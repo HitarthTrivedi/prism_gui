@@ -1,19 +1,33 @@
 # Prism GUI (v0)
 
 A native desktop app (PySide6/Qt — no browser, no local server) for Prism.
-It has **no engine of its own**: `core_bridge.py` puts `../prism_terminal` on
-`sys.path` and imports its `core/` package directly, so routing, browser
-automation, voice, and file-finding are the exact same code the CLI uses.
-Both apps read/write the same `~/.prism/config.json` — set your API key or
-agents in either one and the other sees it immediately.
+It has **no engine of its own**: `core_bridge.py` imports `prism_terminal`'s
+`core/` package directly, so routing, browser automation, voice, and
+file-finding are the exact same code the CLI uses. Both apps read/write the
+same `~/.prism/config.json` — set your API key or agents in either one and
+the other sees it immediately.
+
+`prism_terminal` is a **git submodule** (see `.gitmodules`), pinned to
+[github.com/HitarthTrivedi/prism_terminal](https://github.com/HitarthTrivedi/prism_terminal).
+Clone with `--recurse-submodules` and everything needed is there — no
+separate setup step.
 
 ## Run it
 
 ```bash
+git clone --recurse-submodules https://github.com/HitarthTrivedi/prism_gui.git
 cd prism_gui
 pip install -r requirements.txt
 python3 main.py
 ```
+
+Already cloned without `--recurse-submodules`? Run `git submodule update
+--init` once to fetch it.
+
+If you're developing `prism_terminal` and `prism_gui` side by side (this
+repo's own setup), `core_bridge.py` prefers a sibling `../prism_terminal`
+folder over the submodule automatically, so local edits are picked up
+immediately without touching the submodule pin.
 
 First launch opens the Setup dialog (API key, profile, one agent per
 category, premium plans, Chrome version) if `~/.prism/config.json` isn't
