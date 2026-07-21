@@ -3,13 +3,15 @@ a dropdown of every tool in that category. The router's suggestion (if any)
 is starred in the dropdown and pre-selected; an explicitly-named tool
 ("using NotebookLM…") is pre-selected and flagged as a direct request."""
 from __future__ import annotations
-from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QComboBox, QFrame,
     QPushButton,
 )
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QFontMetrics
 
 import core_bridge as CB
+from widgets.effects import apply_glow
 
 
 class _StageRow(QFrame):
@@ -37,11 +39,11 @@ class _StageRow(QFrame):
 
         if forced:
             note = QLabel("🗣️ you asked for this")
-            note.setObjectName("dim")
+            note.setObjectName("pillInfo")
             row.addWidget(note)
         elif suggested and suggested != current:
-            note = QLabel("💡 router suggestion available")
-            note.setObjectName("dim")
+            note = QLabel("💡 suggestion available")
+            note.setObjectName("pillInfo")
             row.addWidget(note)
 
     def selected_agent(self) -> str | None:
@@ -59,6 +61,8 @@ class AgentsPanel(QWidget):
         self.setObjectName("panel")
         self._rows: list[_StageRow] = []
         root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 14)
+        root.setSpacing(8)
         head = QHBoxLayout()
         title = QLabel("Agents For This Task")
         title.setObjectName("panelTitle")
@@ -66,16 +70,30 @@ class AgentsPanel(QWidget):
         self.run_btn = QPushButton("▶  Run Pipeline")
         self.run_btn.setObjectName("primaryBtn")
         self.run_btn.setEnabled(False)
+        self.run_btn.setToolTip("Route a task first — this fills in once Prism picks the stages.")
         self.run_btn.clicked.connect(self.run_requested.emit)
+        self.run_btn.setMinimumWidth(
+            QFontMetrics(self.run_btn.font()).horizontalAdvance(self.run_btn.text()) + 44)
+        apply_glow(self.run_btn)
         head.addWidget(self.run_btn)
         root.addLayout(head)
+
+        self.empty = QLabel("Route a task to see which agents Prism recommends.")
+        self.empty.setObjectName("emptyState")
+        self.empty.setWordWrap(True)
+        root.addWidget(self.empty)
+
         self.rows_box = QVBoxLayout()
+        self.rows_box.setSpacing(8)
         wrap = QWidget()
         wrap.setLayout(self.rows_box)
         root.addWidget(wrap)
 
     def set_run_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
+        self.run_btn.setToolTip(
+            "Runs every checked stage above." if enabled else
+            "Route a task first — this fills in once Prism picks the stages.")
 
     def clear(self):
         self._rows = []
@@ -83,6 +101,7 @@ class AgentsPanel(QWidget):
             item = self.rows_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self.empty.setVisible(True)
 
     def set_content(self, routing: dict, agents_cfg: dict):
         self.clear()
@@ -101,6 +120,7 @@ class AgentsPanel(QWidget):
                             suggestions.get(stage), forced.get(stage))
             self.rows_box.addWidget(row)
             self._rows.append(row)
+        self.empty.setVisible(not self._rows)
         self.set_run_enabled(bool(self._rows))
 
     def selected_agents(self) -> dict:

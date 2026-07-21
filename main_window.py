@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 from widgets.sidebar import Sidebar
 from widgets.input_panel import InputPanel
+from widgets.step_bar import StepBar
 from widgets.files_panel import FilesPanel
 from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
@@ -83,8 +84,11 @@ class MainWindow(QMainWindow):
 
         right = QVBoxLayout()
         right.setContentsMargins(16, 16, 16, 16)
+        right.setSpacing(10)
         self.input_panel = InputPanel()
         right.addWidget(self.input_panel)
+        self.step_bar = StepBar()
+        right.addWidget(self.step_bar)
         right.addStretch(1)
         right_wrap = QWidget()
         right_wrap.setLayout(right)
@@ -115,6 +119,24 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Ready.")
 
+    def _on_step_clicked(self, key: str):
+        """Jump to the dock(s) relevant to a step chip — raise it above any
+        tab siblings and give it focus, so clicking a chip is a real
+        shortcut, not just a status readout."""
+        if key == "task":
+            self.input_panel.text.setFocus()
+            return
+        docks = {
+            "review": (self.prompt_dock, self.agents_dock),
+            "run": (self.agents_dock,),
+            "output": (self.output_dock,),
+        }.get(key, ())
+        for dock in docks:
+            dock.show()
+            dock.raise_()
+        if docks:
+            docks[-1].widget().setFocus()
+
     def _make_dock(self, title: str, widget: QWidget) -> QDockWidget:
         dock = QDockWidget(title, self)
         dock.setObjectName(title.replace(" ", "_"))
@@ -132,6 +154,8 @@ class MainWindow(QMainWindow):
         self.input_panel.mic_toggle_clicked.connect(self._toggle_mic)
         self.input_panel.attach_file_clicked.connect(self._attach_file_dialog)
         self.input_panel.attach_folder_clicked.connect(self._attach_folder_dialog)
+
+        self.step_bar.step_clicked.connect(self._on_step_clicked)
 
         self.files_panel.mention_accepted.connect(self._accept_mention)
         self.files_panel.mention_change_requested.connect(self._change_mention)
@@ -353,6 +377,7 @@ class MainWindow(QMainWindow):
         agents_cfg = CB.config.active_agents(self.cfg)
         self.prompt_panel.set_content(self._last_query, routing, agents_cfg)
         self.agents_panel.set_content(routing, agents_cfg)
+        self.step_bar.set_step("review")
         self.statusBar().showMessage("Routed — review agents, then Run Pipeline.", 6000)
 
     def _on_route_failed(self, error: str):
@@ -373,6 +398,7 @@ class MainWindow(QMainWindow):
         self._stage_agents = {}
         self._stage_results = []
         self.agents_panel.set_run_enabled(False)
+        self.step_bar.set_step("run")
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments, self._last_query)
         worker.stage_event.connect(self._on_stage_event)
         worker.done.connect(self._on_run_done)
@@ -386,6 +412,7 @@ class MainWindow(QMainWindow):
             agent = payload.get("agent", "")
             self._stage_agents[stage] = agent
             self.output_panel.stage_started(stage, agent)
+            self.step_bar.set_step("output")
         elif kind == "waiting":
             self.output_panel.stage_waiting(stage, payload.get("seconds", 0))
         elif kind == "stage_done":
@@ -408,6 +435,8 @@ class MainWindow(QMainWindow):
 
     def _on_run_done(self, responses: dict, links: dict):
         self.agents_panel.set_run_enabled(True)
+        self.step_bar.set_step("output")
+        self.step_bar.mark_done("output")
         self.statusBar().showMessage("Pipeline finished.", 6000)
         if self._stage_results:
             CompletionDialog(self._stage_results, self).exec()
@@ -419,6 +448,7 @@ class MainWindow(QMainWindow):
         self.agents_panel.set_run_enabled(True)
         QMessageBox.warning(self, "Run failed", error)
         if self._stage_results:   # some stages still completed before the failure
+            self.step_bar.set_step("output")
             CompletionDialog(self._stage_results, self).exec()
 
     # ── wake word ─────────────────────────────────────────────────────────────
@@ -432,10 +462,12 @@ class MainWindow(QMainWindow):
             self._wake_listener.error.connect(
                 lambda e: QMessageBox.warning(self, "Wake word", e))
             self._wake_listener.start()
+            self.sidebar.set_listening(True)
             self.statusBar().showMessage('Listening for "Prism"…')
         elif self._wake_listener:
             self._wake_listener.stop()
             self._wake_listener = None
+            self.sidebar.set_listening(False)
             self.statusBar().showMessage("Wake word off.", 3000)
 
     def _on_wake_heard(self):

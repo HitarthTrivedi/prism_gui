@@ -29,7 +29,7 @@ class SetupDialog(QDialog):
         form_root = QVBoxLayout(inner)
 
         # ── Groq API key ──────────────────────────────────────────────
-        key_box = QGroupBox("Groq API key")
+        key_box = QGroupBox("🔑  Groq API key")
         key_form = QFormLayout(key_box)
         key_form.addRow(QLabel(
             "Free at console.groq.com → API Keys → Create API Key (starts with gsk_)"))
@@ -39,7 +39,7 @@ class SetupDialog(QDialog):
         form_root.addWidget(key_box)
 
         # ── Profile ───────────────────────────────────────────────────
-        prof_box = QGroupBox("What do you do?")
+        prof_box = QGroupBox("🧑  What do you do?")
         prof_form = QFormLayout(prof_box)
         self.profile_edit = QLineEdit(self.cfg.get("profile", ""))
         self.profile_edit.setPlaceholderText("e.g. indie game dev, startup marketer…")
@@ -47,7 +47,7 @@ class SetupDialog(QDialog):
         form_root.addWidget(prof_box)
 
         # ── Agents per category ──────────────────────────────────────
-        agents_box = QGroupBox("Your specialists (one tool per category)")
+        agents_box = QGroupBox("🧩  Your specialists (one tool per category)")
         agents_form = QFormLayout(agents_box)
         current_agents = self.cfg.get("agents", {}) or {}
         for cat, meta in CB.agents.CATEGORIES.items():
@@ -64,13 +64,13 @@ class SetupDialog(QDialog):
         form_root.addWidget(agents_box)
 
         # ── Premium plans ─────────────────────────────────────────────
-        self.premium_box = QGroupBox("Premium plans (routes the bulk of the work here)")
+        self.premium_box = QGroupBox("💎  Premium plans (routes the bulk of the work here)")
         self.premium_layout = QVBoxLayout(self.premium_box)
         form_root.addWidget(self.premium_box)
         self._rebuild_premium()
 
         # ── Chrome version ────────────────────────────────────────────
-        chrome_box = QGroupBox("Chrome version")
+        chrome_box = QGroupBox("🌐  Chrome version")
         chrome_row = QHBoxLayout(chrome_box)
         self.chrome_edit = QLineEdit(self.cfg.get("chrome_version", ""))
         self.chrome_edit.setPlaceholderText("blank = auto-detect")

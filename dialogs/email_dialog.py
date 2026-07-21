@@ -90,7 +90,7 @@ class EmailComposeDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        goal_box = QGroupBox("What is this email about?")
+        goal_box = QGroupBox("✉️  What is this email about?")
         goal_layout = QVBoxLayout(goal_box)
         self.goal_edit = QTextEdit()
         self.goal_edit.setPlaceholderText(
@@ -100,10 +100,15 @@ class EmailComposeDialog(QDialog):
         goal_layout.addWidget(self.goal_edit)
         root.addWidget(goal_box)
 
-        rec_box = QGroupBox("Recipients")
+        rec_box = QGroupBox("📇  Recipients")
         rec_layout = QVBoxLayout(rec_box)
+        self.rec_empty = QLabel("No recipients yet — Find recipients or search below.")
+        self.rec_empty.setObjectName("emptyState")
+        self.rec_empty.setWordWrap(True)
+        rec_layout.addWidget(self.rec_empty)
         self.rec_list = QListWidget()
         self.rec_list.setMaximumHeight(90)
+        self.rec_list.setVisible(False)
         rec_layout.addWidget(self.rec_list)
         rec_btns = QHBoxLayout()
         find_btn = QPushButton("Find recipients (from text + attached CSV)")
@@ -115,7 +120,7 @@ class EmailComposeDialog(QDialog):
         rec_layout.addLayout(rec_btns)
         root.addWidget(rec_box)
 
-        draft_box = QGroupBox("Draft")
+        draft_box = QGroupBox("📝  Draft")
         draft_layout = QVBoxLayout(draft_box)
         draft_btn = QPushButton("Generate draft from attached source files")
         draft_btn.clicked.connect(self._generate_draft)
@@ -160,6 +165,9 @@ class EmailComposeDialog(QDialog):
         self.rec_list.clear()
         for r in self.recipients:
             self.rec_list.addItem(QListWidgetItem(r["email"]))
+        has_recipients = bool(self.recipients)
+        self.rec_empty.setVisible(not has_recipients)
+        self.rec_list.setVisible(has_recipients)
         self.status.setText(f"{len(self.recipients)} recipient(s).")
 
     def _discover_recipient(self):

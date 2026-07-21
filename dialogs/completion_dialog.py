@@ -2,6 +2,7 @@
 produced, with an "Open" button per stage so the user opens only the ones
 they actually need instead of scrolling through everything."""
 from __future__ import annotations
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
     QFrame, QApplication, QDialogButtonBox,
@@ -35,11 +36,16 @@ class StageResultDialog(QDialog):
 class _StageRow(QFrame):
     def __init__(self, info: dict, parent=None):
         super().__init__(parent)
+        self.setObjectName("mentionRow")
         row = QHBoxLayout(self)
         ok = info.get("ok", True)
-        icon = "✅" if ok else "❌"
-        label = QLabel(f"{icon}  <b>{info['stage'].upper()}</b> · {info['agent']}"
-                       f"<br><span style='color:#999'>{info.get('snippet', '')}</span>")
+        pill = QLabel("done" if ok else "failed")
+        pill.setObjectName("pillOk" if ok else "pillErr")
+        pill.setAlignment(Qt.AlignCenter)
+        pill.setFixedSize(58, 24)
+        row.addWidget(pill)
+        label = QLabel(f"<b>{info['stage'].upper()}</b> · {info['agent']}"
+                       f"<br><span style='color:#9CA0AA'>{info.get('snippet', '')}</span>")
         label.setWordWrap(True)
         row.addWidget(label, stretch=1)
         open_btn = QPushButton("Open")
