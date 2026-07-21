@@ -3,12 +3,15 @@ card with a Copy button and an Open link — if a later stage fails or an agent
 isn't cooperating, the user can grab the last good stage's text (or open the
 tool tab) and continue by hand instead of losing the whole run."""
 from __future__ import annotations
+from html import escape as _escape
 from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
     QFrame, QScrollArea, QApplication, QGraphicsOpacityEffect,
 )
+
+from widgets.markdown import render_markdown
 
 
 class StageCard(QFrame):
@@ -17,6 +20,7 @@ class StageCard(QFrame):
         self.setObjectName("stageCard")
         self.stage = stage
         self._url = ""
+        self._raw = ""   # raw text kept for copy, even when the body shows rich markdown
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(9)
@@ -80,28 +84,34 @@ class StageCard(QFrame):
 
     def set_done(self, texts: list[str], url: str):
         self._set_url(url)
-        text = "\n\n———\n\n".join(texts) if texts else ""
         if texts:
-            self.body.setPlainText(text)
+            self._raw = "\n\n———\n\n".join(texts)
+            # render the AI's response as formatted markdown (it's a document),
+            # but keep the raw text for copy so paste-elsewhere is verbatim
+            self.body.setHtml(render_markdown(self._raw))
             self._set_status("✅ done", "pillOk")
             self.copy_btn.setEnabled(True)
         else:
             # scrape missed the response — point the user at the live tab
-            self.body.setPlainText(
-                "Prism couldn't read the response off the page.\n"
-                "Open the tool to grab the result manually — the run "
-                "finished, only the scrape missed it." if url else
-                "No response was captured for this stage.")
+            self._raw = ""
+            self.body.setHtml(
+                "<p style='color:#9CA0B0;line-height:150%'>Prism couldn't read "
+                "the response off the page.<br>Open the tool to grab the result "
+                "manually — the run finished, only the scrape missed it.</p>"
+                if url else
+                "<p style='color:#9CA0B0'>No response was captured for this stage.</p>")
             self._set_status("⚠️ no response scraped", "pillWarn")
             self.copy_btn.setEnabled(False)
 
     def set_error(self, error: str):
         self._set_status("❌ failed", "pillErr")
-        self.body.setPlainText(error)
+        self._raw = error
+        self.body.setHtml(
+            f"<p style='color:#FCA5A5;line-height:150%'>{_escape(error)}</p>")
         self.copy_btn.setEnabled(True)
 
     def _copy(self):
-        QApplication.clipboard().setText(self.body.toPlainText())
+        QApplication.clipboard().setText(self._raw or self.body.toPlainText())
         self.copy_btn.setText("✓  Copied")
         QTimer.singleShot(1500, lambda: self.copy_btn.setText("⧉  Copy output"))
 
