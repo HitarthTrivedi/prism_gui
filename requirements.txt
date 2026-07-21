@@ -1,0 +1,21 @@
+# Prism GUI runs on TOP of prism_terminal's engine (core_bridge.py puts
+# prism_terminal/ on sys.path) — install prism_terminal/requirements.txt too,
+# or just install everything below (it's the same set plus PySide6).
+
+# ── Desktop UI ─────────────────────────────────────────────────
+PySide6>=6.5.0
+
+# ── Shared engine deps (same as prism_terminal) ─────────────────
+setuptools
+packaging
+requests
+undetected-chromedriver
+selenium>=4.0.0
+pypdf
+python-docx
+
+# ── Voice input & wake word — needs PortAudio on the system first:
+#   macOS:  brew install portaudio
+#   Linux:  sudo apt install portaudio19-dev
+# then:
+pyaudio

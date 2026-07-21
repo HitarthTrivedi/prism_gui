@@ -1,0 +1,134 @@
+/* Prism GUI — dark theme, matches the CLI's brand palette (core/ui.py) */
+
+* {
+    font-family: -apple-system, "Segoe UI", "Inter", sans-serif;
+    font-size: 13px;
+    color: #E6E6E6;
+}
+
+QMainWindow, QDialog {
+    background: #14151A;
+}
+
+#sidebar {
+    background: #101116;
+    border-right: 1px solid #2A2B33;
+}
+
+#brand {
+    font-size: 20px;
+    font-weight: 700;
+    color: #EF4B77;
+    padding: 4px 0 10px 0;
+}
+
+#panel {
+    background: #1B1C22;
+    border: 1px solid #2A2B33;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+#panelTitle {
+    font-weight: 700;
+    font-size: 14px;
+    color: #4CD9B4;
+    padding-bottom: 4px;
+}
+
+#dim {
+    color: #888;
+    font-size: 11px;
+}
+
+#mentionRow, #stageCard {
+    background: #202128;
+    border: 1px solid #2A2B33;
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 6px;
+}
+
+QListWidget, QTextEdit, QLineEdit, QComboBox {
+    background: #14151A;
+    border: 1px solid #2A2B33;
+    border-radius: 6px;
+    padding: 4px 6px;
+    selection-background-color: #4CD9B4;
+    selection-color: #0B0B0E;
+}
+
+QListWidget::item:selected {
+    background: #2A2B33;
+    color: #4CD9B4;
+}
+
+QPushButton {
+    background: #2A2B33;
+    border: 1px solid #3A3B45;
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+
+QPushButton:hover {
+    background: #35363F;
+}
+
+QPushButton:disabled {
+    color: #666;
+}
+
+#primaryBtn {
+    background: #EF4B77;
+    border: 1px solid #EF4B77;
+    color: white;
+    font-weight: 600;
+}
+
+#primaryBtn:hover {
+    background: #FF5C87;
+}
+
+#primaryBtn:disabled {
+    background: #5A2E3B;
+    border: 1px solid #5A2E3B;
+    color: #999;
+}
+
+QCheckBox, QGroupBox {
+    color: #E6E6E6;
+}
+
+QGroupBox {
+    border: 1px solid #2A2B33;
+    border-radius: 8px;
+    margin-top: 10px;
+    padding-top: 12px;
+    font-weight: 600;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: #4CD9B4;
+}
+
+QScrollBar:vertical {
+    background: #101116;
+    width: 10px;
+}
+
+QScrollBar::handle:vertical {
+    background: #3A3B45;
+    border-radius: 5px;
+}
+
+QSplitter::handle {
+    background: #2A2B33;
+}
+
+QStatusBar {
+    background: #101116;
+    color: #888;
+}
