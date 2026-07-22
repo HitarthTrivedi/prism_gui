@@ -10,3 +10,6 @@ build/
 dist/
 *.spec.bak
 packaging/icons/
+# Assembled downloads. The tarball is >100MB, which GitHub rejects outright —
+# releases belong on the Releases page, not in the tree.
+release/
