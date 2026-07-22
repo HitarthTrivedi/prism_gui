@@ -35,49 +35,64 @@ already configured from the CLI.
 
 ## Layout
 
-The window auto-sizes to whatever screen it's actually on (92%/88% of
-available width/height, capped at 1400×900, floor 760×480) instead of a
-fixed size that can overflow a smaller display.
+The window follows **direction 1b ("Workbench")** of the *Prism Directions*
+design canvas — everything in view, nothing to drag — rendered in the
+**Industry** design system: a light `#f2f2f3` canvas, slate-blue `#5980a6`
+accent, Barlow / Barlow Condensed, square corners throughout, and hairline
+borders with blueprint registration marks on the primary containers.
 
-- **Sidebar** — every CLI `/` command as a click target (Status, AI
-  Directory, Agents, Profile, Key, Chrome, Login tabs, full Setup, Email,
-  Run history), plus a wake-word toggle and a **Favorites** shelf (star a
-  file/folder once, click it later instead of re-describing it).
-- **Task panel** (top, always visible) — type or speak your task. Speaking
-  runs through the same Wispr-Flow-style interpreter as the CLI: it cleans
-  the transcript and splits out any file/folder mention from the actual task.
-- **Files & Folders**, **Prompt Engineering**, **Agents**, and **Pipeline
-  Output** are `QDockWidget`s, not fixed panes — drag any one by its title
-  bar to pop it into its own floating window, resize it independently, or
-  hit its **✕** to close it. Closed one by accident? **View menu** in the
-  menu bar lists all four and reopens whichever you check.
-  - **Files & Folders** — every file/folder Prism thinks you mentioned (from
-    speech), with **Keep this** / **Change…** per mention — the GUI
-    equivalent of the CLI's confirm-before-attach flow. Typed queries don't
-    auto-scan for file mentions in prose — use the **Attach file/folder**
-    buttons instead, since a GUI has a real file picker.
-  - **Prompt Engineering** — the full chain: what you said → the expanded
-    task brief → each stage's engineered prompt.
-  - **Agents** — one row per stage the router marked needed: a checkbox
-    (run/skip) and a dropdown of every tool in that category. The router's
-    suggested alternative is starred; a tool you explicitly NAMED in your
-    query ("using NotebookLM…") is pre-selected and flagged. Click **Run
-    Pipeline** when you're happy with the picks.
-  - **Pipeline Output** — live per-stage cards as the pipeline runs, each
-    with a **Copy output** button — if a later stage fails, grab the last
-    good stage's text and paste it into the next tool by hand.
+It auto-sizes to whatever screen it's actually on (92%/88% of available
+width/height, capped at 1360×880, floor 1060×640).
+
+Three fixed columns. The old `QDockWidget`s are gone: nothing can be dragged
+out, closed, or lost behind a tab, so there's no View menu either.
+
+- **Rail** (left) — brand, the four primary destinations (Home, AI tools,
+  History, Settings), the wake-word switch, then the rest of the CLI's `/`
+  commands one size down (Status, Login tabs, Email, Agents, Profile, API
+  key, Chrome) and a **Favorites** shelf (star a file/folder once, click it
+  later instead of re-describing it).
+- **Work** (centre) — a two-page stack, because composing and running are the
+  only two things you can be doing and they never want to share the screen:
+  - **Composing** — the **task card** (a blueprint frame: kicker, live state
+    chip, the task as editable 16px text, and Speak / Add file / Add folder /
+    **Make a plan**), then **Your plan**: one row per stage the router marked
+    needed, each with a square include-marker, a line icon, a plain-English
+    name ("Look things up", "Write it up", "Build the slides"), one line of
+    what it means, and the tool as a clickable **chip**. Click a row to drop
+    that step; click its chip to run the step somewhere else. The router's
+    suggestion is starred in the chip's menu; a tool you explicitly NAMED
+    ("using NotebookLM…") is pre-selected and tagged *You picked this*.
+    **Start the work** runs whatever is still switched on.
+  - **Running** — live per-step cards, each with **Copy output** and **Open in
+    tool**, so if a later step fails you can grab the last good text and carry
+    on by hand. **Back to the plan** returns.
+- **Context** (right) — **Files you mentioned**: every file/folder Prism
+  thinks you meant (from speech), with **Keep** / **Change** per mention — the
+  GUI equivalent of the CLI's confirm-before-attach flow. Typed queries don't
+  auto-scan prose for file mentions; use **Add file/folder**, since a GUI has
+  a real file picker. Below it, **Behind the scenes** — collapsed by default —
+  opens the full chain: what you said → the expanded task brief → each stage's
+  engineered prompt.
+- **Setup** (rail → Settings, or any of API key / Profile / Agents / Chrome) —
+  one scrolling page with a sticky header and footer. The rail links land on
+  the section you asked for, scrolled into view with its field focused and its
+  heading briefly marked, rather than dropping you at the top of the wizard.
+- **Run history** (rail → History) — every finished *or failed* run is saved
+  to `~/.prism/runs/` in the same shape the CLI writes, plus a record of which
+  tool ran each step. Rendered as prose, not as the raw JSON it's stored in: what you asked and when, then one section per
+  step with its plain-English name, the tool that ran it, the prompt it was
+  given, and what it answered as formatted markdown.
 - **Completion popup** — once the run finishes (or fails partway), a dialog
-  lists every stage that completed with a one-line description of what it
-  produced, and an **Open** button per stage that pops that ONE stage's
-  full text into its own window — so you only open the ones you actually
-  need instead of scrolling through everything.
-- **Email** (sidebar → ✉️ Email) — mirrors the CLI's `/email`: recipients
-  from an attached CSV and/or addresses typed in the goal text, a **Search
-  for their public email** fallback (via your research/brains agent) when
-  none are given, a draft generated through a normal pipeline stage
-  (editable before sending), then a confirm-and-send step. First use opens
-  the one-time SMTP setup dialog (Gmail needs an app password, not your
-  real one) automatically if it isn't configured yet.
+  lists every step that completed with a one-line description of what it
+  produced, and an **Open** button per step that pops that ONE step's full
+  text into its own window — so you only open the ones you actually need.
+- **Email** (rail → Email) — mirrors the CLI's `/email`: recipients from an
+  attached CSV and/or addresses typed in the goal text, a **Search for their
+  public email** fallback (via your research/brains agent) when none are
+  given, a draft generated through a normal pipeline stage (editable before
+  sending), then a confirm-and-send step. First use opens the one-time SMTP
+  setup dialog (Gmail needs an app password, not your real one) automatically.
 
 ## Known v0 limitations (be aware before relying on these)
 
@@ -95,13 +110,30 @@ fixed size that can overflow a smaller display.
 ## Files
 
 ```
-main.py                entry point
-main_window.py         the only file that makes decisions; owns all workers & docks
+main.py                 entry point; registers the vendored fonts, loads the stylesheet
+main_window.py          the only file that makes decisions; owns all workers & the columns
+theme.py                Industry design tokens for the custom-painted widgets
 core_bridge.py          puts prism_terminal/core on sys.path, re-exports it
 workers.py              QThread wrappers (routing, automation, voice, find)
 wakeword.py             best-effort "Prism" wake-word listener
 favorites.py            starred file/folder persistence (~/.prism/gui_favorites.json)
-style.qss               dark theme matching the CLI's brand palette
-widgets/                dumb display widgets — sidebar, and the 4 dockable panels
-dialogs/                Setup wizard, AI Directory, Email compose/setup, Completion popup
+style.qss               the Industry theme — everything QSS can express
+assets/fonts/           Barlow + Barlow Condensed (OFL), vendored so headings never fall back
+widgets/
+  icons.py              the system's 24x24 stroked line icons, tinted & cached
+  blueprint.py          the hairline frame + registration marks QSS can't draw
+  controls.py           the square switch, tool chip, step mark, chips & type helpers
+  sidebar.py            the left rail
+  input_panel.py        the task card
+  agents_panel.py       the plan (also owns the stage -> plain-English copy map)
+  files_panel.py        "Files you mentioned"
+  prompt_panel.py       "Behind the scenes"
+  output_panel.py       live per-step results
+  markdown.py           markdown -> Qt rich text, for AI responses
+dialogs/
+  setup_dialog.py       Setup, with per-section deep links from the rail
+  history_dialog.py     past runs, re-rendered out of their stored JSON
+  completion_dialog.py  what each step produced, once a run ends
+  ai_directory_dialog.py, email_dialog.py
 ```
+

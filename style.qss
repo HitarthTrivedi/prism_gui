@@ -1,277 +1,428 @@
-/* Prism GUI — "Modern Dark" glassmorphic theme
-   Design language sourced from ui-ux-pro-max (Linear-style AI dev tool):
-   translucent glass surfaces, hairline light borders (never solid grey),
-   ambient gradient canvas, violet→indigo gradient accent with glow, cyan
-   secondary, 14–16px radii, Expo.out easing.
+/* Prism GUI — "Industry" theme
+   Ported from the Prism Directions design canvas (direction 1b, Workbench).
+   The design system's own tokens live in _ds/…/styles.css; theme.py mirrors
+   the subset the custom-painted widgets need. Keep all three in step.
 
    Palette
-     canvas         qradial violet-tint → near-black (set on QMainWindow)
-     glass surface  rgba(255,255,255,0.045)   elevated rgba(255,255,255,0.06)
-     hairline       rgba(255,255,255,0.09)     hover rgba(255,255,255,0.16)
-     ink            #EDEDF2   muted #9CA0B0
-     violet #8B7CF6  indigo #6366F1  cyan #22D3EE
-     success #34D399  warn #FBBF24  error #F87171
-   Qt note: QSS has no box-shadow/backdrop-filter — glow & elevation are
-   applied as QGraphicsDropShadowEffect in widgets/effects.py. */
+     canvas      #f2f2f3     surface  #e9e9ea
+     ink         #1d1f20     divider  #d0d0d1  (16% ink)
+     accent      #5980a6     ramp 100 #eef6ff … 600 #597ea3 … 800 #2c455d
+     neutral     400 #b7b7ba  500 #98989b  600 #7a7a7d  700 #5d5d60  800 #424244
+
+   Shape: everything is square. No radii anywhere — a component in this system
+   is a wireframe object: hairline border, right angles, registration marks
+   (drawn by widgets/blueprint.py, since QSS can't reach outside a box).
+
+   Type: Barlow for body, Barlow Condensed 600 for headings/buttons/labels.
+   Both are vendored in assets/fonts and registered by theme.load_fonts().
+   QSS has no letter-spacing property — the tracked labels (kickers, brand,
+   window title) set it on their QFont in Python. */
 
 * {
-    font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
-    font-size: 13px;
-    color: #EDEDF2;
+    font-family: "Barlow", "Inter", -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    color: #1d1f20;
 }
 
 QMainWindow, QDialog {
-    background: qradialgradient(cx:0.18, cy:0.0, radius:1.1, fx:0.18, fy:0.0,
-        stop:0 #17131F, stop:0.45 #0C0C14, stop:1 #070709);
+    background: #f2f2f3;
+}
+
+/* Qt hands QDialogButtonBox platform icons — on GTK that's a red ✕ and a blue
+   download arrow, which is the one place the desktop theme leaks through this
+   one. Off everywhere; buttons in this system are text plus our own line
+   icons or nothing. */
+QDialogButtonBox {
+    dialogbuttonbox-buttons-have-icons: 0;
 }
 
 QToolTip {
-    background: #17181F;
-    color: #EDEDF2;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
+    background: #1d1f20;
+    color: #f2f2f3;
+    border: 1px solid #1d1f20;
     padding: 5px 8px;
 }
 
 /* ── sidebar ─────────────────────────────────────────────────────────── */
 #sidebar {
-    background: rgba(255,255,255,0.02);
+    background: #e9e9ea;
     border: none;
-    border-right: 1px solid rgba(255,255,255,0.06);
+    border-right: 1px solid #d0d0d1;
 }
 
 #brand {
-    font-size: 22px;
-    font-weight: 800;
-    color: #A78BFA;
-    padding: 6px 2px 14px 2px;
-    letter-spacing: 0.5px;
+    font-family: "Barlow Condensed";
+    font-size: 17px;
+    font-weight: 600;
+    color: #1d1f20;
 }
 
-#sectionLabel {
-    color: #7E8494;
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 1.4px;
-    padding: 12px 2px 2px 2px;
+/* .navitem — a sidebar command. Flat until hovered; the current one carries
+   the accent tint + hairline the design gives [data-cur]. */
+#navItem {
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 8px 11px;
+    font-family: "Barlow";
+    font-size: 13.5px;
+    font-weight: 500;
+    color: #424244;
 }
 
-/* ── glass panels ────────────────────────────────────────────────────── */
-#panel {
-    background: rgba(255,255,255,0.045);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 16px;
+#navItem:hover {
+    background: rgba(29, 31, 32, 0.06);
 }
 
-#panelTitle {
-    font-weight: 700;
-    font-size: 14px;
-    color: #EDEDF2;
-    padding-bottom: 2px;
+#navItem:pressed {
+    background: rgba(29, 31, 32, 0.11);
 }
 
-#panelSubtitle, #dim {
-    color: #9CA0B0;
+#navItem[cur="true"] {
+    background: #eef6ff;
+    color: #2c455d;
+    border: 1px solid rgba(89, 128, 166, 0.32);
+}
+
+#navSection {
+    font-family: "Barlow Condensed";
     font-size: 11px;
+    font-weight: 600;
+    color: #7a7a7d;
+    padding: 2px;
+}
+
+#hr {
+    background: #d0d0d1;
+    max-height: 1px;
+    min-height: 1px;
+    border: none;
+}
+
+/* ── type roles ──────────────────────────────────────────────────────── */
+#kick {
+    font-family: "Barlow Condensed";
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #416180;
+}
+
+#kickMuted {
+    font-family: "Barlow Condensed";
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #7a7a7d;
+}
+
+#h2 { font-family: "Barlow Condensed"; font-size: 30px; font-weight: 600; }
+#h4 { font-family: "Barlow Condensed"; font-size: 21px; font-weight: 600; }
+#h5 { font-family: "Barlow Condensed"; font-size: 16px; font-weight: 600; }
+
+#meta, #dim {
+    font-size: 12px;
+    color: #7a7a7d;
+}
+
+#body {
+    font-size: 13px;
+    color: #5d5d60;
+}
+
+/* dashed advisory box (the "Tip." card in the context rail) */
+#note {
+    border: 1px dashed #d0d0d1;
+    padding: 13px;
+    font-size: 12px;
+    color: #7a7a7d;
 }
 
 #emptyState {
-    color: #7E8494;
-    font-size: 12px;
-    padding: 26px 16px;
-    background: rgba(255,255,255,0.02);
-    border: 1px dashed rgba(255,255,255,0.10);
-    border-radius: 14px;
+    color: #7a7a7d;
+    font-size: 12.5px;
+    padding: 20px 14px;
+    background: transparent;
+    border: 1px dashed #d0d0d1;
 }
 
-/* glass rows / cards */
-#mentionRow, #stageCard {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 14px;
-    padding: 12px;
-    margin-bottom: 10px;
+/* ── buttons ─────────────────────────────────────────────────────────── */
+/* Default is .btn-secondary: hairline box, condensed label, square. */
+QPushButton {
+    background: transparent;
+    border: 1px solid #d0d0d1;
+    padding: 7px 12px;
+    font-family: "Barlow Condensed";
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d1f20;
 }
 
-#mentionRow:hover, #stageCard:hover {
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(139,124,246,0.35);
+QPushButton:hover {
+    background: rgba(29, 31, 32, 0.07);
+}
+
+QPushButton:pressed {
+    background: rgba(29, 31, 32, 0.14);
+}
+
+QPushButton:disabled {
+    color: #98989b;
+    border-color: #d4d4d7;
+}
+
+#primaryBtn {
+    background: #5980a6;
+    border: 1px solid #5980a6;
+    color: #f2f2f3;
+    padding: 9px 18px;
+    font-size: 15px;
+}
+
+#primaryBtn:hover {
+    background: #597ea3;
+    border-color: #597ea3;
+}
+
+#primaryBtn:pressed {
+    background: #416180;
+    border-color: #416180;
+}
+
+#primaryBtn:disabled {
+    background: rgba(89, 128, 166, 0.35);
+    border-color: transparent;
+    color: rgba(242, 242, 243, 0.75);
+}
+
+#ghostBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #416180;
+    padding: 6px 6px;
+}
+
+#ghostBtn:hover {
+    background: rgba(89, 128, 166, 0.10);
+}
+
+#ghostBtn:pressed {
+    background: rgba(89, 128, 166, 0.18);
+}
+
+#smallBtn {
+    font-size: 13px;
+    padding: 5px 11px;
+}
+
+#iconBtn {
+    background: transparent;
+    border: 1px solid #d0d0d1;
+    padding: 0;
+    min-width: 34px;
+    max-width: 34px;
+    min-height: 34px;
+    max-height: 34px;
+}
+
+#iconBtn:hover {
+    background: rgba(29, 31, 32, 0.07);
+}
+
+/* .mic-lg — the composer's filled accent mic */
+#micBtn {
+    background: #5980a6;
+    border: 1px solid #5980a6;
+    padding: 0;
+    min-width: 42px;
+    max-width: 42px;
+    min-height: 42px;
+    max-height: 42px;
+}
+
+#micBtn:hover {
+    background: #597ea3;
+}
+
+#micBtn:checked {
+    background: #416180;
+    border-color: #2c455d;
+}
+
+#linkBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #416180;
+    font-family: "Barlow";
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 4px;
+    text-align: left;
+}
+
+#linkBtn:hover {
+    color: #2c455d;
+    background: rgba(89, 128, 166, 0.10);
 }
 
 /* ── inputs ──────────────────────────────────────────────────────────── */
-QListWidget, QTextEdit, QLineEdit, QComboBox {
-    background: rgba(10,10,16,0.55);
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 12px;
-    padding: 8px 10px;
-    selection-background-color: #6366F1;
-    selection-color: #FFFFFF;
+QTextEdit, QLineEdit, QComboBox, QListWidget, QPlainTextEdit {
+    background: #e9e9ea;
+    border: 1px solid #d0d0d1;
+    padding: 7px 10px;
+    color: #1d1f20;
+    selection-background-color: #5980a6;
+    selection-color: #f2f2f3;
 }
 
-QListWidget:focus, QTextEdit:focus, QLineEdit:focus, QComboBox:focus {
-    border: 1px solid #8B7CF6;
-    background: rgba(139,124,246,0.06);
+QTextEdit:hover, QLineEdit:hover, QComboBox:hover {
+    border-color: rgba(29, 31, 32, 0.45);
+}
+
+/* Lists don't take the accent focus ring: a selected row already says where
+   you are, and ringing the whole box reads as an error state. */
+QTextEdit:focus, QLineEdit:focus, QComboBox:focus {
+    border-color: #5980a6;
+}
+
+/* the task card's own editor sits *inside* a blueprint frame, so it drops
+   the second border and reads as bare text on the card */
+#taskEdit {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 16px;
+    color: #1d1f20;
 }
 
 QComboBox::drop-down {
     border: none;
-    width: 22px;
+    width: 20px;
 }
 
 QComboBox QAbstractItemView {
-    background: #14141C;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    selection-background-color: rgba(139,124,246,0.25);
-    selection-color: #FFFFFF;
-    padding: 4px;
+    background: #f2f2f3;
+    border: 1px solid #d0d0d1;
+    selection-background-color: #eef6ff;
+    selection-color: #2c455d;
+    padding: 2px;
+}
+
+QListWidget {
+    padding: 3px;
 }
 
 QListWidget::item {
-    padding: 7px 8px;
-    border-radius: 9px;
-    margin: 1px 0;
-}
-
-QListWidget::item:selected {
-    background: rgba(139,124,246,0.18);
-    color: #C4B5FD;
+    padding: 6px 8px;
+    border: 1px solid transparent;
 }
 
 QListWidget::item:hover {
-    background: rgba(255,255,255,0.05);
+    background: rgba(29, 31, 32, 0.06);
 }
 
-/* ── buttons ─────────────────────────────────────────────────────────── */
-QPushButton {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 11px;
-    padding: 8px 15px;
-    font-weight: 500;
+QListWidget::item:selected {
+    background: #eef6ff;
+    color: #2c455d;
+    border: 1px solid rgba(89, 128, 166, 0.32);
 }
 
-QPushButton:hover {
-    background: rgba(255,255,255,0.11);
-    border: 1px solid rgba(255,255,255,0.20);
+/* ── rows & cards ────────────────────────────────────────────────────── */
+/* A plan step / mention / stage: surface fill, hairline, square. */
+#row {
+    background: #e9e9ea;
+    border: 1px solid #d0d0d1;
 }
 
-QPushButton:pressed {
-    background: rgba(255,255,255,0.04);
+#row:hover {
+    border-color: rgba(89, 128, 166, 0.55);
 }
 
-QPushButton:disabled {
-    color: #5A5F6E;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.05);
-}
-
-#primaryBtn {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #8B5CF6, stop:1 #6366F1);
-    border: 1px solid rgba(167,139,250,0.6);
-    color: #FFFFFF;
-    font-weight: 700;
-    padding: 9px 20px;
-    border-radius: 12px;
-}
-
-#primaryBtn:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #9D71F9, stop:1 #7C7EF5);
-    border: 1px solid rgba(196,181,253,0.8);
-}
-
-#primaryBtn:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #7A4FD6, stop:1 #5457D6);
-}
-
-#primaryBtn:disabled {
-    background: rgba(139,124,246,0.14);
-    border: 1px solid rgba(139,124,246,0.14);
-    color: rgba(255,255,255,0.4);
-}
-
-#iconBtn {
-    padding: 6px 10px;
-    font-size: 13px;
-    border-radius: 10px;
-}
-
-#compactBtn {
-    padding: 8px 12px;
-}
-
-/* output body (stage cards) — proportional for reading AI responses;
-   fenced ``` code inside carries its own monospace via the markdown renderer */
-#stageBody {
-    background: rgba(0,0,0,0.32);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
-    padding: 11px;
-    font-size: 12.5px;
-    color: #D6D8E0;
-}
-
-/* inline text link button (Open in tool ↗) */
-#linkBtn {
+#rowMuted {
     background: transparent;
-    border: none;
-    color: #A78BFA;
+    border: 1px solid #d0d0d1;
+}
+
+/* the step marker square painted by controls.StepMark */
+#stepMark {
+    background: transparent;
+    border: 1px solid #d0d0d1;
+}
+
+#stepMark[on="true"] {
+    background: #5980a6;
+    border: 1px solid #5980a6;
+}
+
+/* the big condensed 01 / 02 / 03 */
+#stepNum {
+    font-family: "Barlow Condensed";
+    font-size: 30px;
     font-weight: 600;
-    padding: 8px 4px;
+    color: #416180;
 }
 
-#linkBtn:hover {
-    color: #C4B5FD;
-    background: transparent;
-    border: none;
+/* ── tags ────────────────────────────────────────────────────────────── */
+#tagAccent, #tagOutline, #tagNeutral, #tagWarn, #tagErr, #tagOk {
+    font-size: 11px;
+    padding: 2px 9px;
 }
 
-#linkBtn:pressed {
-    color: #8B7CF6;
-    background: transparent;
+#tagAccent { background: #eef6ff; color: #2c455d; border: 1px solid #eef6ff; }
+#tagOutline { border: 1px solid #5980a6; color: #416180; }
+#tagNeutral { background: #f5f5f8; color: #424244; border: 1px solid #e7e7ea; }
+#tagOk { background: #eef6ff; color: #2c455d; border: 1px solid rgba(89,128,166,0.35); }
+#tagWarn { background: #f5f5f8; color: #5d5d60; border: 1px solid #d4d4d7; }
+#tagErr { background: #fdeeee; color: #8a2f2f; border: 1px solid #e8c4c4; }
+
+/* ── output stage body ───────────────────────────────────────────────── */
+#stageBody {
+    background: #f2f2f3;
+    border: 1px solid #d0d0d1;
+    padding: 10px;
+    font-size: 13px;
+    color: #424244;
 }
 
 /* ── checkbox ────────────────────────────────────────────────────────── */
-QCheckBox, QGroupBox {
-    color: #EDEDF2;
+QCheckBox {
+    color: #1d1f20;
+    spacing: 8px;
 }
 
 QCheckBox::indicator {
-    width: 17px;
-    height: 17px;
-    border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.20);
-    background: rgba(255,255,255,0.04);
+    width: 16px;
+    height: 16px;
+    border: 1px solid #d0d0d1;
+    background: #e9e9ea;
 }
 
 QCheckBox::indicator:hover {
-    border: 1px solid #8B7CF6;
+    border-color: #5980a6;
 }
 
 QCheckBox::indicator:checked {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-        stop:0 #8B5CF6, stop:1 #6366F1);
-    border: 1px solid #8B7CF6;
+    background: #5980a6;
+    border: 1px solid #5980a6;
+    /* %ASSETS% is rewritten to an absolute path by main.py — a bare relative
+       url() would resolve against the process's cwd, not the app. */
+    image: url(%ASSETS%/check.svg);
 }
 
-/* ── groupbox ────────────────────────────────────────────────────────── */
+/* ── groupbox (setup dialogs) ────────────────────────────────────────── */
 QGroupBox {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 14px;
+    background: transparent;
+    border: 1px solid #d0d0d1;
     margin-top: 14px;
-    padding-top: 16px;
+    padding-top: 14px;
+    font-family: "Barlow Condensed";
+    font-size: 15px;
     font-weight: 600;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
-    left: 12px;
+    left: 11px;
     padding: 0 6px;
-    color: #C4B5FD;
+    color: #416180;
 }
 
 /* ── scrollbars ──────────────────────────────────────────────────────── */
@@ -286,167 +437,52 @@ QScrollArea > QWidget > QWidget {
 
 QScrollBar:vertical {
     background: transparent;
-    width: 10px;
-    margin: 2px;
+    width: 9px;
+    margin: 0;
 }
 
 QScrollBar::handle:vertical {
-    background: rgba(255,255,255,0.14);
-    border-radius: 5px;
-    min-height: 28px;
+    background: #c4c4c7;
+    min-height: 30px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background: rgba(139,124,246,0.55);
+    background: #98989b;
 }
 
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
-}
-
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QScrollBar:horizontal { height: 0; }
 
-QSplitter::handle {
-    background: transparent;
-}
+QSplitter::handle { background: #d0d0d1; }
 
-QSplitter::handle:hover {
-    background: rgba(139,124,246,0.4);
-}
-
+/* ── chrome ──────────────────────────────────────────────────────────── */
 QStatusBar {
-    background: transparent;
-    color: #9CA0B0;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    background: #e9e9ea;
+    color: #5d5d60;
+    border-top: 1px solid #d0d0d1;
+    font-size: 12px;
 }
 
-QMenuBar {
-    background: transparent;
-    color: #9CA0B0;
-}
-
-QMenuBar::item:selected {
-    background: rgba(255,255,255,0.08);
-    border-radius: 6px;
-}
+QStatusBar::item { border: none; }
 
 QMenu {
-    background: #14141C;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    padding: 4px;
+    background: #f2f2f3;
+    border: 1px solid #d0d0d1;
+    padding: 3px;
 }
 
 QMenu::item {
-    padding: 6px 22px 6px 14px;
-    border-radius: 7px;
+    padding: 6px 20px 6px 12px;
 }
 
 QMenu::item:selected {
-    background: rgba(139,124,246,0.22);
+    background: #eef6ff;
+    color: #2c455d;
 }
 
-/* ── dock chrome ─────────────────────────────────────────────────────── */
-QDockWidget {
-    titlebar-close-icon: none;
-    titlebar-normal-icon: none;
-    background: transparent;
-    color: #EDEDF2;
-    font-weight: 700;
+QMenu::separator {
+    height: 1px;
+    background: #d0d0d1;
+    margin: 3px 0;
 }
-
-QDockWidget::title {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-bottom: none;
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    padding: 9px 12px;
-    color: #C4B5FD;
-}
-
-QDockWidget::close-button, QDockWidget::float-button {
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    padding: 2px;
-    icon-size: 12px;
-}
-
-QDockWidget::close-button:hover, QDockWidget::float-button:hover {
-    background: rgba(255,255,255,0.12);
-}
-
-/* ── status pills (soft tinted, glowing) ─────────────────────────────── */
-#pillOk, #pillWarn, #pillErr, #pillInfo {
-    border-radius: 999px;
-    padding: 3px 11px;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-#pillOk {
-    background: rgba(52,211,153,0.15);
-    color: #6EE7B7;
-    border: 1px solid rgba(52,211,153,0.30);
-}
-
-#pillWarn {
-    background: rgba(251,191,36,0.15);
-    color: #FCD34D;
-    border: 1px solid rgba(251,191,36,0.30);
-}
-
-#pillErr {
-    background: rgba(248,113,113,0.15);
-    color: #FCA5A5;
-    border: 1px solid rgba(248,113,113,0.30);
-}
-
-#pillInfo {
-    background: rgba(139,124,246,0.16);
-    color: #C4B5FD;
-    border: 1px solid rgba(139,124,246,0.32);
-}
-
-/* ── step bar ────────────────────────────────────────────────────────── */
-#stepBar { background: transparent; }
-
-#stepChip {
-    border-radius: 999px;
-    padding: 7px 12px;
-    font-weight: 600;
-    font-size: 12px;
-    color: #7E8494;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.06);
-}
-
-#stepChip[state="active"] {
-    color: #FFFFFF;
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #8B5CF6, stop:1 #6366F1);
-    border: 1px solid rgba(196,181,253,0.7);
-}
-
-#stepChip[state="done"] {
-    color: #C4B5FD;
-    background: rgba(139,124,246,0.14);
-    border: 1px solid rgba(139,124,246,0.32);
-}
-
-#stepChip[state="pending"] {
-    color: #7E8494;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-}
-
-#stepConnector {
-    background: rgba(255,255,255,0.10);
-    max-height: 2px;
-    min-height: 2px;
-    border-radius: 1px;
-}
-
-#recDot { color: #F87171; font-size: 13px; }
-#listenDot { color: #34D399; font-size: 11px; }

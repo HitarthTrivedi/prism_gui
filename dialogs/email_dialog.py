@@ -90,7 +90,7 @@ class EmailComposeDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        goal_box = QGroupBox("✉️  What is this email about?")
+        goal_box = QGroupBox("What is this email about?")
         goal_layout = QVBoxLayout(goal_box)
         self.goal_edit = QTextEdit()
         self.goal_edit.setPlaceholderText(
@@ -100,7 +100,7 @@ class EmailComposeDialog(QDialog):
         goal_layout.addWidget(self.goal_edit)
         root.addWidget(goal_box)
 
-        rec_box = QGroupBox("📇  Recipients")
+        rec_box = QGroupBox("Recipients")
         rec_layout = QVBoxLayout(rec_box)
         self.rec_empty = QLabel("No recipients yet — Find recipients or search below.")
         self.rec_empty.setObjectName("emptyState")
@@ -120,7 +120,7 @@ class EmailComposeDialog(QDialog):
         rec_layout.addLayout(rec_btns)
         root.addWidget(rec_box)
 
-        draft_box = QGroupBox("📝  Draft")
+        draft_box = QGroupBox("Draft")
         draft_layout = QVBoxLayout(draft_box)
         draft_btn = QPushButton("Generate draft from attached source files")
         draft_btn.clicked.connect(self._generate_draft)

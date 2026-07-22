@@ -28,21 +28,21 @@ def _inline(text: str) -> str:
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
     s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
     s = re.sub(r"`([^`]+?)`",
-               rf"<span style='font-family:{_MONO};color:#67E8F9'>\1</span>", s)
+               rf"<span style='font-family:{_MONO};color:#2c455d'>\1</span>", s)
     return s
 
 
 def _label(text: str) -> str:
-    return (f"<p style='color:#8B7CF6;font-weight:700;font-size:11px;"
+    return (f"<p style='color:#416180;font-weight:600;font-size:11px;"
             f"letter-spacing:0.8px;margin:12px 0 4px 0'>"
             f"{html.escape(text.rstrip(':'))}</p>")
 
 
 def _code_block(inner_escaped: str) -> str:
     return (f"<table width='100%' cellspacing='0' cellpadding='9' "
-            f"style='margin:6px 0'><tr><td bgcolor='#07070B'>"
+            f"style='margin:6px 0'><tr><td bgcolor='#e7e7ea'>"
             f"<pre style='white-space:pre-wrap;margin:0;font-family:{_MONO};"
-            f"font-size:12px;color:#8FE9D0'>{inner_escaped}</pre></td></tr></table>")
+            f"font-size:12px;color:#2b2b2d'>{inner_escaped}</pre></td></tr></table>")
 
 
 def render_markdown(text: str) -> str:
@@ -88,7 +88,7 @@ def render_markdown(text: str) -> str:
             close_list()
             level = len(h.group(1))
             size = {1: 16, 2: 14, 3: 13}.get(level, 12)
-            out.append(f"<p style='color:#EDEDF2;font-weight:700;"
+            out.append(f"<p style='color:#1d1f20;font-weight:600;"
                        f"font-size:{size}px;margin:12px 0 4px 0'>"
                        f"{_inline(h.group(2).strip())}</p>")
             i += 1
@@ -103,7 +103,7 @@ def render_markdown(text: str) -> str:
                 out.append(_label(plain))
             else:
                 want_list("ul", "margin:2px 0 8px 4px")
-                out.append(f"<li style='margin:3px 0;color:#D6D8E0'>"
+                out.append(f"<li style='margin:3px 0;color:#424244'>"
                            f"{_inline(content)}</li>")
             i += 1
             continue
@@ -111,7 +111,7 @@ def render_markdown(text: str) -> str:
         n = _NUM_RE.match(raw)
         if n:
             want_list("ol", "margin:2px 0 8px 18px")
-            out.append(f"<li style='margin:3px 0;color:#D6D8E0'>"
+            out.append(f"<li style='margin:3px 0;color:#424244'>"
                        f"{_inline(n.group(3).rstrip())}</li>")
             i += 1
             continue
@@ -122,7 +122,7 @@ def render_markdown(text: str) -> str:
         if _LABEL_RE.match(plain):
             out.append(_label(plain))
         else:
-            out.append(f"<p style='margin:5px 0;color:#D6D8E0;"
+            out.append(f"<p style='margin:5px 0;color:#424244;"
                        f"line-height:150%'>{_inline(line)}</p>")
         i += 1
 

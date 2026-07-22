@@ -1,56 +1,117 @@
-"""Panel: which agent runs each stage — a checkbox to run/skip the stage and
-a dropdown of every tool in that category. The router's suggestion (if any)
-is starred in the dropdown and pre-selected; an explicitly-named tool
-("using NotebookLM…") is pre-selected and flagged as a direct request."""
+"""The plan — what Prism is going to do, as a list of steps you can edit.
+
+This is direction 1b's centre of gravity: one row per stage, each with a
+square include-marker, a line icon, a plain-English name, one line of what it
+means, and the tool that will run it as a clickable chip. Everything the old
+checkbox+combo row did, minus the form-ness.
+
+The stage keys are the engine's own (research / brains / content / …); the
+titles here are the human translation the design asks for — a step is named
+after what it does for you, not after the category it came from."""
 from __future__ import annotations
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QComboBox, QFrame,
-    QPushButton,
+    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QPushButton,
 )
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QFontMetrics
 
 import core_bridge as CB
-from widgets.effects import apply_glow
+import theme
+from widgets import icons
+from widgets.controls import StepMark, ToolChip, heading, meta
+
+# stage -> (icon, plain title, plain one-liner)
+STAGE_COPY = {
+    "research":     ("search",  "Look things up",   "Find the facts and sources this needs"),
+    "brains":       ("bulb",    "Think it through", "Work out the angle and the argument"),
+    "content":      ("pencil",  "Write it up",      "Turn the thinking into clear words"),
+    "visual":       ("image",   "Make the images",  "Generate the artwork to go with it"),
+    "media":        ("video",   "Make the video",   "Produce the video or audio piece"),
+    "development":  ("code",    "Build the tool",   "Stand up the app or page itself"),
+    "presentation": ("present", "Build the slides", "A clean deck, ready to present"),
+    "summary":      ("list",    "Pull it together", "Fold every step into one answer"),
+}
 
 
-class _StageRow(QFrame):
-    def __init__(self, stage: str, meta: dict, current: str, needed: bool,
+class PlanRow(QFrame):
+    toggled = Signal()
+
+    def __init__(self, stage: str, meta_data: dict, current: str, included: bool,
                  suggested: str | None, forced: str | None, parent=None):
         super().__init__(parent)
         self.stage = stage
+        self.setObjectName("row")
+        self.setCursor(Qt.PointingHandCursor)
+
+        icon_name, title, blurb = STAGE_COPY.get(
+            stage, ("grid", meta_data.get("label", stage), meta_data.get("desc", "")))
+
         row = QHBoxLayout(self)
-        self.checkbox = QCheckBox(f"{meta.get('emoji','')} {meta.get('label', stage)}")
-        self.checkbox.setChecked(needed)
-        row.addWidget(self.checkbox, stretch=1)
+        row.setContentsMargins(14, 11, 14, 11)
+        row.setSpacing(13)
 
-        self.combo = QComboBox()
-        names = meta.get("agents", [])
-        for n in names:
-            label = n
-            if n == suggested:
-                label = f"★ {n} (suggested)"
-            self.combo.addItem(label, n)
-        pick = forced or current
-        idx = names.index(pick) if pick in names else (names.index(current) if current in names else 0)
-        if names:
-            self.combo.setCurrentIndex(idx)
-        row.addWidget(self.combo, stretch=2)
+        self.mark = StepMark(included)
+        self.mark.setToolTip("Click to leave this step out of the run")
+        row.addWidget(self.mark)
 
+        glyph = QLabel()
+        glyph.setPixmap(icons.pixmap(icon_name, 18, theme.ACCENT))
+        row.addWidget(glyph)
+
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self.name = QLabel(title)
+        self.name.setObjectName("h5")
+        head.addWidget(self.name)
         if forced:
-            note = QLabel("🗣️ you asked for this")
-            note.setObjectName("pillInfo")
-            row.addWidget(note)
+            head.addWidget(self._tag("You picked this", "tagOutline"))
         elif suggested and suggested != current:
-            note = QLabel("💡 suggestion available")
-            note.setObjectName("pillInfo")
-            row.addWidget(note)
+            head.addWidget(self._tag("Suggested", "tagAccent"))
+        head.addStretch(1)
+        text.addLayout(head)
+        blurb_label = QLabel(blurb)
+        blurb_label.setObjectName("meta")
+        blurb_label.setWordWrap(True)
+        text.addWidget(blurb_label)
+        row.addLayout(text, stretch=1)
+
+        tools = meta_data.get("agents", []) or ([current] if current else [])
+        self.chip = ToolChip(tools, forced or current, suggested or "")
+        self.chip.setToolTip("Click to run this step with a different tool")
+        row.addWidget(self.chip)
+
+        self._included = included
+
+    @staticmethod
+    def _tag(text: str, style: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName(style)
+        return lbl
+
+    def mousePressEvent(self, event):
+        """The whole row is the switch — clicking anywhere but the tool chip
+        includes or drops the step."""
+        if event.button() == Qt.LeftButton:
+            self.set_included(not self._included)
+            self.toggled.emit()
+        super().mousePressEvent(event)
+
+    def set_included(self, included: bool):
+        self._included = included
+        self.mark.set_included(included)
+        self.setObjectName("row" if included else "rowMuted")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.name.setStyleSheet(
+            "" if included else f"color: {theme.NEUTRAL[500]};")
+        self.chip.setEnabled(included)
 
     def selected_agent(self) -> str | None:
-        return self.combo.currentData()
+        return self.chip.current()
 
     def is_checked(self) -> bool:
-        return self.checkbox.isChecked()
+        return self._included
 
 
 class AgentsPanel(QWidget):
@@ -58,42 +119,47 @@ class AgentsPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("panel")
-        self._rows: list[_StageRow] = []
+        self._rows: list[PlanRow] = []
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 14)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(11)
+
         head = QHBoxLayout()
-        title = QLabel("Agents For This Task")
-        title.setObjectName("panelTitle")
-        head.addWidget(title, stretch=1)
-        self.run_btn = QPushButton("▶  Run Pipeline")
-        self.run_btn.setObjectName("primaryBtn")
-        self.run_btn.setEnabled(False)
-        self.run_btn.setToolTip("Route a task first — this fills in once Prism picks the stages.")
-        self.run_btn.clicked.connect(self.run_requested.emit)
-        self.run_btn.setMinimumWidth(
-            QFontMetrics(self.run_btn.font()).horizontalAdvance(self.run_btn.text()) + 44)
-        apply_glow(self.run_btn)
-        head.addWidget(self.run_btn)
+        head.setSpacing(8)
+        head.addWidget(heading("Your plan"), stretch=1)
+        self.count = meta("")
+        head.addWidget(self.count)
         root.addLayout(head)
 
-        self.empty = QLabel("Route a task to see which agents Prism recommends.")
+        self.empty = QLabel(
+            "Describe a task above and press Make a plan — Prism will lay out "
+            "the steps here, and you can drop any of them before it runs.")
         self.empty.setObjectName("emptyState")
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
 
-        self.rows_box = QVBoxLayout()
-        self.rows_box.setSpacing(8)
-        wrap = QWidget()
-        wrap.setLayout(self.rows_box)
-        root.addWidget(wrap)
+        rows_wrap = QWidget()
+        self.rows_box = QVBoxLayout(rows_wrap)
+        self.rows_box.setContentsMargins(0, 0, 0, 0)
+        self.rows_box.setSpacing(9)
+        root.addWidget(rows_wrap)
 
+        self.run_btn = QPushButton("  Start the work")
+        self.run_btn.setObjectName("primaryBtn")
+        self.run_btn.setCursor(Qt.PointingHandCursor)
+        self.run_btn.setMinimumHeight(44)
+        icons.button_icon(self.run_btn, "play", 16, theme.BG)
+        self.run_btn.setEnabled(False)
+        self.run_btn.setToolTip("Make a plan first — this fills in once Prism picks the steps.")
+        self.run_btn.clicked.connect(self.run_requested.emit)
+        root.addWidget(self.run_btn)
+
+    # ── state ─────────────────────────────────────────────────────────────
     def set_run_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
         self.run_btn.setToolTip(
-            "Runs every checked stage above." if enabled else
-            "Route a task first — this fills in once Prism picks the stages.")
+            "Runs every step still switched on." if enabled else
+            "Make a plan first — this fills in once Prism picks the steps.")
 
     def clear(self):
         self._rows = []
@@ -102,6 +168,11 @@ class AgentsPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self.empty.setVisible(True)
+        self.count.setText("")
+        # With no rows there is nothing to run — leaving the CTA armed after a
+        # wipe is exactly the stale-plan trap this clear() exists to avoid.
+        # set_content re-enables it once the new rows are in.
+        self.set_run_enabled(False)
 
     def set_content(self, routing: dict, agents_cfg: dict):
         self.clear()
@@ -116,14 +187,24 @@ class AgentsPanel(QWidget):
             if not current:
                 continue   # user never assigned a tool to this category at all
             needed = bool(data.get("needed") and data.get("questions"))
-            row = _StageRow(stage, A.CATEGORIES.get(stage, {}), current, needed,
-                            suggestions.get(stage), forced.get(stage))
+            row = PlanRow(stage, A.CATEGORIES.get(stage, {}), current, needed,
+                          suggestions.get(stage), forced.get(stage))
+            row.toggled.connect(self._refresh_count)
             self.rows_box.addWidget(row)
             self._rows.append(row)
         self.empty.setVisible(not self._rows)
         self.set_run_enabled(bool(self._rows))
+        self._refresh_count()
+
+    def _refresh_count(self):
+        on = sum(1 for r in self._rows if r.is_checked())
+        if not self._rows:
+            self.count.setText("")
+        else:
+            self.count.setText(f"{on} step{'' if on == 1 else 's'} of {len(self._rows)}")
+        self.set_run_enabled(on > 0)
 
     def selected_agents(self) -> dict:
-        """{stage: agent_name} for every CHECKED stage — feed straight into
-        automation.run() as the run's agent overrides."""
+        """{stage: agent_name} for every step still switched on — feed straight
+        into automation.run() as the run's agent overrides."""
         return {r.stage: r.selected_agent() for r in self._rows if r.is_checked()}

@@ -16,16 +16,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import QApplication
 
+import theme
 from main_window import MainWindow
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Prism")
-    style_path = os.path.join(os.path.dirname(__file__), "style.qss")
+    # Register Barlow before any widget is constructed — a QFont resolved
+    # against a missing family stays resolved, so loading late leaves the
+    # first-built widgets on the fallback sans.
+    theme.load_fonts()
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    style_path = os.path.join(here, "style.qss")
     if os.path.exists(style_path):
         with open(style_path, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
+            qss = f.read()
+        app.setStyleSheet(qss.replace("%ASSETS%", os.path.join(here, "assets")))
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
