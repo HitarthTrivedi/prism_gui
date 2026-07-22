@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
     QComboBox, QPushButton, QCheckBox, QMessageBox, QScrollArea,
-    QWidget, QFrame,
+    QWidget, QFrame, QApplication,
 )
 
 import core_bridge as CB
@@ -253,7 +253,62 @@ class SetupDialog(QDialog):
         detect_btn.clicked.connect(self._detect_chrome)
         row.addWidget(detect_btn)
         s.content.addLayout(row)
+
+        # Prism drives its own Chrome profile so that logins survive between
+        # runs. That also means a login done in the everyday browser doesn't
+        # reach it — hence this.
+        self.profile_note = QLabel()
+        self.profile_note.setObjectName("meta")
+        self.profile_note.setWordWrap(True)
+        self._refresh_profile_note()
+        s.content.addWidget(self.profile_note)
+        reseed_btn = QPushButton("Copy my Chrome logins again")
+        reseed_btn.setCursor(Qt.PointingHandCursor)
+        reseed_btn.setToolTip(
+            "Re-copies cookies from your everyday Chrome into Prism's profile. "
+            "Use it after signing in to a tool in your normal browser. Close "
+            "Chrome first so its newest cookies are on disk.")
+        reseed_btn.clicked.connect(self._reseed_profile)
+        s.content.addWidget(reseed_btn)
         return s
+
+    def _refresh_profile_note(self):
+        ok, err = CB.automation_available()
+        if not ok:
+            self.profile_note.setText(
+                "Prism keeps its own Chrome profile so tool logins persist "
+                "between runs.")
+            return
+        automation = CB.get_automation()
+        if automation.profile_is_seeded():
+            self.profile_note.setText(
+                f"Prism's browser profile: {automation.PROFILE_DIR} — logins "
+                "you make in the window Prism opens are kept for next time.")
+        else:
+            self.profile_note.setText(
+                "Prism hasn't copied your Chrome logins yet — it will on the "
+                "first run.")
+
+    def _reseed_profile(self):
+        ok, err = CB.automation_available()
+        if not ok:
+            QMessageBox.warning(self, "Chrome", f"Automation isn't available: {err}")
+            return
+        automation = CB.get_automation()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            automation.seed_profile(force=True)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Chrome", f"Couldn't copy the profile: {e}")
+            return
+        QApplication.restoreOverrideCursor()
+        self._refresh_profile_note()
+        QMessageBox.information(
+            self, "Chrome",
+            "Copied your Chrome logins into Prism's profile.\n\nIf a tool "
+            "still asks you to sign in, sign in inside the window Prism "
+            "opens (Login tabs in the sidebar) — that sticks.")
 
     # ── focus ─────────────────────────────────────────────────────────────
     def _focus_section(self, key: str):

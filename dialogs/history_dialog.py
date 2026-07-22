@@ -228,6 +228,25 @@ class HistoryDialog(QDialog):
                 f"><tr><td bgcolor='#fdeeee'><span style='color:#8a2f2f'>"
                 f"This run stopped early — {_esc(record['error'])}</span>"
                 f"</td></tr></table>")
+        # /email runs carry a block the plain-run renderer knows nothing about —
+        # and it's the part you actually come back for: who got the email.
+        email = record.get("email") or {}
+        if email:
+            sent = email.get("sent") or []
+            failed = email.get("failed") or []
+            total = email.get("recipients", len(sent) + len(failed))
+            if not sent and not failed:
+                line = f"Drafted but never sent — {total} recipient(s) were lined up."
+            else:
+                line = f"Sent to {len(sent)} of {total} recipient(s)."
+                if failed:
+                    line += f" {len(failed)} failed."
+            parts.append(
+                f"<table width='100%' cellspacing='0' cellpadding='10'>"
+                f"<tr><td bgcolor='{theme.ACCENT_RAMP[100]}'>"
+                f"<b>✉&nbsp; {_esc(email.get('subject', '(no subject)'))}</b><br>"
+                f"<span style='color:{theme.NEUTRAL[700]};font-size:12px'>"
+                f"{_esc(line)}</span></td></tr></table>")
         parts.append(f"<hr style='height:1px;background:{theme.DIVIDER};border:0'>")
 
         if not ran:

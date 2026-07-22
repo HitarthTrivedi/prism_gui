@@ -109,19 +109,32 @@ class StageCard(BlueprintFrame):
     def set_waiting(self, seconds: int):
         self.status.set(f"waiting up to {seconds}s", "clock", "tagWarn")
 
-    def set_done(self, texts: list[str], url: str):
+    def set_done(self, texts: list[str], url: str, timed_out: bool = False):
         self._set_url(url)
+        note = ""
+        if timed_out:
+            # Our clock ran out, not the tool's: it is still generating in that
+            # tab and will land the finished deck/doc/app there. Saying "done"
+            # here would send the user away from the only place the real
+            # result appears, so the link is the headline.
+            note = (f"<p style='color:{theme.NEUTRAL[600]};line-height:150%'>"
+                    "Prism stopped waiting, but the tool is still working — "
+                    "open it to pick up the finished result.</p>")
         if texts:
             self._raw = "\n\n———\n\n".join(texts)
             # render the AI's response as formatted markdown (it's a document),
             # but keep the raw text for copy so paste-elsewhere is verbatim
-            self.body.setHtml(render_markdown(self._raw))
-            self.status.set("done", "check", "tagOk")
+            self.body.setHtml(note + render_markdown(self._raw))
+            if timed_out:
+                self.status.set("still generating", "clock", "tagWarn")
+            else:
+                self.status.set("done", "check", "tagOk")
             self.copy_btn.setEnabled(True)
         else:
             # scrape missed the response — point the user at the live tab
             self._raw = ""
             self.body.setHtml(
+                note if note else
                 f"<p style='color:{theme.NEUTRAL[600]};line-height:150%'>Prism "
                 "couldn't read the response off the page.<br>Open the tool to "
                 "grab the result manually — the run finished, only the scrape "
@@ -129,14 +142,21 @@ class StageCard(BlueprintFrame):
                 if url else
                 f"<p style='color:{theme.NEUTRAL[600]}'>No response was "
                 "captured for this step.</p>")
-            self.status.set("no response", "alert", "tagWarn")
+            self.status.set("still generating" if timed_out else "no response",
+                            "clock" if timed_out else "alert", "tagWarn")
             self.copy_btn.setEnabled(False)
 
-    def set_error(self, error: str):
+    def set_error(self, error: str, url: str = ""):
         self.status.set("failed", "alert", "tagErr")
         self._raw = error
+        # A failed step can still leave a live tab behind — the tool often
+        # finishes on its own after Prism loses the thread. Offer it.
+        self._set_url(url)
+        tail = (f"<p style='color:{theme.NEUTRAL[600]};line-height:150%'>The "
+                "tool's tab is still on the job — open it to see whether it "
+                "finished without Prism.</p>") if url else ""
         self.body.setHtml(
-            f"<p style='color:#8a2f2f;line-height:150%'>{_escape(error)}</p>")
+            f"<p style='color:#8a2f2f;line-height:150%'>{_escape(error)}</p>{tail}")
         self.copy_btn.setEnabled(True)
 
     def _copy(self):
@@ -230,12 +250,13 @@ class OutputPanel(QWidget):
         if card:
             card.set_waiting(seconds)
 
-    def stage_done(self, stage: str, texts: list[str], url: str):
+    def stage_done(self, stage: str, texts: list[str], url: str,
+                   timed_out: bool = False):
         card = self._cards.get(stage)
         if card:
-            card.set_done(texts, url)
+            card.set_done(texts, url, timed_out)
 
-    def stage_error(self, stage: str, error: str):
+    def stage_error(self, stage: str, error: str, url: str = ""):
         card = self._cards.get(stage)
         if card:
-            card.set_error(error)
+            card.set_error(error, url)

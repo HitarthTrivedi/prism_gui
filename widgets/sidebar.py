@@ -161,7 +161,7 @@ class Sidebar(QFrame):
         row.setContentsMargins(2, 0, 0, 0)
         row.setSpacing(8)
         mark = QLabel()
-        mark.setPixmap(icons.pixmap("prism", 20, theme.ACCENT))
+        mark.setPixmap(icons.logo_pixmap(26))
         row.addWidget(mark)
         name = QLabel("PRISM")
         name.setObjectName("brand")

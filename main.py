@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication
 
 import theme
 from main_window import MainWindow
+from widgets import icons
 
 
 def main():
@@ -27,6 +28,8 @@ def main():
     # against a missing family stays resolved, so loading late leaves the
     # first-built widgets on the fallback sans.
     theme.load_fonts()
+    # Titlebar, taskbar, alt-tab and every dialog inherit this.
+    app.setWindowIcon(icons.logo_icon())
 
     here = os.path.dirname(os.path.abspath(__file__))
     style_path = os.path.join(here, "style.qss")

@@ -10,6 +10,7 @@ Paths are lifted verbatim from the design file. `icon()` returns a QIcon and
 `pixmap()` a device-pixel-ratio-correct QPixmap, both tinted to any token
 colour, both cached — these get requested once per repaint of a list row."""
 from __future__ import annotations
+import os
 from PySide6.QtCore import QByteArray, Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
@@ -125,3 +126,44 @@ def button_icon(btn, name: str, size: int = 16, color: str = theme.TEXT,
     btn.setIcon(icon(name, size, color, stroke))
     btn.setIconSize(QSize(size, size))
     return btn
+
+
+# ── brand mark ──────────────────────────────────────────────────────────────
+# The logo is the one graphic that keeps its own colours: it is artwork, not an
+# interface icon, so it is read from assets/ instead of being stroked out of the
+# table above and tinted to a token. It is also taller than it is wide, so it is
+# sized by height and the width follows the artboard's aspect.
+_LOGO_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "assets", "prism-logo.svg")
+
+_logo_cache: dict[tuple, QPixmap] = {}
+
+
+def logo_pixmap(height: int = 24) -> QPixmap:
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    key = (height, dpr)
+    hit = _logo_cache.get(key)
+    if hit is not None:
+        return hit
+
+    renderer = QSvgRenderer(_LOGO_PATH)
+    box = renderer.defaultSize()
+    width = max(1, round(height * box.width() / box.height())) if box.height() else height
+
+    px = QPixmap(round(width * dpr), round(height * dpr))
+    px.setDevicePixelRatio(dpr)
+    px.fill(Qt.transparent)
+    painter = QPainter(px)
+    painter.setRenderHint(QPainter.Antialiasing)
+    renderer.render(painter)
+    painter.end()
+    _logo_cache[key] = px
+    return px
+
+
+def logo_icon(height: int = 256) -> QIcon:
+    """The mark as a QIcon — for setWindowIcon / taskbar, where Qt scales one
+    large pixmap down to whatever the platform asks for."""
+    return QIcon(logo_pixmap(height))

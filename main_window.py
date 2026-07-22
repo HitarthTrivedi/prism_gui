@@ -429,19 +429,30 @@ class MainWindow(QMainWindow):
         elif kind == "stage_done":
             texts = payload.get("texts") or []
             url = payload.get("url", "")
-            self.output_panel.stage_done(stage, texts, url)
-            snippet = (texts[0][:150] + "…") if texts and len(texts[0]) > 150 else (texts[0] if texts else "no response captured")
+            timed_out = bool(payload.get("timed_out"))
+            self.output_panel.stage_done(stage, texts, url, timed_out)
+            if texts:
+                snippet = (texts[0][:150] + "…") if len(texts[0]) > 150 else texts[0]
+            elif timed_out:
+                snippet = "still generating in the tool — open the link"
+            else:
+                snippet = "no response captured"
             self._stage_results.append({
                 "stage": stage, "agent": self._stage_agents.get(stage, "?"),
                 "text": "\n\n---\n\n".join(texts), "url": url,
-                "snippet": snippet, "ok": bool(texts),
+                "snippet": snippet, "ok": bool(texts), "timed_out": timed_out,
             })
         elif kind == "stage_error":
             error = payload.get("error", "")
-            self.output_panel.stage_error(stage, error)
+            # The engine hands back the tab it died on whenever there is one —
+            # a slow tool often finishes server-side after we stopped waiting,
+            # so the link is kept and offered even on a failed step.
+            url = payload.get("url", "")
+            self.output_panel.stage_error(stage, error, url)
             self._stage_results.append({
                 "stage": stage, "agent": self._stage_agents.get(stage, "?"),
-                "text": error, "url": "", "snippet": f"failed: {error[:120]}", "ok": False,
+                "text": error, "url": url,
+                "snippet": f"failed: {error[:120]}", "ok": False,
             })
 
     def _save_run(self, responses: dict | None = None, links: dict | None = None,

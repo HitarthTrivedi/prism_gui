@@ -95,6 +95,60 @@ class InterpretWorker(QThread):
             self.failed.emit(str(e))
 
 
+class SendWorker(QThread):
+    """The email blast. SMTP login, then one message per recipient with a
+    provider-friendly pause between them — minutes of blocking for a real
+    list, which is exactly as long as the window would be frozen if this ran
+    where it used to (straight off the Send button)."""
+    progress = Signal(int, int, str, bool, str)   # i, total, email, ok, error
+    done = Signal(list, list)                     # sent, failed
+    failed = Signal(str)                          # couldn't even connect
+
+    def __init__(self, cfg: dict, recipients: list, subject: str, body: str,
+                 files: list):
+        super().__init__()
+        self.cfg, self.recipients = cfg, recipients
+        self.subject, self.body, self.files = subject, body, files
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    @property
+    def stopped(self) -> bool:
+        return self._stop.is_set()
+
+    def run(self):
+        try:
+            sent, failed = CB.mailer.send_bulk(
+                self.cfg, self.recipients, self.subject, self.body, self.files,
+                on_progress=lambda i, n, email, ok, err:
+                    self.progress.emit(i, n, email, ok, err),
+                should_stop=self._stop.is_set,
+            )
+            self.done.emit(sent, failed)
+        except Exception as e:
+            # Raised out of the login/connect, before any message went out —
+            # nothing was sent, so this is a failure of the account, not of a
+            # recipient.
+            self.failed.emit(str(e))
+
+
+class VerifyWorker(QThread):
+    """Log in and hang up, to check the account before a real blast."""
+    done = Signal(str)   # "" == fine, else the reason
+
+    def __init__(self, cfg: dict):
+        super().__init__()
+        self.cfg = cfg
+
+    def run(self):
+        try:
+            self.done.emit(CB.mailer.verify(self.cfg))
+        except Exception as e:
+            self.done.emit(str(e))
+
+
 class FindWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
