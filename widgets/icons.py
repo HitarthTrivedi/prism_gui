@@ -10,12 +10,12 @@ Paths are lifted verbatim from the design file. `icon()` returns a QIcon and
 `pixmap()` a device-pixel-ratio-correct QPixmap, both tinted to any token
 colour, both cached — these get requested once per repaint of a list row."""
 from __future__ import annotations
-import os
 from PySide6.QtCore import QByteArray, Qt, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
+import paths
 import theme
 
 # name -> list of "d" attributes, stroked.
@@ -133,9 +133,7 @@ def button_icon(btn, name: str, size: int = 16, color: str = theme.TEXT,
 # interface icon, so it is read from assets/ instead of being stroked out of the
 # table above and tinted to a token. It is also taller than it is wide, so it is
 # sized by height and the width follows the artboard's aspect.
-_LOGO_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "assets", "prism-logo.svg")
+_LOGO_PATH = paths.resource("assets", "prism-logo.svg")
 
 _logo_cache: dict[tuple, QPixmap] = {}
 

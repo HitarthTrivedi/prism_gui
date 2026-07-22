@@ -28,6 +28,7 @@ from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import RouteWorker, AutomationWorker, RecordWorker, InterpretWorker, FindWorker
+import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
 from dialogs.ai_directory_dialog import AIDirectoryDialog
@@ -290,6 +291,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Voice", "Set your Groq API key in Setup first.")
                 self.input_panel.set_recording(False)
                 return
+            ok, why = wakeword.available()
+            if not ok:
+                QMessageBox.warning(self, "Voice", why)
+                self.input_panel.set_recording(False)
+                return
             self._record_worker = RecordWorker(self.cfg)
             self._record_worker.done.connect(self._on_transcribed)
             self._record_worker.failed.connect(self._on_voice_failed)
@@ -514,6 +520,13 @@ class MainWindow(QMainWindow):
         if on:
             if not self.cfg.get("api_key"):
                 QMessageBox.warning(self, "Wake word", "Set your Groq API key in Setup first.")
+                self.sidebar.set_listening(False)
+                return
+            # Packaged builds ship without PortAudio (it's a system library, not
+            # a wheel), so say what's missing instead of failing silently.
+            ok, why = wakeword.available()
+            if not ok:
+                QMessageBox.warning(self, "Wake word", why)
                 self.sidebar.set_listening(False)
                 return
             self._wake_listener = WakeWordListener(self.cfg)

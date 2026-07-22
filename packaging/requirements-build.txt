@@ -1,0 +1,7 @@
+# Build-time only — everything needed to turn the sources into an app.
+# The app's own dependencies live in ../requirements.txt; install both.
+PyInstaller>=6.3.0
+
+# Python 3.13 removed audioop from the stdlib (PEP 594) and wakeword.py needs
+# it. Harmless on older interpreters, where the stdlib module wins.
+audioop-lts; python_version >= "3.13"

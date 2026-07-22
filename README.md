@@ -12,7 +12,27 @@ the other sees it immediately.
 Clone with `--recurse-submodules` and everything needed is there — no
 separate setup step.
 
-## Run it
+## Install it (no Python needed)
+
+Grab the build for your OS from
+[Releases](https://github.com/HitarthTrivedi/prism_gui/releases) — portable,
+no installer, nothing written outside the folder and `~/.prism`.
+
+| | Download | Then |
+|---|---|---|
+| **Linux** | `.tar.gz` or `.AppImage` | extract → `./install.sh`, or `chmod +x` the AppImage |
+| **Windows** | `.zip` | extract → `Prism.exe` |
+| **macOS** | `.dmg` | open → drag to Applications |
+
+The builds are **unsigned**, so the first launch needs one extra step: macOS →
+right-click the app → **Open** → **Open**; Windows → **More info** → **Run
+anyway**. [BUILD.md](BUILD.md) explains why, and how to build the apps
+yourself.
+
+You also need **Google Chrome** installed — Prism drives your logged-in browser
+to operate the AI tools.
+
+## Run it from source
 
 ```bash
 git clone --recurse-submodules https://github.com/HitarthTrivedi/prism_gui.git

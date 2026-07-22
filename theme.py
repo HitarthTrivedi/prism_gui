@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from PySide6.QtGui import QColor, QFontDatabase
 
+import paths
+
 # ── core roles ──────────────────────────────────────────────────────────────
 BG = "#f2f2f3"
 SURFACE = "#e9e9ea"
@@ -36,7 +38,7 @@ DIVIDER = "#d0d0d1"
 # ── type ────────────────────────────────────────────────────────────────────
 FONT_BODY = "Barlow"
 FONT_HEADING = "Barlow Condensed"
-_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+_FONT_DIR = paths.resource("assets", "fonts")
 
 
 def load_fonts() -> None:

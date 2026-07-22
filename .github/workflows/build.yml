@@ -1,0 +1,123 @@
+name: Build desktop apps
+
+# PyInstaller cannot cross-compile, so each OS is built on its own runner.
+# Push a tag (v1.0.0) to publish a release; anything else just leaves the
+# artifacts attached to the run for testing.
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only by the release job
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false   # a broken macOS build shouldn't hide a good Windows one
+      matrix:
+        include:
+          - os: ubuntu-22.04     # oldest supported glibc — newer ones can't run
+            label: Linux (x64)   # binaries built against a newer libc
+          - os: windows-latest
+            label: Windows (x64)
+          - os: macos-13         # Intel
+            label: macOS (Intel)
+          - os: macos-14         # Apple Silicon
+            label: macOS (Apple Silicon)
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # prism_terminal is a submodule; without this
+                                  # the engine is an empty directory
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12, deliberately: 3.13 removed the stdlib audioop that the wake
+          # word uses, and PySide6 wheels lag the newest release.
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Qt's runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xfixes0 libdbus-1-3 \
+            portaudio19-dev libfuse2 xvfb
+
+      - name: Install PortAudio (macOS)
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r packaging/requirements-build.txt
+
+      # PyAudio needs PortAudio headers and has no wheel on some platforms;
+      # the app runs without it (voice input just reports itself unavailable),
+      # so a failure here must not fail the build.
+      - name: Install PyAudio (optional)
+        continue-on-error: true
+        run: pip install pyaudio
+
+      - name: Fetch appimagetool (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo curl -sSLo /usr/local/bin/appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+
+      - name: Build
+        run: python packaging/build.py --clean
+
+      # Proves the bundle actually starts: imports resolve, Qt loads, the
+      # window builds. A build that merely *completes* still fails at launch
+      # if a hidden import was missed, and that is the failure users see.
+      - name: Smoke-test the bundle
+        run: python packaging/smoke_test.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prism-${{ matrix.os }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Unsigned builds — the OS will warn on first launch.
+
+            **macOS**: right-click Prism.app → Open → Open. Or, if macOS says
+            the app "is damaged", clear the quarantine flag:
+            `xattr -dr com.apple.quarantine /Applications/Prism.app`
+            **Windows**: SmartScreen → More info → Run anyway.
+            **Linux**: `chmod +x` the AppImage, or extract the tarball and run
+            `./install.sh`.
+
+            Prism drives **Google Chrome**, which must be installed separately.

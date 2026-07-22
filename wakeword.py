@@ -22,13 +22,40 @@ this polling loop further.
 from __future__ import annotations
 import io
 import wave
-import audioop
 from PySide6.QtCore import QThread, Signal
 
 import core_bridge as CB
 
+# audioop was deleted from the stdlib in Python 3.13 (PEP 594), and pyaudio is
+# an optional extra that needs PortAudio on the box. Neither may be present —
+# and neither is worth refusing to start the whole app over, so they are probed
+# here and the feature reports itself unavailable instead of taking the window
+# down with an ImportError at launch. audioop-lts is the drop-in replacement.
+try:
+    import audioop
+except ImportError:  # pragma: no cover - depends on interpreter version
+    try:
+        import audioop_lts as audioop   # noqa: F401
+    except ImportError:
+        audioop = None
+
 _CHUNK_SECONDS = 2.0
 _SILENCE_RMS = 300   # crude energy floor — tune per microphone if it misfires
+
+
+def available() -> tuple[bool, str]:
+    """(usable, why not). Checked before the listener is started so the reason
+    lands in the UI rather than in a traceback nobody sees."""
+    if audioop is None:
+        return False, ("This build has no audio support (Python 3.13 removed "
+                       "the audioop module — install 'audioop-lts').")
+    try:
+        import pyaudio  # noqa: F401
+    except ImportError:
+        return False, ("Voice needs PyAudio, which isn't installed. macOS: "
+                       "'brew install portaudio', Linux: 'sudo apt install "
+                       "portaudio19-dev', then 'pip install pyaudio'.")
+    return True, ""
 
 
 class WakeWordListener(QThread):

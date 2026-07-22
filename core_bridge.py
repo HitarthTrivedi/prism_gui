@@ -18,15 +18,23 @@ from __future__ import annotations
 import os
 import sys
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SIBLING = os.path.join(_HERE, "..", "prism_terminal")     # local monorepo dev
-_SUBMODULE = os.path.join(_HERE, "prism_terminal")          # standalone clone
+import paths
 
-if os.path.isdir(os.path.join(_SIBLING, "core")):
-    _TERMINAL_DIR = os.path.abspath(_SIBLING)
-elif os.path.isdir(os.path.join(_SUBMODULE, "core")):
-    _TERMINAL_DIR = os.path.abspath(_SUBMODULE)
-else:
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_CANDIDATES = [
+    # Packaged app: the spec copies prism_terminal/ into the bundle root, so
+    # this is the only one that exists (and it must be checked first — the dev
+    # paths below would resolve to nothing useful inside _MEIPASS).
+    paths.resource("prism_terminal"),
+    os.path.join(_HERE, "..", "prism_terminal"),   # local monorepo dev
+    os.path.join(_HERE, "prism_terminal"),         # standalone clone (submodule)
+]
+
+_TERMINAL_DIR = next(
+    (os.path.abspath(c) for c in _CANDIDATES
+     if os.path.isdir(os.path.join(c, "core"))), None)
+
+if _TERMINAL_DIR is None:
     raise ImportError(
         "Can't find prism_terminal's core/ package. Expected either a sibling "
         "'../prism_terminal' folder, or the submodule at './prism_terminal' "
