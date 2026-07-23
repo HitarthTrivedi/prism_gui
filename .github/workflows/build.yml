@@ -120,8 +120,10 @@ jobs:
           files: artifacts/**/*
           generate_release_notes: true
           body: |
-            Unsigned builds — the OS will warn on first launch.
+            **New here?** [GETTING_STARTED.md](https://github.com/${{ github.repository }}/blob/main/GETTING_STARTED.md)
+            has the full walkthrough — which file to pick, first launch, first run.
 
+            Quick version: builds are unsigned, so the OS warns on first launch.
             **macOS**: right-click Prism.app → Open → Open. Or, if macOS says
             the app "is damaged", clear the quarantine flag:
             `xattr -dr com.apple.quarantine /Applications/Prism.app`

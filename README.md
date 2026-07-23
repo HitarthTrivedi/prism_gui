@@ -14,23 +14,16 @@ separate setup step.
 
 ## Install it (no Python needed)
 
-Grab the build for your OS from
+**→ [GETTING_STARTED.md](GETTING_STARTED.md)** — the full walkthrough: which
+file to grab, the first-launch unsigned-app step, and first-run setup. This is
+the doc to hand a non-technical user or client.
+
+Short version: grab the build for your OS from
 [Releases](https://github.com/HitarthTrivedi/prism_gui/releases) — portable,
-no installer, nothing written outside the folder and `~/.prism`.
+no installer, nothing written outside the folder and `~/.prism`. You'll also
+need **Google Chrome** installed, since Prism drives it directly.
 
-| | Download | Then |
-|---|---|---|
-| **Linux** | `.tar.gz` or `.AppImage` | extract → `./install.sh`, or `chmod +x` the AppImage |
-| **Windows** | `.zip` | extract → `Prism.exe` |
-| **macOS** | `.dmg` | open → drag to Applications |
-
-The builds are **unsigned**, so the first launch needs one extra step: macOS →
-right-click the app → **Open** → **Open**; Windows → **More info** → **Run
-anyway**. [BUILD.md](BUILD.md) explains why, and how to build the apps
-yourself.
-
-You also need **Google Chrome** installed — Prism drives your logged-in browser
-to operate the AI tools.
+[BUILD.md](BUILD.md) covers building and releasing the apps yourself.
 
 ## Run it from source
 
