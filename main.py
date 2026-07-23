@@ -51,7 +51,22 @@ def _selftest(app) -> int:
     # the check rather than printing a warning nobody reads.
     automation_ok, automation_err = CB.automation_available()
 
+    # A real HTTPS handshake, not just an import — the SSL cert bug that
+    # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
+    # module import cleanly; ssl.create_default_context() only fails once it
+    # actually tries to verify a live server, and that only happens on macOS,
+    # where the frozen ssl module has no route to the system trust store
+    # unless rthook_ssl_certs.py has patched it in. Catches a regression here
+    # instead of on a user's machine a second time.
+    try:
+        import urllib.request
+        with urllib.request.urlopen("https://www.google.com", timeout=10) as r:
+            tls_ok, tls_err = r.status == 200, ""
+    except Exception as e:
+        tls_ok, tls_err = False, str(e)
+
     checks = [
+        (f"HTTPS trust store{'' if tls_ok else f' — {tls_err}'}", tls_ok),
         ("stylesheet", os.path.exists(paths.resource("style.qss"))),
         ("fonts", os.path.isdir(paths.resource("assets", "fonts"))
                   and theme.FONT_BODY in QFontDatabase.families()),

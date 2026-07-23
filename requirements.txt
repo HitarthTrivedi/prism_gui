@@ -14,6 +14,11 @@ selenium>=4.0.0
 pypdf
 python-docx
 
+# packaging/rthook_ssl_certs.py depends on this directly — requests pulls it
+# in transitively too, but the packaged app needs it even where requests
+# wouldn't otherwise force the version CI resolves, so it's explicit here.
+certifi
+
 # ── Voice input & wake word — needs PortAudio on the system first:
 #   macOS:  brew install portaudio
 #   Linux:  sudo apt install portaudio19-dev

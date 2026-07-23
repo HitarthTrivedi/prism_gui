@@ -119,6 +119,12 @@ Voice input needs an extra system library (PortAudio) that isn't included by
 default on every machine. Every other part of Prism works without it — this
 only affects the microphone features.
 
+**A popup says `SSL: CERTIFICATE_VERIFY_FAILED` (Mac only).**
+Fixed in builds from v1.0.1 onward — update to the latest release from the
+[Downloads page](https://github.com/HitarthTrivedi/prism_gui/releases/latest).
+If you're still on v1.0.0, this is a one-time macOS quirk unrelated to your
+computer's security; there's nothing to fix on your end except updating.
+
 **Where is my data?**
 Everything Prism saves — your settings, run history, API key — lives in a
 folder on your own computer (`~/.prism`), never on a server Prism controls.

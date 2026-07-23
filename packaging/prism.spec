@@ -113,7 +113,10 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[os.path.join(SPEC_DIR, "rthook_distutils.py")],
+    runtime_hooks=[
+        os.path.join(SPEC_DIR, "rthook_distutils.py"),
+        os.path.join(SPEC_DIR, "rthook_ssl_certs.py"),
+    ],
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
