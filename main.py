@@ -71,7 +71,15 @@ def _selftest(app) -> int:
         ("fonts", os.path.isdir(paths.resource("assets", "fonts"))
                   and theme.FONT_BODY in QFontDatabase.families()),
         ("logo", not icons.logo_pixmap(64).isNull()),
-        ("line icons", not icons.pixmap("home", 18).isNull()),   # needs QtSvg
+        # A multi-part icon that only paints SOME of its strokes still passes
+        # isNull() — that's exactly how the macOS bug (six sibling <path>
+        # elements, only one rendering) reached a client undetected. "sliders"
+        # has 6 subpaths across two rows; count actual painted pixels, not
+        # just "a pixmap object exists".
+        ("line icons (sliders, 6 subpaths)", (lambda img: sum(
+            1 for y in range(img.height()) for x in range(img.width())
+            if img.pixelColor(x, y).alpha() > 10) >= 40
+         )(icons.pixmap("sliders", 24, "#5980a6").toImage())),
         ("engine", hasattr(CB.agents, "AGENT_REGISTRY")
                    and len(CB.agents.AGENT_REGISTRY) > 0),
         ("engine notes", bool(CB.router._tool_notes())),

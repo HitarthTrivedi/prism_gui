@@ -80,16 +80,23 @@ _cache: dict[tuple, QPixmap] = {}
 
 
 def _svg(name: str, color: str, stroke: float) -> bytes:
+    # Every multi-part icon (sliders, home, grid, clock, …) used to render as
+    # N sibling <path> elements under one <svg>. On macOS's QtSvg, only one of
+    # those siblings would paint — a 6-stroke "sliders" icon came out as a
+    # single flat dash, a 4-square "grid" as one square. Linux/Windows never
+    # showed it, so it went undetected until a real Mac ran the packaged app.
+    # A single <path> with multiple "M …" subpaths is standard SVG and has no
+    # siblings for a renderer to selectively drop — same pixels everywhere.
     if name in _FILLED:
-        body = "".join(
-            f'<path d="{d}" fill="{color}" stroke="none"/>' for d in _FILLED[name])
+        d = " ".join(_FILLED[name])
+        body = f'<path d="{d}" fill="{color}" stroke="none" fill-rule="evenodd"/>'
     else:
         paths = _STROKED.get(name)
         if paths is None:
             raise KeyError(f"unknown icon {name!r}")
-        body = "".join(
-            f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
-            f'stroke-linecap="round" stroke-linejoin="round"/>' for d in paths)
+        d = " ".join(paths)
+        body = (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
+                f'stroke-linecap="round" stroke-linejoin="round"/>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
             f'width="24" height="24">{body}</svg>').encode()
 
