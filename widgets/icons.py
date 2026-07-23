@@ -10,7 +10,7 @@ Paths are lifted verbatim from the design file. `icon()` returns a QIcon and
 `pixmap()` a device-pixel-ratio-correct QPixmap, both tinted to any token
 colour, both cached — these get requested once per repaint of a list row."""
 from __future__ import annotations
-from PySide6.QtCore import QByteArray, Qt, QSize
+from PySide6.QtCore import QByteArray, Qt, QSize, QRectF
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
@@ -115,7 +115,12 @@ def pixmap(name: str, size: int = 18, color: str = theme.TEXT,
     px.fill(Qt.transparent)
     painter = QPainter(px)
     painter.setRenderHint(QPainter.Antialiasing)
-    QSvgRenderer(QByteArray(_svg(name, color, stroke))).render(painter)
+    # render(painter) with NO target rect maps the SVG using the *physical*
+    # pixmap size, not the dpr-scaled logical size set above — on a Retina
+    # display (dpr=2) that mismatch made QSvgRenderer paint only the first
+    # subpath of a multi-M path, scaled and cropped, with the rest silently
+    # clipped away. An explicit logical-size rect fixes the mapping for any dpr.
+    QSvgRenderer(QByteArray(_svg(name, color, stroke))).render(painter, QRectF(0, 0, size, size))
     painter.end()
     _cache[key] = px
     return px
@@ -162,7 +167,7 @@ def logo_pixmap(height: int = 24) -> QPixmap:
     px.fill(Qt.transparent)
     painter = QPainter(px)
     painter.setRenderHint(QPainter.Antialiasing)
-    renderer.render(painter)
+    renderer.render(painter, QRectF(0, 0, width, height))
     painter.end()
     _logo_cache[key] = px
     return px

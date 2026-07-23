@@ -72,14 +72,19 @@ def _selftest(app) -> int:
                   and theme.FONT_BODY in QFontDatabase.families()),
         ("logo", not icons.logo_pixmap(64).isNull()),
         # A multi-part icon that only paints SOME of its strokes still passes
-        # isNull() — that's exactly how the macOS bug (six sibling <path>
-        # elements, only one rendering) reached a client undetected. "sliders"
-        # has 6 subpaths across two rows; count actual painted pixels, not
-        # just "a pixmap object exists".
-        ("line icons (sliders, 6 subpaths)", (lambda img: sum(
-            1 for y in range(img.height()) for x in range(img.width())
-            if img.pixelColor(x, y).alpha() > 10) >= 40
-         )(icons.pixmap("sliders", 24, "#5980a6").toImage())),
+        # isNull(), and even a bare painted-pixel-count check isn't enough —
+        # a second macOS bug (QSvgRenderer.render(painter) with no target
+        # rect mis-mapping under devicePixelRatio != 1) painted only the
+        # icon's FIRST subpath, scaled and cropped, which alone already
+        # cleared a ">= 40 total pixels" bar. "sliders" has one row at y=8
+        # and another at y=16 in its 24x24 viewBox, so require paint in BOTH
+        # halves — a partial render that drops either row now fails loudly.
+        ("line icons (sliders, top+bottom rows)", (lambda img: (
+            any(img.pixelColor(x, y).alpha() > 10
+                for y in range(img.height() // 2) for x in range(img.width()))
+            and any(img.pixelColor(x, y).alpha() > 10
+                    for y in range(img.height() // 2, img.height()) for x in range(img.width()))
+         ))(icons.pixmap("sliders", 24, "#5980a6").toImage())),
         ("engine", hasattr(CB.agents, "AGENT_REGISTRY")
                    and len(CB.agents.AGENT_REGISTRY) > 0),
         ("engine notes", bool(CB.router._tool_notes())),
