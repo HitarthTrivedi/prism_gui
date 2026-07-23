@@ -35,6 +35,15 @@ def _selftest(app) -> int:
     import core_bridge as CB
     import wakeword
 
+    # The checks below print ✓/✗ to whatever stdout the harness attached. On
+    # Windows that pipe defaults to cp1252, which can't encode them — and a
+    # windowed (console=False) build may have no stdout at all, hence the guard.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     # Selenium + undetected_chromedriver are the product's whole point, and
     # they are also the most fragile thing to freeze (dynamic imports, a
     # patcher that still wants the removed distutils). A build where this

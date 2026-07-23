@@ -19,6 +19,12 @@ import os
 import struct
 import sys
 
+# This script renders into QImages and never shows a window, but Qt still
+# insists on a platform plugin — and on a display-less CI runner the default
+# (xcb) aborts the whole process with SIGABRT. Offscreen everywhere: same
+# pixels, no display required.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUI = os.path.dirname(HERE)
 sys.path.insert(0, GUI)

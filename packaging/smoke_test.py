@@ -18,6 +18,14 @@ import subprocess
 import sys
 import tempfile
 
+# Same cp1252 hazard as build.py: this script prints ✓, and it also READS the
+# app's UTF-8 self-test output, which a cp1252 decode would reject.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUI = os.path.dirname(HERE)
 sys.path.insert(0, GUI)
@@ -62,8 +70,8 @@ def main():
     env["USERPROFILE"] = home
 
     print(f"» {exe} (PRISM_SELFTEST=1, HOME={home})")
-    result = subprocess.run([exe], env=env, capture_output=True, text=True,
-                            timeout=180)
+    result = subprocess.run([exe], env=env, capture_output=True,
+                            encoding="utf-8", errors="replace", timeout=180)
     print(result.stdout.strip())
     if result.stderr.strip():
         print("stderr:", result.stderr.strip()[:4000], file=sys.stderr)

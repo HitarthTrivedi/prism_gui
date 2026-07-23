@@ -25,6 +25,15 @@ import sys
 import tarfile
 import zipfile
 
+# Windows consoles default to cp1252, which cannot encode the ✓/✗ these
+# scripts print — the Windows CI build once FAILED after building successfully,
+# purely on printing "✓ built". Force UTF-8, degrade characters rather than die.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUI = os.path.dirname(HERE)
 DIST = os.path.join(GUI, "dist")
