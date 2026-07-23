@@ -25,8 +25,8 @@ jobs:
             label: Linux (x64)   # binaries built against a newer libc
           - os: windows-latest
             label: Windows (x64)
-          - os: macos-13         # Intel
-            label: macOS (Intel)
+          - os: macos-15-intel   # last Intel image GitHub offers (until Aug 2027);
+            label: macOS (Intel) # macos-13 was retired Dec 2025 and queues forever
           - os: macos-14         # Apple Silicon
             label: macOS (Apple Silicon)
 
@@ -35,6 +35,15 @@ jobs:
         with:
           submodules: recursive   # prism_terminal is a submodule; without this
                                   # the engine is an empty directory
+
+      # git's message for this ("not our ref <sha>") cost a debugging session
+      # once already — if checkout dies, say what it almost certainly means.
+      - name: Explain checkout failures
+        if: failure()
+        run: |
+          echo "::error::Checkout failed. Most likely cause: prism_gui pins the \
+          prism_terminal submodule to a commit that was never pushed. Run \
+          'cd prism_terminal && git push origin HEAD:main' locally, then re-run."
 
       - uses: actions/setup-python@v5
         with:
