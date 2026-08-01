@@ -37,8 +37,6 @@ SECONDARY = [
     ("ADD-ONS", [
         ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec"),
         ("email", "Email", "mail", "Draft & send an email from attached files"),
-        ("reel",  "Reel",  "video",
-         "A finished vertical reel, rendered here — no watermark, no limits"),
         # Shown but disabled on purpose: the shelf should look like a product
         # line, and a visible "next one" is worth more in a client demo than
         # an empty gap. Reads as coming-soon, never as broken.

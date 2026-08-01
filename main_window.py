@@ -212,8 +212,6 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
-        elif key == "reel":
-            self._open_reel()
 
     def _open_reel(self):
         ok, err = CB.reel_available()
