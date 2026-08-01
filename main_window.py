@@ -34,6 +34,7 @@ from dialogs.setup_dialog import SetupDialog
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
 from dialogs.boq_dialog import BoqDialog
+from dialogs.reel_dialog import ReelDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
@@ -211,6 +212,15 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
+        elif key == "reel":
+            self._open_reel()
+
+    def _open_reel(self):
+        ok, err = CB.reel_available()
+        if not ok:
+            QMessageBox.information(self, "Reel", err)
+            return
+        ReelDialog(self.cfg, self.attachments, self).exec()
 
     def _open_boq(self):
         ok, err = CB.boq_available()

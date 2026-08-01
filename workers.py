@@ -200,3 +200,28 @@ class MeasureWorker(QThread):
             self.done.emit(q, notes)
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class ReelWorker(QThread):
+    """Render the reel off the UI thread.
+
+    A 30-second reel is 900 frames of drawing plus encoding — around 16
+    seconds. Inline that would freeze the window with no feedback, which on a
+    client's laptop reads as a crash.
+    """
+    progress = Signal(int, int)      # frames done, total
+    done = Signal(str)               # output path
+    failed = Signal(str)
+
+    def __init__(self, spec: dict, out_path: str):
+        super().__init__()
+        self.spec, self.out_path = spec, out_path
+
+    def run(self):
+        try:
+            reel = CB.get_reel()
+            reel.render(self.spec, self.out_path,
+                        on_progress=lambda d, t: self.progress.emit(d, t))
+            self.done.emit(self.out_path)
+        except Exception as e:
+            self.failed.emit(str(e))

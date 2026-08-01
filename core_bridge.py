@@ -83,3 +83,23 @@ def boq_available() -> tuple[bool, str]:
 def get_boq():
     from core import boq
     return boq
+
+
+def reel_available() -> tuple[bool, str]:
+    """Pillow draws the frames, FFmpeg encodes them. Probe both so the add-on
+    can explain what is missing instead of failing mid-render."""
+    try:
+        from PIL import Image  # noqa: F401
+    except Exception:
+        return False, "Pillow is needed to draw the frames:\n\n    pip install pillow"
+    try:
+        from core import reel
+        reel.ffmpeg_path()
+    except Exception as e:
+        return False, str(e)
+    return True, ""
+
+
+def get_reel():
+    from core import reel
+    return reel

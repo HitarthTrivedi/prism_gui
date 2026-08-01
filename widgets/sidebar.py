@@ -37,6 +37,14 @@ SECONDARY = [
     ("ADD-ONS", [
         ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec"),
         ("email", "Email", "mail", "Draft & send an email from attached files"),
+        ("reel",  "Reel",  "video",
+         "A finished vertical reel, rendered here — no watermark, no limits"),
+        # Shown but disabled on purpose: the shelf should look like a product
+        # line, and a visible "next one" is worth more in a client demo than
+        # an empty gap. Reads as coming-soon, never as broken.
+        ("bom",   "BOM & Stock", "list",
+         "Coming soon — match a parts list against your stock and get the "
+         "shortage list", False),
     ]),
     ("WORKSPACE", [
         ("status", "Status",       "chart", "Current profile, key & agents"),
@@ -120,9 +128,16 @@ class Sidebar(QFrame):
             root.addSpacing(12)
             root.addWidget(kicker(section, muted=True))
             root.addSpacing(4)
-            for key, label, icon_name, tip in items:
-                btn = nav_button(label, icon_name, small=True, tip=tip)
-                btn.clicked.connect(lambda _=False, k=key: self.command_triggered.emit(k))
+            for entry in items:
+                key, label, icon_name, tip = entry[:4]
+                ready = entry[4] if len(entry) > 4 else True
+                btn = nav_button(label if ready else f"{label}  (soon)",
+                                 icon_name, small=True, tip=tip)
+                if ready:
+                    btn.clicked.connect(
+                        lambda _=False, k=key: self.command_triggered.emit(k))
+                else:
+                    btn.setEnabled(False)
                 root.addWidget(btn)
 
         # -- favorites -------------------------------------------------------
