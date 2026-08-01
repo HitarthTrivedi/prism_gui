@@ -30,10 +30,17 @@ PRIMARY = [
 
 # Everything else the CLI exposes, grouped by intent.
 SECONDARY = [
+    # ADD-ONS are the purpose-built pipelines — the ones sold on top of the
+    # generic product. Each one takes a real business document in and gives a
+    # finished one out, rather than being a general prompt. New verticals
+    # (quotation from spec, BOM vs inventory, export papers) land here.
+    ("ADD-ONS", [
+        ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec"),
+        ("email", "Email", "mail", "Draft & send an email from attached files"),
+    ]),
     ("WORKSPACE", [
         ("status", "Status",       "chart", "Current profile, key & agents"),
         ("login",  "Login tabs",   "lock",  "Re-open your tools in Chrome to sign in"),
-        ("email",  "Email",        "mail",  "Draft & send an email from attached files"),
     ]),
     ("CONFIGURE", [
         ("agents",  "Agents",  "grid",  "Re-pick one agent per category"),

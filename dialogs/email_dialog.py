@@ -9,12 +9,13 @@ import re
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
     QPushButton, QTextEdit, QListWidget, QListWidgetItem, QMessageBox,
-    QDialogButtonBox, QGroupBox,
+    QDialogButtonBox, QGroupBox, QWidget,
 )
 
 import core_bridge as CB
 import theme
-from workers import AutomationWorker, SendWorker, VerifyWorker
+from workers import AutomationWorker, SendWorker, VerifyWorker, RecordWorker
+from widgets.ask_panel import AskPanel, MoreOptions
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -151,22 +152,45 @@ class EmailComposeDialog(QDialog):
         self._sent_ok: list[str] = []
         self._sent_bad: list[tuple] = []
         self._subject = self._body = ""
+        self._rec = None
 
         root = QVBoxLayout(self)
 
-        goal_box = QGroupBox("What is this email about?")
-        goal_layout = QVBoxLayout(goal_box)
-        self.goal_edit = QTextEdit()
-        self.goal_edit.setPlaceholderText(
-            "e.g. \"pitch our new brochure to investors — jane@fund.com, "
-            "mark@fund.com\" (mention addresses here, or attach a recipients CSV)")
-        self.goal_edit.setFixedHeight(70)
-        goal_layout.addWidget(self.goal_edit)
-        root.addWidget(goal_box)
+        title = QLabel("What email do you want to send?")
+        title.setObjectName("h2")
+        root.addWidget(title)
 
-        rec_box = QGroupBox("Recipients")
-        rec_layout = QVBoxLayout(rec_box)
-        self.rec_empty = QLabel("No recipients yet — Find recipients or search below.")
+        # One box, the same as the home screen. Everything the old form asked
+        # for — who to send to, which file to write from — is read out of this
+        # sentence instead of out of six separate fields.
+        self.ask = AskPanel(
+            "Just say it — for example:\n"
+            "\"send all the clients in the CSV a note convincing them to buy "
+            "from us, use brochure.pdf so you know who we are\"")
+        self.ask.speak_clicked.connect(self._toggle_record)
+        self.ask.files_added.connect(self._on_files_added)
+        root.addWidget(self.ask)
+
+        go_row = QHBoxLayout()
+        self.go_btn = QPushButton("Write the email")
+        self.go_btn.setObjectName("primaryBtn")
+        self.go_btn.clicked.connect(self._one_press)
+        go_row.addWidget(self.go_btn)
+        go_row.addStretch(1)
+        root.addLayout(go_row)
+
+        self.who_label = QLabel("")
+        self.who_label.setObjectName("emptyState")
+        self.who_label.setWordWrap(True)
+        root.addWidget(self.who_label)
+
+        # The old recipient controls still exist, for the rare user who wants
+        # to hand-edit the list. Shut by default.
+        self.more = MoreOptions("Edit the recipient list")
+        rec_holder = QWidget()
+        rec_layout = QVBoxLayout(rec_holder)
+        rec_layout.setContentsMargins(0, 0, 0, 0)
+        self.rec_empty = QLabel("No recipients yet.")
         self.rec_empty.setObjectName("emptyState")
         self.rec_empty.setWordWrap(True)
         rec_layout.addWidget(self.rec_empty)
@@ -186,22 +210,23 @@ class EmailComposeDialog(QDialog):
         rec_layout.addLayout(add_row)
 
         rec_btns = QHBoxLayout()
-        find_btn = QPushButton("Find recipients (from text + attached CSV)")
+        find_btn = QPushButton("Re-read addresses from my words + CSV")
         find_btn.clicked.connect(self._find_recipients)
         rec_btns.addWidget(find_btn)
-        discover_btn = QPushButton("No address? Search for their public email")
+        discover_btn = QPushButton("Search the web for their email")
         discover_btn.clicked.connect(self._discover_recipient)
         rec_btns.addWidget(discover_btn)
         rec_layout.addLayout(rec_btns)
-        root.addWidget(rec_box)
+        self.more.add(rec_holder)
+        root.addWidget(self.more)
 
-        draft_box = QGroupBox("Draft")
+        draft_box = QGroupBox("Your draft — edit anything before it goes")
         draft_layout = QVBoxLayout(draft_box)
         files_note = QLabel(self._files_note())
         files_note.setObjectName("dim")
         files_note.setWordWrap(True)
         draft_layout.addWidget(files_note)
-        draft_btn = QPushButton("Generate draft from attached source files")
+        draft_btn = QPushButton("Rewrite the draft")
         draft_btn.clicked.connect(self._generate_draft)
         draft_layout.addWidget(draft_btn)
         form = QFormLayout()
@@ -226,13 +251,76 @@ class EmailComposeDialog(QDialog):
 
         send_row = QHBoxLayout()
         send_row.addStretch(1)
-        self.send_btn = QPushButton("Send")
+        self.send_btn = QPushButton("Send to everyone")
         self.send_btn.setObjectName("primaryBtn")
         self.send_btn.clicked.connect(self._send)
         send_row.addWidget(self.send_btn)
         root.addLayout(send_row)
 
     # ── recipients ────────────────────────────────────────────────────────
+    def _one_press(self):
+        """One button does the whole job: read who from the sentence and the
+        attached CSV, then write the draft. The old screen made the user press
+        'Find recipients' and then 'Generate draft' and work out for themselves
+        that the order mattered."""
+        if not self.ask.text():
+            QMessageBox.information(self, "Email",
+                                    "Tell me what the email should say.")
+            return
+        self._find_recipients()
+        if not self.recipients:
+            # Nobody named and no CSV — offer the web search rather than
+            # stopping with an error the user can do nothing with.
+            self._discover_recipient()
+            return
+        self._generate_draft()
+
+    def _on_files_added(self, paths: list):
+        """A CSV is the address list; anything else is source material for the
+        draft. The user should not have to know that distinction."""
+        for p in paths:
+            try:
+                att = CB.files.attach(p)
+            except Exception:
+                continue
+            self.attachments.append(att)
+            csvs, others = CB.mailer.split_attachments([att])
+            self._csvs += csvs
+            self.source_files += others
+        self.who_label.setText(self._files_note())
+
+    def _toggle_record(self):
+        if getattr(self, "_rec", None):
+            self._rec.stop()
+            self.ask.set_recording(False)
+            return
+        if not CB.voice.available():
+            QMessageBox.information(
+                self, "Speak",
+                "Voice needs PyAudio on this machine:\n\n"
+                "    brew install portaudio && pip install pyaudio\n\n"
+                "Everything else works — just type instead.")
+            return
+        self.ask.set_recording(True)
+        self.status.setText("Listening — press Stop when you're done.")
+        self._rec = RecordWorker(self.cfg)
+        self._rec.done.connect(self._on_spoken)
+        self._rec.failed.connect(self._on_spoken_failed)
+        self._rec.start()
+
+    def _on_spoken(self, text: str, lang: str):
+        self._rec = None
+        self.ask.set_recording(False)
+        self.status.setText("")
+        if text:
+            self.ask.append_text(text)
+
+    def _on_spoken_failed(self, error: str):
+        self._rec = None
+        self.ask.set_recording(False)
+        self.status.setText("")
+        QMessageBox.information(self, "Speak", error)
+
     def _files_note(self) -> str:
         names = ", ".join(f["name"] for f in self.source_files)
         csvs = ", ".join(a["name"] for a in self._csvs)
@@ -245,9 +333,9 @@ class EmailComposeDialog(QDialog):
         return "  ".join(parts)
 
     def _find_recipients(self):
-        text = self.goal_edit.toPlainText()
+        text = self.ask.text()
         inline, remainder = CB.mailer.recipients_from_text(text)
-        self.goal_edit.setPlainText(remainder)
+        self.ask.set_text(remainder)
         found = list(inline)
         for a in self._csvs:
             found += CB.mailer.parse_recipients(a["path"])
@@ -286,6 +374,8 @@ class EmailComposeDialog(QDialog):
         self._refresh_recipients()
 
     def _refresh_recipients(self):
+        if self.recipients:
+            self.send_btn.setText(f"Send to all {len(self.recipients)}")
         self.rec_list.clear()
         for r in self.recipients:
             name = (r.get("name") or "").strip()
@@ -294,14 +384,19 @@ class EmailComposeDialog(QDialog):
         has_recipients = bool(self.recipients)
         self.rec_empty.setVisible(not has_recipients)
         self.rec_list.setVisible(has_recipients)
-        named = sum(1 for r in self.recipients if (r.get("name") or "").strip())
-        note = f"{len(self.recipients)} recipient(s)."
-        if named:
-            note += f" {named} with a name for {{name}}."
-        self.status.setText(note)
+        # Say who this is going to in plain words, on the main screen — the
+        # user should never have to open a panel to find that out.
+        if not self.recipients:
+            self.who_label.setText(self._files_note())
+            return
+        shown = ", ".join(r["email"] for r in self.recipients[:3])
+        more = f" and {len(self.recipients) - 3} more" if len(self.recipients) > 3 else ""
+        self.who_label.setText(
+            f"Going to {len(self.recipients)} people — {shown}{more}."
+            f"  ·  {self._files_note()}")
 
     def _discover_recipient(self):
-        goal = self.goal_edit.toPlainText().strip()
+        goal = self.ask.text().strip()
         if not goal:
             QMessageBox.information(self, "Search", "Describe who the recipient is first.")
             return
@@ -336,7 +431,7 @@ class EmailComposeDialog(QDialog):
 
     # ── draft ─────────────────────────────────────────────────────────────
     def _generate_draft(self):
-        goal = self.goal_edit.toPlainText().strip()
+        goal = self.ask.text().strip()
         if not goal:
             QMessageBox.information(self, "Draft", "Say what the email is about first.")
             return
@@ -492,7 +587,7 @@ class EmailComposeDialog(QDialog):
     def _save_run(self, sent: list, failed: list):
         """Same record the CLI's /email writes, so the blast shows up in
         History next to every other run instead of vanishing."""
-        goal = self.goal_edit.toPlainText().strip()
+        goal = self.ask.text().strip()
         record = {
             "query": f"/email {goal}",
             "routing": self._last_run.get("routing") or {},

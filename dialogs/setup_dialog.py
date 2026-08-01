@@ -384,7 +384,11 @@ class SetupDialog(QDialog):
 
     def _save(self):
         key = self.key_edit.text().strip()
-        if key and not (key.startswith("gsk_") and len(key) > 20):
+        if not key:
+            QMessageBox.warning(self, "API key", "Enter your Groq API key — Prism can't route anything without one.")
+            self._focus_section("key")
+            return
+        if not (key.startswith("gsk_") and len(key) > 20):
             QMessageBox.warning(self, "API key", "That doesn't look like a Groq key (should start with 'gsk_').")
             self._focus_section("key")
             return

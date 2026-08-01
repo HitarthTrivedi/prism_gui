@@ -34,10 +34,16 @@ class AutomationWorker(QThread):
     done = Signal(dict, dict)
     failed = Signal(str)
 
-    def __init__(self, routing: dict, cfg: dict, attachments: list, query: str):
+    def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
+                 custom_stages=None, chatgpt_analysis: bool = True):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
+        # instead of going through the router's fixed categories; the engine
+        # accepts them directly. None = ordinary routed run, unchanged.
+        self.custom_stages = custom_stages
+        self.chatgpt_analysis = chatgpt_analysis
 
     def run(self):
         ok, err = CB.automation_available()
@@ -46,10 +52,14 @@ class AutomationWorker(QThread):
             return
         automation = CB.get_automation()
         try:
+            kwargs = {}
+            if self.custom_stages is not None:
+                kwargs["custom_stages"] = self.custom_stages
+                kwargs["chatgpt_analysis"] = self.chatgpt_analysis
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
-                query=self.query,
+                query=self.query, **kwargs,
             )
             self.done.emit(responses, links)
         except Exception as e:
@@ -160,5 +170,33 @@ class FindWorker(QThread):
     def run(self):
         try:
             self.done.emit(CB.pathfinder.find(self.desc, self.cfg))
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class MeasureWorker(QThread):
+    """Parse a CAD drawing off the UI thread.
+
+    A 13 MB DWG takes ~40 s to convert and measure. Doing that inline froze
+    the whole dialog with no feedback — the app looked hung, which on a
+    client's laptop reads as broken software.
+    """
+    done = Signal(object, list)      # quantities dict, converter notes
+    failed = Signal(str)
+
+    def __init__(self, path: str, unit: str = "", scope: list | None = None):
+        super().__init__()
+        self.path, self.unit, self.scope = path, unit, scope or []
+
+    def run(self):
+        try:
+            boq = CB.get_boq()
+            dxf_path, notes = boq.ensure_dxf(self.path)
+            q = boq.measure(dxf_path)
+            if self.unit:
+                boq.apply_known_unit(q, self.unit)
+            if self.scope:
+                q = boq.filter_by_keywords(q, self.scope)
+            self.done.emit(q, notes)
         except Exception as e:
             self.failed.emit(str(e))

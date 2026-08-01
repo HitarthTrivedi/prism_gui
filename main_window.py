@@ -33,6 +33,7 @@ from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
+from dialogs.boq_dialog import BoqDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
@@ -208,6 +209,20 @@ class MainWindow(QMainWindow):
             self._show_runs()
         elif key == "email":
             self._open_email()
+        elif key == "boq":
+            self._open_boq()
+
+    def _open_boq(self):
+        ok, err = CB.boq_available()
+        if not ok:
+            QMessageBox.information(
+                self, "BOQ",
+                "The BOQ add-on needs the ezdxf library to measure drawings:\n\n"
+                "    pip install ezdxf\n\n"
+                "A .dwg also needs a converter — `brew install libredwg` on "
+                f"macOS.\n\nDetail: {err}")
+            return
+        BoqDialog(self.cfg, self.attachments, self).exec()
 
     def _open_email(self):
         if not CB.mailer.is_configured(self.cfg):

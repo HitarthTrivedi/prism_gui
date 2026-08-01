@@ -66,3 +66,20 @@ def automation_available() -> tuple[bool, str]:
 def get_automation():
     from core import automation
     return automation
+
+
+def boq_available() -> tuple[bool, str]:
+    """core.boq needs ezdxf, which is optional — probe it the same way as
+    automation so the BOQ add-on can explain itself instead of the whole app
+    failing to start on a machine that never uses it."""
+    try:
+        import ezdxf  # noqa: F401
+        from core import boq  # noqa: F401
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def get_boq():
+    from core import boq
+    return boq
