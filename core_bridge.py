@@ -103,3 +103,19 @@ def reel_available() -> tuple[bool, str]:
 def get_reel():
     from core import reel
     return reel
+
+
+def studio_available() -> tuple[bool, str]:
+    """Prism Studio films an HTML page, so it needs a browser engine on top of
+    FFmpeg. Probed separately from the template renderer: a machine can have
+    one and not the other, and the pipeline picks accordingly."""
+    try:
+        from core import reel_web
+    except Exception as e:
+        return False, f"The web renderer isn't available ({e})."
+    return reel_web.available()
+
+
+def get_studio():
+    from core import reel_web
+    return reel_web

@@ -430,6 +430,22 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Run", "Every step is switched off — "
                                                  "turn at least one back on.")
             return
+        # Prism Studio needs a browser engine the rest of Prism does not. Say
+        # so before the run rather than at the last stage, an hour of tool
+        # calls later — and offer the renderer that does work.
+        if "Prism Studio" in run_agents.values():
+            ok, why = CB.studio_available()
+            if not ok:
+                answer = QMessageBox.question(
+                    self, "Prism Studio",
+                    f"{why}\n\nRun with the fixed house style (Prism Reel) "
+                    "instead?",
+                    QMessageBox.Yes | QMessageBox.Cancel)
+                if answer != QMessageBox.Yes:
+                    return
+                run_agents = {k: ("Prism Reel" if v == "Prism Studio" else v)
+                              for k, v in run_agents.items()}
+
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
