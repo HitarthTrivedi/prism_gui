@@ -8,6 +8,9 @@ from PySide6.QtWidgets import (
     QFrame, QApplication, QDialogButtonBox,
 )
 
+import os
+
+import paths
 import theme
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
@@ -27,7 +30,28 @@ class StageResultDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(11)
         root.addWidget(heading(title))
-        if url:
+        if paths.is_local_result(url):
+            # A file, not a tab — an <a href> to a bare path opens nothing, so
+            # this step's result used to be unreachable from here.
+            video = url.lower().endswith((".mp4", ".mov", ".m4v", ".webm"))
+            files = QHBoxLayout()
+            files.setSpacing(8)
+            play = QPushButton(" Play video" if video else " Open file")
+            play.setObjectName("smallBtn")
+            icons.button_icon(play, "play" if video else "folder", 14, theme.TEXT)
+            play.clicked.connect(lambda: paths.open_result(url))
+            files.addWidget(play)
+            show = QPushButton(" Show in folder")
+            show.setObjectName("smallBtn")
+            icons.button_icon(show, "folder", 14, theme.TEXT)
+            show.clicked.connect(lambda: paths.reveal_result(url))
+            files.addWidget(show)
+            where = QLabel(os.path.basename(url))
+            where.setObjectName("meta")
+            files.addWidget(where)
+            files.addStretch(1)
+            root.addLayout(files)
+        elif url:
             # When Prism didn't get the text, this link is the whole result —
             # the tool keeps working in that tab after we stop watching.
             label = (f"The result is still being made in {agent} — open it"
@@ -108,12 +132,17 @@ class _StageRow(QFrame):
         text.addWidget(snippet)
         row.addLayout(text, stretch=1)
 
-        open_btn = QPushButton("Open")
+        # A rendered video wants one click, not a dialog about itself.
+        plays = paths.is_local_result(url) and url.lower().endswith(
+            (".mp4", ".mov", ".m4v", ".webm"))
+        open_btn = QPushButton("Play" if plays else "Open")
         open_btn.setObjectName("smallBtn")
         open_btn.setCursor(Qt.PointingHandCursor)
-        open_btn.clicked.connect(lambda: StageResultDialog(
-            stage, info["agent"], info.get("text", ""), url,
-            self.window(), unfinished).exec())
+        open_btn.clicked.connect(
+            (lambda: paths.open_result(url)) if plays else
+            (lambda: StageResultDialog(
+                stage, info["agent"], info.get("text", ""), url,
+                self.window(), unfinished).exec()))
         row.addWidget(open_btn)
 
 

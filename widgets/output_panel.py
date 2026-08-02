@@ -5,6 +5,7 @@ restyled onto the blueprint frame so a running step reads as the same kind of
 object as the plan step it came from. Per-stage copy matters: if a later stage
 fails, the user can still take the last good text and finish by hand."""
 from __future__ import annotations
+import os
 from html import escape as _escape
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QApplication, QGraphicsOpacityEffect,
 )
 
+import paths
 import theme
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
@@ -79,6 +81,15 @@ class StageCard(BlueprintFrame):
         self.open_btn.clicked.connect(self._open)
         self.open_btn.setVisible(False)
         row.addWidget(self.open_btn)
+        # Only ever shown for a file result: it lands in ~/.prism/runs, which
+        # Finder hides, so "here is the path" is not an answer on its own.
+        self.reveal_btn = QPushButton(" Show in folder")
+        self.reveal_btn.setObjectName("smallBtn")
+        self.reveal_btn.setCursor(Qt.PointingHandCursor)
+        icons.button_icon(self.reveal_btn, "folder", 14, theme.TEXT)
+        self.reveal_btn.clicked.connect(lambda: paths.reveal_result(self._url))
+        self.reveal_btn.setVisible(False)
+        row.addWidget(self.reveal_btn)
         row.addStretch(1)
         self.content.addWidget(self.actions)
 
@@ -105,6 +116,19 @@ class StageCard(BlueprintFrame):
     def _set_url(self, url: str):
         self._url = url or ""
         self.open_btn.setVisible(bool(url))
+        # A local agent's result is a file, not a tab. Say so on the button —
+        # "Open in tool" over a rendered MP4 reads as a link to somewhere else,
+        # and the user never learns the video is already on their machine.
+        local = paths.is_local_result(self._url)
+        self.reveal_btn.setVisible(local)
+        if local:
+            video = self._url.lower().endswith((".mp4", ".mov", ".m4v", ".webm"))
+            self.open_btn.setText(" Play video" if video else " Open file")
+            icons.button_icon(self.open_btn, "play" if video else "folder", 14,
+                              theme.ACCENT_RAMP[700])
+        elif url:
+            self.open_btn.setText(" Open in tool")
+            icons.button_icon(self.open_btn, "external", 14, theme.ACCENT_RAMP[700])
 
     def set_waiting(self, seconds: int):
         self.status.set(f"waiting up to {seconds}s", "clock", "tagWarn")
@@ -120,6 +144,25 @@ class StageCard(BlueprintFrame):
             note = (f"<p style='color:{theme.NEUTRAL[600]};line-height:150%'>"
                     "Prism stopped waiting, but the tool is still working — "
                     "open it to pick up the finished result.</p>")
+        elif paths.is_local_result(url):
+            # The whole result IS the file. Without this the card printed the
+            # engine's one-line note and nothing else, so a finished render
+            # looked like a step that had produced nothing. Copy gives the
+            # path, since that is the only thing worth pasting anywhere.
+            size = ""
+            try:
+                size = f" · {os.path.getsize(url) / 1e6:.1f} MB"
+            except OSError:
+                pass
+            self._raw = url
+            self.body.setHtml(
+                f"<p style='line-height:150%'>Made on this machine — "
+                f"<b>{_escape(os.path.basename(url))}</b>{size}<br>"
+                f"<span style='color:{theme.NEUTRAL[600]}'>"
+                f"{_escape(os.path.dirname(url))}</span></p>")
+            self.status.set("done", "check", "tagOk")
+            self.copy_btn.setEnabled(True)
+            return
         if texts:
             self._raw = "\n\n———\n\n".join(texts)
             # render the AI's response as formatted markdown (it's a document),
@@ -166,7 +209,7 @@ class StageCard(BlueprintFrame):
 
     def _open(self):
         if self._url:
-            QDesktopServices.openUrl(QUrl(self._url))
+            paths.open_result(self._url)
 
 
 class OutputPanel(QWidget):

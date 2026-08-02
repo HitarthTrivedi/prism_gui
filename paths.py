@@ -42,6 +42,42 @@ def user_dir(*parts: str) -> str:
     return os.path.join(os.path.expanduser("~"), ".prism", *parts)
 
 
+def is_local_result(url: str) -> bool:
+    """A stage result that is a FILE on this machine, not a tool's tab.
+
+    Local agents (the reel renderer) hand back a path where every scraped
+    stage hands back a URL, and the UI treats the two the same everywhere —
+    so a path was being fed to QUrl(), which has no scheme to open and fails
+    silently. Anything that opens a result has to ask this first.
+    """
+    return bool(url) and "://" not in url and os.path.exists(url)
+
+
+def open_result(url: str) -> None:
+    """Open a stage result — a file with its default app, a URL in Chrome."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    QDesktopServices.openUrl(
+        QUrl.fromLocalFile(url) if is_local_result(url) else QUrl(url))
+
+
+def reveal_result(path: str) -> None:
+    """Show the file in Finder/Explorer. Worth its own button because output
+    lands in ~/.prism/runs, and a dot-folder is invisible in Finder — a user
+    who is told the path still cannot get to it."""
+    import subprocess
+    folder = os.path.dirname(path)
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+    except Exception:
+        open_result(folder)
+
+
 def app_root() -> str:
     """The directory holding the executable (frozen) or the sources (dev).
     Used for logs and for telling the user where the app actually is."""
