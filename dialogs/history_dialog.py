@@ -27,14 +27,21 @@ from widgets.markdown import render_markdown
 _PATH_ROLE = 1000
 
 
-def _when(filename: str) -> tuple[str, str]:
+def _when(path: str) -> tuple[str, str]:
     """('22 Jul 2026', '14:21') from run_<epoch>.json, falling back to the
-    file's own mtime if the name isn't in that shape."""
-    stamp = filename.removeprefix("run_").removesuffix(".json")
+    file's own mtime if the name isn't in that shape.
+
+    Takes a FULL PATH, not a bare name: the fallback stats the file, and it
+    was previously handed only the basename — so any name that failed the
+    int() parse raised FileNotFoundError instead of falling back."""
+    stamp = os.path.basename(path).removeprefix("run_").removesuffix(".json")
     try:
         moment = time.localtime(int(stamp))
     except ValueError:
-        moment = time.localtime(os.path.getmtime(filename))
+        try:
+            moment = time.localtime(os.path.getmtime(path))
+        except OSError:
+            return "—", "—"
     return time.strftime("%d %b %Y", moment), time.strftime("%H:%M", moment)
 
 
@@ -149,7 +156,12 @@ class HistoryDialog(QDialog):
         runs_dir = CB.config.RUNS_DIR
         names = []
         if os.path.isdir(runs_dir):
-            names = sorted((n for n in os.listdir(runs_dir) if n.endswith(".json")),
+            # Only run records. The same folder also holds artefacts a run
+            # produced — reel scene specs, BOQ quantity CSVs — and those are
+            # not runs; listing them broke History the moment /reel wrote its
+            # first spec beside a run file.
+            names = sorted((n for n in os.listdir(runs_dir)
+                            if n.startswith("run_") and n.endswith(".json")),
                            reverse=True)
         if not names:
             self.runs.setEnabled(False)
@@ -159,7 +171,7 @@ class HistoryDialog(QDialog):
             return
         for name in names:
             path = os.path.join(runs_dir, name)
-            day, clock = _when(name)
+            day, clock = _when(path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     query = (json.load(f) or {}).get("query", "")
