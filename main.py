@@ -59,13 +59,28 @@ def _selftest(app) -> int:
     # handshake rather than importing ssl.
     license_ok, license_err = licensing.selftest()
 
-    # The add-ons we sell, probed the way the app probes them. Both once
-    # shipped broken: packaging/prism.spec excluded numpy and PIL, so BOQ and
-    # Reel failed only in the frozen build and only when a customer clicked
-    # them. A dependency that is fine from source and missing once packaged is
-    # exactly what this self-test is for.
+    # The add-ons we sell. Both once shipped broken: packaging/prism.spec
+    # excluded numpy and PIL, so BOQ and Reel failed only in the frozen build
+    # and only when a customer clicked them. A dependency that is fine from
+    # source and missing once packaged is exactly what this self-test is for.
     boq_ok, boq_err = CB.boq_available()
-    reel_ok, reel_err = CB.reel_available()
+
+    # Reel is probed in two halves rather than through CB.reel_available(),
+    # because it needs two different kinds of thing and only one of them is a
+    # property of the build. Pillow is FROZEN INTO the bundle — that half is
+    # the regression above and stays a hard failure. FFmpeg is a system tool
+    # the customer installs (reel.ffmpeg_path() says as much), never bundled
+    # and never bundle-able, so a build machine without it proves nothing
+    # about whether the build is whole. It is reported below alongside voice
+    # input instead of failing the build, which is the same call made for
+    # PortAudio and for the same reason.
+    try:
+        from PIL import Image, ImageDraw   # noqa: F401
+        from core import reel              # noqa: F401
+        reel_ok, reel_err = True, ""
+    except Exception as e:
+        reel_ok, reel_err = False, str(e)
+    ffmpeg_ok, ffmpeg_err = CB.reel_available()
 
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
@@ -110,8 +125,9 @@ def _selftest(app) -> int:
          automation_ok),
         (f"licence verification{'' if license_ok else f' — {license_err}'}",
          license_ok),
-        (f"BOQ add-on{'' if boq_ok else f' — {boq_err}'}", boq_ok),
-        (f"Reel add-on{'' if reel_ok else f' — {reel_err}'}", reel_ok),
+        (f"BOQ add-on (ezdxf){'' if boq_ok else f' — {boq_err}'}", boq_ok),
+        (f"Reel add-on (Pillow + renderer)"
+         f"{'' if reel_ok else f' — {reel_err}'}", reel_ok),
     ]
     win = MainWindow()
     win.show()
@@ -124,6 +140,13 @@ def _selftest(app) -> int:
     ok, why = wakeword.available()
     print(f"  {'✓' if ok else '!'} voice input{'' if ok else f' — {why}'}"
           "  (optional — needs PortAudio on the machine)")
+    # ffmpeg_path()'s message is a multi-line install guide; one line is enough
+    # here. split() rather than splitlines()[0] so an exception that stringifies
+    # to "" can't turn a diagnostic into an IndexError.
+    ffmpeg_why = ffmpeg_err.split("\n")[0]
+    print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
+          f"{'' if ffmpeg_ok else f' — {ffmpeg_why}'}"
+          "  (optional — needs FFmpeg on the machine)")
     print(f"{app.applicationName()} {app.applicationVersion()} · "
           f"frozen={paths.is_frozen()} · {sys.platform} · py"
           f"{sys.version_info.major}.{sys.version_info.minor}")

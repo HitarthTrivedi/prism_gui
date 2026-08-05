@@ -1,6 +1,13 @@
 # Prism GUI runs on TOP of prism_terminal's engine (core_bridge.py puts
-# prism_terminal/ on sys.path) — install prism_terminal/requirements.txt too,
-# or just install everything below (it's the same set plus PySide6).
+# prism_terminal/ on sys.path), so everything the engine imports has to be
+# listed HERE as well — this file is the whole install set for a build, and
+# .github/workflows/build.yml installs no other. The engine's own
+# requirements.txt is for running the CLI standalone; the two drifting apart
+# is what shipped a packaged app with no ezdxf and no Pillow. Anything the GUI
+# can reach through core_bridge belongs in both.
+#
+# (prism_terminal's rich/questionary are the exception: they draw the CLI's
+# terminal UI, which the GUI never calls into.)
 
 # ── Desktop UI ─────────────────────────────────────────────────
 PySide6>=6.5.0
@@ -18,6 +25,15 @@ python-docx
 # in transitively too, but the packaged app needs it even where requests
 # wouldn't otherwise force the version CI resolves, so it's explicit here.
 certifi
+
+# ── Add-ons we sell ─────────────────────────────────────────────────────────
+# Not optional for a BUILD, however optional they are at runtime: PyInstaller
+# can only bundle what is installed, so a packaging runner without these
+# produces an app whose BOQ and Reel buttons fail on a customer's machine.
+# packaging/prism.spec keeps numpy and PIL out of its excludes for the same
+# reason; both halves are needed, and only one of them used to be here.
+ezdxf     # BOQ reads DXF geometry directly (pulls in numpy)
+pillow    # Prism Reel draws every frame with PIL
 
 # ── Licensing ───────────────────────────────────────────────────────────────
 # Ed25519 to verify licence tokens, ChaCha20-Poly1305 to decrypt the engine
