@@ -25,10 +25,17 @@ jobs:
             label: Linux (x64)   # binaries built against a newer libc
           - os: windows-latest
             label: Windows (x64)
-          - os: macos-15-intel   # last Intel image GitHub offers (until Aug 2027);
-            label: macOS (Intel) # macos-13 was retired Dec 2025 and queues forever
           - os: macos-14         # Apple Silicon
             label: macOS (Apple Silicon)
+          # No Intel Mac target. macos-15-intel built fine but failed its smoke
+          # test, and `release` needs the whole matrix — one red leg blocks the
+          # publish for every platform. Dropped rather than debugged, because
+          # the machines this is going to are Apple Silicon.
+          #
+          # An arm64 .dmg will NOT run on an Intel Mac: there is no Rosetta path
+          # for it, the app simply won't open. If one ever needs supporting, add
+          # `- os: macos-15-intel` back here (GitHub offers that image until
+          # Aug 2027) and fix the smoke-test failure it surfaces.
 
     steps:
       - uses: actions/checkout@v4

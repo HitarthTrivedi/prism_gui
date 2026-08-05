@@ -57,8 +57,9 @@ the `NSMicrophoneUsageDescription` that notarization requires.
 
 **PyInstaller cannot cross-compile.** The OS you build on is the OS you get —
 a Linux machine cannot produce a `.exe` or a `.dmg`. That is why CI builds all
-four targets (Linux, Windows, Intel Mac, Apple Silicon Mac) on their own
-runners.
+three targets (Linux, Windows, Apple Silicon Mac) on their own runners. There
+is no Intel Mac target — see the matrix comment in
+`.github/workflows/build.yml`.
 
 ```bash
 git clone --recurse-submodules https://github.com/HitarthTrivedi/prism_gui.git

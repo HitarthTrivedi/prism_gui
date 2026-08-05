@@ -143,8 +143,11 @@ bundle, then publishes a GitHub Release with:
 | `Prism-1.1.0-linux-x64.tar.gz` | Linux |
 | `Prism-1.1.0-x64.AppImage` | Linux, single file |
 | `Prism-1.1.0-windows-x64.zip` | Windows |
-| `Prism-1.1.0-macos-x64.dmg` | Intel Macs |
 | `Prism-1.1.0-macos-arm64.dmg` | Apple Silicon |
+
+There is deliberately **no Intel Mac build** — see the matrix in
+`.github/workflows/build.yml` for why, and note that the arm64 `.dmg` will not
+run on an Intel Mac. Anyone still on one needs that leg added back first.
 
 Push any other branch and you still get artifacts on the run — useful for
 testing without cutting a release.

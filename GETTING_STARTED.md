@@ -26,12 +26,14 @@ and pick the file for your computer:
 |---|---|
 | **Windows** | the `.zip` file |
 | **Mac — 2021 or newer** (M1/M2/M3/M4 chip) | the `.dmg` file ending in `arm64` |
-| **Mac — 2020 or older** (Intel chip) | the `.dmg` file ending in `x64` |
 | **Linux** | the `.tar.gz`, or the `.AppImage` if you prefer a single file |
 
 **Not sure which Mac you have?** Click the Apple menu (top-left) → *About
-This Mac*. It says either "Chip: Apple M…" (pick `arm64`) or "Processor:
-Intel…" (pick `x64`).
+This Mac*. If it says "Chip: Apple M…", take the `arm64` file.
+
+**If it says "Processor: Intel…"**, Prism does not have a build for your Mac
+yet — the `arm64` file will not open on it. Ask us rather than trying to make
+it work; there is nothing on that page that will run.
 
 ## 2. Install
 
