@@ -51,6 +51,29 @@ ENGINE_DIR = os.path.join(GUI_DIR, "prism_terminal")
 icon = os.path.join(SPEC_DIR, "icons",
                     "prism.ico" if IS_WIN else "prism.icns" if IS_MAC else "prism.png")
 
+# ── which licence server this build talks to ─────────────────────────────────
+# A frozen app ignores PRISM_LICENSE_SERVER at runtime (that override would be
+# a bypass), so the URL has to be decided here. PRISM_SERVER_URL lets a test
+# build point at a laptop or a LAN address without editing source; unset, the
+# DEFAULT_SERVER already in licensing/client.py ships.
+_server_url = os.environ.get("PRISM_SERVER_URL", "").strip()
+if _server_url:
+    _client_py = os.path.join(GUI_DIR, "licensing", "client.py")
+    with open(_client_py, "r", encoding="utf-8") as _f:
+        _src = _f.read()
+    import re as _re
+    _patched = _re.sub(r'^DEFAULT_SERVER = ".*"$',
+                       f'DEFAULT_SERVER = "{_server_url}"', _src,
+                       count=1, flags=_re.M)
+    if _patched == _src:
+        raise SystemExit("PRISM_SERVER_URL set but DEFAULT_SERVER not found "
+                         "in licensing/client.py — has it been renamed?")
+    # Written back so the analyser bundles the patched module. build.py restores
+    # the original afterwards; if a build is interrupted, `git diff` shows it.
+    with open(_client_py, "w", encoding="utf-8") as _f:
+        _f.write(_patched)
+    print(f"[prism] licence server baked in: {_server_url}")
+
 # ── what ships alongside the code ────────────────────────────────────────────
 # paths.resource() resolves these at runtime; the destination names must match
 # the layout the sources expect ("assets/…", "prism_terminal/…").
@@ -134,7 +157,15 @@ excludes = [
     "PySide6.QtPdfWidgets", "PySide6.QtSpatialAudio", "PySide6.QtTextToSpeech",
     "shiboken6.support",
     # Scientific/GUI stacks that sneak in via transitive imports.
-    "tkinter", "matplotlib", "numpy", "scipy", "pandas", "PIL", "IPython",
+    #
+    # numpy and PIL are NOT in this list, and must not be added back:
+    #   · ezdxf declares numpy as a hard dependency — excluding it made the
+    #     BOQ add-on fail in every packaged build with "No module named
+    #     'numpy'", while working perfectly from source.
+    #   · Prism Reel draws its frames with Pillow (PIL).
+    # Both add-ons are things we sell. They cost ~50MB in the bundle; a
+    # flagship feature that only works on a developer's machine costs more.
+    "tkinter", "matplotlib", "scipy", "pandas", "IPython",
     "pytest", "notebook",
 ]
 

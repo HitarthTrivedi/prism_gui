@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import wakeword
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets.ask_panel import AskPanel, MoreOptions
 
@@ -42,6 +43,7 @@ class BoqDialog(QDialog):
         self._worker = None
         self._rec = None
         self._standards = ""
+        self._brief = ""        # the interpreter's legend & scope brief
         self._links: dict = {}
 
         root = QVBoxLayout(self)
@@ -80,6 +82,13 @@ class BoqDialog(QDialog):
         self.scope_edit = QLineEdit()
         self.scope_edit.setPlaceholderText("Only include layers containing… (comma separated)")
         self.more.add(self.scope_edit)
+        # The CLI takes this as a `legend:` directive on /boq. Same thing, so
+        # the interpreter stage gets the same hint in both apps.
+        self.legend_edit = QLineEdit()
+        self.legend_edit.setPlaceholderText(
+            "What the drawing's symbols mean, if the sheet doesn't say — e.g. "
+            "circles = light points")
+        self.more.add(self.legend_edit)
         self.derive_cb = QCheckBox(
             "Estimate items the drawing doesn't contain (marked as an estimate)")
         self.derive_cb.setChecked(True)
@@ -192,7 +201,7 @@ class BoqDialog(QDialog):
             QMessageBox.information(
                 self, "Speak",
                 "Voice needs PyAudio on this machine:\n\n"
-                "    brew install portaudio && pip install pyaudio\n\n"
+                f"    {wakeword.install_hint()}\n\n"
                 "Everything else works — just type instead.")
             return
         self.ask.set_recording(True)
@@ -233,6 +242,12 @@ class BoqDialog(QDialog):
             return
         self.writer_agent = agents[writer]
         self.researcher = agents.get("research") or agents.get("brains")
+        # ChatGPT specifically, and only when there is something it can read.
+        # It is the stage that turns a screenshot of the sheet plus a sample
+        # BOQ into the legend, scope and house style the writer then follows.
+        # Matches cmd_boq in prism_terminal/prism.py — the pipelines have to
+        # agree, or the same drawing produces two different documents.
+        self.interpreter = "ChatGPT" if self.images else None
         self.request = request or "Produce a Bill of Quantities from the attached drawing."
 
         if self.derive_cb.isChecked() and self.researcher:
@@ -248,11 +263,46 @@ class BoqDialog(QDialog):
             self._worker.failed.connect(self._on_failed)
             self._worker.start()
         else:
-            self._write()
+            self._interpret()
 
     def _on_standards(self, responses: dict, links: dict):
         got = [t for t in (responses.get("standards") or []) if t.strip()]
         self._standards = got[0] if got else ""
+        self._links.update(links)
+        self._interpret()
+
+    def _interpret(self):
+        """Read the screenshot and the sample BOQ for legend, scope and style.
+
+        A separate automation.run from the others because each stage needs a
+        DIFFERENT file set — and this one must never receive the .dwg.
+        ChatGPT cannot parse a binary CAD file; handing it one is what made
+        this stage return nothing in the CLI, leaving the writer following a
+        brief that did not exist.
+        """
+        if not self.interpreter:
+            self._write()
+            return
+        self._set_busy(True, f"{self.interpreter} is reading the drawing "
+                             "screenshot and your sample…")
+        prompt = self.boq.interpretation_prompt(
+            self.request, self.summary,
+            self.boq.roles_text([], self.templates, self.images, self.notes),
+            legend_hint=self.legend_edit.text().strip())
+        self._worker = AutomationWorker(
+            {}, self.cfg,
+            # Images, sample and notes only — deliberately not the drawing.
+            list(self.images) + list(self.templates) + list(self.notes),
+            "read a drawing screenshot for BOQ legend and scope",
+            custom_stages=[("interpret", self.interpreter, [prompt])],
+            chatgpt_analysis=False)
+        self._worker.done.connect(self._on_interpreted)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.start()
+
+    def _on_interpreted(self, responses: dict, links: dict):
+        got = [t for t in (responses.get("interpret") or []) if t.strip()]
+        self._brief = got[0] if got else ""
         self._links.update(links)
         self._write()
 
@@ -261,7 +311,12 @@ class BoqDialog(QDialog):
         prompt = self.boq.formatting_prompt(
             self.summary, project_context=self.request,
             has_template=bool(self.templates),
+            legend=self.legend_edit.text().strip(),
             scoped=bool(self.scope_edit.text().strip()),
+            # Threaded through explicitly rather than relying on the browser
+            # relay to carry it between stages — the CLI learned that the hard
+            # way, with an empty handoff and then a garbled one.
+            brief_text=self._brief,
             standards_text=self._standards,
             allow_derived=self.derive_cb.isChecked() or not self.q,
             has_cad=bool(self.q))
@@ -306,6 +361,30 @@ class BoqDialog(QDialog):
         self.progress.setVisible(busy)
         self.run_btn.setEnabled(not busy)
         self.status.setText(message)
+
+    def closeEvent(self, event):
+        """Wind up any worker before this dialog is destroyed.
+
+        A QThread destroyed while still running aborts the whole process —
+        "QThread: Destroyed while thread is still running", then a core dump —
+        so closing the BOQ window mid-run took Prism down with it. The
+        automation worker polls a stop flag between stages and inside its
+        waits, so asking first lets it close its browser tab cleanly instead
+        of being killed.
+        """
+        for worker in (getattr(self, "_worker", None),
+                       getattr(self, "_measure_worker", None),
+                       getattr(self, "_rec", None)):
+            if worker is None or not worker.isRunning():
+                continue
+            if hasattr(worker, "stop"):
+                worker.stop()
+            # Bounded: a stage mid-scrape can take a moment to notice, but a
+            # dialog that refuses to close is its own bug.
+            if not worker.wait(8000):
+                worker.terminate()
+                worker.wait(1000)
+        super().closeEvent(event)
 
     def _open_link(self):
         import webbrowser

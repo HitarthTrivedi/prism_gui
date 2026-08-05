@@ -20,8 +20,16 @@ licensing/
   status.py      the NONE/VALID/GRACE/EXPIRED/TAMPERED machine (named
                  status, not state: the package also exposes a state()
                  function, and the collision silently shadows one)
+  meter.py       usage buffering + the Groq token counter
   payload.py     Tier 2 — fetch, decrypt, cache, schema-check the engine payload
 ```
+
+`meter.py` wraps the `requests` handle inside `core/router.py` from
+[`core_bridge.py`](../../core_bridge.py) — **not** by editing the module. The
+engine is a submodule shared with the CLI, which carries no licence and must
+keep running standalone. Wrapping the name it already looks up catches all
+three of its Groq call sites without touching a line of it, and degrades to
+"no token counts" rather than an error if the engine is refactored.
 
 ### The public API — the whole surface
 
@@ -39,7 +47,25 @@ licensing.require("boq", parent) -> bool
 licensing.activate(key) -> Result   # from the licence dialog
 licensing.deactivate() -> Result
 licensing.payload() -> dict | None  # Tier 2 — decrypted engine data, cached
+
+licensing.authorize(feature, action) -> Authorization
+                                    # ASK THE SERVER, live. Run start and
+                                    # add-on entry only — never mid-run.
+licensing.report_usage(run_id)      # flush buffered metering; never blocks
+licensing.meter.record(kind, ...)   # buffer one event
 ```
+
+`authorize()` is the live gate and `has()`/`require()` are the cached one. Both
+exist on purpose: `require()` is instant and drives the UI (padlocks, paywall
+sheets, whether a button is enabled), while `authorize()` is the decision that
+actually lets work start. Never use `has()` alone to permit a run — that is the
+cached token talking, and the point of this design is that the server has the
+last word.
+
+**`authorize()` must not be called on the UI thread.** It is a network round
+trip behind a button press; use `AuthorizeWorker` in
+[`workers.py`](../../workers.py), which is what `_run_pipeline` does. A frozen
+window reads as a crash.
 
 There is deliberately **no `start_trial()`**. Trials are keys we issue; the
 client cannot mint one. See the admin-only rule in

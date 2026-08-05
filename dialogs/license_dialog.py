@@ -77,10 +77,14 @@ class _ActivateWorker(QThread):
             # The server writes this as customer-facing copy, so show it as-is.
             self.failed.emit(e.message)
         except licensing.Unreachable:
+            # Name the server this build actually talks to. Hardcoding a
+            # hostname here once sent a real diagnosis down the wrong path —
+            # the address was fine and the request was simply timing out.
+            host = licensing.client.server_url()
             self.failed.emit(
-                "Couldn't reach the licence server. Check this computer's "
-                "internet connection and try again — if you're on a company "
-                "network, it may need to allow api.alphakore.in.")
+                f"Couldn't reach the licence server at {host}. Check this "
+                "computer's internet connection and try again — if you're on "
+                "a company network, it may need to allow that address.")
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(f"Something went wrong activating Prism: {e}")
 

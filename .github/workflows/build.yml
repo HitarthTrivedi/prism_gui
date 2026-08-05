@@ -87,6 +87,17 @@ jobs:
           sudo chmod +x /usr/local/bin/appimagetool
 
       - name: Build
+        env:
+          # Which licence server this build talks to. A frozen app ignores
+          # PRISM_LICENSE_SERVER at runtime (that override would be a bypass),
+          # so the URL is compiled in here.
+          #
+          # Set the repository variable PRISM_SERVER_URL to aim a build at
+          # staging or a team-test server. Leave it unset for real releases and
+          # the DEFAULT_SERVER in licensing/client.py ships. A repo *variable*,
+          # not a secret — it is a public URL, and secrets are masked in logs
+          # which makes a wrong one impossible to diagnose.
+          PRISM_SERVER_URL: ${{ vars.PRISM_SERVER_URL }}
         run: python packaging/build.py --clean
 
       # Proves the bundle actually starts: imports resolve, Qt loads, the

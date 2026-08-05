@@ -20,6 +20,8 @@ turns out to matter for real daily use, swap in Porcupine/OpenWakeWord
 this polling loop further.
 """
 from __future__ import annotations
+import os
+import sys
 import io
 import wave
 from PySide6.QtCore import QThread, Signal
@@ -43,6 +45,20 @@ _CHUNK_SECONDS = 2.0
 _SILENCE_RMS = 300   # crude energy floor — tune per microphone if it misfires
 
 
+def install_hint() -> str:
+    """The command that actually works on THIS machine.
+
+    Three dialogs used to print 'brew install portaudio' regardless of
+    platform, so a Linux or Windows user was told to run a macOS package
+    manager they do not have. One place, so they cannot drift again.
+    """
+    if sys.platform == "darwin":
+        return "brew install portaudio && pip install pyaudio"
+    if os.name == "nt":
+        return "pip install pyaudio"
+    return "sudo apt install portaudio19-dev && pip install pyaudio"
+
+
 def available() -> tuple[bool, str]:
     """(usable, why not). Checked before the listener is started so the reason
     lands in the UI rather than in a traceback nobody sees."""
@@ -52,9 +68,8 @@ def available() -> tuple[bool, str]:
     try:
         import pyaudio  # noqa: F401
     except ImportError:
-        return False, ("Voice needs PyAudio, which isn't installed. macOS: "
-                       "'brew install portaudio', Linux: 'sudo apt install "
-                       "portaudio19-dev', then 'pip install pyaudio'.")
+        return False, ("Voice needs PyAudio, which isn't installed:\n\n"
+                       f"    {install_hint()}")
     return True, ""
 
 

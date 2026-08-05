@@ -256,16 +256,22 @@ class Sidebar(QFrame):
             btn.style().polish(btn)
 
     # ── licence ───────────────────────────────────────────────────────────
-    def set_entitlements(self, features, usable: bool):
+    def set_entitlements(self, features, usable: bool = True):
         """Mark add-ons the licence doesn't cover.
+
+        A padlock means one thing only: **you don't own this**. It must not
+        also mean "we can't reach the server" — those need different actions
+        from the customer, and padlocking a feature they have paid for tells
+        them they've lost it. Availability is the banner's job; ownership is
+        this. `usable` is accepted and ignored so callers need not care.
 
         Locked items stay **enabled**. Clicking one opens the pitch for it,
         which is the most useful thing that click can do — the customer has
         just told us exactly what they want. A greyed-out row sells nothing,
-        and it is also indistinguishable from something broken.
+        and is indistinguishable from something broken.
         """
         for _, (btn, label, icon_name, feature) in self._gated.items():
-            unlocked = usable and feature in features
+            unlocked = feature in features
             # The icon swaps to a padlock; the label stays put. Appending
             # "(locked)" would make the shelf read as a list of things you
             # can't have rather than a product line.

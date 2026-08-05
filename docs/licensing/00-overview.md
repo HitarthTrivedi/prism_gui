@@ -59,8 +59,8 @@ Same key format, same machinery, one number different.
                           no key ───────┘                         ▼
                           ┌──────────────────┐        4. THEY WORK
                           │ Activation screen│        ┌──────────────────────┐
-                          │ and nothing else.│        │ Works offline for the│
-                          │ No trial button. │        │ rest of the period.  │
+                          │ and nothing else.│        │ Each run checks in    │
+                          │ No trial button. │        │ with us first.       │
                           └──────────────────┘        └──────────┬───────────┘
                                                                  │
    6. THEY BUY (or don't)                          5. DAY 10 ARRIVES
@@ -112,9 +112,27 @@ Think of it as a **passport**. The customer holds it and can read it. They
 cannot alter it — change one character and the signature stops matching. Only
 our server holds the key that can produce a valid one.
 
-It's valid for 7 days and renews silently in the background. That's why the app
-keeps working on a construction site with no signal, and why our server going
-down doesn't stop anybody.
+**Every plan and every run asks us first.** When the customer presses *Make a
+plan* or *Start the work*, or opens an add-on, Prism checks in with our server,
+which decides then and there.
+
+**If our server is unreachable, nothing runs.** There is no offline allowance.
+A cancelled licence stops on the customer's very next action rather than
+drifting on, and we can see exactly what each customer is using.
+
+The trade is worth being blunt about: **our uptime is our customers' uptime.**
+If the licence server goes down, every client stops at once. We accept that
+because the service is deliberately tiny — three endpoints, a few rows written
+per run — and can be hosted for reliability cheaply.
+
+What still works during an outage: the app opens, and History and everything
+already produced stays readable. Only new work is paused. Holding a customer's
+own output hostage over our outage would be indefensible.
+
+One thing this is *not* about: Prism cannot work without the internet anyway —
+it calls Groq for every plan and drives claude.ai through a browser — so there
+was never any "using it offline" to protect. An earlier version of this
+document claimed otherwise; that was wrong.
 
 ### Mechanism 2 — the app ships incomplete
 

@@ -29,7 +29,8 @@ from widgets.files_panel import FilesPanel
 from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
-from workers import RouteWorker, AutomationWorker, RecordWorker, InterpretWorker, FindWorker
+from workers import (RouteWorker, AutomationWorker, RecordWorker,
+                     InterpretWorker, FindWorker, AuthorizeWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
@@ -65,6 +66,8 @@ class MainWindow(QMainWindow):
         self._stage_agents: dict[str, str] = {}   # stage -> agent, from stage_start
         self._stage_results: list[dict] = []      # built up during a run, for the completion popup
         self._run_finished = False                # a finished plan is spent — see _back_to_plan
+        self._run_id = ""                         # licence server's id for the current run
+        self._active_run = None                   # the AutomationWorker, so Stop can reach it
 
         self._build_ui()
         self._wire()
@@ -146,7 +149,12 @@ class MainWindow(QMainWindow):
             self.banner.setVisible(False)
             return
 
-        if state.status == licensing.GRACE:
+        if state.status == licensing.STALE:
+            tone, icon_name = theme.NEUTRAL[600], "clock"
+            text = ("Prism hasn't been able to reach the licence server. "
+                    "New work is paused until it can — History and everything "
+                    "you've already made are still here.")
+        elif state.status == licensing.GRACE:
             tone, icon_name = theme.NEUTRAL[600], "clock"
             days = max(state.days_left + state.grace_days, 0)
             text = (f"Prism couldn't confirm your licence. It keeps working for "
@@ -246,6 +254,8 @@ class MainWindow(QMainWindow):
 
         self.agents_panel.run_requested.connect(self._run_pipeline)
         self.output_panel.back_requested.connect(self._back_to_plan)
+        self.output_panel.stop_requested.connect(self._stop_run)
+        self.agents_panel.discard_requested.connect(self._discard_plan)
 
     # ── moving between the two pages ────────────────────────────────────────
     def _back_to_plan(self):
@@ -292,9 +302,37 @@ class MainWindow(QMainWindow):
         elif key == "boq":
             self._open_boq()
 
-    def _open_reel(self):
-        if not licensing.require("reel", self):
+    def _authorized_then(self, feature: str, action: str, then):
+        """Ask the licence server, then run `then()` if it said yes.
+
+        Off the UI thread: it is a network round trip behind a click, and a
+        frozen window reads as a crash. The cached `require()` check runs
+        first as a fast path so an add-on the customer plainly does not own
+        opens the pitch instantly instead of after a round trip.
+        """
+        if not licensing.require(feature, self):
             return
+        self.statusBar().showMessage("Checking your licence…")
+
+        def proceed(auth):
+            self.statusBar().clearMessage()
+            if not auth.allowed:
+                if auth.code == "FEATURE_NOT_LICENSED":
+                    licensing.require(feature, self)     # show the pitch
+                else:
+                    QMessageBox.warning(self, "Licence", auth.message)
+                return
+            then()
+
+        worker = AuthorizeWorker(feature, action)
+        worker.done.connect(proceed)
+        self._workers.append(worker)
+        worker.start()
+
+    def _open_reel(self):
+        self._authorized_then("reel", "addon", self._open_reel_dialog)
+
+    def _open_reel_dialog(self):
         ok, err = CB.reel_available()
         if not ok:
             QMessageBox.information(self, "Reel", err)
@@ -302,11 +340,12 @@ class MainWindow(QMainWindow):
         ReelDialog(self.cfg, self.attachments, self).exec()
 
     def _open_boq(self):
-        # Entitlement first, dependency probe second. A customer who hasn't
-        # bought BOQ should be told that — not sent off to install ezdxf for a
-        # feature they still won't be able to open.
-        if not licensing.require("boq", self):
-            return
+        self._authorized_then("boq", "addon", self._open_boq_dialog)
+
+    def _open_boq_dialog(self):
+        # Dependency probe comes AFTER the licence check: a customer who
+        # hasn't bought BOQ should be told that, not sent off to install ezdxf
+        # for a feature they still won't be able to open.
         ok, err = CB.boq_available()
         if not ok:
             QMessageBox.information(
@@ -319,8 +358,9 @@ class MainWindow(QMainWindow):
         BoqDialog(self.cfg, self.attachments, self).exec()
 
     def _open_email(self):
-        if not licensing.require("email", self):
-            return
+        self._authorized_then("email", "addon", self._open_email_dialog)
+
+    def _open_email_dialog(self):
         if not CB.mailer.is_configured(self.cfg):
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
@@ -489,6 +529,28 @@ class MainWindow(QMainWindow):
             return
         self._last_query = query
         self.input_panel.set_busy(True)
+        # Planning is itself a Groq call — it costs tokens and is the step
+        # every run begins with — so it is authorised and metered like one.
+        # Gating only "Start the work" left the whole planning path reachable
+        # with the licence server unreachable, which is not what live
+        # authorisation is supposed to mean.
+        # action="plan", not "run": planning is the billable step (three Groq
+        # calls) and the one the daily allowance counts. The pipeline that
+        # follows is browser automation against the customer's own logins and
+        # costs us nothing, so counting both would burn two units per journey.
+        auth_worker = AuthorizeWorker("core", "plan")
+        auth_worker.done.connect(lambda result: self._start_route(result, query))
+        self._workers.append(auth_worker)
+        auth_worker.start()
+
+    def _start_route(self, auth, query: str):
+        """Second half of _route, once the server has said yes."""
+        if not auth.allowed:
+            self.input_panel.set_busy(False)
+            self.input_panel.set_state("ready")
+            QMessageBox.warning(self, "Licence", auth.message)
+            return
+        self._run_id = getattr(auth, "run_id", "")
         worker = RouteWorker(query, self.cfg, self.attachments)
         worker.done.connect(self._on_routed)
         worker.failed.connect(self._on_route_failed)
@@ -497,6 +559,9 @@ class MainWindow(QMainWindow):
 
     def _on_routed(self, routing: dict):
         self.input_panel.set_busy(False)
+        # The router's Groq calls are already counted by licensing/meter.py;
+        # send them now rather than waiting for a run that may never happen.
+        licensing.report_usage(getattr(self, "_run_id", ""))
         self.input_panel.set_state("planned")
         self.routing = routing
         agents_cfg = CB.config.active_agents(self.cfg)
@@ -566,25 +631,84 @@ class MainWindow(QMainWindow):
                 run_agents = {k: ("Prism Reel" if v == "Prism Studio" else v)
                               for k, v in run_agents.items()}
 
+        # Ask the licence server, live, before committing to the run. This is
+        # the ONLY place a run is authorised — never again once it is moving,
+        # because a pipeline is tens of minutes of browser automation and
+        # killing it half way for a transient reason throws away real work.
+        self.agents_panel.set_run_enabled(False)
+        self.statusBar().showMessage("Checking your licence…")
+        auth_worker = AuthorizeWorker("core", "run")
+        auth_worker.done.connect(
+            lambda result: self._start_run(result, run_agents))
+        self._workers.append(auth_worker)
+        auth_worker.start()
+
+    def _start_run(self, auth, run_agents: dict):
+        """Second half of _run_pipeline, once the server has said yes."""
+        self.statusBar().clearMessage()
+        if not auth.allowed:
+            self.agents_panel.set_run_enabled(True)
+            QMessageBox.warning(self, "Licence", auth.message)
+            return
+
+        self._run_id = getattr(auth, "run_id", "")
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
         self._stage_agents = {}
         self._stage_results = []
-        self.agents_panel.set_run_enabled(False)
         self.input_panel.set_state("running")
         self._run_finished = False
         self.output_panel.set_finished(False)
+        self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments, self._last_query)
+        self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
         worker.done.connect(self._on_run_done)
         worker.failed.connect(self._on_run_failed)
         self._workers.append(worker)
         worker.start()
 
+    def _discard_plan(self):
+        """Throw away a plan the customer doesn't want.
+
+        Attachments survive on purpose — they are explicit choices sitting
+        visibly in the rail with their own Detach button, and the next task is
+        usually about the same files.
+        """
+        if QMessageBox.question(
+                self, "Discard this plan",
+                "Throw this plan away and clear the task?\n\n"
+                "Files you've attached stay attached.",
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        self._reset_for_new_task()
+
+    def _stop_run(self):
+        """Ask the running pipeline to wind up.
+
+        Deliberately not a thread kill: the engine polls a flag between stages
+        and inside its waits, so it stops at a safe point and keeps every step
+        that already finished. Terminating the QThread instead would abandon a
+        live Chrome session and lose completed output — the exact work the
+        customer is trying to protect by stopping.
+        """
+        worker = getattr(self, "_active_run", None)
+        if worker is None or not worker.isRunning():
+            return
+        worker.stop()
+        self.statusBar().showMessage(
+            "Stopping — finishing the current step, keeping what's done…", 0)
+
     def _on_stage_event(self, kind: str, payload: dict):
         stage = payload.get("stage", "")
+        if kind == "cancelled":
+            done = payload.get("done", 0)
+            self.statusBar().showMessage(
+                f"Stopped. {done} step{'s' if done != 1 else ''} finished and "
+                f"kept." if done else "Stopped before anything ran.", 8000)
+            return
         if kind == "stage_start":
             agent = payload.get("agent", "")
             self._stage_agents[stage] = agent
@@ -607,8 +731,16 @@ class MainWindow(QMainWindow):
                 "text": "\n\n---\n\n".join(texts), "url": url,
                 "snippet": snippet, "ok": bool(texts), "timed_out": timed_out,
             })
+            # Metering: which tool ran which stage. No prompt text, no output —
+            # see licensing/meter.py for why that line is drawn hard.
+            licensing.meter.record(
+                "stage", tool=self._stage_agents.get(stage, ""), stage=stage,
+                ok=bool(texts))
         elif kind == "stage_error":
             error = payload.get("error", "")
+            licensing.meter.record(
+                "stage", tool=self._stage_agents.get(stage, ""), stage=stage,
+                ok=False)
             # The engine hands back the tab it died on whenever there is one —
             # a slow tool often finishes server-side after we stopped waiting,
             # so the link is kept and offered even on a failed step.
@@ -652,11 +784,28 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Couldn't save this run to history: {e}", 8000)
 
     def _on_run_done(self, responses: dict, links: dict):
+        stopped = bool(getattr(self, "_active_run", None)
+                       and self._active_run.stopping())
+        self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self.input_panel.set_state("done")
         self._run_finished = True
         self.output_panel.set_finished(True)
+        self.output_panel.set_running(False)
+        licensing.report_usage(getattr(self, "_run_id", ""))
         self._save_run(responses, links)
+
+        if stopped:
+            # A stopped run still produced whatever finished before it, and
+            # that is worth keeping and showing — the customer stopped it
+            # because of what came next, not to throw away what came before.
+            self.statusBar().showMessage(
+                "Stopped — everything finished so far is saved to History.",
+                8000)
+            if self._stage_results:
+                CompletionDialog(self._stage_results, self).exec()
+            return
+
         self.statusBar().showMessage("All done — saved to History.", 6000)
         if self._stage_results:
             CompletionDialog(self._stage_results, self).exec()
@@ -665,8 +814,13 @@ class MainWindow(QMainWindow):
                                     "No step produced output — check the results above.")
 
     def _on_run_failed(self, error: str):
+        self._active_run = None
         self.agents_panel.set_run_enabled(True)
+        self.output_panel.set_running(False)
         self.input_panel.set_state("planned")
+        # A failed run is still consumption — it drove browsers and spent Groq
+        # tokens — and it is the more interesting half of the usage data.
+        licensing.report_usage(getattr(self, "_run_id", ""))
         # Kept too — a run that broke halfway is exactly the one you want to
         # go back and read later.
         self._save_run(error=error)
@@ -707,4 +861,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self._wake_listener:
             self._wake_listener.stop()
+        # Anything metered but not yet sent — a run that ended just before the
+        # window closed, or events buffered while the server was unreachable.
+        licensing.report_usage(getattr(self, "_run_id", ""))
         event.accept()

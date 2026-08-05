@@ -131,20 +131,56 @@ app verifies it offline against the embedded public key:
   "iat":1754300000, "exp":1754904800, "grace_days":3, "ver":1 }
 ```
 
-Why signed-offline rather than call-home-on-launch:
+### The server authorises every run
 
-- Runs drive Chrome for **long** jobs — a network blip must never kill work in
-  progress.
-- Site and factory machines (the BOQ users) have flaky or proxied connectivity.
-- The backend going down must not brick every customer. With a 7-day TTL it
-  simply doesn't.
-- Revocation still works: a refunded or cancelled licence dies at the next
-  expiry, within 7 days.
+**Corrected from an earlier draft.** That draft argued for long-lived offline
+tokens partly on the grounds that a customer might be working somewhere with no
+signal — a site office, a factory floor. That is not a real scenario for this
+product, and the claim should never have been made: `core/router.py` calls the
+Groq API for every plan and `core/automation.py` drives Chrome against
+claude.ai and chatgpt.com. **No internet means no Prism, licence or not.** The
+network references in `boq.py` and `reel.py` turn out to be documentation URLs
+in error text, not calls.
+
+So the design is now server-authoritative:
+
+- **`POST /v1/authorize` at the start of every run**, and when an add-on is
+  opened. The server decides live — a revoked licence stops on the next run
+  rather than whenever a cached token happens to lapse.
+- **Never during a run.** A pipeline is tens of minutes of browser automation;
+  a check that could fail part-way would throw away real work for a transient
+  reason the customer can do nothing about.
+- **No offline fallback at all.** If the licence server cannot be reached, the
+  answer is no — for planning, for runs, and for opening any add-on. There is
+  no window in which work happens unauthorised.
+
+**The trade, stated plainly: our uptime is now our customers' uptime.** If the
+licence server is down, every customer stops. That is a deliberate choice, made
+on the basis that this service is tiny — three endpoints and a few rows written
+per run — and can therefore be hosted for reliability cheaply. It is worth
+re-reading that sentence before the first client is live, because the failure
+mode is total and simultaneous.
+
+Two things follow that must not be traded away:
+
+- **Never check mid-run.** Authorise at the start; a pipeline is tens of
+  minutes of browser automation and killing it half way destroys real work.
+- **Expiry and unreachability must never share copy.** "Your licence ended" and
+  "we couldn't reach Alphakore" send the customer in different directions, and
+  telling a paying customer the first when the second is true costs a support
+  call and a lot of goodwill.
+
+`offline_hours` survives on the licence but no longer gates anything — it only
+sets how long the cached token stays fresh enough to drive the app's own
+display (which add-ons show a padlock, what Setup reports).
 
 ### Backend endpoints
 
 ```
 POST /v1/activate      {key, device_fp}            → token
+POST /v1/authorize     {license_id, device_fp,
+                        action, feature}           → allowed + run_id + token
+POST /v1/usage         {run_id, events[]}          → metering
 POST /v1/refresh       {license_id, device_fp}     → token
 POST /v1/deactivate    {license_id, device_fp}     → seat released
 POST /v1/payload       {license_id, device_fp}     → encrypted engine payload
@@ -154,6 +190,28 @@ POST /webhooks/razorpay                            → (Phase 2)
 ```
 
 There is no trial endpoint. Keys are minted in `/admin/*` only.
+
+### Usage metering
+
+`/v1/usage` records **shapes and counts, never content** — no brief, no prompt,
+no output. A BOQ query names a real project on a real site; storing it would
+turn billing infrastructure into something needing a data-processing agreement,
+for data we have no use for. `tests/test_api.py` asserts the schema has nowhere
+to put it, so nobody adds a column later.
+
+What you get per licence, via `GET /admin/usage`:
+
+| Metric | Source | Honest? |
+|---|---|---|
+| Runs, add-on opens | `/v1/authorize` | Exact |
+| Stages per tool | Stage events | Exact |
+| **Groq prompt/completion tokens** | The Groq API response | Exact |
+| Claude / ChatGPT / Perplexity tokens | — | **Not available** |
+
+That last row matters. Those stages are driven through a browser — there is no
+API response to read usage from — so they are counted as *stages run per tool*.
+Quoting `total_tokens` at a customer as though it covered everything they ran
+would be wrong. True per-token metering across all tools needs the Tier 3 proxy.
 
 ### Device fingerprint
 
@@ -295,11 +353,19 @@ The part that decides whether customers hate this. Treat these as requirements.
 - Payload fetch fails but a valid cache exists → silent. No cache and no
   network → block new runs with a connection message, and **never** fall back to
   a bundled copy. There isn't one, by design.
-- **Never** check a licence mid-run. Launch and add-on entry only. A pipeline
-  that dies at stage 4 because a token expired is an unrecoverable support
-  incident.
-- Backend down → every customer keeps working. That is the entire justification
-  for offline tokens.
+- **Never** check a licence mid-run. Run *start* and add-on entry only. A
+  pipeline that dies at stage 4 because a check failed is an unrecoverable
+  support incident, and the customer can do nothing about it.
+- Backend down → **every customer stops immediately.** No new plans, no runs,
+  no add-ons. History and everything already produced stay readable, because
+  holding a customer's own work hostage over our outage would be indefensible.
+  This is the cost of live authorisation and it is being paid knowingly.
+- **Authorising must never freeze the window.** It is a network round trip
+  behind a button press; it runs on `AuthorizeWorker` with the status bar
+  saying so. A frozen window reads as a crash.
+- Metering must never break a run. `/v1/usage` failures put the events back on
+  the buffer for next time and are invisible to the customer — nothing they do
+  depends on that call arriving.
 - Expired → the app still opens; History and past outputs stay readable. Only
   new runs are blocked. Never hold a customer's own data hostage.
 - **The dev bypass must be gated on `not paths.is_frozen()`.** An env-var

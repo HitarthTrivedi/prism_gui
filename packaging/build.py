@@ -76,9 +76,22 @@ def preflight():
 
 def build():
     run([sys.executable, os.path.join(HERE, "make_icons.py")])
-    run([sys.executable, "-m", "PyInstaller", "--noconfirm",
-         "--distpath", DIST, "--workpath", BUILD,
-         os.path.join(HERE, "prism.spec")])
+    # prism.spec rewrites DEFAULT_SERVER in place when PRISM_SERVER_URL is set,
+    # because a frozen build cannot take the URL from the environment. Keep a
+    # copy so the working tree is not left modified by a build.
+    client_py = os.path.join(GUI, "licensing", "client.py")
+    original = None
+    if os.environ.get("PRISM_SERVER_URL"):
+        with open(client_py, "r", encoding="utf-8") as f:
+            original = f.read()
+    try:
+        run([sys.executable, "-m", "PyInstaller", "--noconfirm",
+             "--distpath", DIST, "--workpath", BUILD,
+             os.path.join(HERE, "prism.spec")])
+    finally:
+        if original is not None:
+            with open(client_py, "w", encoding="utf-8") as f:
+                f.write(original)
 
 
 # ── per-OS packaging ─────────────────────────────────────────────────────────

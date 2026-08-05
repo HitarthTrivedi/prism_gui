@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import wakeword
 import theme
 from workers import AutomationWorker, SendWorker, VerifyWorker, RecordWorker
 from widgets.ask_panel import AskPanel, MoreOptions
@@ -298,7 +299,7 @@ class EmailComposeDialog(QDialog):
             QMessageBox.information(
                 self, "Speak",
                 "Voice needs PyAudio on this machine:\n\n"
-                "    brew install portaudio && pip install pyaudio\n\n"
+                f"    {wakeword.install_hint()}\n\n"
                 "Everything else works — just type instead.")
             return
         self.ask.set_recording(True)

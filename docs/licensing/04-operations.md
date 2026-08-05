@@ -173,6 +173,39 @@ price of being able to fix selectors in minutes.
 
 ---
 
+---
+
+## Checking what a customer is using
+
+```bash
+curl -s "$API/admin/usage?license_id=lic_xxx&days=30" -H "$H"
+```
+
+```json
+{ "runs": 47, "stages": 138, "addons": 12, "groq_calls": 94,
+  "prompt_tokens": 182400, "completion_tokens": 51200, "total_tokens": 233600,
+  "by_tool": {"Claude": 61, "Perplexity": 44, "ChatGPT": 33},
+  "by_day": {"2026-08-04": 6, "2026-08-05": 9}, "last_seen": 1786526230 }
+```
+
+What each number is worth in a conversation:
+
+- **`runs` and `by_day`** — the real adoption signal. Forty-seven runs in a
+  month is a customer who has built Prism into their week. Three is one who
+  will not renew.
+- **`by_tool`** — which specialists they lean on. A firm running everything
+  through Perplexity is a research customer; one hammering BOQ is a takeoff
+  customer. Different renewal pitch, different upsell.
+- **`last_seen`** — silence is churn, visible a quarter early.
+
+**Do not quote `total_tokens` as their total AI usage.** It covers the Groq
+routing calls only. The Claude / ChatGPT / Perplexity stages run through a
+browser and report no usage, so they appear in `stages` and `by_tool` but
+contribute nothing to the token counts. Saying "you used 233k tokens" would be
+wrong and a customer with their own Anthropic bill will notice.
+
+---
+
 ## Monthly rhythm
 
 **Renewals** — query licences expiring in the next 30 days. Reach out before

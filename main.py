@@ -59,6 +59,14 @@ def _selftest(app) -> int:
     # handshake rather than importing ssl.
     license_ok, license_err = licensing.selftest()
 
+    # The add-ons we sell, probed the way the app probes them. Both once
+    # shipped broken: packaging/prism.spec excluded numpy and PIL, so BOQ and
+    # Reel failed only in the frozen build and only when a customer clicked
+    # them. A dependency that is fine from source and missing once packaged is
+    # exactly what this self-test is for.
+    boq_ok, boq_err = CB.boq_available()
+    reel_ok, reel_err = CB.reel_available()
+
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
     # module import cleanly; ssl.create_default_context() only fails once it
@@ -102,6 +110,8 @@ def _selftest(app) -> int:
          automation_ok),
         (f"licence verification{'' if license_ok else f' — {license_err}'}",
          license_ok),
+        (f"BOQ add-on{'' if boq_ok else f' — {boq_err}'}", boq_ok),
+        (f"Reel add-on{'' if reel_ok else f' — {reel_err}'}", reel_ok),
     ]
     win = MainWindow()
     win.show()

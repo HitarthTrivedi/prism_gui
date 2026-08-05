@@ -154,14 +154,16 @@ class StateResolution(unittest.TestCase):
         self.assertFalse(st.has("reel"))
 
     def test_inside_grace_is_still_usable(self):
+        """Past the quoted end date, inside grace — a paid account whose
+        payment is late. Still works, with a renew banner."""
         now = int(time.time())
-        st = S.resolve(_claims(exp=now - DAY, grace=3))
+        st = S.resolve(_claims(exp=now + DAY, lend=now - DAY, grace=3))
         self.assertEqual(st.status, S.GRACE)
         self.assertTrue(st.usable)
 
     def test_past_grace_is_expired(self):
         now = int(time.time())
-        st = S.resolve(_claims(exp=now - 5 * DAY, grace=3))
+        st = S.resolve(_claims(exp=now - 5 * DAY, lend=now - 5 * DAY, grace=3))
         self.assertEqual(st.status, S.EXPIRED)
         self.assertFalse(st.usable)
         self.assertFalse(st.has("core"))
@@ -169,7 +171,8 @@ class StateResolution(unittest.TestCase):
     def test_trial_has_no_grace(self):
         """A 10-day trial ends on day 10 — the date in the email we sent."""
         now = int(time.time())
-        st = S.resolve(_claims(kind="trial", exp=now - 60, grace=0))
+        st = S.resolve(_claims(kind="trial", exp=now - 60, lend=now - 60,
+                               grace=0))
         self.assertEqual(st.status, S.EXPIRED)
 
     def test_ui_shows_licence_end_not_token_expiry(self):
@@ -188,6 +191,15 @@ class StateResolution(unittest.TestCase):
         now = int(time.time())
         st = S.resolve(_claims(exp=now + 3600, lend=now + 3600))
         self.assertEqual(st.days_left, 1)
+
+    def test_stale_is_not_expired(self):
+        """In date, but we have not reached the server inside its offline
+        window. Blocked — but the copy must not say the licence ended."""
+        now = int(time.time())
+        st = S.resolve(_claims(exp=now - 60, lend=now + 20 * DAY))
+        self.assertEqual(st.status, S.STALE)
+        self.assertFalse(st.usable)
+        self.assertNotEqual(st.status, S.EXPIRED)
 
     def test_clock_rollback_detected(self):
         now = int(time.time())

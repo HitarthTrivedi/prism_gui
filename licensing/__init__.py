@@ -23,16 +23,18 @@ Two rules run through all of it:
 """
 from __future__ import annotations
 
+import os
 import threading
 from typing import Any, Callable
 
 import app_meta
 import paths
 
-from . import client, device, keyformat, keys, status as _status, store, token
+from . import (client, device, keyformat, keys, meter, status as _status,
+               store, token)
 from .client import ServerError, Unreachable
-from .status import (EXPIRED, GRACE, NONE, TAMPERED, VALID,  # noqa: F401
-                     LicenseState)
+from .status import (EXPIRED, GRACE, NONE, STALE, TAMPERED,  # noqa: F401
+                     VALID, LicenseState)
 from .token import TokenError
 
 # NB: the module is status.py, not state.py, because this package also exposes
@@ -42,14 +44,32 @@ from .token import TokenError
 
 __all__ = [
     "state", "has", "require", "activate", "deactivate", "refresh",
+    "authorize", "report_usage", "Authorization", "meter",
     "set_paywall_handler", "device_fingerprint", "reload", "user_dir",
     "LicenseState", "ServerError", "Unreachable", "TokenError", "keyformat",
-    "NONE", "VALID", "GRACE", "EXPIRED", "TAMPERED",
+    "NONE", "VALID", "GRACE", "STALE", "EXPIRED", "TAMPERED",
 ]
 
 _lock = threading.Lock()
 _cached: LicenseState | None = None
 _paywall: Callable[[str, Any, LicenseState], None] | None = None
+
+
+def _offline_dev() -> bool:
+    """PRISM_LICENSE_OFFLINE_DEV — run against a minted token, no server.
+
+    Exists so that working on a dialog does not require uvicorn in another
+    terminal. Honoured ONLY when running from source: in a frozen build this
+    returns False no matter what the environment says, exactly like the
+    PRISM_LICENSE_SERVER override and the DEVELOPMENT keys in keys.py.
+
+    If it were readable in a release build it would be a total bypass of the
+    licensing system, settable by any customer with an environment variable.
+    That is why the frozen check comes first and there is no way to reorder it.
+    """
+    if paths.is_frozen():
+        return False
+    return bool(os.environ.get("PRISM_LICENSE_OFFLINE_DEV"))
 
 
 def user_dir() -> str:
@@ -219,6 +239,121 @@ def _safe_refresh() -> None:
         _refresh_once()
     except Exception:                               # noqa: BLE001
         pass
+
+
+# ── live authorisation & metering ──────────────────────────────────────────
+class Authorization:
+    """The server's answer for one run or one add-on."""
+
+    def __init__(self, allowed: bool, run_id: str = "", message: str = "",
+                 code: str = ""):
+        self.allowed = allowed
+        self.run_id = run_id
+        self.message = message
+        self.code = code
+
+    def __bool__(self) -> bool:
+        return self.allowed
+
+
+def authorize(feature: str = "core", action: str = "run") -> Authorization:
+    """Ask the server whether this may go ahead, right now.
+
+    **There is no offline fallback.** If the licence server cannot be reached,
+    the answer is no. That is a deliberate product decision: Prism needs the
+    internet regardless — it calls Groq for every plan and drives claude.ai
+    through a browser — so a customer who cannot reach us cannot do useful
+    work anyway, and the alternative is a window in which a revoked or expired
+    licence keeps running.
+
+    The cost is real and is being paid on purpose: our availability is now our
+    customers' availability. That is why the licence server is deliberately
+    tiny (three endpoints, one table's worth of writes per run) and hosted
+    accordingly.
+
+    Called at the START of a run or add-on — never during one. A pipeline is
+    tens of minutes of browser automation, and failing it part-way would
+    discard real work for a reason the customer cannot act on.
+    """
+    current = state()
+    if current.status == NONE:
+        return Authorization(False, message="Prism isn't activated on this "
+                                            "computer yet.", code="NONE")
+
+    data = store.load(user_dir())
+    license_id = data.get("license_id") or current.license_id
+    if license_id:
+        try:
+            response = client.authorize(
+                license_id, device_fingerprint(),
+                app_version=app_meta.VERSION, action=action, feature=feature)
+            _apply(response)
+            return Authorization(True, run_id=response.get("run_id", ""))
+        except ServerError as e:
+            if e.code == "DEVICE_NOT_ACTIVATED" and data.get("key"):
+                # A seat released by mistake. Heal it and try once more.
+                try:
+                    activate(data["key"])
+                    response = client.authorize(
+                        license_id, device_fingerprint(),
+                        app_version=app_meta.VERSION, action=action,
+                        feature=feature)
+                    _apply(response)
+                    return Authorization(True, run_id=response.get("run_id", ""))
+                except (ServerError, Unreachable):
+                    pass
+            # A definite no — revoked, expired, add-on not licensed. The
+            # server's wording is customer-facing copy; show it as-is.
+            return Authorization(False, message=e.message, code=e.code)
+        except Unreachable:
+            if _offline_dev():
+                # Working on the UI shouldn't require running uvicorn. Source
+                # builds only — see _offline_dev().
+                if not feature or has(feature):
+                    return Authorization(True, run_id="dev")
+                return Authorization(False, code="FEATURE_NOT_LICENSED",
+                                     message="Not in this dev licence.")
+            # Name the address. Without it this message is the same whether
+            # the network is down, a firewall is in the way, or the build is
+            # simply pointed at a server that does not exist yet — and those
+            # need completely different fixes.
+            return Authorization(
+                False, code="UNREACHABLE",
+                message=f"Prism couldn't reach the licence server at "
+                        f"{client.server_url()}, so it can't start new work "
+                        "right now.\n\nCheck this computer's internet "
+                        "connection and try again. Everything you've already "
+                        "produced is still in History.")
+
+    # No licence id at all — never activated, or the file was cleared.
+    return Authorization(False, code=state().status,
+                         message="Prism isn't activated on this computer.")
+
+
+def report_usage(run_id: str = "") -> None:
+    """Send buffered usage. Fire-and-forget; never blocks, never raises.
+
+    Nothing the customer does depends on this arriving, so a failure puts the
+    events back on the buffer for the next attempt rather than surfacing.
+    """
+    threading.Thread(target=_send_usage, args=(run_id,),
+                     name="prism-usage", daemon=True).start()
+
+
+def _send_usage(run_id: str = "") -> None:
+    events = meter.drain()
+    if not events:
+        return
+    try:
+        data = store.load(user_dir())
+        license_id = data.get("license_id") or state().license_id
+        if not license_id:
+            return
+        client.usage(license_id, device_fingerprint(),
+                     app_version=app_meta.VERSION, run_id=run_id,
+                     events=events)
+    except Exception:                               # noqa: BLE001
+        meter.restore(events)
 
 
 def selftest() -> tuple[bool, str]:

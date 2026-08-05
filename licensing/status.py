@@ -4,14 +4,24 @@ Step 8 of verification — the temporal part — plus the shape the rest of the 
 reads. Kept separate from token.py because expiry is a normal, expected
 condition that the UI has to handle kindly, while a bad signature is an attack.
 
-The five states:
+The six states:
 
     none      no licence at all            → activation screen, nothing else
-    valid     verified and in date         → full access to `features`
-    grace     past exp, inside grace       → full access + countdown banner
-    expired   past exp + grace             → read-only: History and Setup only
+    valid     in date, server heard from   → full access to `features`
+    grace     past the quoted end date but
+              inside grace (paid, late
+              payment)                     → full access + renew banner
+    stale     in date, but our server has
+              not been reached inside the
+              licence's offline window     → blocked until it is
+    expired   past end date + grace        → read-only: History and Setup only
     tampered  forged, wrong machine,
               or a wound-back clock        → read-only until an online refresh
+
+`stale` and `expired` must never share copy. One means "we couldn't reach
+Alphakore"; the other means "your licence is over". Telling a paying customer
+the second when the first is true sends them chasing a renewal they do not
+need, and costs a support call.
 
 Read-only means the app still opens and the customer can still reach every
 piece of work they have already produced. Only new runs and add-ons stop. A
@@ -28,6 +38,7 @@ from typing import Any
 NONE = "none"
 VALID = "valid"
 GRACE = "grace"
+STALE = "stale"
 EXPIRED = "expired"
 TAMPERED = "tampered"
 
@@ -37,7 +48,7 @@ DAY = 86400
 # purpose: timezone changes, DST, a dead CMOS battery on a new site machine and
 # a first boot before NTP are all real and innocent. Falsely accusing a paying
 # customer of tampering is far worse than missing a rollback — and the rollback
-# gains little anyway, because tokens only live seven days.
+# gains little anyway, because the token's own life is measured in hours.
 CLOCK_TOLERANCE = DAY
 
 
@@ -62,7 +73,13 @@ class LicenseState:
 
     @property
     def usable(self) -> bool:
-        """May the customer start new work?"""
+        """May the customer start new work?
+
+        STALE is excluded on purpose: the server is meant to authorise every
+        run, so a machine that has not reached it inside its offline window
+        stops until it does. That is the trade being made — live control in
+        exchange for our availability mattering.
+        """
         return self.status in (VALID, GRACE)
 
     @property
@@ -89,16 +106,29 @@ def resolve(claims: dict[str, Any], *, now: int | None = None) -> LicenseState:
 
     exp = int(claims.get("exp") or 0)
     grace_days = int(claims.get("grace") or 0)
-    # A trial is issued with grace 0, so this collapses to a hard stop on the
-    # day the customer was told — which is the whole point of the field.
-    grace_until = exp + grace_days * DAY
+    # `lend` is the licence end; `exp` is only how long this machine may run
+    # without reaching our server. Falling back to exp keeps tokens minted
+    # before `lend` existed working.
+    lend = int(claims.get("lend") or exp)
+    # A trial carries grace 0, so this collapses to a hard stop on the day the
+    # customer was told — which is the whole point of the field.
+    licence_end = lend + grace_days * DAY
 
-    if now < exp:
-        status = VALID
-    elif now < grace_until:
-        status = GRACE
-    else:
+    if now >= licence_end:
+        # The licence itself is over. Nothing the network can do about it.
         status = EXPIRED
+    elif now >= lend:
+        # Past the quoted end date but inside grace — a paid account whose
+        # payment is late. Still works; the banner asks them to renew.
+        status = GRACE
+    elif now < exp:
+        status = VALID
+    else:
+        # In date, but we have not heard from the server inside its offline
+        # window. NOT "expired": telling a paying customer their licence ended
+        # because our Render instance restarted sends them chasing the wrong
+        # thing and costs us a support call.
+        status = STALE
 
     feats = claims.get("feat") or []
     return LicenseState(

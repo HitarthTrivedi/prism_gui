@@ -105,6 +105,63 @@ Re-evaluates licence status and returns a fresh 7-day token.
 
 ---
 
+### `POST /v1/authorize`
+
+Live permission for one run, or one add-on being opened. **This is what makes
+the server authoritative** rather than the cached token.
+
+```jsonc
+// request
+{ "license_id": "lic_…", "device_fp": "a3f9c2b81e4d7a05",
+  "action": "run",            // run | addon
+  "feature": "core", "app_version": "1.1.0" }
+
+// 200
+{ "allowed": true, "run_id": "run_72fc6123e48452b9",
+  "token": "PRSMv1.eyJ…", "expires_at": …, "license_ends_at": …,
+  "features": ["core","boq"], "plan": "trial", "kind": "trial", "seats": 2 }
+```
+
+- Called at the **start** of a run and never during one. A pipeline is tens of
+  minutes of browser automation; failing it half way discards real work for a
+  reason the customer cannot act on.
+- Returns a fresh token too, so authorising doubles as a refresh — one round
+  trip on the path the customer is actually waiting on.
+- Feature not in the licence → `FEATURE_NOT_LICENSED`, with `included` in
+  `detail` so the app can say what they *do* have.
+- Revoked or expired → refused immediately. This is the whole point of going
+  online: revocation bites on the next run, not whenever a token lapses.
+- Writes the `run`/`addon` usage event, which is what `run_id` then ties
+  stage events to.
+
+---
+
+### `POST /v1/usage`
+
+```jsonc
+{ "license_id": "lic_…", "device_fp": "…", "run_id": "run_…",
+  "app_version": "1.1.0",
+  "events": [ {"kind":"groq","prompt_tokens":1840,"completion_tokens":512,"ms":1100},
+              {"kind":"stage","tool":"Claude","stage":"brains","ms":51000} ] }
+```
+
+`kind` is `run` | `stage` | `groq` | `addon`. Returns `{"recorded": N}` and
+**never fails loudly** — a metering write that 500s must not become a
+customer-visible error, because nothing they do depends on it. An unknown
+licence returns `{"recorded": 0}` rather than an error.
+
+**Records shapes and counts, never content.** No brief, no prompt, no output.
+A BOQ query names a real project on a real site; storing it would turn billing
+infrastructure into something needing a data-processing agreement, for data we
+have no use for. There is a test asserting the schema has nowhere to put it.
+
+**Token counts are honest only for Groq.** Those come back in the API
+response. Claude / ChatGPT / Perplexity stages are driven through a browser —
+no usage figure exists — so they are counted as stages per tool. Do not quote
+`total_tokens` at a customer as though it covered everything they ran.
+
+---
+
 ### `POST /v1/payload` — Tier 2
 
 Delivers the engine payload: the strings that make Prism work, which are **not
@@ -244,6 +301,10 @@ CREATE TABLE licenses (
   features     TEXT[] NOT NULL,             -- ['core','boq','email']
   seats        INT  NOT NULL DEFAULT 1,
   grace_days   INT  NOT NULL DEFAULT 3,     -- ALWAYS 0 for kind='trial'
+  -- Token lifetime in hours. NOT an offline allowance — the client refuses to
+  -- start work it cannot get authorised, full stop. This only sets how long
+  -- the cached token stays fresh enough to drive the app's own display.
+  offline_hours INT NOT NULL DEFAULT 1,
   status       TEXT NOT NULL DEFAULT 'active',  -- active | expired | revoked
   starts_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at   TIMESTAMPTZ NOT NULL,        -- the hard end. 10 days, 30, a year.
@@ -296,6 +357,24 @@ CREATE TABLE webhook_events (           -- Phase 2
   processed_at TIMESTAMPTZ,
   UNIQUE (provider, event_id)
 );
+
+-- What customers consumed. Shapes and counts only — see /v1/usage.
+CREATE TABLE usage_events (
+  id                BIGSERIAL PRIMARY KEY,
+  license_id        TEXT NOT NULL REFERENCES licenses(id),
+  device_fp         TEXT NOT NULL,
+  run_id            TEXT NOT NULL DEFAULT '',
+  kind              TEXT NOT NULL,        -- run | stage | groq | addon
+  tool              TEXT NOT NULL DEFAULT '',
+  stage             TEXT NOT NULL DEFAULT '',
+  prompt_tokens     INT  NOT NULL DEFAULT 0,   -- Groq only; browser stages
+  completion_tokens INT  NOT NULL DEFAULT 0,   -- have no usage to read
+  ok                BOOLEAN NOT NULL DEFAULT TRUE,
+  ms                INT  NOT NULL DEFAULT 0,
+  app_version       TEXT NOT NULL DEFAULT '',
+  at                BIGINT NOT NULL
+);
+CREATE INDEX ON usage_events (license_id, at);
 
 CREATE TABLE audit_log (
   id      BIGSERIAL PRIMARY KEY,

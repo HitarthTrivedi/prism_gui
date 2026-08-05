@@ -84,6 +84,35 @@ class GateTest(unittest.TestCase):
         with mock.patch.object(main_window.MainWindow, "_open_setup"):
             return main_window.MainWindow()
 
+    def _instant_authorize(self, allowed=True, message=""):
+        """Replace AuthorizeWorker with something synchronous.
+
+        The real one is a QThread doing a network round trip. Left running,
+        a test finishes while it is still alive and Qt tears the thread down
+        underneath it — which segfaults the interpreter at exit rather than
+        failing a test, and is miserable to trace back here.
+        """
+        import licensing
+
+        class _Instant:
+            def __init__(self, feature="core", action="run", parent=None):
+                self._cb = None
+
+            @property
+            def done(self):
+                outer = self
+
+                class _Sig:
+                    def connect(self, fn):
+                        outer._cb = fn
+                return _Sig()
+
+            def start(self):
+                if self._cb:
+                    self._cb(licensing.Authorization(allowed, run_id="run_test",
+                                                     message=message))
+        return _Instant
+
 
 class Entitlements(GateTest):
     def test_require_passes_what_is_owned(self):
@@ -122,11 +151,30 @@ class WindowGates(GateTest):
         # boq_available() is the dependency probe that runs *after* the gate;
         # stubbing it False stops the real dialog while still proving the
         # licence check let us through.
-        with mock.patch.object(main_window.CB, "boq_available",
+        with mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize(allowed=True)), \
+             mock.patch.object(main_window.CB, "boq_available",
                                return_value=(False, "no ezdxf")), \
              mock.patch.object(main_window.QMessageBox, "information"):
             win._open_boq()
         self.assertEqual(self.paywalled, [])
+
+    def test_owned_addon_still_blocked_when_the_server_is_unreachable(self):
+        """No offline fallback: owning BOQ is not enough, the server has to
+        say yes at the moment it is opened."""
+        import main_window
+        self.grant(["core", "boq"])
+        win = self._window()
+        with mock.patch.object(
+                main_window, "AuthorizeWorker",
+                self._instant_authorize(
+                    allowed=False,
+                    message="Prism couldn't reach the licence server.")), \
+             mock.patch.object(main_window, "BoqDialog") as dialog, \
+             mock.patch.object(main_window.QMessageBox, "warning") as warned:
+            win._open_boq()
+        dialog.assert_not_called()
+        warned.assert_called_once()
 
     def test_email_gate(self):
         import main_window
@@ -167,6 +215,117 @@ class WindowGates(GateTest):
         self.assertTrue(gated["email"][0].isEnabled())
 
 
+class GettingOut(GateTest):
+    """A customer must be able to abandon work they no longer want.
+
+    A run is tens of minutes of browser automation; before this the only exit
+    was force-quitting the app, which threw away every step that had already
+    finished.
+    """
+
+    def test_stop_asks_the_engine_to_wind_up(self):
+        """Not a thread kill: the engine polls a flag and stops at a safe
+        point, keeping finished steps and closing Chrome properly."""
+        self.grant(["core"])
+        win = self._window()
+
+        stopped = []
+        win._active_run = mock.Mock(
+            isRunning=mock.Mock(return_value=True),
+            stop=mock.Mock(side_effect=lambda: stopped.append(True)))
+        win._stop_run()
+        self.assertEqual(stopped, [True])
+
+    def test_stop_is_harmless_when_nothing_is_running(self):
+        self.grant(["core"])
+        win = self._window()
+        win._active_run = None
+        win._stop_run()             # must not raise
+
+    def test_stop_button_only_shows_while_running(self):
+        self.grant(["core"])
+        win = self._window()
+        win.output_panel.set_running(True)
+        self.assertTrue(win.output_panel.stop_btn.isVisibleTo(win.output_panel))
+        win.output_panel.set_running(False)
+        self.assertFalse(win.output_panel.stop_btn.isVisibleTo(win.output_panel))
+
+    def test_stop_latches_so_a_second_click_does_nothing(self):
+        self.grant(["core"])
+        win = self._window()
+        win.output_panel.set_running(True)
+        win.output_panel._on_stop()
+        self.assertFalse(win.output_panel.stop_btn.isEnabled())
+        self.assertIn("Stopping", win.output_panel.stop_btn.text())
+
+    def test_a_cancelled_run_keeps_what_finished(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        win._stage_results = [{"stage": "brains", "agent": "Claude",
+                               "text": "done", "url": "", "snippet": "s",
+                               "ok": True}]
+        win._active_run = mock.Mock(stopping=mock.Mock(return_value=True))
+        with mock.patch.object(main_window, "CompletionDialog") as dialog, \
+             mock.patch.object(win, "_save_run"):
+            win._on_run_done({}, {})
+        dialog.assert_called_once()          # the finished work is still shown
+
+    def test_discard_clears_the_plan_but_keeps_attachments(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        win.routing = {"stages": {}}
+        win.attachments = [{"path": "/tmp/x.dwg", "name": "x.dwg"}]
+        with mock.patch.object(main_window.QMessageBox, "question",
+                               return_value=main_window.QMessageBox.Yes):
+            win._discard_plan()
+        self.assertIsNone(win.routing)
+        self.assertEqual(len(win.attachments), 1)   # explicit choices survive
+
+    def test_discard_can_be_backed_out_of(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        win.routing = {"stages": {}}
+        with mock.patch.object(main_window.QMessageBox, "question",
+                               return_value=main_window.QMessageBox.Cancel):
+            win._discard_plan()
+        self.assertIsNotNone(win.routing)
+
+
+class PlanningIsAuthorised(GateTest):
+    """Planning is a Groq call — it costs tokens and every run starts with it,
+    so it goes through the server like a run does."""
+
+    def test_planning_asks_the_server(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        with mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize(allowed=True)), \
+             mock.patch.object(main_window, "RouteWorker") as router, \
+             mock.patch.object(main_window.CB.config, "is_configured",
+                               return_value=True):
+            win._route("draw me a bill of quantities")
+        router.assert_called_once()
+
+    def test_planning_stops_when_the_server_says_no(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        with mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize(
+                                   allowed=False, message="Licence ended.")), \
+             mock.patch.object(main_window, "RouteWorker") as router, \
+             mock.patch.object(main_window.QMessageBox, "warning") as warned, \
+             mock.patch.object(main_window.CB.config, "is_configured",
+                               return_value=True):
+            win._route("draw me a bill of quantities")
+        router.assert_not_called()
+        warned.assert_called_once()
+
+
 class RoutedAgentGate(GateTest):
     """Prism Reel can enter a plan through the router without the customer
     ever touching the rail, so the sidebar gate alone would leak it."""
@@ -184,6 +343,8 @@ class RoutedAgentGate(GateTest):
                                              "media": "Prism Reel"}), \
              mock.patch.object(main_window.QMessageBox, "question",
                                return_value=QMessageBox.Yes), \
+             mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize()), \
              mock.patch.object(main_window, "AutomationWorker") as worker:
             win._run_pipeline()
 

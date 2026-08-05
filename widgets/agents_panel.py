@@ -116,6 +116,7 @@ class PlanRow(QFrame):
 
 class AgentsPanel(QWidget):
     run_requested = Signal()
+    discard_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -152,7 +153,26 @@ class AgentsPanel(QWidget):
         self.run_btn.setEnabled(False)
         self.run_btn.setToolTip("Make a plan first — this fills in once Prism picks the steps.")
         self.run_btn.clicked.connect(self.run_requested.emit)
-        root.addWidget(self.run_btn)
+
+        # "Start the work" is the commitment; this is the way back out of it.
+        # Without it a plan you did not want could only be escaped by editing
+        # the task and re-planning over the top, which is not obviously
+        # possible and leaves the old plan armed in the meantime.
+        cta = QHBoxLayout()
+        cta.setSpacing(9)
+        cta.addWidget(self.run_btn, stretch=1)
+        self.discard_btn = QPushButton(" Discard")
+        self.discard_btn.setObjectName("smallBtn")
+        self.discard_btn.setCursor(Qt.PointingHandCursor)
+        self.discard_btn.setMinimumHeight(44)
+        self.discard_btn.setToolTip(
+            "Throws this plan away and clears the task, ready for a new one. "
+            "Your attached files stay.")
+        icons.button_icon(self.discard_btn, "trash", 15, theme.NEUTRAL[600])
+        self.discard_btn.clicked.connect(self.discard_requested.emit)
+        self.discard_btn.setVisible(False)
+        cta.addWidget(self.discard_btn)
+        root.addLayout(cta)
 
     # ── state ─────────────────────────────────────────────────────────────
     def set_run_enabled(self, enabled: bool):
@@ -160,6 +180,8 @@ class AgentsPanel(QWidget):
         self.run_btn.setToolTip(
             "Runs every step still switched on." if enabled else
             "Make a plan first — this fills in once Prism picks the steps.")
+        # Discard only exists while there is a plan to discard.
+        self.discard_btn.setVisible(enabled)
 
     def clear(self):
         self._rows = []

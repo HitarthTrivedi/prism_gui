@@ -214,6 +214,7 @@ class StageCard(BlueprintFrame):
 
 class OutputPanel(QWidget):
     back_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -229,8 +230,23 @@ class OutputPanel(QWidget):
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.clicked.connect(self.back_requested.emit)
         head.addWidget(self.back_btn)
-        self.set_finished(False)
         head.addStretch(1)
+
+        # A run is tens of minutes of browser automation. Without this the
+        # only way out is force-quitting the app, which loses every step that
+        # had already finished — the engine has supported stopping cleanly all
+        # along, and nothing here was calling it.
+        self.stop_btn = QPushButton(" Stop the run")
+        self.stop_btn.setObjectName("smallBtn")
+        self.stop_btn.setCursor(Qt.PointingHandCursor)
+        self.stop_btn.setToolTip(
+            "Finishes the step that's running, keeps everything already done, "
+            "and stops there.")
+        icons.button_icon(self.stop_btn, "stop", 14, "#8a2f2f")
+        self.stop_btn.clicked.connect(self._on_stop)
+        head.addWidget(self.stop_btn)
+
+        self.set_finished(False)
         root.addLayout(head)
 
         title_row = QHBoxLayout()
@@ -259,12 +275,30 @@ class OutputPanel(QWidget):
         scroll.setWidget(inner)
         root.addWidget(scroll, stretch=1)
 
+    def _on_stop(self):
+        # Latch immediately so a second click can't queue a second stop, and
+        # so the label stops claiming an action that is already under way. The
+        # engine finishes the current step before it winds up, which can take
+        # a moment, and silence there reads as the button not having worked.
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setText(" Stopping…")
+        self.stop_requested.emit()
+
+    def set_running(self, running: bool):
+        """Show Stop only while there is something to stop."""
+        self.stop_btn.setVisible(running)
+        if running:
+            self.stop_btn.setEnabled(True)
+            self.stop_btn.setText(" Stop the run")
+            icons.button_icon(self.stop_btn, "stop", 14, "#8a2f2f")
+
     def set_finished(self, finished: bool):
         """Once the run is done the plan behind this page is spent, and going
         back clears it — so the button has to say so. Mid-run (or after a
         failure, where the plan is still worth retrying) it stays a plain
         back link."""
         if finished:
+            self.set_running(False)
             self.back_btn.setText(" Start something new")
             icons.button_icon(self.back_btn, "plus", 15, theme.ACCENT_RAMP[700])
             self.back_btn.setToolTip("Clears this plan and the task, ready for the next one")

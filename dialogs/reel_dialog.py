@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import wakeword
 from workers import AutomationWorker, RecordWorker, ReelWorker
 from widgets.ask_panel import AskPanel
 
@@ -135,7 +136,7 @@ class ReelDialog(QDialog):
             QMessageBox.information(
                 self, "Speak",
                 "Voice needs PyAudio on this machine:\n\n"
-                "    brew install portaudio && pip install pyaudio\n\n"
+                f"    {wakeword.install_hint()}\n\n"
                 "Everything else works — just type instead.")
             return
         self.ask.set_recording(True)
@@ -232,6 +233,24 @@ class ReelDialog(QDialog):
             "query": f"reel — {self.request}",
             "reel": {"mp4": path, "brand": self.brand},
         })
+
+    def closeEvent(self, event):
+        """Wind up any worker before this dialog is destroyed.
+
+        A QThread destroyed while still running aborts the whole process, so
+        closing this window mid-render took Prism down with it.
+        """
+        for worker in (getattr(self, "_worker", None),
+                       getattr(self, "_render_worker", None),
+                       getattr(self, "_rec", None)):
+            if worker is None or not worker.isRunning():
+                continue
+            if hasattr(worker, "stop"):
+                worker.stop()
+            if not worker.wait(8000):
+                worker.terminate()
+                worker.wait(1000)
+        super().closeEvent(event)
 
     def _on_failed(self, error: str):
         self._busy(False, "")

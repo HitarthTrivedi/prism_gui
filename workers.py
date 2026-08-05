@@ -13,6 +13,33 @@ from PySide6.QtCore import QThread, Signal
 import core_bridge as CB
 
 
+class AuthorizeWorker(QThread):
+    """Ask the licence server whether this run may go ahead.
+
+    On its own thread because the answer takes a network round trip and the
+    customer has just pressed a button — freezing the window while we wait
+    reads as a crash, which is exactly the moment they decide the software is
+    broken.
+    """
+
+    done = Signal(object)      # licensing.Authorization
+
+    def __init__(self, feature: str = "core", action: str = "run", parent=None):
+        super().__init__(parent)
+        self._feature = feature
+        self._action = action
+
+    def run(self):
+        import licensing
+        try:
+            self.done.emit(licensing.authorize(self._feature, self._action))
+        except Exception as e:                      # noqa: BLE001
+            # Never strand the caller: a bug in here must not mean the button
+            # silently does nothing forever.
+            self.done.emit(licensing.Authorization(
+                False, message=f"Couldn't check your licence: {e}"))
+
+
 class RouteWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
@@ -44,6 +71,20 @@ class AutomationWorker(QThread):
         # accepts them directly. None = ordinary routed run, unchanged.
         self.custom_stages = custom_stages
         self.chatgpt_analysis = chatgpt_analysis
+        self._stop = threading.Event()
+
+    def stop(self):
+        """Ask the run to wind up at the next safe point.
+
+        The engine polls this between stages and inside its waits, so a stop
+        lands within a second or two rather than at the end of the current
+        step — and it keeps everything already finished, emitting a
+        "cancelled" event with the count. Nothing is killed mid-write.
+        """
+        self._stop.set()
+
+    def stopping(self) -> bool:
+        return self._stop.is_set()
 
     def run(self):
         ok, err = CB.automation_available()
@@ -59,7 +100,7 @@ class AutomationWorker(QThread):
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
-                query=self.query, **kwargs,
+                query=self.query, should_stop=self._stop.is_set, **kwargs,
             )
             self.done.emit(responses, links)
         except Exception as e:

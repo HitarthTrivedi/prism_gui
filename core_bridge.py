@@ -47,6 +47,18 @@ if _TERMINAL_DIR not in sys.path:
 from core import config as config          # noqa: E402
 from core import agents as agents          # noqa: E402
 from core import router as router          # noqa: E402
+
+# Count Groq tokens for licence metering. Installed here, from the GUI side,
+# rather than in core/router.py: prism_terminal is a submodule shared with the
+# CLI, which carries no licence and must keep running standalone. Wrapping the
+# `requests` name the module already looks up catches all three of its call
+# sites without editing a line of it, and degrades to "no token counts" rather
+# than an error if the engine is ever refactored.
+try:
+    import licensing.meter as _meter       # noqa: E402
+    _meter.install_groq_meter(router)
+except Exception:                          # noqa: BLE001
+    pass    # metering is never worth breaking the engine over
 from core import pathfinder as pathfinder  # noqa: E402
 from core import files as files            # noqa: E402
 from core import voice as voice            # noqa: E402

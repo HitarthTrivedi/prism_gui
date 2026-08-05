@@ -21,7 +21,7 @@ import paths
 # Production keys. Signed tokens issued by api.alphakore.in verify against
 # these, in every build.
 PRODUCTION: dict[str, str] = {
-    # "k1": "…",   ← added at first release, generated on the server
+    "k1": "5c1133a2f92978d0b2813efa5e5405b84f9081a30d0d369d5ebe50645d5ba280",
 }
 
 # Development and staging keys.
