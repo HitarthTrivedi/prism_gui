@@ -33,6 +33,7 @@ def _selftest(app) -> int:
     Deliberately checks the things freezing breaks, not the things Python
     already guarantees."""
     import core_bridge as CB
+    import licensing
     import wakeword
 
     # The checks below print ✓/✗ to whatever stdout the harness attached. On
@@ -50,6 +51,13 @@ def _selftest(app) -> int:
     # doesn't import is broken even though every window renders, so it fails
     # the check rather than printing a warning nobody reads.
     automation_ok, automation_err = CB.automation_available()
+
+    # Licence verification is now the first thing that runs on a customer's
+    # machine, so a crypto backend that did not survive freezing locks every
+    # customer out at once — and looks exactly like a revoked licence. Verify a
+    # real signature here, for the same reason the TLS check below does a real
+    # handshake rather than importing ssl.
+    license_ok, license_err = licensing.selftest()
 
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
@@ -92,6 +100,8 @@ def _selftest(app) -> int:
         ("mailer", callable(CB.mailer.send_bulk)),
         (f"browser automation{'' if automation_ok else f' — {automation_err}'}",
          automation_ok),
+        (f"licence verification{'' if license_ok else f' — {license_err}'}",
+         license_ok),
     ]
     win = MainWindow()
     win.show()
@@ -138,9 +148,55 @@ def main():
     if os.environ.get("PRISM_SELFTEST"):
         sys.exit(_selftest(app))
 
+    if not _licence_gate():
+        sys.exit(0)
+
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
+
+
+def _paywall(feature: str, parent, state) -> None:
+    """Shown when a locked add-on is opened. Registered once, here, so the
+    licensing package never has to import Qt."""
+    from PySide6.QtWidgets import QDialog
+    from dialogs.paywall import PaywallDialog
+
+    sheet = PaywallDialog(feature, parent, state)
+    sheet.exec()
+    if sheet.relaunch_license:
+        # Parented to the window rather than to the sheet, which is closing.
+        from dialogs.license_dialog import LicenseDialog
+        LicenseDialog(parent, mode="change").exec()
+
+
+def _licence_gate() -> bool:
+    """Decide whether the app may open, before the window is built.
+
+    Returns False only when there is no licence at all and the customer closed
+    the activation screen — an expired one still opens, read-only, because
+    History and everything already produced must stay reachable. Locking
+    someone out of their own past output is how a lapsed trial becomes a
+    complaint instead of a sale.
+    """
+    from PySide6.QtWidgets import QDialog
+
+    import licensing
+    from dialogs.license_dialog import LicenseDialog
+
+    licensing.set_paywall_handler(_paywall)
+    # Fire-and-forget: renews the token in the background. The window builds
+    # against the cached one, so a slow corporate DNS costs nothing at startup.
+    licensing.refresh()
+
+    state = licensing.state()
+    if state.status == licensing.NONE:
+        return LicenseDialog(mode="activate").exec() == QDialog.Accepted
+    if state.status == licensing.TAMPERED:
+        LicenseDialog(mode="problem").exec()
+    elif state.status == licensing.EXPIRED:
+        LicenseDialog(mode="expired").exec()
+    return True
 
 
 if __name__ == "__main__":

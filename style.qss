@@ -84,6 +84,19 @@ QToolTip {
     border: 1px solid rgba(89, 128, 166, 0.32);
 }
 
+/* An add-on the licence doesn't cover. Quieter than a live item but NOT
+   disabled — it stays clickable and opens the pitch for that add-on, because
+   the click is the customer telling us what they want. A greyed-out control
+   sells nothing and looks broken. */
+#navItem[locked="true"] {
+    color: #98989b;
+}
+
+#navItem[locked="true"]:hover {
+    background: #f5f5f8;
+    color: #5d5d60;
+}
+
 #navSection {
     font-family: "Barlow Condensed";
     font-size: 11px;

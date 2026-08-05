@@ -14,17 +14,19 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QApplication,
 )
 
+import app_meta
 import core_bridge as CB
+import licensing
 import theme
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
-from widgets.controls import heading, icon_label, kicker
+from widgets.controls import heading, icon_label, kicker, meta
 
 SKIP = "— skip this category —"
 
 # rail command -> the section it should land on (None = top of the page)
 FOCUS_SECTIONS = {"key": "key", "profile": "profile", "agents": "agents",
-                  "chrome": "chrome", "config": None}
+                  "chrome": "chrome", "licence": "licence", "config": None}
 
 
 class Section(QFrame):
@@ -101,6 +103,9 @@ class SetupDialog(QDialog):
         page.setSpacing(20)
 
         for index, (key, section) in enumerate((
+            # First on the page: it says who this copy belongs to and what it
+            # can do, which frames every setting under it.
+            ("licence", self._licence_section()),
             ("key", self._key_section()),
             ("profile", self._profile_section()),
             ("agents", self._agents_section()),
@@ -182,6 +187,114 @@ class SetupDialog(QDialog):
         return bar
 
     # ── sections ──────────────────────────────────────────────────────────
+    def _licence_section(self) -> Section:
+        """Who this copy belongs to, what it can do, and until when.
+
+        Always shows the LICENCE end date, never the token's — a customer told
+        "expires in 4 days" on day 3 of a 10-day trial will phone you, and be
+        right to.
+        """
+        import time
+
+        s = Section("Licence", "What this copy of Prism is licensed for.")
+        state = licensing.state()
+
+        if state.status == licensing.NONE:
+            s.content.addWidget(icon_label(
+                "lock", "Not activated on this computer yet."))
+        else:
+            when = (time.strftime("%d %B %Y", time.localtime(state.license_ends))
+                    if state.license_ends else "—")
+            word = "Ended" if not state.usable else (
+                "Trial ends" if state.kind == "trial" else "Renews")
+            rows = [
+                ("Licensed to", state.customer or "—"),
+                ("Plan", (state.plan or "—").title()
+                 + (f" · {state.seats} seat{'s' if state.seats != 1 else ''}"
+                    if state.seats else "")),
+                (word, f"{when}"
+                       + (f"  ({state.days_left} days left)"
+                          if state.usable and state.days_left >= 0 else "")),
+            ]
+            form = QFormLayout()
+            form.setContentsMargins(0, 0, 0, 0)
+            form.setSpacing(6)
+            for label, value in rows:
+                value_label = QLabel(value)
+                value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                form.addRow(QLabel(label), value_label)
+            s.content.addLayout(form)
+
+            # Every add-on, ticked or padlocked. Showing the locked ones is
+            # deliberate: this is the only place a customer can see what else
+            # Prism does.
+            from dialogs.license_dialog import FEATURE_NAMES, feature_label
+            s.content.addWidget(kicker("Included", muted=True))
+            for feature in ("core", "boq", "email", "reel", "bom"):
+                if feature not in FEATURE_NAMES:
+                    continue
+                have = state.has(feature)
+                row = icon_label("check" if have else "lock",
+                                 feature_label(feature), 15,
+                                 theme.ACCENT if have else theme.NEUTRAL[400])
+                if not have:
+                    row.setStyleSheet(f"color: {theme.NEUTRAL[500]};")
+                s.content.addWidget(row)
+
+        note = meta(f"This computer: {licensing.device_fingerprint()}  ·  "
+                    f"{app_meta.SUPPORT_EMAIL}")
+        note.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        s.content.addWidget(note)
+
+        row = QHBoxLayout()
+        row.setSpacing(9)
+        change = QPushButton(" Enter a licence key")
+        change.setObjectName("smallBtn")
+        change.setCursor(Qt.PointingHandCursor)
+        icons.button_icon(change, "key", 14, theme.TEXT)
+        change.clicked.connect(self._change_licence)
+        row.addWidget(change)
+
+        if state.status != licensing.NONE:
+            release = QPushButton(" Deactivate this computer")
+            release.setObjectName("smallBtn")
+            release.setCursor(Qt.PointingHandCursor)
+            release.setToolTip(
+                "Frees this machine's seat so the licence can be used on "
+                "another computer. You'll need the key again to come back.")
+            icons.button_icon(release, "trash", 14, theme.TEXT)
+            release.clicked.connect(self._deactivate)
+            row.addWidget(release)
+        row.addStretch(1)
+        s.content.addLayout(row)
+        return s
+
+    def _change_licence(self):
+        from dialogs.license_dialog import LicenseDialog
+        if LicenseDialog(self, mode="change").exec() == QDialog.Accepted:
+            QMessageBox.information(
+                self, "Licence",
+                "Activated. Reopen Setup to see the new details.")
+            self._notify_parent()
+
+    def _deactivate(self):
+        if QMessageBox.question(
+                self, "Deactivate this computer",
+                "This frees the seat so the licence can be used elsewhere.\n\n"
+                "Prism on THIS computer will stop until you enter the key "
+                "again. Your settings and history stay put.",
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        licensing.deactivate()
+        self._notify_parent()
+        QMessageBox.information(self, "Deactivated",
+                                "This computer's seat has been released.")
+
+    def _notify_parent(self):
+        owner = self.parent()
+        if owner is not None and hasattr(owner, "refresh_licence_ui"):
+            owner.refresh_licence_ui()
+
     def _key_section(self) -> Section:
         s = Section("Groq API key",
                     "Free at console.groq.com → API Keys → Create API Key. "

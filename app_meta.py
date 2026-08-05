@@ -11,3 +11,10 @@ BUNDLE_ID = "in.alphakore.prism"
 VERSION = "1.0.1"
 DESCRIPTION = "One task in, a whole pipeline of AI tools out."
 PUBLISHER = "Alphakore"
+
+# Shown on every licence screen — when a trial ends, when an add-on is locked,
+# when activation fails. This is the only route a stuck customer has back to
+# us, so it must be an address someone actually reads.
+# TODO(alphakore): confirm these before the first client build ships.
+SUPPORT_EMAIL = "hello@alphakore.in"
+WEBSITE = "https://alphakore.in"

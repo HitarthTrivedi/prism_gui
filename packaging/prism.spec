@@ -24,6 +24,28 @@ import app_meta   # noqa: E402
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 
+# ── the build will not ship without a production signing key ────────────────
+# licensing/keys.py trusts its DEVELOPMENT keys only when running from source,
+# so a frozen build with an empty PRODUCTION map trusts nothing and rejects
+# every customer's licence with "issued for a different version of Prism".
+#
+# Nothing else catches this: the app starts, the window opens, and
+# licensing.selftest() still passes, because it verifies the committed test
+# vector against that vector's own key rather than against PRODUCTION. The
+# first sign would be every client of the release failing to activate at once.
+import licensing.keys as _keys   # noqa: E402
+
+if not _keys.PRODUCTION and not os.environ.get("PRISM_UNLICENSED_TEST_BUILD"):
+    raise SystemExit(
+        "\n  Refusing to build: licensing/keys.py has no PRODUCTION key.\n"
+        "  A packaged Prism would reject every licence you issue.\n\n"
+        "  Generate the production keypair on the licence server, then paste\n"
+        "  its PUBLIC half into PRODUCTION in licensing/keys.py:\n\n"
+        '      PRODUCTION = {"k1": "<64 hex chars>"}\n\n'
+        "  See license_server/.env.example for the generator command.\n"
+        "  (Building packaging smoke tests only? "
+        "PRISM_UNLICENSED_TEST_BUILD=1 — the result cannot activate.)\n")
+
 ENGINE_DIR = os.path.join(GUI_DIR, "prism_terminal")
 
 icon = os.path.join(SPEC_DIR, "icons",
@@ -35,7 +57,16 @@ icon = os.path.join(SPEC_DIR, "icons",
 datas = [
     (os.path.join(GUI_DIR, "assets"), "assets"),
     (os.path.join(GUI_DIR, "style.qss"), "."),
+    # The committed licence-token test vector. main.py's --selftest verifies a
+    # real signature against it, which is the only check that proves the
+    # crypto survived freezing on this platform — an import succeeding says
+    # nothing about whether the native backend actually works.
+    (os.path.join(GUI_DIR, "licensing", "testdata", "vector.json"),
+     os.path.join("licensing", "testdata")),
 ]
+
+# devtools/ is deliberately absent: it holds the token-signing logic and a
+# private key. Nothing in it may ever reach a build.
 
 # The engine also ships as files, because core_bridge puts this directory on
 # sys.path at runtime and router._tool_notes() reads pros_cons.txt/tool_notes.md
@@ -79,6 +110,13 @@ hiddenimports = [
     "setuptools", "setuptools._distutils", "setuptools._distutils.version",
     # Qt bits pulled in by name (QtSvg backs every icon we draw).
     "PySide6.QtSvg", "PySide6.QtNetwork",
+    # Licence verification. cryptography loads its Rust/OpenSSL backend
+    # dynamically, so the leaf modules have to be named — a build where these
+    # are missing starts fine and then rejects every customer's licence.
+    "cryptography", "cryptography.hazmat.backends.openssl",
+    "cryptography.hazmat.bindings._rust",
+    "cryptography.hazmat.primitives.asymmetric.ed25519",
+    "cryptography.hazmat.primitives.ciphers.aead",
 ]
 hiddenimports += collect_submodules("undetected_chromedriver")
 hiddenimports += collect_submodules("selenium")
@@ -100,7 +138,12 @@ excludes = [
     "pytest", "notebook",
 ]
 
-block_cipher = None
+# NOTE: there is no bytecode encryption here, and there cannot be — PyInstaller
+# removed the `cipher`/`--key` option in 6.0, and this project requires >=6.3.
+# The `block_cipher = None` / `cipher=block_cipher` arguments that used to sit
+# here were inert and have been deleted rather than left implying protection
+# that does not exist. What actually keeps the product closed is that the
+# engine payload is not in this bundle at all — see docs/licensing/.
 
 a = Analysis(
     [os.path.join(GUI_DIR, "main.py")],
@@ -120,10 +163,9 @@ a = Analysis(
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,

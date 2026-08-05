@@ -1,0 +1,27 @@
+{
+  "_comment": "Committed test vector. Signer and verifier must agree on these exact bytes. Regenerate only if the token format changes \u2014 see devtools/mint.py vector.",
+  "public_key": "163a3237853f550c7067fa85a94c89e411aac7af06ce12a41c4c9c8f6f3e03fe",
+  "device_fp": "0123456789abcdef",
+  "token": "PRSMv1.eyJjdXN0IjoiVmVjdG9yIFRlc3QgTHRkIiwiZGV2IjoiMDEyMzQ1Njc4OWFiY2RlZiIsImV4cCI6MTc1MDYwNDgwMCwiZmVhdCI6WyJjb3JlIiwiYm9xIiwiZW1haWwiXSwiZ3JhY2UiOjMsImlhdCI6MTc1MDAwMDAwMCwia2lkIjoidmVjdG9yIiwia2luZCI6InBhaWQiLCJsZW5kIjoxNzgxNTM2MDAwLCJuYmYiOjE3NTAwMDAwMDAsInBldGFnIjoiIiwicGsiOiIiLCJwbGFuIjoiYnVzaW5lc3MiLCJzZWF0cyI6NSwic3ViIjoibGljX3ZlY3RvciJ9.9gILg8QzRoJUMy4viazfhIDVhronsG4YwxIa-Lbpf59eRvoHmDs4aaK9EHKUmFbCpCRN1NDreaXdl9wAYDNFBw",
+  "claims": {
+    "kid": "vector",
+    "sub": "lic_vector",
+    "cust": "Vector Test Ltd",
+    "plan": "business",
+    "kind": "paid",
+    "feat": [
+      "core",
+      "boq",
+      "email"
+    ],
+    "seats": 5,
+    "dev": "0123456789abcdef",
+    "iat": 1750000000,
+    "nbf": 1750000000,
+    "exp": 1750604800,
+    "lend": 1781536000,
+    "grace": 3,
+    "pk": "",
+    "petag": ""
+  }
+}

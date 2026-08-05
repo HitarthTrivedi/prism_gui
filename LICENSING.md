@@ -1,11 +1,25 @@
 # Licensing & Subscription Plan
 
 Plan for turning Prism from a freely-distributed build into a licensed product:
-a 30-day trial, a paid subscription after it, and add-ons that unlock per plan —
-backed by a hosted licence server.
+**every install runs on a key we issue by hand**, trials end on the day we set,
+and add-ons unlock per licence — backed by a hosted licence server.
 
-Status: **proposal, nothing built yet.** Nothing in the repo touches trials,
-keys, or entitlements today.
+**Decided:** build Tier 1 + Tier 2 (§1). Tier 3 is deferred and specified in
+[`06-tier-3-future.md`](docs/licensing/06-tier-3-future.md).
+
+**Status: in progress — Tier 1 works end to end.**
+
+- **Licence server** — `../license_server/` (sibling directory, ready to become
+  its own repo). FastAPI + Postgres/SQLite + Alembic; activate, refresh,
+  deactivate, and the full admin surface. 30 tests.
+- **Client** — `licensing/` in this repo, plus `devtools/mint.py`. 48 tests.
+- **Proven together**: server issues a 10-day trial key → client activates and
+  verifies the signature → admin extension reaches the next refresh → a revoked
+  licence keeps working on its cached token for the remaining days, as designed.
+
+Left: deployment and the production keypair, the dialogs and gates in the app,
+cross-platform proving, and all of Tier 2. Live progress in the checkboxes of
+[`05-build-checklist.md`](docs/licensing/05-build-checklist.md).
 
 This file holds the **strategy and the reasoning**. The detailed specs live in
 [`docs/licensing/`](docs/licensing/):
@@ -17,7 +31,8 @@ This file holds the **strategy and the reasoning**. The detailed specs live in
 | [02 · API & data](docs/licensing/02-api-and-data.md) | Every endpoint, the Postgres schema, hosting | Backend |
 | [03 · Client integration](docs/licensing/03-client-integration.md) | Exactly what changes in this repo, and where | Desktop |
 | [04 · Operations](docs/licensing/04-operations.md) | Issuing keys, extending trials, fixing tickets | Support |
-| [05 · Build checklist](docs/licensing/05-build-checklist.md) | Phase 1, day by day, with a definition of done | Everyone |
+| [05 · Build checklist](docs/licensing/05-build-checklist.md) | Three weeks, day by day, with a definition of done | Everyone |
+| [06 · Tier 3 (future)](docs/licensing/06-tier-3-future.md) | The "completely uncrackable" option, and why it's deferred | Future us |
 
 ---
 
@@ -41,24 +56,45 @@ This file holds the **strategy and the reasoning**. The detailed specs live in
 ## 1. Threat model — be honest up front
 
 A frozen Python app is patchable. Anyone determined can unpack the `.pyc` and
-stub out the gate. So enforcement must be aimed at the realistic case, not the
-movie case.
+stub out a boolean check. So a licence check that is *only* a check will always
+be defeatable. The way out is not to make the check harder to find — it is to
+make the app **incomplete without us**.
 
-The buyers look like SMB/enterprise firms (BOQ from CAD drawings, the RS
-Infotech work, `sample_boq.docx`). That market does not crack binaries. It
-*does* let trials lapse, share one install across five desks, and forget to
-renew. Design for **billing hygiene, not DRM**.
+Three tiers:
 
-Three tiers of teeth, in ROI order:
+| Tier | Mechanism | Bypassed by | Status |
+|---|---|---|---|
+| **T1** | Ed25519-signed keys, admin-issued, device-bound | Unpack `.pyc`, patch the check, repack — an afternoon's work | **Building** |
+| **T2** | The engine payload — tool knowledge, prompts, CSS selectors — is **not in the build**. It arrives on activation, encrypted to the token | Nothing to patch; the valuable part was never delivered | **Building** |
+| **T3** | The routing call itself runs on our server | Nothing | [Deferred](docs/licensing/06-tier-3-future.md) |
 
-| Level | Mechanism | Stops |
-|---|---|---|
-| **Ship this** | Ed25519-signed licence tokens | Editing `license.json`, clock rollback, expired/refunded licences |
-| **Ship this** | Server-issued trial keyed to device + email | Delete-the-folder trial resets |
-| **Phase 3, optional** | Move one flagship add-on's brain server-side | Everything — genuinely uncrackable |
+**T2 is what makes this worth doing.** Prism's value isn't the Qt window — it's
+the accumulated tool knowledge, three engineered prompt templates, and the CSS
+selectors that drive Claude/ChatGPT/Kimi. Strip the licence check from a build
+that never activated and you get a shell that opens, routes nothing, and drives
+no browser.
 
-Do **not** invest in obfuscation or anti-debug. Bad cost/benefit at this
-customer count.
+It also has a property specific to this product: **those selectors rot.** The
+tools change their pages constantly — that maintenance is why they live in a
+registry at all. A cracked copy stops receiving payload updates and degrades on
+its own within weeks, with no action from us.
+
+And the same mechanism is an operations win independent of licensing: a broken
+selector becomes a **server-side fix that reaches every customer in hours**,
+instead of four platform builds and a chase to get everyone to update.
+
+Do **not** invest in obfuscation or anti-debug at any tier. Bad cost/benefit.
+Note also that PyInstaller 6 removed bytecode encryption, so there is no
+"encrypt the `.pyc`" option available — the inert `block_cipher` lines that
+implied otherwise have been deleted from `packaging/prism.spec`.
+
+### The one honest gap
+
+A client who takes a legitimate trial, patches the binary, and keeps the payload
+they were given. T2 makes that copy perish; only T3 makes it impossible. For
+handing a build to a named firm on a 10-day evaluation, T2 is enough — the
+person who would reverse-engineer this is not the person running quantity
+takeoffs.
 
 ---
 
@@ -67,16 +103,24 @@ customer count.
 ```
 Prism desktop (PySide6)          api.alphakore.in (FastAPI + Postgres)
 ┌──────────────────────┐         ┌────────────────────────────────┐
-│ licensing/           │  HTTPS  │ /v1/trial/start                │
-│  ├ device.py  fp     │────────▶│ /v1/activate    → signed token │
-│  ├ client.py  http   │         │ /v1/refresh                    │
-│  ├ token.py   verify │◀────────│ /v1/deactivate  (seat release) │
-│  └ store.py   cache  │  token  │ /webhooks/razorpay             │
-│                      │         │ /admin/*        (you)          │
+│ licensing/           │  HTTPS  │ /v1/activate    → signed token │
+│  ├ device.py  fp     │────────▶│ /v1/refresh                    │
+│  ├ client.py  http   │         │ /v1/deactivate  (seat release) │
+│  ├ token.py   verify │◀────────│ /v1/payload     → the engine   │
+│  ├ store.py   cache  │  token  │ /admin/*        (you: issue,   │
+│  └ payload.py decrypt│    +    │                  extend, publish)│
+│                      │ payload │                                │
 │ Ed25519 PUBLIC key   │         │ Ed25519 PRIVATE key            │
 │ baked into bundle    │         │ never leaves server            │
+│                      │         │ payload JSON — never shipped   │
+│ NO prompts.          │         │  · tool knowledge + selectors  │
+│ NO selectors.        │         │  · 3 prompt templates          │
+│ NO tool knowledge.   │         │  · field notes                 │
 └──────────────────────┘         └────────────────────────────────┘
 ```
+
+The left box is what a customer downloads. On its own it is a shell — that is
+the T2 design, not an omission from the diagram.
 
 **The token is the whole design.** The server signs a compact claims blob; the
 app verifies it offline against the embedded public key:
@@ -100,14 +144,16 @@ Why signed-offline rather than call-home-on-launch:
 ### Backend endpoints
 
 ```
-POST /v1/trial/start   {email, org, device_fp}     → token
 POST /v1/activate      {key, device_fp}            → token
 POST /v1/refresh       {license_id, device_fp}     → token
 POST /v1/deactivate    {license_id, device_fp}     → seat released
-GET  /v1/me                                        → portal / status
-POST /webhooks/razorpay
-     /admin/*          issue licence, extend trial, release seat, revoke
+POST /v1/payload       {license_id, device_fp}     → encrypted engine payload
+GET  /v1/me                                        → portal / status  (Phase 2)
+POST /webhooks/razorpay                            → (Phase 2)
+     /admin/*          issue key, extend, revoke, release seat, publish payload
 ```
+
+There is no trial endpoint. Keys are minted in `/admin/*` only.
 
 ### Device fingerprint
 
@@ -123,29 +169,37 @@ ticket.
 
 ---
 
-## 3. Trial design (30 days, server-authoritative)
+## 3. Trials — admin-issued keys only
 
-The trial start date **must not** live only in `~/.prism` — otherwise
-`rm -rf ~/.prism` means infinite trials.
+> **No key, no Prism.** No free tier, no self-signup, no anonymous trial. Every
+> install — evaluation or paid — runs on a key we generated by hand.
 
-First launch shows two paths:
+A trial is not a separate mode. It is a key with a short life:
 
-1. **Start 30-day trial** — name, work email, company → server records
-   `(email, device_fp)` → issues a trial token. Doubles as lead capture, which
-   you want anyway.
-2. **I have a licence key** — `PRSM-XXXX-XXXX-XXXX-XXXX` → activate.
+| We issue | They get |
+|---|---|
+| `days: 10, features: [core, boq]` | Ten days, BOQ unlocked, Email locked |
+| `days: 30, seats: 2` | A month on two machines |
+| `days: 365, seats: 5` | A year |
 
-Anti-abuse, in order of value:
+This is **less code** than the self-serve alternative an earlier draft assumed.
+There is no trial endpoint to farm, no disposable-email problem, and no
+`trial_claims` table. The entire public attack surface is one rate-limited
+`activate` call.
 
-- The server refuses a second trial for the same `device_fp`, or the same email
-  domain paired with the same device. It returns *"your trial ended on X, here
-  is how to buy"* rather than silently issuing a fresh one.
-- **`trial_days` is a server-side per-customer field, default 30.** This is the
-  key operational win: a stalled pilot gets extended from the admin panel — no
-  rebuild, no new download. Covers the "30–35 days" requirement directly.
-- **Clock rollback** — store a monotonic `last_seen_utc` high-water mark. If
-  system time is more than 24h behind it, force an online refresh before
-  unlocking. A speed bump only; the real control is `exp`.
+Consequences that follow:
+
+- **`days` is set per customer at issue time**, and extendable from admin with
+  no rebuild and no re-download. A stalled pilot gets another fortnight in ten
+  seconds.
+- **Trials carry `grace_days = 0`.** A 10-day trial ends on day 10 — the date
+  in the email you sent. Grace exists to absorb a late bank transfer on a *paid*
+  account; applying it to trials just makes every deadline soft.
+- **Clock rollback** — a monotonic `last_seen_utc` high-water mark. More than
+  24h backwards forces an online refresh. A speed bump only; the real control is
+  that tokens live 7 days and never outlast the licence end.
+- **The trade-off:** no self-serve growth funnel. Correct for hand-sold B2B, and
+  reversible later by adding one endpoint.
 
 ### Offline activation (for on-site machines with no internet)
 
@@ -191,7 +245,8 @@ dialogs/
   `prism_terminal/core/config.py`'s `save()` rewrites the entire dict on every
   save — a stale in-memory `cfg` in the GUI would silently wipe the licence. A
   separate file also keeps the CLI submodule untouched.
-- **New dependency**: PyNaCl (or `cryptography`) for Ed25519. It needs a
+- **New dependency**: `cryptography` for Ed25519 (and ChaCha20-Poly1305 for the
+  T2 payload). It needs a
   `hiddenimports` entry in `packaging/prism.spec` **and** a check added to the
   self-test in `main.py` — a licence library that imports in dev and dies
   frozen bricks every customer at once.
@@ -231,9 +286,15 @@ inflated.
 The part that decides whether customers hate this. Treat these as requirements.
 
 - Token TTL **7 days**, refreshed silently on every launch, plus a background
-  retry.
-- Refresh fails → **keep working** until `exp` + 3-day grace, with a
-  non-blocking banner counting down.
+  retry. A token's expiry never outlasts the licence end, so the last token of a
+  10-day trial runs out on day 10.
+- Refresh fails → **keep working** until `exp` + grace, with a non-blocking
+  banner counting down. Grace is 3 days for paid licences and **0 for trials**.
+- **The UI always shows the licence end date, never the token expiry.** A
+  customer told "expires in 4 days" on day 3 of a 10-day trial will phone you.
+- Payload fetch fails but a valid cache exists → silent. No cache and no
+  network → block new runs with a connection message, and **never** fall back to
+  a bundled copy. There isn't one, by design.
 - **Never** check a licence mid-run. Launch and add-on entry only. A pipeline
   that dies at stage 4 because a token expired is an unrecoverable support
   incident.
@@ -248,21 +309,30 @@ The part that decides whether customers hate this. Treat these as requirements.
 
 ## 7. Phases
 
-### Phase 1 — Licensing MVP (~2 weeks), ships as v1.1
+### Phase 1 — T1 + T2 (~3 weeks), ships as v1.1
 
-- Backend: FastAPI + Postgres on Render/Railway (~$15–25/mo), `api.alphakore.in`,
-  Ed25519 keypair, trial/activate/refresh, minimal admin (a token-protected
-  page, or plain SQL — you are the only operator).
-- Client: the `licensing/` package, launch gate, add-on gates, trial and
-  activation dialogs, licence section in Setup.
-- Result: you can sell. Trials expire, keys work, add-ons unlock.
+- **Week 1** — backend: FastAPI + Postgres on Render/Railway (~₹1,500–2,000/mo),
+  `api.alphakore.in`, Ed25519 keypair, activate/refresh/deactivate, admin
+  issuance. No admin UI; `curl` is fine while you are the only operator.
+- **Week 2** — client: the `licensing/` package, launch gate, add-on gates,
+  activation dialog, licence section in Setup.
+- **Week 3** — T2: extract the payload, serve it encrypted, consume it through
+  `core_bridge.py`, prove a never-activated build is a shell.
+- Result: you can hand a build to a client and control exactly what they get and
+  for how long.
+
+Day-by-day breakdown in
+[`05-build-checklist.md`](docs/licensing/05-build-checklist.md).
 
 ### Phase 2 — Self-serve billing (~1 week)
 
 Razorpay subscriptions and webhooks, hosted customer portal, dunning emails,
-seat management, self-service device release.
+self-service device release. Needed once you outgrow issuing keys by hand.
 
-### Phase 3 — Hardening / strategic (see below)
+### Phase 3 — T3, if ever
+
+[`06-tier-3-future.md`](docs/licensing/06-tier-3-future.md). Tied to the Groq
+key decision below.
 
 ---
 
@@ -283,21 +353,30 @@ token, no routing brain, no product. It also yields real usage metering for
 renewals and upsells.
 
 The cost: real per-customer inference spend that pricing must absorb, added
-latency, and the backend becoming a hard uptime dependency — which is exactly
-why it is Phase 3, after offline tokens have proven stable. Plan for it; do not
+latency, and the backend becoming a hard uptime dependency. Plan for it; do not
 build it until there are paying customers.
+
+**If it is ever scheduled, do T3 at the same time** — they are the same
+plumbing, and building them separately means building it twice. Full costing in
+[`06-tier-3-future.md`](docs/licensing/06-tier-3-future.md).
 
 ---
 
 ## 9. Open decisions
 
+Settled:
+
+- ~~Trial gate~~ — **admin-issued keys only** (§3).
+- ~~Hardening level~~ — **T1 + T2**, T3 deferred (§1).
+
+Still open, and none of them block starting:
+
 1. **Payment rail** — Razorpay (India/INR/GST) or Stripe (international)? This
-   doc assumes Razorpay plus manual invoicing.
+   doc assumes Razorpay plus manual invoicing. Only matters at Phase 2.
 2. **Plan shape** — base + à la carte modules (recommended) or bundled tiers?
-3. **Trial gate** — require email/company to start the trial (lead capture,
-   blocks reset abuse), or a frictionless anonymous device-bound trial?
-4. **Phase 3 proxy** — is moving Groq routing behind the backend on the
-   roadmap? A "yes" changes Phase 1's API surface.
+   Affects what goes in `features`, not how it works.
+3. **Groq proxying** — on the roadmap? A "yes" pulls T3 forward and changes the
+   Phase 1 API surface.
 
 Phase 1 starts with the `licensing/` client package and the token format — the
 backend schema falls out of the claims design.

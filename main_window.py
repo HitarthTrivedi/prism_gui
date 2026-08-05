@@ -16,11 +16,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
-    QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget,
+    QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
 )
 
 import core_bridge as CB
+import licensing
 import theme
+from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.input_panel import InputPanel
 from widgets.files_panel import FilesPanel
@@ -39,6 +41,11 @@ from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
 COMPOSE, RUNNING = 0, 1
+
+# Routed agents that belong to a paid add-on. The rail gate alone would miss
+# these: the router can put Prism Reel into a plan without the customer ever
+# touching the Reel item in the sidebar.
+AGENT_FEATURES = {"Prism Reel": "reel", "Prism Studio": "reel"}
 
 
 class MainWindow(QMainWindow):
@@ -61,8 +68,11 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._wire()
+        self.refresh_licence_ui()
 
-        if not CB.config.is_configured(self.cfg):
+        # Only nag about setup once the licence is sorted — a customer who
+        # cannot use Prism yet does not need a Groq key dialog on top.
+        if licensing.state().usable and not CB.config.is_configured(self.cfg):
             self._open_setup()
 
     # ── layout ──────────────────────────────────────────────────────────────
@@ -84,7 +94,16 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         central = QWidget()
-        outer = QHBoxLayout(central)
+        # A vertical shell so the licence banner can span the full width above
+        # all three columns. It has to be impossible to miss and impossible to
+        # confuse with a run message, which rules out the status bar.
+        shell = QVBoxLayout(central)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        shell.addWidget(self._licence_banner())
+
+        columns = QWidget()
+        outer = QHBoxLayout(columns)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
@@ -92,9 +111,69 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.sidebar)
         outer.addWidget(self._work_column(), stretch=1)
         outer.addWidget(self._context_column())
+        shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
 
         self.statusBar().showMessage("Ready.")
+
+    # ── licence ─────────────────────────────────────────────────────────────
+    def _licence_banner(self) -> QWidget:
+        self.banner = QFrame()
+        self.banner.setObjectName("licenceBanner")
+        row = QHBoxLayout(self.banner)
+        row.setContentsMargins(20, 9, 14, 9)
+        row.setSpacing(10)
+        self._banner_icon = QLabel()
+        row.addWidget(self._banner_icon)
+        self._banner_text = QLabel()
+        self._banner_text.setWordWrap(True)
+        row.addWidget(self._banner_text, stretch=1)
+        self._banner_btn = QPushButton("Enter a licence key")
+        self._banner_btn.setObjectName("smallBtn")
+        self._banner_btn.setCursor(Qt.PointingHandCursor)
+        self._banner_btn.clicked.connect(self._open_license_dialog)
+        row.addWidget(self._banner_btn)
+        self.banner.setVisible(False)
+        return self.banner
+
+    def refresh_licence_ui(self):
+        """Repaint everything that depends on the licence: the banner, and the
+        locks in the rail. Called at startup and after any licence change."""
+        state = licensing.state()
+        self.sidebar.set_entitlements(state.features, state.usable)
+
+        if state.status == licensing.VALID:
+            self.banner.setVisible(False)
+            return
+
+        if state.status == licensing.GRACE:
+            tone, icon_name = theme.NEUTRAL[600], "clock"
+            days = max(state.days_left + state.grace_days, 0)
+            text = (f"Prism couldn't confirm your licence. It keeps working for "
+                    f"about {days} more day{'s' if days != 1 else ''} — check "
+                    f"this computer's internet connection.")
+        elif state.status == licensing.TAMPERED:
+            tone, icon_name = "#8a2f2f", "lock"
+            text = (state.message
+                    or "Prism can't verify this computer's licence.")
+        else:                                   # EXPIRED or NONE
+            tone, icon_name = "#8a2f2f", "lock"
+            text = ("Your licence has ended. History and everything you've "
+                    "already made are still here — new runs are paused until "
+                    "it's renewed.")
+        self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
+        self._banner_text.setText(text)
+        self._banner_text.setStyleSheet(f"color: {tone}; font-size: 13px;")
+        self.banner.setStyleSheet(
+            f"QFrame#licenceBanner {{ background: {theme.NEUTRAL[100]};"
+            f"border-bottom: 1px solid {theme.DIVIDER}; }}")
+        self.banner.setVisible(True)
+
+    def _open_license_dialog(self, mode: str = "change"):
+        from dialogs.license_dialog import LicenseDialog
+        LicenseDialog(self, mode=mode).exec()
+        licensing.reload()
+        self.refresh_licence_ui()
 
     def _work_column(self) -> QWidget:
         self.input_panel = InputPanel()
@@ -200,7 +279,7 @@ class MainWindow(QMainWindow):
     def _handle_command(self, key: str):
         if key == "catalog":
             AIDirectoryDialog(self).exec()
-        elif key in ("agents", "profile", "key", "chrome", "config"):
+        elif key in ("agents", "profile", "key", "chrome", "licence", "config"):
             self._open_setup(focus=key)
         elif key == "login":
             self._open_login_tabs()
@@ -214,6 +293,8 @@ class MainWindow(QMainWindow):
             self._open_boq()
 
     def _open_reel(self):
+        if not licensing.require("reel", self):
+            return
         ok, err = CB.reel_available()
         if not ok:
             QMessageBox.information(self, "Reel", err)
@@ -221,6 +302,11 @@ class MainWindow(QMainWindow):
         ReelDialog(self.cfg, self.attachments, self).exec()
 
     def _open_boq(self):
+        # Entitlement first, dependency probe second. A customer who hasn't
+        # bought BOQ should be told that — not sent off to install ezdxf for a
+        # feature they still won't be able to open.
+        if not licensing.require("boq", self):
+            return
         ok, err = CB.boq_available()
         if not ok:
             QMessageBox.information(
@@ -233,6 +319,8 @@ class MainWindow(QMainWindow):
         BoqDialog(self.cfg, self.attachments, self).exec()
 
     def _open_email(self):
+        if not licensing.require("email", self):
+            return
         if not CB.mailer.is_configured(self.cfg):
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
@@ -394,6 +482,8 @@ class MainWindow(QMainWindow):
         if not query.strip():
             self.statusBar().showMessage("Type or speak a task first.", 4000)
             return
+        if not licensing.require("core", self):
+            return
         if not CB.config.is_configured(self.cfg):
             QMessageBox.warning(self, "Setup needed", "Finish Setup (API key + agents) first.")
             return
@@ -425,11 +515,41 @@ class MainWindow(QMainWindow):
     def _run_pipeline(self):
         if not self.routing:
             return
+        if not licensing.require("core", self):
+            return
         run_agents = self.agents_panel.selected_agents()
         if not run_agents:
             QMessageBox.information(self, "Run", "Every step is switched off — "
                                                  "turn at least one back on.")
             return
+
+        # The router can put a paid add-on into a plan without the customer
+        # ever opening it from the rail, so the entitlement has to be checked
+        # here too. Offer to run everything else rather than refusing outright:
+        # losing one step is a far better outcome than losing the whole run.
+        locked = {stage: name for stage, name in run_agents.items()
+                  if AGENT_FEATURES.get(name)
+                  and not licensing.has(AGENT_FEATURES[name])}
+        if locked:
+            names = ", ".join(sorted(set(locked.values())))
+            answer = QMessageBox.question(
+                self, "Not in your licence",
+                f"{names} isn't part of your licence, so "
+                f"{'those steps' if len(locked) > 1 else 'that step'} can't run."
+                f"\n\nRun the rest of the plan without "
+                f"{'them' if len(locked) > 1 else 'it'}?",
+                QMessageBox.Yes | QMessageBox.Cancel)
+            if answer != QMessageBox.Yes:
+                # Straight to the pitch — they have just told us they want it.
+                licensing.require(AGENT_FEATURES[next(iter(locked.values()))], self)
+                return
+            run_agents = {stage: name for stage, name in run_agents.items()
+                          if stage not in locked}
+            if not run_agents:
+                QMessageBox.information(
+                    self, "Run", "Every step in this plan needs an add-on that "
+                                 "isn't in your licence.")
+                return
         # Prism Studio needs a browser engine the rest of Prism does not. Say
         # so before the run rather than at the last stage, an hour of tool
         # calls later — and offer the renderer that does work.

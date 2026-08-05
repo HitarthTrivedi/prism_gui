@@ -10,7 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QHBoxLayout, QFileDialog, QWidget,
+    QPushButton, QHBoxLayout, QFileDialog, QWidget, QScrollArea,
 )
 
 import favorites as FAV
@@ -28,31 +28,38 @@ PRIMARY = [
     ("config",  "Settings", "sliders"),
 ]
 
-# Everything else the CLI exposes, grouped by intent.
+# Sentinel for a shelf item that isn't built yet, as opposed to one the
+# customer simply hasn't bought.
+SOON = "__soon__"
+
+# Everything else the CLI exposes, grouped by intent. The 5th field is the
+# licence entitlement the item needs — "" for anything always available.
 SECONDARY = [
     # ADD-ONS are the purpose-built pipelines — the ones sold on top of the
     # generic product. Each one takes a real business document in and gives a
     # finished one out, rather than being a general prompt. New verticals
     # (quotation from spec, BOM vs inventory, export papers) land here.
     ("ADD-ONS", [
-        ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec"),
-        ("email", "Email", "mail", "Draft & send an email from attached files"),
+        ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec", "boq"),
+        ("email", "Email", "mail", "Draft & send an email from attached files", "email"),
         # Shown but disabled on purpose: the shelf should look like a product
         # line, and a visible "next one" is worth more in a client demo than
         # an empty gap. Reads as coming-soon, never as broken.
         ("bom",   "BOM & Stock", "list",
          "Coming soon — match a parts list against your stock and get the "
-         "shortage list", False),
+         "shortage list", SOON),
     ]),
     ("WORKSPACE", [
-        ("status", "Status",       "chart", "Current profile, key & agents"),
-        ("login",  "Login tabs",   "lock",  "Re-open your tools in Chrome to sign in"),
+        ("status", "Status",       "chart", "Current profile, key & agents", ""),
+        ("login",  "Login tabs",   "lock",  "Re-open your tools in Chrome to sign in", ""),
     ]),
     ("CONFIGURE", [
-        ("agents",  "Agents",  "grid",  "Re-pick one agent per category"),
-        ("profile", "Profile", "user",  "Change what-you-do"),
-        ("key",     "API key", "key",   "Change your Groq API key"),
-        ("chrome",  "Chrome",  "globe", "Pin or auto-detect your Chrome version"),
+        ("licence", "Licence", "archive",
+         "Your plan, what's included, seats and expiry", ""),
+        ("agents",  "Agents",  "grid",  "Re-pick one agent per category", ""),
+        ("profile", "Profile", "user",  "Change what-you-do", ""),
+        ("key",     "API key", "key",   "Change your Groq API key", ""),
+        ("chrome",  "Chrome",  "globe", "Pin or auto-detect your Chrome version", ""),
     ]),
 ]
 
@@ -83,7 +90,28 @@ class Sidebar(QFrame):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setFixedWidth(232)
-        root = QVBoxLayout(self)
+
+        # The rail wants ~816px at its minimum and the window's floor is 640,
+        # so on a 1366x768 laptop — ordinary kit in a drawing office — Qt was
+        # squeezing the nav buttons below their sizeHint and clipping the
+        # labels. Scroll instead of compressing: a rail you can reach is worth
+        # more than one that fits. The stretch on the favourites list still
+        # absorbs the slack whenever there IS room, so nothing changes on a
+        # large screen.
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        inner = QWidget()
+        inner.setObjectName("sidebarInner")
+        scroll.setWidget(inner)
+        shell.addWidget(scroll)
+
+        root = QVBoxLayout(inner)
         root.setContentsMargins(14, 18, 14, 14)
         root.setSpacing(2)
 
@@ -122,20 +150,22 @@ class Sidebar(QFrame):
         root.addWidget(wake)
 
         # -- everything else ------------------------------------------------
+        self._gated: dict[str, tuple[QPushButton, str, str, str]] = {}
         for section, items in SECONDARY:
             root.addSpacing(12)
             root.addWidget(kicker(section, muted=True))
             root.addSpacing(4)
-            for entry in items:
-                key, label, icon_name, tip = entry[:4]
-                ready = entry[4] if len(entry) > 4 else True
-                btn = nav_button(label if ready else f"{label}  (soon)",
+            for key, label, icon_name, tip, feature in items:
+                soon = feature == SOON
+                btn = nav_button(f"{label}  (soon)" if soon else label,
                                  icon_name, small=True, tip=tip)
-                if ready:
+                if soon:
+                    btn.setEnabled(False)
+                else:
                     btn.clicked.connect(
                         lambda _=False, k=key: self.command_triggered.emit(k))
-                else:
-                    btn.setEnabled(False)
+                    if feature:
+                        self._gated[key] = (btn, label, icon_name, feature)
                 root.addWidget(btn)
 
         # -- favorites -------------------------------------------------------
@@ -222,6 +252,29 @@ class Sidebar(QFrame):
             btn.setProperty("cur", cur)
             icons.button_icon(btn, dict((k, i) for k, _, i in PRIMARY)[key], 17,
                               theme.ACCENT_RAMP[800] if cur else theme.NEUTRAL[600])
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    # ── licence ───────────────────────────────────────────────────────────
+    def set_entitlements(self, features, usable: bool):
+        """Mark add-ons the licence doesn't cover.
+
+        Locked items stay **enabled**. Clicking one opens the pitch for it,
+        which is the most useful thing that click can do — the customer has
+        just told us exactly what they want. A greyed-out row sells nothing,
+        and it is also indistinguishable from something broken.
+        """
+        for _, (btn, label, icon_name, feature) in self._gated.items():
+            unlocked = usable and feature in features
+            # The icon swaps to a padlock; the label stays put. Appending
+            # "(locked)" would make the shelf read as a list of things you
+            # can't have rather than a product line.
+            icons.button_icon(btn, icon_name if unlocked else "lock", 15,
+                              theme.NEUTRAL[600] if unlocked else theme.NEUTRAL[400])
+            btn.setProperty("locked", not unlocked)
+            if not unlocked:
+                btn.setToolTip(f"{label} isn't in your licence — click to find "
+                               f"out about it")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 

@@ -19,6 +19,13 @@ python-docx
 # wouldn't otherwise force the version CI resolves, so it's explicit here.
 certifi
 
+# ── Licensing ───────────────────────────────────────────────────────────────
+# Ed25519 to verify licence tokens, ChaCha20-Poly1305 to decrypt the engine
+# payload. Chosen over PyNaCl because PyInstaller ships maintained hooks for
+# it, where PyNaCl's cffi _sodium extension is exactly the kind of thing that
+# imports cleanly in development and dies in a frozen build.
+cryptography
+
 # ── Voice input & wake word — needs PortAudio on the system first:
 #   macOS:  brew install portaudio
 #   Linux:  sudo apt install portaudio19-dev

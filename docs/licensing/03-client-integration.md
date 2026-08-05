@@ -17,7 +17,10 @@ licensing/
   keys.py        PUBLIC_KEYS = {kid: pubkey}   (generated, committed)
   client.py      HTTP to the licence server; retries; offline tolerance
   store.py       ~/.prism/license.json, clock high-water mark
-  state.py       the NONE/VALID/GRACE/EXPIRED/TAMPERED machine
+  status.py      the NONE/VALID/GRACE/EXPIRED/TAMPERED machine (named
+                 status, not state: the package also exposes a state()
+                 function, and the collision silently shadows one)
+  payload.py     Tier 2 — fetch, decrypt, cache, schema-check the engine payload
 ```
 
 ### The public API — the whole surface
@@ -34,9 +37,13 @@ licensing.require("boq", parent) -> bool
                                     # checks; on failure shows the paywall
                                     # sheet and returns False
 licensing.activate(key) -> Result   # from the licence dialog
-licensing.start_trial(...) -> Result
 licensing.deactivate() -> Result
+licensing.payload() -> dict | None  # Tier 2 — decrypted engine data, cached
 ```
+
+There is deliberately **no `start_trial()`**. Trials are keys we issue; the
+client cannot mint one. See the admin-only rule in
+[`02-api-and-data.md`](02-api-and-data.md).
 
 `state()` returns a small frozen dataclass:
 
@@ -67,8 +74,13 @@ class LicenseState:
   "key": "PRSM4K2XA9WQ7M3TYRB8HNVE",
   "last_seen_utc": 1754301234,
   "last_refresh_attempt": 1754301234,
+  "payload_etag": "pl_7c1f",
   "server": "https://api.alphakore.in" }
 ```
+
+Plus `~/.prism/payload.enc` — the encrypted engine payload. Ciphertext only;
+the key that opens it lives in the token's `pk` claim. Never write the
+decrypted form to disk.
 
 > **Do not put any of this in `config.json`.**
 > [`prism_terminal/core/config.py`](../../prism_terminal/core/config.py)'s
@@ -92,8 +104,10 @@ licensing.refresh()                      # fire-and-forget, ~50ms, never blocks
 
 st = licensing.state()
 if st.status == 'none':
-    if LicenseDialog(app).exec() != QDialog.Accepted:
-        sys.exit(0)                      # they closed it — no silent free ride
+    # No key. The only screen available is activation — there is no trial
+    # button, because trials are keys we issue.
+    if ActivationDialog(app).exec() != QDialog.Accepted:
+        sys.exit(0)
 elif st.status in ('expired', 'tampered'):
     ExpiredDialog(app).exec()            # informs, offers activation, then
                                          # falls through to read-only mode
@@ -165,7 +179,34 @@ same way the others are:
 - **Deactivate this device** (with a confirmation — it logs this machine out)
 - **Enter a different licence key**
 
-### 6. Grace banner — [`main_window.py`](../../main_window.py)
+### 6. The payload shim — Tier 2
+
+The strings leave the bundle; the code that assembles them stays. Three places
+read payload data instead of module constants:
+
+| Today | Becomes |
+|---|---|
+| `A.AGENT_REGISTRY` in [`core/agents.py`](../../prism_terminal/core/agents.py) — specialties, budgets, URLs, **and the `textarea_selector` / `response_selector` values** | merged from `licensing.payload()["agents"]` |
+| The three prompt templates in [`core/router.py`](../../prism_terminal/core/router.py) (brief expander ~L225, plan auditor ~L320, routing brain ~L397) | `payload["prompts"][name].format(...)` |
+| `pros_cons.txt`, read by `_tool_notes()` | `payload["notes"]`, merged as one more source |
+
+**Where the shim lives matters.** `prism_terminal` is a git submodule shared
+with the CLI product, and the CLI is not licensed. So do not edit `core/` to
+import `licensing`. Instead have [`core_bridge.py`](../../core_bridge.py) —
+which already exists to adapt the engine for the GUI — inject the payload into
+the engine modules at startup, before any widget is built. The submodule keeps
+working standalone, with its own local defaults, exactly as it does now.
+
+Two behaviours to preserve:
+
+- **`_tool_notes()` also reads `~/.prism/tool_notes.md`.** That's a documented
+  user feature — the user's own field notes get merged into routing prompts.
+  The payload adds a source; it must not replace that lookup.
+- **The registry's shape is unchanged.** `payload["agents"]` merges *over* the
+  local skeleton, so a payload missing one tool degrades that tool rather than
+  crashing the app.
+
+### 7. Grace banner — [`main_window.py`](../../main_window.py)
 
 When `status == 'grace'`, a dismissible strip above the work column: *"Your
 subscription couldn't be verified. Prism keeps working for N more days."*
@@ -206,7 +247,7 @@ background, and let them work.
 
 ## Packaging and tests
 
-**[`packaging/prism.spec`](../../packaging/prism.spec)** — add PyNaCl to
+**[`packaging/prism.spec`](../../packaging/prism.spec)** — add `cryptography`'s leaf modules to
 `hiddenimports`. It loads a compiled `_sodium` extension that PyInstaller's
 analysis does not reliably discover.
 
@@ -232,3 +273,12 @@ still died on a customer's machine).
 | `license.json` deleted | `NONE`, re-activates from the stored key if present |
 | `license.json` truncated / corrupt | `NONE`, never a crash |
 | Unknown `kid` in token | Rejected, prompts re-activation |
+| **Payload cases (Tier 2)** | |
+| No payload ever fetched, no key | App is a shell: opens, routes nothing, no crash |
+| `payload.enc` present, token deleted | Cache is inert — no `pk`, refuses to decrypt |
+| `payload.enc` corrupted | Refused by the AEAD tag; keeps last good, re-fetches |
+| Payload decrypts but fails schema | Refused; previous version kept; reported to server |
+| Payload fetch fails, valid cache | Silent — cache used, no dialog |
+| Payload fetch fails, no cache | New runs blocked with a connection message, **never** a bundled fallback |
+| `petag` mismatch after refresh | Re-fetches automatically |
+| `~/.prism/tool_notes.md` present | Still merged into routing prompts (user feature preserved) |
