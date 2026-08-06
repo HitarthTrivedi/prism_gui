@@ -82,8 +82,24 @@ class WakeWordListener(QThread):
         self.cfg = cfg
         self._running = True
 
-    def stop(self):
+    def stop(self, wait_ms: int = 3000) -> bool:
+        """Ask the loop to finish, and wait for it to actually do so. Returns
+        True if the thread has exited by the time this returns.
+
+        This used to only set the flag and return. Callers took that as "the
+        thread is gone" and dropped their reference — but the loop was still
+        inside a 2s recording pass, or a Whisper request that can run for its
+        full 60s timeout. Destroying a running QThread is fatal in Qt:
+        "QThread: Destroyed while thread '' is still running", then abort.
+
+        The wait is bounded on purpose. A stuck network call must not freeze
+        the GUI for a minute, so this can legitimately return False and the
+        caller has to keep the object alive itself rather than assume success.
+        """
         self._running = False
+        if not self.isRunning():
+            return True
+        return self.wait(wait_ms)
 
     def run(self):
         import pyaudio
@@ -110,6 +126,12 @@ class WakeWordListener(QThread):
                         loud = True
                 if not loud or not frames:
                     continue
+                # Re-check before the network call, not just at the top of the
+                # loop. Someone who switches the wake word off mid-chunk should
+                # not still cost a Whisper round-trip — and it is that call
+                # that makes stop() slow enough to matter.
+                if not self._running:
+                    break
                 buf = io.BytesIO()
                 with wave.open(buf, "wb") as wf:
                     wf.setnchannels(1)

@@ -43,6 +43,36 @@ from dialogs.history_dialog import HistoryDialog
 
 COMPOSE, RUNNING = 0, 1
 
+# Wake-word threads that were asked to stop but had not finished in time.
+# Module level, not an attribute: on window close there is nothing else left
+# holding the reference, and a QThread collected while its OS thread is still
+# running aborts the process. Entries remove themselves once finished fires.
+_retired_listeners: list = []
+
+
+def _retire_listener(listener, wait_ms: int = 3000) -> None:
+    """Stop a wake-word listener, and make sure nothing drops it while its
+    thread is still alive.
+
+    stop() waits, but only briefly — an in-flight Whisper request holds the
+    loop until its own 60s timeout, and blocking the GUI thread for that long
+    is worse than the bug. When the wait runs out the listener is parked here,
+    referenced and alive, until finished says the thread has really gone.
+    Releasing it any earlier is precisely the "Destroyed while thread is still
+    running" abort this exists to prevent.
+    """
+    if listener.stop(wait_ms):
+        return
+    _retired_listeners.append(listener)
+
+    def _drop():
+        try:
+            _retired_listeners.remove(listener)
+        except ValueError:
+            pass
+
+    listener.finished.connect(_drop)
+
 # Routed agents that belong to a paid add-on. The rail gate alone would miss
 # these: the router can put Prism Reel into a plan without the customer ever
 # touching the Reel item in the sidebar.
@@ -849,7 +879,7 @@ class MainWindow(QMainWindow):
             self._wake_listener.start()
             self.statusBar().showMessage('Listening for "Prism"…')
         elif self._wake_listener:
-            self._wake_listener.stop()
+            _retire_listener(self._wake_listener)
             self._wake_listener = None
             self.statusBar().showMessage("Wake word off.", 3000)
 
@@ -860,7 +890,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self._wake_listener:
-            self._wake_listener.stop()
+            # Longer than the toggle case: the app is going away, so a brief
+            # stall costs nothing, while a listener still running when the
+            # process tears down is the abort itself.
+            _retire_listener(self._wake_listener, wait_ms=8000)
+            self._wake_listener = None
         # Anything metered but not yet sent — a run that ended just before the
         # window closed, or events buffered while the server was unreachable.
         licensing.report_usage(getattr(self, "_run_id", ""))
