@@ -23,25 +23,21 @@ from widgets import icons
 from widgets.controls import heading, kicker, meta
 
 # One line on what each add-on is FOR — the pitch, not the mechanism.
-PITCH = {
-    "boq": ("BOQ", "file",
-            "Turn a CAD drawing or a written spec into a priced bill of "
-            "quantities. Prism measures the geometry rather than estimating "
-            "it, then writes the schedule out for you."),
-    "email": ("Email", "mail",
-              "Draft an email from the files you've attached, to a list from a "
-              "CSV or addresses in your brief — then review it and send, "
-              "without leaving Prism."),
-    "reel": ("Reel & Studio", "list",
-             "Render a finished video from a script: frames drawn, captions "
-             "set and encoded, in your own house style."),
-    "bom": ("BOM & Stock", "list",
-            "Match a parts list against your stock and get the shortage list "
-            "back."),
-    "core": ("The pipeline", "grid",
-             "Plan a task and run it as a sequence of steps across your AI "
-             "tools, each one feeding the next."),
+#
+# The words come from plans.py so that a feature is described identically
+# wherever the customer meets it: here, in Setup's "Included" list, in the
+# guide, and on whatever page eventually sells it. The icon is the only thing
+# this file still owns, because only the UI cares.
+import plans
+
+_ICONS = {
+    "core": "grid", "marketing": "image", "leads": "user", "boq": "file",
+    "bom": "list", "attendance": "clock", "reel": "video", "email": "mail",
+    "dev": "code",
 }
+
+PITCH = {key: (f.label, _ICONS.get(key, "grid"), f.pitch or f.blurb)
+         for key, f in plans.FEATURES.items()}
 
 
 class PaywallDialog(QDialog):

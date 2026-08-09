@@ -15,10 +15,14 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QTextBrowser, QWidget, QPushButton, QSplitter, QSizePolicy,
+    QComboBox,
 )
 
 import core_bridge as CB
+import identity
+import roles as R
 import theme
+import workspace
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import heading, kicker
@@ -93,6 +97,27 @@ class _RunItem(QWidget):
         box.addWidget(what)
 
 
+def _person_label(person: dict) -> str:
+    """'Ravi Patel — Sales' for the profile picker, degrading to whatever is
+    known: a folder can exist for someone the roster has never heard of."""
+    name = person.get("name") or ""
+    role = R.label(person.get("role", ""))
+    if person.get("is_self"):
+        return f"{name or 'Me'} — {role or 'my work'}  (me)"
+    if name and role:
+        return f"{name} — {role}"
+    return name or role or person["mid"]
+
+
+def _role_chip(me: dict) -> QLabel:
+    """A quiet marker on a working member's History saying whose it is. It is
+    also the honest answer to 'why can I only see my own runs?'."""
+    chip = QLabel(R.label(me.get("role", "")))
+    chip.setObjectName("tagOutline")
+    chip.setToolTip("Your own runs. Each role's work stays in its own folder.")
+    return chip
+
+
 class HistoryDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,6 +135,27 @@ class HistoryDialog(QDialog):
         glyph.setPixmap(icons.pixmap("clock", 20, theme.ACCENT))
         head.addWidget(glyph)
         head.addWidget(heading("Run history"), stretch=1)
+
+        # Whose history is on screen. An owner or manager gets a picker over
+        # everyone in the workspace; everybody else gets nothing at all — not
+        # a disabled picker, which would advertise that other people's work is
+        # there to be asked for.
+        self.cfg = CB.config.load()
+        self._me = identity.current()
+        self._people = workspace.readable_members(self.cfg, self._me)
+        self.who = None
+        if self._me["admin"] and len(self._people) > 1:
+            self.who = QComboBox()
+            self.who.setToolTip(
+                "Whose work to show. As a manager you can open any member's "
+                "history; they only ever see their own.")
+            for person in self._people:
+                self.who.addItem(_person_label(person), person["mid"])
+            self.who.currentIndexChanged.connect(self._switch_person)
+            head.addWidget(QLabel("Showing"))
+            head.addWidget(self.who)
+        elif R.label(self._me.get("role", "")):
+            head.addWidget(_role_chip(self._me))
         root.addLayout(head)
 
         split = QSplitter(Qt.Horizontal)
@@ -152,8 +198,21 @@ class HistoryDialog(QDialog):
         self._load()
 
     # ── data ──────────────────────────────────────────────────────────────
+    def _switch_person(self):
+        """An admin picked somebody else. Read-only: view_as changes which
+        folder is listed and nothing else."""
+        try:
+            identity.view_as(self.who.currentData())
+        except PermissionError as e:
+            self.view.setHtml(self._page(f"<p>{e}</p>"))
+            return
+        self.runs.clear()
+        self.runs.setEnabled(True)
+        self._load()
+
     def _load(self):
-        runs_dir = CB.config.RUNS_DIR
+        who = identity.viewing()
+        runs_dir = workspace.runs_dir(who["mid"], self.cfg)
         names = []
         if os.path.isdir(runs_dir):
             # Only run records. The same folder also holds artefacts a run
@@ -165,9 +224,14 @@ class HistoryDialog(QDialog):
                            reverse=True)
         if not names:
             self.runs.setEnabled(False)
+            nobody = ("No runs saved yet. Once Prism finishes a task, it "
+                      "turns up here.")
+            if who["mid"] != self._me["mid"]:
+                nobody = (f"{who.get('name') or who['mid']} hasn't run "
+                          f"anything yet, or their Prism hasn't synced to "
+                          f"this workspace.")
             self.view.setHtml(self._page(
-                "<p style='color:%s'>No runs saved yet. Once Prism finishes a "
-                "task, it turns up here.</p>" % theme.NEUTRAL[600]))
+                "<p style='color:%s'>%s</p>" % (theme.NEUTRAL[600], nobody)))
             return
         for name in names:
             path = os.path.join(runs_dir, name)

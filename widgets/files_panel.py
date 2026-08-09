@@ -12,9 +12,37 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QFrame, QGraphicsOpacityEffect,
 )
 
+import i18n
 import theme
 from widgets import icons
 from widgets.controls import kicker
+
+def _label(att: dict) -> str:
+    """The row's text, saying so when only part of the file will be read.
+
+    Prism inlines the first 12,000 characters of a file's text. For a 60-page
+    tender that is roughly the first eight pages, and silently answering from
+    an eighth of a document is a wrong deliverable rather than a degraded one.
+    Truncation is reasonable; not mentioning it is not.
+    """
+    if att.get("truncated"):
+        return f"{att['name']}   (first part only)"
+    return att["name"]
+
+
+def _tip(att: dict) -> str:
+    if att.get("truncated"):
+        return (f"{att['path']}\n\nThis file is long, so Prism is using its "
+                f"first 12,000 characters — about 8 pages. The whole file is "
+                f"still uploaded to any tool that accepts attachments.")
+    return att["path"]
+
+
+# Item roles and what "Detach selected" should do with the highlighted row.
+_PATH_ROLE = 1000
+_MODE_ROLE = 1001
+DETACH_FILE = "file"
+DETACH_FOLDER = "folder"
 
 
 def _fade_in(widget: QWidget):
@@ -65,7 +93,8 @@ class MentionRow(QFrame):
         head.addLayout(text, stretch=1)
         root.addLayout(head)
 
-        self.setToolTip(f'"{description}"  →  {resolved or "(not found)"}')
+        self.setToolTip(i18n.t('"{what}"  →  {where}').format(
+            what=description, where=resolved or i18n.t("(not found)")))
 
         actions = QHBoxLayout()
         actions.setSpacing(7)
@@ -92,6 +121,8 @@ class FilesPanel(QWidget):
     mention_accepted = Signal(int)
     mention_change_requested = Signal(int)
     detach_requested = Signal(str)
+    detach_folder_requested = Signal(str)   # the folder's own path
+    detach_all_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -119,11 +150,28 @@ class FilesPanel(QWidget):
         self.attached_list.setIconSize(QSize(15, 15))
         self.attached_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         root.addWidget(self.attached_list)
+        # Detaching one file at a time is fine until "Add folder" puts
+        # fifteen of them in at once — the engine attaches a folder as its
+        # individual files, so there was no single thing to take back out.
+        # Selecting a folder's header row now removes the whole group.
+        buttons = QHBoxLayout()
+        buttons.setSpacing(7)
         self.detach_btn = QPushButton("Detach selected")
         self.detach_btn.setObjectName("smallBtn")
         self.detach_btn.setCursor(Qt.PointingHandCursor)
+        self.detach_btn.setToolTip(
+            "Removes the highlighted file — or, if you highlight a folder "
+            "heading, everything that came from that folder.")
         self.detach_btn.clicked.connect(self._detach_selected)
-        root.addWidget(self.detach_btn)
+        buttons.addWidget(self.detach_btn)
+        self.detach_all_btn = QPushButton("Detach all")
+        self.detach_all_btn.setObjectName("smallBtn")
+        self.detach_all_btn.setCursor(Qt.PointingHandCursor)
+        self.detach_all_btn.setToolTip("Take every attached file back out.")
+        self.detach_all_btn.clicked.connect(self.detach_all_requested.emit)
+        buttons.addWidget(self.detach_all_btn)
+        buttons.addStretch(1)
+        root.addLayout(buttons)
 
         self._refresh_empty_state()
 
@@ -134,6 +182,7 @@ class FilesPanel(QWidget):
         self.attached_label.setVisible(has_attached)
         self.attached_list.setVisible(has_attached)
         self.detach_btn.setVisible(has_attached)
+        self.detach_all_btn.setVisible(has_attached)
 
     def clear_mentions(self):
         while self.mentions_box.count():
@@ -150,22 +199,65 @@ class FilesPanel(QWidget):
         self._refresh_empty_state()
 
     def set_attached(self, attachments: list[dict]):
+        """Draw the tray: loose files as themselves, folders as one heading
+        with their files indented underneath.
+
+        Grouping is presentation only — the engine still receives the flat
+        list of files, because that is what it uploads. What it buys is a
+        single row that means "this whole folder", which is the thing there
+        was previously no way to take back out.
+        """
         self.attached_list.clear()
+
+        loose = [a for a in attachments if not a.get("from_dir")]
+        folders: dict[str, list[dict]] = {}
         for a in attachments:
-            item = QListWidgetItem(
-                icons.icon("folder" if a["kind"] == "folder" else "file", 15,
-                           theme.NEUTRAL[600]),
-                a["name"])
-            item.setData(1000, a["path"])
-            item.setToolTip(a["path"])
-            self.attached_list.addItem(item)
-        # Height follows the list, capped at five rows — a single attachment
-        # shouldn't leave an empty tray sitting in the rail.
-        rows = min(max(len(attachments), 1), 5)
+            if a.get("from_dir"):
+                folders.setdefault(a["from_dir"], []).append(a)
+
+        for a in loose:
+            self._add_row(_label(a), a["path"], DETACH_FILE,
+                          "folder" if a.get("kind") == "folder" else "file",
+                          _tip(a))
+
+        for folder, files in folders.items():
+            count = len(files)
+            self._add_row(
+                f"{os.path.basename(folder.rstrip(os.sep)) or folder}"
+                f"   ({count} file{'' if count == 1 else 's'})",
+                folder, DETACH_FOLDER, "folder", folder, bold=True)
+            for a in files:
+                self._add_row("     " + _label(a), a["path"], DETACH_FILE,
+                              "file", _tip(a), muted=True)
+
+        rows = min(max(self.attached_list.count(), 1), 6)
         self.attached_list.setFixedHeight(rows * 29 + 8)
         self._refresh_empty_state()
 
+    def _add_row(self, label: str, target: str, mode: str, icon_name: str,
+                 tip: str, *, bold: bool = False, muted: bool = False):
+        item = QListWidgetItem(
+            icons.icon(icon_name, 15,
+                       theme.ACCENT if bold else theme.NEUTRAL[600]),
+            label)
+        item.setData(_PATH_ROLE, target)
+        item.setData(_MODE_ROLE, mode)
+        item.setToolTip(tip if not bold else
+                        f"{tip}\n\nSelect this row and press Detach selected "
+                        f"to remove the whole folder.")
+        if bold:
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+        if muted:
+            item.setForeground(theme.c(theme.NEUTRAL[600]))
+        self.attached_list.addItem(item)
+
     def _detach_selected(self):
         it = self.attached_list.currentItem()
-        if it:
-            self.detach_requested.emit(it.data(1000))
+        if not it:
+            return
+        if it.data(_MODE_ROLE) == DETACH_FOLDER:
+            self.detach_folder_requested.emit(it.data(_PATH_ROLE))
+        else:
+            self.detach_requested.emit(it.data(_PATH_ROLE))

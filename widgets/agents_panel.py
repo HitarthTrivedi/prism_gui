@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import i18n
 import theme
 from widgets import icons
 from widgets.controls import StepMark, ToolChip, heading, meta
@@ -22,6 +23,7 @@ from widgets.controls import StepMark, ToolChip, heading, meta
 # stage -> (icon, plain title, plain one-liner)
 STAGE_COPY = {
     "research":     ("search",  "Look things up",   "Find the facts and sources this needs"),
+    "leads":        ("user",    "Find the people",  "Companies to approach, with verified emails"),
     "brains":       ("bulb",    "Think it through", "Work out the angle and the argument"),
     "content":      ("pencil",  "Write it up",      "Turn the thinking into clear words"),
     "visual":       ("image",   "Make the images",  "Generate the artwork to go with it"),
@@ -223,7 +225,18 @@ class AgentsPanel(QWidget):
         if not self._rows:
             self.count.setText("")
         else:
-            self.count.setText(f"{on} step{'' if on == 1 else 's'} of {len(self._rows)}")
+            # Assembled through t() rather than as an f-string: by the time an
+            # f-string reaches setText the sentence is already built and
+            # matches nothing in the catalogue. Two forms because the singular
+            # and plural are different sentences in most languages, and the
+            # placeholders are named so a translator can reorder them.
+            # Both literals sit inside a t() call rather than being chosen
+            # into a variable first: devtools/extract_strings.py reads the
+            # source, so a key it cannot see never reaches a translator.
+            self.count.setText(
+                (i18n.t("{n} step of {total}") if on == 1
+                 else i18n.t("{n} steps of {total}")
+                 ).format(n=on, total=len(self._rows)))
         self.set_run_enabled(on > 0)
 
     def selected_agents(self) -> dict:

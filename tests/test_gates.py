@@ -372,5 +372,225 @@ class RoutedAgentGate(GateTest):
         self.assertEqual(self.paywalled, ["reel"])
 
 
+class TaskQueue(GateTest):
+    """The queue plans and runs tasks one at a time, and keeps each one's
+    results apart so the completion window can report them per task."""
+
+    def _queued(self, win, *tasks):
+        for t in tasks:
+            win.input_panel.set_query_text(t)
+            win.input_panel._queue_current()
+
+    def test_the_box_counts_as_the_last_task(self):
+        self.grant(["core"])
+        win = self._window()
+        self._queued(win, "one", "two")
+        win.input_panel.set_query_text("three")
+        self.assertEqual(win.input_panel.tasks(), ["one", "two", "three"])
+
+    def test_plan_button_survives_an_empty_box(self):
+        """Add task clears the box; without a queued task counting, the very
+        button Add task leads to would go dead."""
+        self.grant(["core"])
+        win = self._window()
+        self._queued(win, "only task")
+        self.assertEqual(win.input_panel.text.toPlainText(), "")
+        self.assertTrue(win.input_panel.route_btn.isEnabled())
+
+    def test_each_task_is_planned_in_turn(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        self._queued(win, "task one", "task two", "task three")
+
+        planned, started = [], []
+
+        def fake_route_worker(query, cfg, attachments):
+            planned.append(query)
+            return mock.MagicMock()
+
+        with mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize()), \
+             mock.patch.object(main_window, "RouteWorker",
+                               side_effect=fake_route_worker):
+            win._route("")
+            self.assertEqual(planned, ["task one"])   # only the first, so far
+
+            # Pretend the plan came back and the user pressed Start the work.
+            win._auto_run = True
+            for _ in range(3):
+                win._last_query = win._task_queue[win._task_pos - 1]
+                started.append(win._last_query)
+                win._stage_results = [{"stage": "content", "agent": "Claude",
+                                       "text": "x", "url": "", "ok": True}]
+                win._record_task_run()
+                if win._more_tasks():
+                    win._advance_queue()
+
+        self.assertEqual(started, ["task one", "task two", "task three"])
+        self.assertEqual(planned, ["task one", "task two", "task three"])
+
+    def test_results_are_kept_per_task(self):
+        """_stage_results is wiped at the top of every run; the queue has to
+        bank each task's stages before that happens."""
+        self.grant(["core"])
+        win = self._window()
+        win._task_queue = ["a", "b"]
+
+        win._task_pos = 1
+        win._last_query = "a"
+        win._stage_results = [{"stage": "content", "agent": "Claude", "ok": True}]
+        win._record_task_run()
+
+        win._task_pos = 2
+        win._last_query = "b"
+        win._stage_results = [{"stage": "research", "agent": "Apollo", "ok": True}]
+        win._record_task_run()
+
+        self.assertEqual([g["task"] for g in win._task_runs], ["a", "b"])
+        self.assertEqual([g["stages"][0]["agent"] for g in win._task_runs],
+                         ["Claude", "Apollo"])
+
+    def test_a_failed_task_does_not_kill_the_queue(self):
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        win._task_queue = ["a", "b"]
+        win._task_pos = 1
+        win._auto_run = True
+        with mock.patch.object(win, "_advance_queue") as advance, \
+             mock.patch.object(main_window.QMessageBox, "warning") as warned:
+            win._on_run_failed("Chrome would not launch")
+        advance.assert_called_once()
+        warned.assert_not_called()      # status bar, not a modal, mid-queue
+        self.assertEqual(win._task_runs[0]["error"], "Chrome would not launch")
+
+    def test_a_licence_refusal_stops_the_whole_queue(self):
+        """One refusal will refuse every task behind it — firing the rest at
+        the server would be pure noise."""
+        import main_window
+        self.grant(["core"])
+        win = self._window()
+        win._task_queue = ["a", "b", "c"]
+        win._task_pos = 1
+        with mock.patch.object(main_window.QMessageBox, "warning"), \
+             mock.patch.object(win, "_finish_queue") as finish:
+            win._start_run(licensing.Authorization(False, message="nope"), {})
+        self.assertTrue(win._queue_stopped)
+        self.assertFalse(win._more_tasks())
+        finish.assert_called_once()
+
+    def test_stopping_a_run_stops_the_queue(self):
+        self.grant(["core"])
+        win = self._window()
+        win._task_queue = ["a", "b"]
+        win._task_pos = 1
+        win._active_run = mock.MagicMock(**{"stopping.return_value": True})
+        with mock.patch.object(win, "_finish_queue") as finish, \
+             mock.patch.object(win, "_save_run"):
+            win._on_run_done({}, {})
+        self.assertTrue(win._queue_stopped)
+        finish.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class Attachments(GateTest):
+    """Attaching, and — the part that was missing — un-attaching.
+
+    "Add folder" hands the engine the folder's individual FILES, because that
+    is what it uploads. So there was no single thing representing the folder
+    and no way to take one back out: undoing a fifteen-file folder meant
+    fifteen selections, and until you had done all fifteen every tool in the
+    run was still being sent them.
+    """
+
+    def _window(self):
+        from main_window import MainWindow
+        self.grant(["core"])
+        return MainWindow()
+
+    def _tmpfiles(self):
+        import tempfile
+        root = tempfile.mkdtemp(prefix="prism-att-")
+        folder = os.path.join(root, "brand assets")
+        os.makedirs(folder)
+        for name in ("logo.png", "banner.png", "notes.txt"):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(b"\x89PNG\r\n" if name.endswith(".png") else b"hi")
+        loose = os.path.join(root, "spec.png")
+        with open(loose, "wb") as f:
+            f.write(b"\x89PNG\r\n")
+        return loose, folder
+
+    def test_a_png_attaches(self):
+        """An image has no extractable text, which is exactly the case a
+        text-first attach path gets wrong."""
+        loose, _folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(loose)
+        self.assertEqual([a["name"] for a in win.attachments], ["spec.png"])
+        self.assertEqual(win.attachments[0]["kind"], "image")
+
+    def test_a_folder_becomes_one_row_over_its_files(self):
+        loose, folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(loose)
+        win._attach_path(folder)
+        rows = [win.files_panel.attached_list.item(i).text()
+                for i in range(win.files_panel.attached_list.count())]
+        self.assertIn("spec.png", rows)
+        self.assertTrue(any("brand assets" in r and "3 files" in r
+                            for r in rows), rows)
+        # The engine still receives the flat file list.
+        self.assertEqual(len(win.attachments), 4)
+
+    def test_detaching_a_folder_takes_all_of_it(self):
+        loose, folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(loose)
+        win._attach_path(folder)
+        win._detach_folder(folder)
+        self.assertEqual([a["name"] for a in win.attachments], ["spec.png"])
+
+    def test_detaching_a_folder_leaves_a_loose_file_of_the_same_name(self):
+        """A file attached on its own is not part of the folder group even if
+        the folder holds one with the same name."""
+        _loose, folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(os.path.join(folder, "logo.png"))   # on its own
+        win._attach_path(folder)
+        win._detach_folder(folder)
+        self.assertEqual([a["name"] for a in win.attachments], ["logo.png"])
+        self.assertNotIn("from_dir", win.attachments[0])
+
+    def test_detach_all_empties_the_tray(self):
+        loose, folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(loose)
+        win._attach_path(folder)
+        win._detach_all()
+        self.assertEqual(win.attachments, [])
+        self.assertEqual(win.files_panel.attached_list.count(), 0)
+
+    def test_the_same_file_is_not_queued_twice(self):
+        """Attaching a folder and then a file inside it used to send that file
+        to every tool twice."""
+        loose, folder = self._tmpfiles()
+        win = self._window()
+        win._attach_path(folder)
+        win._attach_path(os.path.join(folder, "logo.png"))
+        paths = [a["path"] for a in win.attachments]
+        self.assertEqual(len(paths), len(set(paths)))
+
+    def test_a_missing_file_reports_instead_of_failing_silently(self):
+        """Failures go through _explain now, which shows the plain-English
+        dialog rather than a raw QMessageBox."""
+        win = self._window()
+        with mock.patch.object(type(win), "_explain") as explained:
+            win._attach_path("/no/such/file.png")
+        self.assertTrue(explained.called)
+        self.assertEqual(explained.call_args[0][1], "attach")
+        self.assertEqual(win.attachments, [])

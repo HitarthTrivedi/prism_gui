@@ -5,11 +5,12 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
-    QFrame, QApplication, QDialogButtonBox,
+    QFrame, QApplication, QDialogButtonBox, QScrollArea, QWidget,
 )
 
 import os
 
+import i18n
 import paths
 import theme
 from widgets import icons
@@ -146,14 +147,68 @@ class _StageRow(QFrame):
         row.addWidget(open_btn)
 
 
-class CompletionDialog(QDialog):
-    def __init__(self, stage_infos: list[dict], parent=None):
+class _TaskHeader(QFrame):
+    """Names one task in a multi-task run, and says how it went before any of
+    its steps are read."""
+
+    def __init__(self, group: dict, parent=None):
         super().__init__(parent)
+        self.setObjectName("row")
+        box = QVBoxLayout(self)
+        box.setContentsMargins(14, 10, 14, 10)
+        box.setSpacing(3)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        num = QLabel(i18n.t("Task {n}").format(n=group.get("index", 0)))
+        num.setObjectName("h5")
+        head.addWidget(num)
+        stages = group.get("stages", [])
+        tools = []
+        for s in stages:                       # ordered, de-duplicated
+            if s.get("agent") and s["agent"] not in tools:
+                tools.append(s["agent"])
+        if group.get("error"):
+            head.addWidget(Chip("failed", "alert", "tagErr"))
+        else:
+            ok = sum(1 for s in stages if s.get("ok", True))
+            head.addWidget(Chip(f"{ok}/{len(stages)} steps", "check", "tagOk"))
+        head.addStretch(1)
+        box.addLayout(head)
+
+        what = QLabel(" ".join(group.get("task", "").split()) or "(no task text)")
+        what.setWordWrap(True)
+        box.addWidget(what)
+
+        # The question this window exists to answer at a glance: which AIs ran
+        # for THIS task. The per-step rows below carry the links.
+        line = (f"Used: {', '.join(tools)}" if tools else "No tool ran.")
+        if group.get("error"):
+            line += f" · {group['error']}"
+        used = QLabel(line)
+        used.setObjectName("meta")
+        used.setWordWrap(True)
+        box.addWidget(used)
+
+
+class CompletionDialog(QDialog):
+    """Shown when the work finishes.
+
+    `task_groups` turns this into the multi-task view: a heading per queued
+    task, then that task's steps beneath it. Left out, the dialog behaves
+    exactly as it always did and just lists `stage_infos` — a single task
+    should not have to read as "Task 1 of 1".
+    """
+
+    def __init__(self, stage_infos: list[dict], parent=None,
+                 task_groups: list[dict] | None = None):
+        super().__init__(parent)
+        multi = bool(task_groups and len(task_groups) > 1)
         self.setWindowTitle("All done")
-        self.resize(620, 460)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 20, 22, 18)
-        root.setSpacing(13)
+        self.resize(620, 560 if multi else 460)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(22, 20, 22, 18)
+        outer.setSpacing(13)
 
         head = QHBoxLayout()
         head.setSpacing(9)
@@ -161,26 +216,46 @@ class CompletionDialog(QDialog):
         mark.setPixmap(icons.pixmap("check", 20, theme.ACCENT))
         head.addWidget(mark)
         head.addWidget(heading("Prism finished the work"), stretch=1)
-        root.addLayout(head)
+        outer.addLayout(head)
 
-        pending = [i for i in stage_infos
+        rows = task_groups if multi else [{"stages": stage_infos}]
+        every = [s for g in rows for s in g.get("stages", [])]
+        pending = [i for i in every
                    if i.get("timed_out") or (not i.get("ok", True) and i.get("url"))]
-        sub = QLabel(
-            "Here's what each step produced — open only the ones you need."
-            if not pending else
-            f"Here's what each step produced. {len(pending)} of them ran past "
-            "Prism's wait — their tools are still working, so open those links "
-            "to collect the finished result.")
+        if multi:
+            lead = (f"All {len(task_groups)} tasks are done — here's what each "
+                    f"one used and what it produced.")
+        else:
+            lead = "Here's what each step produced — open only the ones you need."
+        if pending:
+            lead += (f" {len(pending)} step(s) ran past Prism's wait — their "
+                     "tools are still working, so open those links to collect "
+                     "the finished result.")
+        sub = QLabel(lead)
         sub.setObjectName("meta")
         sub.setWordWrap(True)
-        root.addWidget(sub)
+        outer.addWidget(sub)
 
-        for info in stage_infos:
-            root.addWidget(_StageRow(info))
+        # A ten-task run is far taller than any screen, so the body scrolls.
+        body_host = QWidget()
+        root = QVBoxLayout(body_host)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(13)
+        for group in rows:
+            if multi:
+                root.addWidget(_TaskHeader(group))
+            for info in group.get("stages", []):
+                root.addWidget(_StageRow(info))
         root.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(body_host)
+        outer.addWidget(scroll, stretch=1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         buttons.button(QDialogButtonBox.Close).clicked.connect(self.accept)
-        root.addWidget(buttons)
+        outer.addWidget(buttons)

@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 import favorites as FAV
+import i18n
+import identity
 import theme
 from widgets import icons
 from widgets.controls import ToggleSwitch, kicker, track
@@ -23,6 +25,7 @@ _PATH_ROLE = 1000
 # (key, label, icon) — the primary destinations, straight from the mock.
 PRIMARY = [
     ("home",    "Home",     "home"),
+    ("guide",   "How to use Prism", "help"),
     ("catalog", "AI tools", "grid"),
     ("runs",    "History",  "clock"),
     ("config",  "Settings", "sliders"),
@@ -57,6 +60,10 @@ SECONDARY = [
         ("licence", "Licence", "archive",
          "Your plan, what's included, seats and expiry", ""),
         ("agents",  "Agents",  "grid",  "Re-pick one agent per category", ""),
+        ("language", "Language", "globe",
+         "Prism's own language, and what the AI tools answer in", ""),
+        ("team",    "Your role", "user",
+         "Which job this copy is set up for, and the team workspace", ""),
         ("profile", "Profile", "user",  "Change what-you-do", ""),
         ("key",     "API key", "key",   "Change your Groq API key", ""),
         ("chrome",  "Chrome",  "globe", "Pin or auto-detect your Chrome version", ""),
@@ -157,8 +164,10 @@ class Sidebar(QFrame):
             root.addSpacing(4)
             for key, label, icon_name, tip, feature in items:
                 soon = feature == SOON
-                btn = nav_button(f"{label}  (soon)" if soon else label,
-                                 icon_name, small=True, tip=tip)
+                btn = nav_button(
+                    i18n.t("{addon}  (soon)").format(addon=i18n.t(label))
+                    if soon else label,
+                    icon_name, small=True, tip=tip)
                 if soon:
                     btn.setEnabled(False)
                 else:
@@ -196,9 +205,14 @@ class Sidebar(QFrame):
         help_icon = QLabel()
         help_icon.setPixmap(icons.pixmap("help", 16, theme.NEUTRAL[600]))
         help_row.addWidget(help_icon)
-        help_text = QLabel("Need a hand?")
-        help_text.setObjectName("meta")
-        help_text.setToolTip("Every panel explains itself — hover anything.")
+        help_text = QPushButton("Need a hand?")
+        help_text.setFlat(True)
+        help_text.setCursor(Qt.PointingHandCursor)
+        help_text.setStyleSheet(
+            f"text-align: left; border: none; color: {theme.NEUTRAL[600]};"
+            f"font-size: 13px; padding: 0;")
+        help_text.setToolTip("Opens the guide — what Prism can do and what to type")
+        help_text.clicked.connect(lambda: self.command_triggered.emit("guide"))
         help_row.addWidget(help_text, stretch=1)
         root.addLayout(help_row)
 
@@ -215,7 +229,23 @@ class Sidebar(QFrame):
         row.addWidget(mark)
         name = QLabel("PRISM")
         name.setObjectName("brand")
-        row.addWidget(track(name, 0.16), stretch=1)
+        # Stacked under the wordmark when this copy belongs to a company
+        # member: on a shared workspace several people run Prism side by side
+        # and the accent colour alone does not say WHICH sales person.
+        who = identity.describe()
+        if who:
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(0)
+            stack.addWidget(track(name, 0.16))
+            member = QLabel(who)
+            member.setObjectName("meta")
+            member.setToolTip("This copy of Prism is set up for this person. "
+                              "Change it in Settings \u2192 Your role.")
+            stack.addWidget(member)
+            row.addLayout(stack, stretch=1)
+        else:
+            row.addWidget(track(name, 0.16), stretch=1)
         return wrap
 
     @staticmethod
@@ -279,8 +309,9 @@ class Sidebar(QFrame):
                               theme.NEUTRAL[600] if unlocked else theme.NEUTRAL[400])
             btn.setProperty("locked", not unlocked)
             if not unlocked:
-                btn.setToolTip(f"{label} isn't in your licence — click to find "
-                               f"out about it")
+                btn.setToolTip(i18n.t(
+                    "{addon} isn't in your licence — click to find out "
+                    "about it").format(addon=label))
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
@@ -310,9 +341,9 @@ class Sidebar(QFrame):
             self.fav_list.addItem(li)
 
     def _add_favorite(self):
-        path = QFileDialog.getExistingDirectory(self, "Favorite a folder…")
+        path = QFileDialog.getExistingDirectory(self, i18n.t("Favorite a folder…"))
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "…or favorite a file")
+            path, _ = QFileDialog.getOpenFileName(self, i18n.t("…or favorite a file"))
         if not path:
             return
         FAV.add(path)

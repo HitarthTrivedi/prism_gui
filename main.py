@@ -18,10 +18,16 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 import app_meta
+import diagnostics
+import i18n
 import paths
 import theme
-from main_window import MainWindow
 from widgets import icons
+
+# MainWindow is imported inside main(), after i18n.start() has patched Qt.
+# Importing it here would be harmless today, but the moment a widget module
+# builds a QLabel at import time that label is created untranslated — and the
+# failure looks like one stubbornly English string with no obvious cause.
 
 
 def _selftest(app) -> int:
@@ -129,6 +135,7 @@ def _selftest(app) -> int:
         (f"Reel add-on (Pillow + renderer)"
          f"{'' if reel_ok else f' — {reel_err}'}", reel_ok),
     ]
+    from main_window import MainWindow
     win = MainWindow()
     win.show()
     checks.append(("main window", win.isVisible()))
@@ -169,6 +176,26 @@ def main():
     # Titlebar, taskbar, alt-tab and every dialog inherit this.
     app.setWindowIcon(icons.logo_icon())
 
+    # Before the first widget exists, and before the licence gate — that
+    # dialog is the very first thing a new customer sees, and it is the one
+    # screen they cannot skip. Also before the stylesheet, which both of
+    # these rewrite.
+    # Before anything that can fail: from here on, a crash lands in
+    # ~/.prism/logs instead of on a stdout a windowed build does not have.
+    diagnostics.install()
+
+    import core_bridge as CB
+    import identity
+    cfg = CB.config.load()
+    i18n.start(cfg, app)
+
+    # The signed-in member's role decides the accent colour, so a glance at
+    # the window says whose copy this is — and, for a manager running several,
+    # which one they are looking at. theme's constants have to move with the
+    # stylesheet or the custom-painted widgets keep the old blue.
+    role_hue = identity.hue()
+    theme.apply_role(role_hue)
+
     style_path = paths.resource("style.qss")
     if os.path.exists(style_path):
         with open(style_path, "r", encoding="utf-8") as f:
@@ -176,7 +203,19 @@ def main():
         # QSS url(…) paths must be absolute and posix-separated: a Windows
         # backslash inside url() is read as an escape and the icon vanishes.
         assets = paths.resource("assets").replace(os.sep, "/")
+        # Barlow has no Devanagari or Gujarati; this appends families that do
+        # to every font stack. A no-op for Latin-script languages.
+        qss = i18n.style_for_script(qss)
+        qss = theme.role_stylesheet(qss, role_hue)
         app.setStyleSheet(qss.replace("%ASSETS%", assets))
+
+    # Make sure this member's folders exist before anything tries to write a
+    # run into them.
+    try:
+        import workspace
+        workspace.ensure_member(identity.current()["mid"], cfg)
+    except OSError:
+        pass    # an unreachable share must not stop the app opening
 
     if os.environ.get("PRISM_SELFTEST"):
         sys.exit(_selftest(app))
@@ -184,6 +223,7 @@ def main():
     if not _licence_gate():
         sys.exit(0)
 
+    from main_window import MainWindow
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

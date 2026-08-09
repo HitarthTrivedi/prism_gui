@@ -7,7 +7,8 @@ The mock shows the task as settled text with an [Edit] button; here the text
 from __future__ import annotations
 from PySide6.QtCore import Signal, QTimer, Qt
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QTextEdit, QPushButton, QSizePolicy,
+    QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QTextEdit, QPushButton,
+    QSizePolicy,
 )
 
 import theme
@@ -36,11 +37,45 @@ def _action(label: str, icon_name: str, tip: str = "") -> QPushButton:
     return btn
 
 
+class _QueuedTaskRow(QFrame):
+    """One task waiting its turn, with the number it will run in."""
+
+    def __init__(self, index: int, text: str, on_remove, parent=None):
+        super().__init__(parent)
+        self.setObjectName("row")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 7, 8, 7)
+        row.setSpacing(9)
+
+        num = QLabel(str(index))
+        num.setObjectName("tagNeutral")
+        num.setAlignment(Qt.AlignCenter)
+        num.setFixedWidth(22)
+        row.addWidget(num)
+
+        # Elide in the label rather than truncating the stored text: the queue
+        # holds the real task, this only has to be recognisable at a glance.
+        one_line = " ".join(text.split())
+        label = QLabel(one_line if len(one_line) <= 78 else one_line[:77] + "…")
+        label.setToolTip(text)
+        row.addWidget(label, stretch=1)
+
+        drop = QPushButton()
+        drop.setObjectName("smallBtn")
+        drop.setCursor(Qt.PointingHandCursor)
+        drop.setToolTip("Remove this task")
+        drop.setFixedWidth(28)
+        icons.button_icon(drop, "x", 13, theme.TEXT)
+        drop.clicked.connect(on_remove)
+        row.addWidget(drop)
+
+
 class InputPanel(BlueprintFrame):
     route_clicked = Signal(str)
     mic_toggle_clicked = Signal()
     attach_file_clicked = Signal()
     attach_folder_clicked = Signal()
+    queue_changed = Signal(int)     # how many tasks are queued behind this one
 
     _MIN_H, _MAX_H = 46, 150
 
@@ -71,6 +106,25 @@ class InputPanel(BlueprintFrame):
         self.content.addWidget(self.text)
         self.content.addSpacing(10)
 
+        # ── the queue ────────────────────────────────────────────────────────
+        # Tasks the user lined up before starting. Prism plans and runs them in
+        # order, so this list IS the running order — hence the numbers.
+        self._queue: list[str] = []
+        self.queue_box = QWidget()
+        qv = QVBoxLayout(self.queue_box)
+        qv.setContentsMargins(0, 0, 0, 0)
+        qv.setSpacing(5)
+        self.queue_head = QLabel("")
+        self.queue_head.setObjectName("meta")
+        qv.addWidget(self.queue_head)
+        self.queue_rows = QWidget()
+        self._queue_layout = QVBoxLayout(self.queue_rows)
+        self._queue_layout.setContentsMargins(0, 0, 0, 0)
+        self._queue_layout.setSpacing(4)
+        qv.addWidget(self.queue_rows)
+        self.queue_box.setVisible(False)
+        self.content.addWidget(self.queue_box)
+
         row = QHBoxLayout()
         row.setSpacing(8)
         self.mic_btn = _action("Speak", "mic", "Dictate the task instead of typing")
@@ -85,6 +139,12 @@ class InputPanel(BlueprintFrame):
         folder_btn = _action("Add folder", "folder", "Attach a whole folder")
         folder_btn.clicked.connect(self.attach_folder_clicked.emit)
         row.addWidget(folder_btn)
+
+        self.add_task_btn = _action(
+            "Add task", "plus",
+            "Queue this one and type another — Prism runs them in order")
+        self.add_task_btn.clicked.connect(self._queue_current)
+        row.addWidget(self.add_task_btn)
         row.addStretch(1)
 
         self.route_btn = QPushButton(" Make a plan")
@@ -112,6 +172,66 @@ class InputPanel(BlueprintFrame):
         self._state = "empty"
         self.set_state("empty")
 
+    # ── the task queue ────────────────────────────────────────────────────
+    def _queue_current(self):
+        """Move whatever is in the box onto the queue and clear it for the
+        next one. Deliberately not allowed while a run is going: the queue is
+        read once when the run starts, so appending mid-run would silently do
+        nothing."""
+        text = self.text.toPlainText().strip()
+        if not text:
+            self.append_status("Type the task first, then Add task.")
+            return
+        if self._state in ("routing", "running"):
+            return
+        self._queue.append(text)
+        self.text.clear()
+        self.append_status("")
+        self._render_queue()
+        self.set_state("empty")
+        self.queue_changed.emit(len(self._queue))
+
+    def _render_queue(self):
+        while self._queue_layout.count():
+            item = self._queue_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        for i, task in enumerate(self._queue):
+            self._queue_layout.addWidget(
+                _QueuedTaskRow(i + 1, task,
+                               lambda _=False, n=i: self._remove_task(n)))
+        n = len(self._queue)
+        self.queue_head.setText(
+            "" if not n else
+            f"{n} task{'s' if n != 1 else ''} queued — they run in this order, "
+            "and the box below is the last one.")
+        self.queue_box.setVisible(bool(n))
+
+    def _remove_task(self, index: int):
+        if 0 <= index < len(self._queue):
+            self._queue.pop(index)
+            self._render_queue()
+            self.queue_changed.emit(len(self._queue))
+            # Dropping the last queued task while the box is empty leaves
+            # nothing to plan — put the chip back to match.
+            if not self._queue and not self.text.toPlainText().strip():
+                self.set_state("empty")
+            elif self._state == "empty" and self._queue:
+                self.set_state("ready")
+
+    def tasks(self) -> list[str]:
+        """Everything to run, in order: the queue, then whatever is still in
+        the box. The box counts as the final task so the user never has to
+        press Add task before Make a plan."""
+        tail = self.text.toPlainText().strip()
+        return self._queue + ([tail] if tail else [])
+
+    def clear_queue(self):
+        self._queue = []
+        self._render_queue()
+        self.queue_changed.emit(0)
+
     # ── state ─────────────────────────────────────────────────────────────
     def set_state(self, key: str):
         """Drive the chip. Also gates the CTA: there's nothing to plan until
@@ -121,7 +241,12 @@ class InputPanel(BlueprintFrame):
         self._state = key
         label, icon_name, style = _STATES[key]
         self.state_chip.set(label, icon_name, style)
-        self.route_btn.setEnabled(key in ("ready", "planned", "done"))
+        # A queued task is enough to plan with even when the box is empty —
+        # otherwise "Add task" would disable the very button it leads to.
+        self.route_btn.setEnabled(
+            key in ("ready", "planned", "done")
+            or (key == "empty" and bool(self._queue)))
+        self.add_task_btn.setEnabled(key not in ("routing", "running"))
 
     def _autosize(self):
         height = int(self.text.document().size().height()) + 4
@@ -137,6 +262,7 @@ class InputPanel(BlueprintFrame):
         still 'done'."""
         self.text.clear()
         self.append_status("")
+        self.clear_queue()
         self.set_state("empty")
 
     def set_query_text(self, text: str):

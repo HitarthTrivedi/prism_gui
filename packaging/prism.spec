@@ -80,6 +80,18 @@ if _server_url:
 datas = [
     (os.path.join(GUI_DIR, "assets"), "assets"),
     (os.path.join(GUI_DIR, "style.qss"), "."),
+    # The translation catalogue and every language pack. i18n.load() reads
+    # these through paths.resource(), and a build that ships without them
+    # doesn't fail — it just quietly renders in English no matter what the
+    # customer picked, which is a far harder bug to be told about.
+    (os.path.join(GUI_DIR, "lang"), "lang"),
+    # The Google OAuth client, if this build has one. Optional on purpose:
+    # gdrive.configured() reports "not set up" rather than failing, so a build
+    # made without it still ships — it just has no Drive picker.
+    *([(os.path.join(GUI_DIR, "integrations", "google_client.json"),
+        "integrations")]
+      if os.path.exists(os.path.join(GUI_DIR, "integrations",
+                                     "google_client.json")) else []),
     # The committed licence-token test vector. main.py's --selftest verifies a
     # real signature against it, which is the only check that proves the
     # crypto survived freezing on this platform — an import succeeding says
@@ -141,6 +153,22 @@ hiddenimports = [
     "cryptography.hazmat.primitives.asymmetric.ed25519",
     "cryptography.hazmat.primitives.ciphers.aead",
 ]
+
+# The Google Drive libraries are imported lazily inside integrations/gdrive.py,
+# so the analyser never sees them. Added only when they are actually installed
+# on the build machine: a build without them still ships, with the Drive picker
+# reporting itself unavailable rather than crashing.
+try:
+    import google_auth_oauthlib  # noqa: F401
+    import googleapiclient       # noqa: F401
+    hiddenimports += collect_submodules("googleapiclient")
+    hiddenimports += collect_submodules("google_auth_oauthlib")
+    hiddenimports += collect_submodules("google.oauth2")
+    datas += collect_data_files("googleapiclient")
+    print("[prism] Google Drive support bundled")
+except ImportError:
+    print("[prism] Google Drive libraries not installed - picker will be "
+          "unavailable in this build")
 hiddenimports += collect_submodules("undetected_chromedriver")
 hiddenimports += collect_submodules("selenium")
 

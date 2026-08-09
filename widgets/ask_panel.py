@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 import favorites
+import i18n
 import theme
 from widgets import icons
 
@@ -94,7 +95,7 @@ class AskPanel(QWidget):
 
     # ── files ───────────────────────────────────────────────────────────
     def _pick_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "Attach files")
+        paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Attach files"))
         if paths:
             self.add_paths(paths)
 
@@ -117,7 +118,8 @@ class AskPanel(QWidget):
         # user picks the file they actually mean, rather than silently
         # attaching a whole directory.
         if os.path.isdir(path):
-            picked, _ = QFileDialog.getOpenFileNames(self, "Choose from this folder", path)
+            picked, _ = QFileDialog.getOpenFileNames(
+                self, i18n.t("Choose from this folder"), path)
             if picked:
                 self.add_paths(picked)
         else:
@@ -161,7 +163,8 @@ class MoreOptions(QFrame):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(6)
 
-        self.toggle = QPushButton(f"  {label}  (optional)")
+        self.toggle = QPushButton(
+            "  " + i18n.t("{label}  (optional)").format(label=i18n.t(label)))
         self.toggle.setObjectName("smallBtn")
         self.toggle.setCursor(Qt.PointingHandCursor)
         self.toggle.setCheckable(True)

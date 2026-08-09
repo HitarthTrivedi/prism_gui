@@ -32,6 +32,11 @@ _DEFAULT: dict[str, Any] = {
     "last_refresh_attempt": 0,
     "payload_etag": "",
     "server": "",
+    # The member's designation key (licensing/designation.py). Beside the
+    # licence rather than in config.json for the same reason as the token:
+    # config.py rewrites the whole dict from whatever the caller holds, and a
+    # stale copy written back would silently demote somebody to no role.
+    "designation": "",
 }
 
 
@@ -81,6 +86,19 @@ def save(user_dir: str, data: dict[str, Any]) -> None:
         except OSError:
             pass
         raise
+
+
+def update(user_dir: str, **fields: Any) -> dict[str, Any]:
+    """Change some fields and leave the rest alone.
+
+    The read-modify-write that save() alone invites callers to do by hand —
+    and doing it by hand is how a caller holding a stale dict wipes the token
+    while only meaning to set the designation.
+    """
+    data = load(user_dir)
+    data.update(fields)
+    save(user_dir, data)
+    return data
 
 
 def touch_clock(user_dir: str, data: dict[str, Any] | None = None) -> dict[str, Any]:

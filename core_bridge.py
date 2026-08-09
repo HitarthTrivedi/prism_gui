@@ -46,6 +46,7 @@ if _TERMINAL_DIR not in sys.path:
 
 from core import config as config          # noqa: E402
 from core import agents as agents          # noqa: E402
+from core import lang as lang              # noqa: E402
 from core import router as router          # noqa: E402
 
 # Count Groq tokens for licence metering. Installed here, from the GUI side,

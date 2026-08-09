@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import i18n
 import wakeword
 import theme
 from workers import AutomationWorker, SendWorker, VerifyWorker, RecordWorker
@@ -298,9 +299,10 @@ class EmailComposeDialog(QDialog):
         if not CB.voice.available():
             QMessageBox.information(
                 self, "Speak",
-                "Voice needs PyAudio on this machine:\n\n"
-                f"    {wakeword.install_hint()}\n\n"
-                "Everything else works — just type instead.")
+                i18n.t("Voice needs PyAudio on this machine:\n\n"
+                       "    {hint}\n\n"
+                       "Everything else works — just type instead."
+                       ).format(hint=wakeword.install_hint()))
             return
         self.ask.set_recording(True)
         self.status.setText("Listening — press Stop when you're done.")
@@ -402,9 +404,13 @@ class EmailComposeDialog(QDialog):
             QMessageBox.information(self, "Search", "Describe who the recipient is first.")
             return
         agents = CB.config.active_agents(self.cfg)
-        finder = next((s for s in ("research", "brains") if agents.get(s)), None)
+        # Leads first — it is the stage meant for "who do I contact". Research
+        # and brains stay as the fallback for anyone who has not set one.
+        finder = next((s for s in ("leads", "research", "brains")
+                       if agents.get(s)), None)
         if not finder:
-            QMessageBox.warning(self, "Search", "No research/brains agent configured.")
+            QMessageBox.warning(
+                self, "Search", "No leads/research/brains agent configured.")
             return
         routing = {finder: {"needed": True, "questions": [
             "Your ONLY task is: find the official, public contact email address for "
@@ -513,12 +519,15 @@ class EmailComposeDialog(QDialog):
         files = ", ".join(f["name"] for f in self.source_files) or "none"
         confirm = QMessageBox.question(
             self, "Confirm send",
-            f"Send to {len(self.recipients)} recipient(s)?\n\n"
-            f"To: {names}{more}\n"
-            f"Subject: {subject}\n"
-            f"Attachments: {files}\n"
-            f"From: {self.cfg['email']['address']}\n\n"
-            "Each address gets its own message — this can't be undone.",
+            i18n.t("Send to {n} recipient(s)?\n\n"
+                   "To: {to}\n"
+                   "Subject: {subject}\n"
+                   "Attachments: {files}\n"
+                   "From: {sender}\n\n"
+                   "Each address gets its own message — this can't be undone."
+                   ).format(n=len(self.recipients), to=f"{names}{more}",
+                            subject=subject, files=files,
+                            sender=self.cfg["email"]["address"]),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No)   # nobody should send a blast by pressing Enter
         if confirm != QMessageBox.Yes:
@@ -548,10 +557,13 @@ class EmailComposeDialog(QDialog):
         (self._sent_ok if ok else self._sent_bad).append(
             email if ok else (email, error))
         tail = "" if ok else f" — {error[:60]}"
-        self.status.setText(
-            f"{i}/{total} · {'sent' if ok else 'FAILED'} {email}{tail}"
-            + (f"  ({len(self._sent_bad)} failed so far)"
-               if self._sent_bad and ok else ""))
+        line = i18n.t("{i}/{total} · {state} {email}").format(
+            i=i, total=total, email=email,
+            state=i18n.t("sent") if ok else i18n.t("FAILED")) + tail
+        if self._sent_bad and ok:
+            line += "  " + i18n.t("({n} failed so far)").format(
+                n=len(self._sent_bad))
+        self.status.setText(line)
 
     def _on_send_done(self, sent: list, failed: list):
         self._set_sending(False)
@@ -579,7 +591,8 @@ class EmailComposeDialog(QDialog):
         self.status.setText(f"Couldn't send: {hint}")
         again = QMessageBox.question(
             self, "Send failed",
-            f"{hint}\n\nThe server said: {error}\n\nOpen account setup now?")
+            i18n.t("{hint}\n\nThe server said: {error}\n\n"
+                   "Open account setup now?").format(hint=hint, error=error))
         if again == QMessageBox.Yes:
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() == QDialog.Accepted:

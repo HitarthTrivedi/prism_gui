@@ -1,0 +1,279 @@
+"""Rebuild lang/_catalogue.json — the list of English strings Prism can translate.
+
+Why a catalogue at all, when i18n.t() could just translate anything handed to
+it? Because it must NOT translate anything handed to it. The same setText()
+that draws "Start the work" also draws a customer's name, a file path, an
+agent's brand name and — via the output panel — whole paragraphs written by
+Claude. The catalogue is the allow-list: a string is only ever swapped if it
+is in here, so everything else passes through untouched by construction.
+
+That makes this file the one place a new piece of UI copy has to be
+registered. Run it after adding any:
+
+    python3 devtools/extract_strings.py
+
+It rewrites lang/_catalogue.json in place and prints what changed. Existing
+translation packs are never touched — a key that disappears from the
+catalogue simply stops being looked up, and a new key falls back to English
+until someone translates it.
+
+What it finds:
+  * string literals passed to the Qt calls that put words on screen
+    (setText, setToolTip, QMessageBox.warning, QPushButton("…"), …)
+  * string literals inside the module-level tables that hold UI copy
+    (sidebar.PRIMARY, agents_panel.STAGE_COPY, …) — these reach the screen
+    through a variable, so the call-site scan cannot see them
+  * anything already wrapped in t("…") by hand, which is how f-string
+    templates like "Opened {n} tabs" get in
+
+What it deliberately skips: URLs, stylesheets, object names, format specs,
+and anything without a letter in it.
+"""
+from __future__ import annotations
+
+import ast
+import json
+import re
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "lang", "_catalogue.json")
+
+# Directories that hold no user-facing GUI copy. prism_terminal is the shared
+# engine — it is a submodule the CLI also uses, and translating the CLI is not
+# this app's business. The few engine strings that surface in the GUI arrive
+# through the status sink and are listed by hand in EXTRA below.
+SKIP_DIRS = {".git", ".venv", "build", "dist", "__pycache__", "prism_terminal",
+             "tests", "packaging", "devtools", "assets", "docs", "lang"}
+
+# A few helpers take a string that is NOT copy — a stylesheet object name, an
+# icon name, a callback. Listing the argument positions that ARE copy keeps
+# 'tagAccent' and 'sliders' out of the translator's way.
+ARG_SLOTS = {
+    "_tag": (0,),           # (text, style)
+    "_mini": (1,),          # (icon_name, tip, slot)
+    "icon_label": (1,),     # (icon_name, text, size, colour)
+    "nav_button": (0, 3),   # (label, icon_name, small, tip)
+    "_action": (0, 2),      # (label, icon_name, tip, slot)
+}
+
+# Words that look like copy but must never be translated. The product name is
+# the product name in every language; the rest are formats and placeholders
+# the user is meant to read literally.
+NEVER = {
+    "Prism", "PRISM", "Prism Setup", "Prism Studio", "Prism Reel", "Groq",
+    "Chrome", "Canva", "Apollo", "ChatGPT", "Claude", "Perplexity", "Gmail",
+    "PRSM-XXXXX-XXXXX-XXXXX-XXXXX", "gsk_…", "tagAccent", "tagOutline",
+    # Language names in the picker stay in their own script, always. The one
+    # person who most needs that list is someone who set the wrong language
+    # and can no longer read the interface — translating "English" into
+    # Devanagari is exactly the moment it stops being a way back out.
+    "English",
+    # A QFileDialog name filter is a syntax, not a sentence — Qt parses the
+    # parentheses. Translating it breaks the filter.
+    "Text (*.txt)",
+}
+
+# Calls whose string arguments end up on screen.
+TEXT_CALLS = {
+    # Qt setters
+    "setText", "setToolTip", "setPlaceholderText", "setWindowTitle",
+    "setStatusTip", "setWhatsThis", "setTitle", "setLabelText", "setSuffix",
+    "setPrefix", "setItemText", "setTabText", "setInformativeText",
+    "setDetailedText", "addItem", "addItems", "insertItem",
+    # Qt static dialogs — (parent, title, body) are all args 1..2
+    "information", "warning", "critical", "question", "about",
+    "getExistingDirectory", "getOpenFileName", "getOpenFileNames",
+    "getSaveFileName", "getText",
+    # Qt widget constructors that take their label first
+    "QLabel", "QPushButton", "QCheckBox", "QRadioButton", "QGroupBox",
+    "QAction", "QListWidgetItem", "QToolButton", "QTreeWidgetItem",
+    # Prism's own text helpers (widgets/controls.py) and local factories
+    "heading", "meta", "kicker", "icon_label", "nav_button", "Section",
+    "_action", "_tag", "_mini", "pill", "chip",
+    # the hand-written escape hatch
+    "t", "_t", "tr",
+}
+
+# Module-level tables whose strings reach the screen through a variable.
+# Matched on the assignment target's name, anywhere in the GUI package.
+COPY_TABLES = {
+    "PRIMARY", "SECONDARY", "STAGE_COPY", "FEATURE_NAMES", "FEATURE_BLURB",
+    "STATUS_COPY", "STATES", "STEP_COPY", "COPY", "LABELS", "TIPS",
+    "PLACEHOLDERS", "SKIP", "SOON",
+}
+
+# Strings that reach the UI from somewhere this scan cannot see: the engine's
+# status sink, and the handful of built-in Qt button labels Prism relies on.
+EXTRA = [
+    "Yes", "No", "OK", "Cancel", "Save", "Close", "Open", "Apply", "Retry",
+    "Ignore", "Discard", "Help", "Reset", "Abort",
+]
+
+
+def _is_copy(s: str) -> bool:
+    """True if this literal is prose meant for a human, not machinery."""
+    s = s.strip()
+    if len(s) < 2 or not any(c.isalpha() for c in s):
+        return False
+    if s in NEVER:
+        return False
+    # A translatable template — "{n} steps of {total}" — is copy, and its
+    # braces must not be mistaken for the stylesheet braces filtered below.
+    # Blanked out first so the rest of the checks see the prose around them.
+    bare = re.sub(r"\{[a-z_][a-z0-9_]*\}", "", s, flags=re.IGNORECASE)
+    if not any(c.isalpha() for c in bare):
+        return False
+    # URLs, paths, selectors, keys
+    if bare.lstrip().startswith(("http", "gsk_", "/", "~/", ".", "#", "--")):
+        return False
+    if "://" in s or s.startswith("data:"):
+        return False
+    # CSS / stylesheet fragments
+    if ("{" in bare and "}" in bare) or ";" in bare and ":" in bare:
+        return False
+    # HTML the code splices around a value — '<a href="', '</a>', '" style="'
+    if "<" in s or ">" in s or '="' in s:
+        return False
+    # snake_case / camelCase identifiers, object names, config keys
+    if " " not in s and ("_" in s or s.islower() and len(s) < 14 and s.isalnum()):
+        return False
+    # CSS selectors like "QFrame#setupHeader"
+    if s.startswith("Q") and ("#" in s or "::" in s):
+        return False
+    # A shard of an f-string: the code built "Opened " + n + " tabs" and we
+    # are looking at one end of it. Translating half a sentence is worse than
+    # leaving it in English, so these are skipped and the call site is
+    # converted to i18n.t("Opened {n} tabs") by hand instead — see the
+    # "templates" note in i18n.py.
+    if s.endswith((" ", ":", "—", "(")) and not s.endswith("…"):
+        return False
+    return True
+
+
+def _walk_strings(node: ast.AST):
+    """Every string constant inside node, except the pieces of an f-string.
+
+    An f-string is a JoinedStr whose literal halves are Constants like
+    "Opened " and " tab(s) in Chrome". Collecting those would put half a
+    sentence in front of a translator, and it could never match anything
+    anyway: by the time setText() sees the value it is one assembled string.
+
+    So f-strings are stepped over entirely. The way to make one translatable
+    is to convert the call site to a template — i18n.t("Opened {n} tab(s)")
+    .format(n=…) — which arrives here as a plain Constant inside a t() call.
+    """
+    if isinstance(node, ast.JoinedStr):
+        return
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, str):
+            yield node.value
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from _walk_strings(child)
+
+
+def collect() -> dict[str, list[str]]:
+    found: dict[str, set[str]] = {}
+
+    def note(value: str, where: str, forced: bool = False):
+        # `forced` means the string was written inside an explicit t() call.
+        # The author has already declared it copy, so the prose heuristics —
+        # which reject a bare "sent" as an identifier and "{i}/{total} · {x}"
+        # as punctuation — must not get a second opinion.
+        if forced and value.strip():
+            # NEVER still wins. A call site can declare something is copy, but
+            # it cannot make the product's own name translatable — "Prism" is
+            # "Prism" in every language, and a window titled with a translated
+            # brand is a bug nobody would think to look for.
+            if value.strip() in NEVER:
+                return
+            found.setdefault(value.strip(), set()).add(where)
+            return
+        if _is_copy(value):
+            # Stored stripped: t() re-applies the caller's padding, so the
+            # icon-spacing prefix on "  Start the work" must not fork the key.
+            found.setdefault(value.strip(), set()).add(where)
+
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, filename)
+            rel = os.path.relpath(path, ROOT)
+            try:
+                tree = ast.parse(open(path, encoding="utf-8").read())
+            except SyntaxError as exc:
+                print(f"  ! skipped {rel}: {exc}", file=sys.stderr)
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    func = node.func
+                    name = (func.attr if isinstance(func, ast.Attribute)
+                            else func.id if isinstance(func, ast.Name) else "")
+                    if name in TEXT_CALLS:
+                        slots = ARG_SLOTS.get(name)
+                        args = ([node.args[i] for i in slots
+                                 if i < len(node.args)]
+                                if slots else node.args)
+                        explicit = name in ("t", "_t", "tr")
+                        for arg in args:
+                            for s in _walk_strings(arg):
+                                note(s, rel, forced=explicit)
+                        for kw in node.keywords:
+                            if kw.arg in ("text", "tip", "title", "blurb",
+                                          "label", "placeholder", "desc"):
+                                for s in _walk_strings(kw.value):
+                                    note(s, rel)
+                elif isinstance(node, ast.Assign):
+                    targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                    if any(t in COPY_TABLES for t in targets):
+                        for s in _walk_strings(node.value):
+                            note(s, rel)
+
+    for s in EXTRA:
+        found.setdefault(s, set()).add("(built-in)")
+    return {k: sorted(v) for k, v in sorted(found.items(), key=lambda kv: kv[0].lower())}
+
+
+def main() -> int:
+    old = {}
+    if os.path.exists(OUT):
+        old = json.load(open(OUT, encoding="utf-8")).get("strings", {})
+
+    strings = collect()
+    added = sorted(set(strings) - set(old))
+    gone = sorted(set(old) - set(strings))
+
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump({
+            "_comment": "Generated by devtools/extract_strings.py — do not "
+                        "edit by hand. Maps each English UI string to the "
+                        "files it appears in. Translation packs (lang/xx.json) "
+                        "key off these exact strings.",
+            "count": len(strings),
+            "strings": strings,
+        }, f, indent=1, ensure_ascii=False)
+        f.write("\n")
+
+    print(f"{len(strings)} strings → {os.path.relpath(OUT, ROOT)}")
+    if added:
+        print(f"\n  +{len(added)} new (need translating):")
+        for s in added[:40]:
+            print(f"      {s!r}")
+        if len(added) > 40:
+            print(f"      … and {len(added) - 40} more")
+    if gone:
+        print(f"\n  -{len(gone)} no longer used:")
+        for s in gone[:20]:
+            print(f"      {s!r}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

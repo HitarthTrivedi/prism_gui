@@ -20,3 +20,7 @@ packaging/icons/
 # Assembled downloads. The tarball is >100MB, which GitHub rejects outright —
 # releases belong on the Releases page, not in the tree.
 release/
+
+# OAuth client for the Google Drive integration — never commit
+integrations/google_client.json
+integrations/token.json

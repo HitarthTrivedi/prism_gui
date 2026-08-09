@@ -88,8 +88,10 @@ def _compute() -> LicenseState:
 
     if _status.clock_rolled_back(int(data.get("last_seen_utc") or 0)):
         return _status.tampered(
-            "This computer's clock has been set back. Connect to the internet "
-            "so Prism can check your licence.")
+            "This computer's date and time look wrong — the clock has gone "
+            "backwards.\n\nCheck the date and time in your computer's "
+            "settings and set them to update automatically, then connect to "
+            "the internet so Prism can re-check your licence.")
 
     try:
         claims = token.verify(data["token"],

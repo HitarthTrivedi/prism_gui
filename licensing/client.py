@@ -24,7 +24,7 @@ import paths
 # packaging/build.py writes this from PRISM_SERVER_URL so a test build can be
 # pointed at a laptop or a LAN address without editing source. Leave it unset
 # for real releases and this default ships.
-DEFAULT_SERVER = "https://api.alphakore.in"
+DEFAULT_SERVER = "https://prism-license-server.onrender.com"
 
 # Short on purpose. This runs at launch; if the server has not answered in five
 # seconds we would rather carry on with the cached token than make the customer
@@ -36,7 +36,18 @@ TIMEOUT = 8
 # Authorising a run happens with the customer watching, right after they
 # pressed Start the work. They will wait a few seconds for an answer; what
 # they will not forgive is being told no because we gave up too early.
-AUTHORIZE_TIMEOUT = 15
+#
+# Sized for a COLD SERVER, not a warm one. A host that sleeps when idle — which
+# is every free and low tier — takes 30-60s to wake, and 15s meant the first
+# run of every morning was refused for a server that was merely getting up.
+# There is no offline fallback (see licensing.authorize), so this timeout is
+# the whole difference between "Prism works" and "Prism doesn't" at 9am.
+AUTHORIZE_TIMEOUT = 45
+
+# One retry for a call the customer is watching. A cold start often eats the
+# first request entirely — the server wakes, but not before the socket gives
+# up — and the second one lands on a warm instance a moment later.
+AUTHORIZE_RETRIES = 1
 
 # Activation is the most expensive call we make — look up the licence, count
 # seats, insert the device, commit — and the one the customer least forgives
@@ -83,20 +94,29 @@ def server_url() -> str:
 
 
 def _post(endpoint: str, body: dict[str, Any], *, app_version: str,
-          timeout: int | None = None) -> dict[str, Any]:
+          timeout: int | None = None, retries: int = 0) -> dict[str, Any]:
     import requests  # local import: keeps `import licensing` cheap at startup
     import sys
+    import time
 
     url = f"{server_url()}{endpoint}"
     headers = {
         "X-Prism-Version": app_version,
         "X-Prism-Platform": sys.platform,
     }
-    try:
-        response = requests.post(url, json=body, headers=headers,
-                                 timeout=timeout or TIMEOUT)
-    except Exception as e:                      # noqa: BLE001 — requests raises broadly
-        raise Unreachable(str(e)) from e
+    response = None
+    for attempt in range(retries + 1):
+        try:
+            response = requests.post(url, json=body, headers=headers,
+                                     timeout=timeout or TIMEOUT)
+            break
+        except Exception as e:                  # noqa: BLE001 — requests raises broadly
+            # Only a TRANSPORT failure retries. A server that answered has
+            # said something, even if it said no, and repeating the request
+            # would double-count a metered run.
+            if attempt >= retries:
+                raise Unreachable(str(e)) from e
+            time.sleep(2)
 
     try:
         data = response.json()
@@ -154,7 +174,8 @@ def authorize(license_id: str, device_fp: str, *, app_version: str,
         "action": action,
         "feature": feature,
         "app_version": app_version,
-    }, app_version=app_version, timeout=AUTHORIZE_TIMEOUT)
+    }, app_version=app_version, timeout=AUTHORIZE_TIMEOUT,
+       retries=AUTHORIZE_RETRIES)
 
 
 def usage(license_id: str, device_fp: str, *, app_version: str,

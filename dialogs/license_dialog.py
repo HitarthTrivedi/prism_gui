@@ -35,13 +35,12 @@ from widgets.controls import heading, kicker, meta
 
 # What each entitlement is called in front of a customer. The internal ids
 # ("boq") must never reach the screen.
-FEATURE_NAMES = {
-    "core": "The pipeline — plan a task and run it across your AI tools",
-    "boq": "BOQ — bills of quantities from a CAD drawing or a written spec",
-    "email": "Email — draft and send from your attached files",
-    "reel": "Reel & Studio — rendered video from a script",
-    "bom": "BOM & Stock — match a parts list against your inventory",
-}
+# Kept as a name for compatibility, but the content now lives in plans.py so
+# the paywall, Setup's "Included" list, the guide and whatever mints the keys
+# all describe a feature the same way.
+import plans
+
+FEATURE_NAMES = {key: f"{f.label} — {f.blurb}" for key, f in plans.FEATURES.items()}
 
 
 def feature_label(feature: str) -> str:

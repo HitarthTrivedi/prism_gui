@@ -35,6 +35,83 @@ ACCENT_RAMP = {
 # --color-divider: 16% ink over the canvas.
 DIVIDER = "#d0d0d1"
 
+# ── per-role accent ─────────────────────────────────────────────────────────
+# A company running Prism has one copy per person, and the fastest way to know
+# whose copy you are looking at — or which profile a manager has switched into
+# — is that the whole app is a different colour.
+#
+# Only the HUE moves. Every swatch keeps the lightness and saturation of the
+# blue it replaces, so contrast against text and canvas is identical in every
+# role and nothing has to be re-checked for legibility. That is why this
+# generates the ramp instead of listing nine hand-picked palettes: nine
+# palettes drift, and one of them ends up with grey-on-grey somewhere.
+_BASE_ACCENT = dict(ACCENT_RAMP)
+_BASE_ACCENT_KEYS = ("ACCENT", "ACCENT_2")
+
+# Everything the stylesheet says in the accent hue. Rewritten at load time by
+# role_stylesheet(); the keys are the shipped blues, the values are what they
+# become. Kept as a list so a hex that appears in more than one role of the
+# design (ACCENT and ramp 600 are close but distinct) each map correctly.
+_ACCENT_HEXES = ("#5980a6", "#728fab", "#eef6ff", "#d6ebff", "#b5d9fd",
+                 "#94bce3", "#749dc4", "#597ea3", "#416180", "#2c455d",
+                 "#1d2d3d")
+
+
+def _hex_to_hls(value: str) -> tuple[float, float, float]:
+    import colorsys
+    value = value.lstrip("#")
+    r, g, b = (int(value[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return colorsys.rgb_to_hls(r, g, b)
+
+
+def _hls_to_hex(h: float, l: float, s: float) -> str:
+    import colorsys
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+def recolour(value: str, hue: int) -> str:
+    """One accent swatch, rotated to `hue`, keeping its lightness exactly."""
+    _h, lightness, saturation = _hex_to_hls(value)
+    return _hls_to_hex((hue % 360) / 360.0, lightness, saturation)
+
+
+def role_palette(hue: int) -> dict[str, str]:
+    """{shipped blue -> the role's version of it}, for every accent swatch."""
+    return {value: recolour(value, hue) for value in _ACCENT_HEXES}
+
+
+def apply_role(hue: int) -> None:
+    """Point this module's accent constants at the role's hue.
+
+    The painted widgets (toggle switch, tool chips, registration marks) read
+    ACCENT and ACCENT_RAMP directly, so they have to move with the stylesheet
+    or the seams show — which is the same reason this module exists at all.
+    """
+    global ACCENT, ACCENT_2, ACCENT_RAMP
+    if hue == 210:                      # Prism's own blue: nothing to do
+        return
+    ACCENT = recolour("#5980a6", hue)
+    ACCENT_2 = recolour("#728fab", hue)
+    ACCENT_RAMP = {step: recolour(value, hue)
+                   for step, value in _BASE_ACCENT.items()}
+
+
+def role_stylesheet(qss: str, hue: int) -> str:
+    """Rewrite every accent hex in the stylesheet to the role's hue.
+
+    A blunt string swap rather than a QSS parser, and safe because these
+    eleven hexes are only ever used as the accent — the neutrals, the canvas
+    and the one error red are separate values and are left alone, so the app
+    keeps its identity and only the accent changes.
+    """
+    if hue == 210:
+        return qss
+    for original, replacement in role_palette(hue).items():
+        qss = qss.replace(original, replacement)
+        qss = qss.replace(original.upper(), replacement)
+    return qss
+
 # ── type ────────────────────────────────────────────────────────────────────
 FONT_BODY = "Barlow"
 FONT_HEADING = "Barlow Condensed"

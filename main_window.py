@@ -12,16 +12,22 @@ The work column is a two-page stack: composing (task + plan) and running
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication, QFont
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QFont, QCursor
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
+    QMenu,
 )
 
+import awake
 import core_bridge as CB
+import diagnostics
+import i18n
+import identity
 import licensing
 import theme
+import workspace
 from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.input_panel import InputPanel
@@ -99,6 +105,18 @@ class MainWindow(QMainWindow):
         self._run_id = ""                         # licence server's id for the current run
         self._active_run = None                   # the AutomationWorker, so Stop can reach it
 
+        # ── the task queue ───────────────────────────────────────────────────
+        # Tasks the user lined up before pressing Make a plan. Each one is a
+        # full journey of its own — plan, authorise, run — because the router
+        # can only plan one task at a time and each is separately billable.
+        # _task_runs accumulates {"task", "stages"} so the completion window
+        # can say which AIs ran for task 1 as distinct from task 2.
+        self._task_queue: list[str] = []
+        self._task_pos = 0                        # 1-based index of the running task
+        self._task_runs: list[dict] = []
+        self._queue_stopped = False               # a licence refusal kills the rest
+        self._auto_run = False                    # set once Start the work is pressed
+
         self._build_ui()
         self._wire()
         self.refresh_licence_ui()
@@ -106,7 +124,11 @@ class MainWindow(QMainWindow):
         # Only nag about setup once the licence is sorted — a customer who
         # cannot use Prism yet does not need a Groq key dialog on top.
         if licensing.state().usable and not CB.config.is_configured(self.cfg):
-            self._open_setup()
+            # Deferred to the event loop rather than run here. A modal opened
+            # from inside __init__ blocks before the window is on screen, so
+            # it can appear behind it or with nowhere to centre itself — and
+            # the constructor never returns until it is dismissed.
+            QTimer.singleShot(0, self._first_run)
 
     # ── layout ──────────────────────────────────────────────────────────────
     def _fit_to_screen(self):
@@ -176,7 +198,14 @@ class MainWindow(QMainWindow):
         self.sidebar.set_entitlements(state.features, state.usable)
 
         if state.status == licensing.VALID:
-            self.banner.setVisible(False)
+            # A healthy licence frees the banner for the other thing worth
+            # interrupting someone about: their work is no longer reaching the
+            # shared folder, so their manager cannot see it.
+            offline = workspace.unreachable(self.cfg)
+            if offline:
+                self._show_banner(offline, "#8a5a2f", "alert")
+            else:
+                self.banner.setVisible(False)
             return
 
         if state.status == licensing.STALE:
@@ -199,6 +228,9 @@ class MainWindow(QMainWindow):
             text = ("Your licence has ended. History and everything you've "
                     "already made are still here — new runs are paused until "
                     "it's renewed.")
+        self._show_banner(text, tone, icon_name)
+
+    def _show_banner(self, text: str, tone: str, icon_name: str):
         self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
         self._banner_text.setText(text)
         self._banner_text.setStyleSheet(f"color: {tone}; font-size: 13px;")
@@ -277,10 +309,13 @@ class MainWindow(QMainWindow):
         self.input_panel.mic_toggle_clicked.connect(self._toggle_mic)
         self.input_panel.attach_file_clicked.connect(self._attach_file_dialog)
         self.input_panel.attach_folder_clicked.connect(self._attach_folder_dialog)
+        self.input_panel.queue_changed.connect(self._on_queue_changed)
 
         self.files_panel.mention_accepted.connect(self._accept_mention)
         self.files_panel.mention_change_requested.connect(self._change_mention)
         self.files_panel.detach_requested.connect(self._detach)
+        self.files_panel.detach_folder_requested.connect(self._detach_folder)
+        self.files_panel.detach_all_requested.connect(self._detach_all)
 
         self.agents_panel.run_requested.connect(self._run_pipeline)
         self.output_panel.back_requested.connect(self._back_to_plan)
@@ -308,6 +343,12 @@ class MainWindow(QMainWindow):
         self._stage_agents = {}
         self._stage_results = []
         self.pending_mentions = []
+        # The queue belongs to the journey that just ended, not the next one.
+        self._task_queue = []
+        self._task_pos = 0
+        self._task_runs = []
+        self._queue_stopped = False
+        self._auto_run = False
         self.input_panel.reset()
         self.agents_panel.clear()
         self.prompt_panel.clear()
@@ -315,11 +356,20 @@ class MainWindow(QMainWindow):
         self.output_panel.set_finished(False)
         self.statusBar().showMessage("Ready for the next one.", 4000)
 
+    def _on_queue_changed(self, count: int):
+        if count:
+            self.statusBar().showMessage(
+                f"{count} task{'s' if count != 1 else ''} queued. Add more, or "
+                "Make a plan to start the first one.", 5000)
+
     # ── sidebar commands ─────────────────────────────────────────────────────
     def _handle_command(self, key: str):
         if key == "catalog":
             AIDirectoryDialog(self).exec()
-        elif key in ("agents", "profile", "key", "chrome", "licence", "config"):
+        elif key == "guide":
+            self._open_guide()
+        elif key in ("agents", "profile", "key", "chrome", "licence",
+                     "language", "team", "config"):
             self._open_setup(focus=key)
         elif key == "login":
             self._open_login_tabs()
@@ -407,6 +457,43 @@ class MainWindow(QMainWindow):
             self.cfg = dlg.cfg
             self.statusBar().showMessage("Setup saved.", 4000)
 
+    def _first_run(self):
+        self._welcome()
+        self._open_setup()
+
+    def _welcome(self):
+        """Shown once, before Setup, on a machine that has never been set up.
+
+        Setup asks for an API key from a service they have not heard of. Doing
+        that cold is the moment a first-time user decides the software is for
+        somebody else — so it is worth thirty seconds explaining what Prism is
+        and offering the guide first.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.t("Welcome to Prism"))
+        box.setText(i18n.t("Prism does jobs for you using AI."))
+        box.setInformativeText(i18n.t(
+            "You describe a job in your own words — \u201cwrite a proposal "
+            "for a 40-camera CCTV project\u201d — and Prism works out which "
+            "AI tools are needed, uses them in order, and hands you the "
+            "finished result.\n\n"
+            "Setting up takes about five minutes and only happens once. "
+            "Would you like a quick tour first?"))
+        tour = box.addButton(i18n.t("Show me around"), QMessageBox.AcceptRole)
+        box.addButton(i18n.t("Set up now"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is tour:
+            self._open_guide()
+
+    def _open_guide(self):
+        """The guide, with its buttons wired back into the rail so reading
+        about a thing and reaching it are the same gesture."""
+        from dialogs.guide_dialog import GuideDialog
+        dialog = GuideDialog(self)
+        dialog.command_requested.connect(self._handle_command)
+        dialog.exec()
+
     def _open_login_tabs(self):
         agents = CB.config.active_agents(self.cfg)
         if not agents:
@@ -423,7 +510,9 @@ class MainWindow(QMainWindow):
                 urls.append(CB.agents.AGENT_REGISTRY[name]["url"])
                 seen.add(name)
         automation.open_login_tabs(urls)
-        self.statusBar().showMessage(f"Opened {len(urls)} login tab(s) in Chrome.", 4000)
+        self.statusBar().showMessage(
+            i18n.t("Opened {n} login tab(s) in Chrome.").format(n=len(urls)),
+            4000)
 
     def _show_status(self):
         agents = CB.config.active_agents(self.cfg)
@@ -439,31 +528,177 @@ class MainWindow(QMainWindow):
         HistoryDialog(self).exec()
 
     # ── attachments ───────────────────────────────────────────────────────────
+    def _explain(self, error: object, context: str = "") -> None:
+        """Show a problem the way a first-time user needs to see it.
+
+        Every failure the customer can meet goes through here rather than
+        through a raw QMessageBox, so each one arrives as "here is what
+        happened and here is what to do" — and so the technical text is
+        logged even though it is not what fills the screen.
+
+        The dialog can hand back an action, which is the difference between
+        telling somebody to open Settings and taking them there.
+        """
+        from dialogs.problem_dialog import show_problem
+        action = show_problem(self, error, context)
+        if not action:
+            return
+        if action.startswith("settings:"):
+            self._open_setup(focus=action.split(":", 1)[1])
+        elif action == "login":
+            self._open_login_tabs()
+        elif action == "guide":
+            self._open_guide()
+
     def _attach_path(self, path: str):
+        """Take one file or folder into the run.
+
+        The whole body is guarded, redrawing the panel included. It used to
+        guard only the read: anything that went wrong while RENDERING the new
+        row escaped the slot, Qt swallowed it, and the file appeared not to
+        attach at all — no error, no row, nothing to go on. A failure here has
+        to be visible, because an attachment silently not arriving is
+        indistinguishable from a dead button.
+        """
+        if not path:
+            return
+        already = {a["path"] for a in self.attachments}
         try:
             if os.path.isdir(path):
-                added = CB.files.attach_dir(path)
-                self.attachments.extend(added)
+                # Stamped with where they came from so the tray can show one
+                # row for the folder and take the whole group back out again.
+                # The engine still gets the flat list — it uploads files, not
+                # folders — so this is presentation only.
+                added = [{**a, "from_dir": path} for a in CB.files.attach_dir(path)]
             else:
-                self.attachments.append(CB.files.attach(path))
-        except Exception as e:
-            QMessageBox.warning(self, "Attach", f"Couldn't attach {path}: {e}")
+                added = [CB.files.attach(path)]
+        except Exception as e:                          # noqa: BLE001
+            self._explain(e, "attach")
             return
-        self.files_panel.set_attached(self.attachments)
+
+        # Attaching a folder and then a file inside it used to queue the same
+        # file twice, and every stage then uploaded it twice.
+        fresh = [a for a in added if a["path"] not in already]
+        if not fresh:
+            self.statusBar().showMessage(
+                i18n.t("Already attached."), 4000)
+            return
+        self.attachments.extend(fresh)
+        try:
+            self.files_panel.set_attached(self.attachments)
+        except Exception as e:                          # noqa: BLE001
+            # The read succeeded; only the drawing failed. Say so rather than
+            # letting the exception escape the slot, where Qt swallows it and
+            # the attachment appears simply not to have happened.
+            QMessageBox.warning(self, "Attach", i18n.t(
+                "Attached, but the list couldn't be drawn: {error}"
+            ).format(error=e))
+            return
+        if len(fresh) == 1:
+            self.statusBar().showMessage(i18n.t("Attached {name}.").format(
+                name=fresh[0]["name"]), 4000)
+        else:
+            self.statusBar().showMessage(i18n.t(
+                "Attached {n} files from {name}.").format(
+                    n=len(fresh),
+                    name=os.path.basename(path.rstrip(os.sep))), 4000)
+        # A folder whose files were all already attached falls out above, at
+        # the "Already attached" guard.
 
     def _attach_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Attach a file")
+        """Ask where the file is before asking which file.
+
+        A plain file dialog can only offer the disk, and half of what a
+        company wants to feed Prism lives in its Drive. The choice comes
+        first, and is skipped entirely when Drive isn't set up in this build —
+        an option that always fails is worse than no option.
+        """
+        # Every source is a folder on this machine — Drive for Desktop,
+        # OneDrive and Dropbox all mount as one — so "pick a source" is really
+        # "which folder should the chooser open in". That keeps the whole
+        # feature to one extra menu and no credentials at all.
+        try:
+            import cloud
+            places = cloud.sources()
+        except Exception:                               # noqa: BLE001
+            places = []
+
+        start_in = ""
+        if places:
+            menu = QMenu(self)
+            here = menu.addAction(i18n.t("This computer"))
+            menu.addSeparator()
+            for place in places:
+                act = menu.addAction(place["label"])
+                act.setData(place["path"])
+            chosen = menu.exec(QCursor.pos())
+            if chosen is None:
+                return                                  # dismissed the menu
+            if chosen is not here:
+                start_in = chosen.data() or ""
+
+        # One chooser either way. Opening it INSIDE the cloud folder is the
+        # whole trick: from there it behaves exactly like picking any other
+        # file, and nothing downstream needs to know where it came from.
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Attach a file"), start_in)
         if path:
             self._attach_path(path)
+        else:
+            # Distinguishes "you closed the chooser" from "the chooser never
+            # opened" and from "attaching failed" — three very different bugs
+            # that otherwise all look like a button that does nothing.
+            self.statusBar().showMessage(i18n.t("No file chosen."), 3000)
+
+    def _attach_from_drive(self):
+        """Pick from Drive, download, then hand the local path to the same
+        attach path a local file takes — nothing downstream knows the
+        difference."""
+        from dialogs.drive_dialog import DriveDialog
+        picker = DriveDialog(self)
+        if picker.exec() == QDialog.Accepted and picker.path:
+            self._attach_path(picker.path)
+            self.statusBar().showMessage(
+                i18n.t("Brought {name} down from Google Drive.").format(
+                    name=os.path.basename(picker.path)), 5000)
 
     def _attach_folder_dialog(self):
-        path = QFileDialog.getExistingDirectory(self, "Attach a folder")
+        path = QFileDialog.getExistingDirectory(self, i18n.t("Attach a folder"))
         if path:
             self._attach_path(path)
 
     def _detach(self, path: str):
         self.attachments = [a for a in self.attachments if a["path"] != path]
         self.files_panel.set_attached(self.attachments)
+
+    def _detach_folder(self, folder: str):
+        """Take a whole "Add folder" back out in one go.
+
+        A folder is attached as its individual files, so before this the only
+        way to undo one was to select and detach fifteen rows by hand — and
+        Prism would have uploaded all fifteen to every tool in the meantime.
+        """
+        keep = [a for a in self.attachments if a.get("from_dir") != folder]
+        removed = len(self.attachments) - len(keep)
+        self.attachments = keep
+        self.files_panel.set_attached(self.attachments)
+        if removed:
+            where = os.path.basename(folder.rstrip(os.sep))
+            self.statusBar().showMessage(
+                (i18n.t("Detached 1 file from {name}.").format(name=where)
+                 if removed == 1 else
+                 i18n.t("Detached {n} files from {name}.").format(
+                     n=removed, name=where)), 4000)
+
+    def _detach_all(self):
+        if not self.attachments:
+            return
+        count = len(self.attachments)
+        self.attachments = []
+        self.files_panel.set_attached(self.attachments)
+        self.statusBar().showMessage(
+            (i18n.t("Detached the one attached file.") if count == 1
+             else i18n.t("Detached all {n} files.").format(n=count)), 4000)
 
     # ── voice: record → interpret → resolve mentions ─────────────────────────
     def _toggle_mic(self):
@@ -541,14 +776,41 @@ class MainWindow(QMainWindow):
             self._attach_path(m["path"])
 
     def _change_mention(self, index: int):
-        path = QFileDialog.getExistingDirectory(self, "Pick the right folder…")
+        path = QFileDialog.getExistingDirectory(self, i18n.t("Pick the right folder…"))
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "…or pick the right file")
+            path, _ = QFileDialog.getOpenFileName(self, i18n.t("…or pick the right file"))
         if path:
             self._attach_path(path)
 
     # ── routing ───────────────────────────────────────────────────────────────
     def _route(self, query: str):
+        """Start the journey. The button hands over whatever is in the box,
+        but the queue is the real source of truth — the box is only its last
+        entry (see InputPanel.tasks).
+
+        `query` still wins when the panel has nothing, so callers that drive
+        the window directly — the wake word, a remote prompt, the tests —
+        keep working without going through the text box.
+        """
+        tasks = self.input_panel.tasks() or (
+            [query] if query and query.strip() else [])
+        if not tasks:
+            self.statusBar().showMessage("Type or speak a task first.", 4000)
+            return
+        self._task_queue = tasks
+        self._task_pos = 0
+        self._task_runs = []
+        self._queue_stopped = False
+        self._plan_task(0)
+
+    def _plan_task(self, index: int):
+        """Plan task `index` of the queue. Every task goes through this, so a
+        single task is just a queue of one and there is no second code path to
+        keep in step."""
+        self._task_pos = index + 1
+        self._route_one(self._task_queue[index])
+
+    def _route_one(self, query: str):
         if not query.strip():
             self.statusBar().showMessage("Type or speak a task first.", 4000)
             return
@@ -558,6 +820,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Setup needed", "Finish Setup (API key + agents) first.")
             return
         self._last_query = query
+        if len(self._task_queue) > 1:
+            self.statusBar().showMessage(
+                f"Planning task {self._task_pos} of {len(self._task_queue)}…", 0)
         self.input_panel.set_busy(True)
         # Planning is itself a Groq call — it costs tokens and is the step
         # every run begins with — so it is authorised and metered like one.
@@ -576,9 +841,14 @@ class MainWindow(QMainWindow):
     def _start_route(self, auth, query: str):
         """Second half of _route, once the server has said yes."""
         if not auth.allowed:
+            # A refusal will refuse identically for every task behind this
+            # one, so stop the queue rather than firing N hopeless requests
+            # at the licence server.
+            self._queue_stopped = True
             self.input_panel.set_busy(False)
             self.input_panel.set_state("ready")
             QMessageBox.warning(self, "Licence", auth.message)
+            self._finish_queue()
             return
         self._run_id = getattr(auth, "run_id", "")
         worker = RouteWorker(query, self.cfg, self.attachments)
@@ -598,13 +868,34 @@ class MainWindow(QMainWindow):
         self.prompt_panel.set_content(self._last_query, routing, agents_cfg)
         self.agents_panel.set_content(routing, agents_cfg)
         self.work_stack.setCurrentIndex(COMPOSE)
+        # Tasks 2..n were authorised by the same "Start the work" press as
+        # task 1 — stopping to ask again for each would defeat the point of
+        # queueing them. Only the first plan is offered for review.
+        if self._auto_run:
+            self.statusBar().showMessage(
+                f"Task {self._task_pos} of {len(self._task_queue)} — starting…",
+                4000)
+            self._run_pipeline()
+            return
+        total = len(self._task_queue)
         self.statusBar().showMessage(
-            "Plan ready — drop any step you don't want, then Start the work.", 6000)
+            "Plan ready — drop any step you don't want, then Start the work."
+            if total <= 1 else
+            f"Plan ready for task 1 of {total}. Start the work and Prism will "
+            f"run all {total} in order.", 8000)
 
     def _on_route_failed(self, error: str):
         self.input_panel.set_busy(False)
         self.input_panel.set_state("ready")
-        QMessageBox.warning(self, "Planning failed", error)
+        # Mid-queue a planning failure is one bad task, not a dead run — record
+        # it and carry on, the same way a failed stage doesn't end a pipeline.
+        if self._auto_run and self._task_pos < len(self._task_queue):
+            self._record_task_run(failed=f"Planning failed: {error}")
+            self.statusBar().showMessage(
+                f"Task {self._task_pos} couldn't be planned — moving on.", 6000)
+            self._advance_queue()
+            return
+        self._explain(error, "plan")
 
     # ── running the pipeline ────────────────────────────────────────────────
     def _run_pipeline(self):
@@ -612,6 +903,9 @@ class MainWindow(QMainWindow):
             return
         if not licensing.require("core", self):
             return
+        # Pressing Start the work commits the whole queue, not just the plan on
+        # screen. From here every later task plans and runs without stopping.
+        self._auto_run = True
         run_agents = self.agents_panel.selected_agents()
         if not run_agents:
             QMessageBox.information(self, "Run", "Every step is switched off — "
@@ -629,10 +923,12 @@ class MainWindow(QMainWindow):
             names = ", ".join(sorted(set(locked.values())))
             answer = QMessageBox.question(
                 self, "Not in your licence",
-                f"{names} isn't part of your licence, so "
-                f"{'those steps' if len(locked) > 1 else 'that step'} can't run."
-                f"\n\nRun the rest of the plan without "
-                f"{'them' if len(locked) > 1 else 'it'}?",
+                (i18n.t("{tools} isn't part of your licence, so those steps "
+                        "can't run.\n\nRun the rest of the plan without them?")
+                 if len(locked) > 1 else
+                 i18n.t("{tools} isn't part of your licence, so that step "
+                        "can't run.\n\nRun the rest of the plan without it?")
+                 ).format(tools=names),
                 QMessageBox.Yes | QMessageBox.Cancel)
             if answer != QMessageBox.Yes:
                 # Straight to the pitch — they have just told us they want it.
@@ -653,8 +949,8 @@ class MainWindow(QMainWindow):
             if not ok:
                 answer = QMessageBox.question(
                     self, "Prism Studio",
-                    f"{why}\n\nRun with the fixed house style (Prism Reel) "
-                    "instead?",
+                    i18n.t("{why}\n\nRun with the fixed house style "
+                           "(Prism Reel) instead?").format(why=why),
                     QMessageBox.Yes | QMessageBox.Cancel)
                 if answer != QMessageBox.Yes:
                     return
@@ -677,8 +973,12 @@ class MainWindow(QMainWindow):
         """Second half of _run_pipeline, once the server has said yes."""
         self.statusBar().clearMessage()
         if not auth.allowed:
+            # Same reasoning as the planning refusal: it will say no to every
+            # remaining task too, so end the queue instead of grinding through.
+            self._queue_stopped = True
             self.agents_panel.set_run_enabled(True)
             QMessageBox.warning(self, "Licence", auth.message)
+            self._finish_queue()
             return
 
         self._run_id = getattr(auth, "run_id", "")
@@ -693,6 +993,10 @@ class MainWindow(QMainWindow):
         self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments, self._last_query)
+        # Hold the machine awake for the duration. A run is tens of minutes
+        # and the whole promise is that you walk away — a laptop that sleeps
+        # halfway through takes the browser session with it.
+        awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
         worker.done.connect(self._on_run_done)
@@ -808,12 +1112,69 @@ class MainWindow(QMainWindow):
         }
         if error:
             record["error"] = error
+        # Stamped with who ran it, so a run file is self-describing even if it
+        # is later copied out of its folder — the manager's History shows a
+        # name against the work rather than inferring one from the path.
+        me = identity.current()
+        record["member"] = {"mid": me["mid"], "name": me["name"],
+                            "role": me["role"]}
         try:
-            CB.config.save_run(record)
+            # Always the REAL member, never identity.viewing(): an admin
+            # reading someone else's profile and then starting a run must file
+            # that run under themselves, not under the person they were
+            # looking at.
+            CB.config.save_run(record, workspace.runs_dir(me["mid"], self.cfg))
         except Exception as e:
             self.statusBar().showMessage(f"Couldn't save this run to history: {e}", 8000)
 
+    # ── the task queue ───────────────────────────────────────────────────────
+    def _record_task_run(self, failed: str = ""):
+        """Bank the task that just ended, so its stages survive the reset at
+        the top of the next run. This is the whole reason the queue works:
+        _stage_results is emptied for every run, and without copying it out
+        first, task 1's results would be gone before task 2 finished."""
+        self._task_runs.append({
+            "task": getattr(self, "_last_query", ""),
+            "index": self._task_pos,
+            "stages": list(self._stage_results),
+            "error": failed,
+        })
+
+    def _more_tasks(self) -> bool:
+        return (not self._queue_stopped
+                and self._task_pos < len(self._task_queue))
+
+    def _advance_queue(self):
+        """Plan and run the next queued task."""
+        if not self._more_tasks():
+            self._finish_queue()
+            return
+        nxt = self._task_pos          # _task_pos is 1-based, so this is the next index
+        self.statusBar().showMessage(
+            f"Task {nxt} done — planning task {nxt + 1} of "
+            f"{len(self._task_queue)}…", 5000)
+        self._plan_task(nxt)
+
+    def _finish_queue(self):
+        """Every task is done (or the queue was cut short). Show one window
+        covering all of them."""
+        self._auto_run = False
+        self.input_panel.clear_queue()
+        groups = [g for g in self._task_runs if g["stages"] or g["error"]]
+        if not groups:
+            if not self._queue_stopped:
+                QMessageBox.information(
+                    self, "Finished",
+                    "No step produced output — check the results above.")
+            return
+        # One task behaves exactly as before: a flat list, no task headings.
+        if len(groups) == 1:
+            CompletionDialog(groups[0]["stages"], self).exec()
+        else:
+            CompletionDialog(groups[0]["stages"], self, task_groups=groups).exec()
+
     def _on_run_done(self, responses: dict, links: dict):
+        awake.release()
         stopped = bool(getattr(self, "_active_run", None)
                        and self._active_run.stopping())
         self._active_run = None
@@ -824,26 +1185,28 @@ class MainWindow(QMainWindow):
         self.output_panel.set_running(False)
         licensing.report_usage(getattr(self, "_run_id", ""))
         self._save_run(responses, links)
+        self._record_task_run()
 
         if stopped:
-            # A stopped run still produced whatever finished before it, and
-            # that is worth keeping and showing — the customer stopped it
-            # because of what came next, not to throw away what came before.
+            # Stop means stop the lot. Pressing it to escape one bad task and
+            # then watching four more start would be the opposite of what the
+            # button says — but everything already finished is still shown.
+            self._queue_stopped = True
             self.statusBar().showMessage(
                 "Stopped — everything finished so far is saved to History.",
                 8000)
-            if self._stage_results:
-                CompletionDialog(self._stage_results, self).exec()
+            self._finish_queue()
+            return
+
+        if self._more_tasks():
+            self._advance_queue()
             return
 
         self.statusBar().showMessage("All done — saved to History.", 6000)
-        if self._stage_results:
-            CompletionDialog(self._stage_results, self).exec()
-        else:
-            QMessageBox.information(self, "Finished",
-                                    "No step produced output — check the results above.")
+        self._finish_queue()
 
     def _on_run_failed(self, error: str):
+        awake.release()
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self.output_panel.set_running(False)
@@ -854,9 +1217,20 @@ class MainWindow(QMainWindow):
         # Kept too — a run that broke halfway is exactly the one you want to
         # go back and read later.
         self._save_run(error=error)
-        QMessageBox.warning(self, "Run failed", error)
-        if self._stage_results:   # some stages still completed before the failure
-            CompletionDialog(self._stage_results, self).exec()
+        self._record_task_run(failed=error)
+
+        # Tasks are independent, so one broken pipeline is not a reason to
+        # abandon the four the customer queued behind it. Report it in the
+        # status bar rather than a modal — a dialog per failure in a ten-task
+        # queue would need ten dismissals before anything else could run.
+        if self._more_tasks():
+            self.statusBar().showMessage(
+                f"Task {self._task_pos} failed ({error}) — carrying on.", 8000)
+            self._advance_queue()
+            return
+
+        self._explain(error, "run")
+        self._finish_queue()
 
     # ── wake word ─────────────────────────────────────────────────────────────
     def toggle_wakeword(self, on: bool):
@@ -898,4 +1272,9 @@ class MainWindow(QMainWindow):
         # Anything metered but not yet sent — a run that ended just before the
         # window closed, or events buffered while the server was unreachable.
         licensing.report_usage(getattr(self, "_run_id", ""))
+        # An unbalanced acquire (window closed mid-run) would otherwise leave
+        # `caffeinate` alive after Prism has gone, and the machine would never
+        # sleep again until reboot.
+        awake.release_all()
+        diagnostics.write("INFO", "--- Prism closed ---")
         event.accept()

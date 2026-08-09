@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from licensing import device, keyformat, token as T
+import workspace as W
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY_PATH = os.path.join(HERE, "dev-signing-key.hex")
@@ -168,6 +169,44 @@ def cmd_vector(args) -> int:
     return 0
 
 
+def cmd_designation(args) -> int:
+    """Mint the second key: the one that says which job a member does.
+
+    Signed with the same private key as the licence token but under its own
+    version prefix, so a designation key can never be replayed as a licence or
+    the other way round. See licensing/designation.py for the verifier.
+
+    The member id defaults to role+name, which is also the name of their
+    folder in the workspace — so `ls members/` reads as an org chart.
+
+        python3 devtools/mint.py designation \\
+            --license-id lic_8842 --role sales --name "Ravi Patel"
+    """
+    import roles as R
+    from licensing import designation as D
+
+    if not R.get(args.role):
+        print(f"unknown role {args.role!r}. Known: {', '.join(R.ORDER)}",
+              file=sys.stderr)
+        return 2
+
+    private = load_private()
+    mid = args.mid or W.member_id(args.role, args.name)
+    claims = D.build_claims(org=args.license_id, mid=mid, role=args.role,
+                            name=args.name, kid=args.kid,
+                            now=int(args.now or time.time()))
+    payload_b64 = D.encode_payload(claims)
+    signature = private.sign(D.signing_input(payload_b64))
+    key = f"{D.PREFIX}.{payload_b64}.{T.b64u_encode(signature)}"
+
+    print(key)
+    print(f"\n  {args.name or '(no name)'} — {R.label(args.role)}\n"
+          f"  member id : {mid}\n"
+          f"  licence   : {args.license_id}\n"
+          f"  folder    : members/{mid}/", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -195,12 +234,24 @@ def main() -> int:
         p.add_argument("--device", default="")
         p.add_argument("--verbose", action="store_true")
 
+    des = sub.add_parser("designation",
+                         help="mint a member's designation key")
+    des.add_argument("--license-id", required=True,
+                     help="the company licence this key belongs to")
+    des.add_argument("--role", required=True, help="a key from roles.ROLES")
+    des.add_argument("--name", default="", help="the person's name")
+    des.add_argument("--mid", default="",
+                     help="member id / folder name (default: role-name)")
+    des.add_argument("--kid", default="dev1")
+    des.add_argument("--now", type=int, default=0)
+
     sub.add_parser("vector", help="regenerate the committed test vector")
 
     args = parser.parse_args()
     return {
         "keygen": cmd_keygen, "key": cmd_key, "token": cmd_token,
         "install": cmd_install, "vector": cmd_vector,
+        "designation": cmd_designation,
     }[args.cmd](args)
 
 
