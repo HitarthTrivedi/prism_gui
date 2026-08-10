@@ -67,10 +67,15 @@ FEATURES: dict[str, Feature] = {
 
     "boq": Feature(
         "boq", "BOQ — Bills of Quantities",
-        "Measure a CAD drawing and price the job",
-        "Attach the drawing and get a priced BOQ you can check line by line. "
-        "The measured counts are saved to a spreadsheet so every figure is "
-        "verifiable."),
+        "Measure a CAD drawing and get the quantities",
+        # Says "quantities", not "priced". The engine measures and deliberately
+        # leaves the Rate and Amount columns blank — the costing is the
+        # customer's. Promising a priced BOQ in the paywall copy would be
+        # selling something the product does not do, and the demo would be the
+        # moment they found out.
+        "Attach the drawing and get the measured quantities, line by line, in "
+        "a spreadsheet you can check against the drawing. Your rates go in "
+        "the blank columns — Prism counts, you price."),
 
     "bom": Feature(
         "bom", "BOM & Stock",
@@ -93,6 +98,14 @@ FEATURES: dict[str, Feature] = {
         "Send from your own account, one copy per recipient",
         "Prism drafts it, you approve it, and it goes out from your own "
         "address — never a bulk-mail service."),
+
+    "inbox": Feature(
+        "inbox", "Inbox to Order",
+        "Read the mail, register the inquiries, quote, chase, track the order",
+        "Prism reads your inbox, files every drawing, keeps your inquiry "
+        "register, prices from your own rate sheet, chases the customers who "
+        "go quiet and sends your SOPs — on your own computer. It stops twice: "
+        "before a price goes out, and before you accept a PO."),
 
     "dev": Feature(
         "dev", "Build tools & pages",
@@ -121,7 +134,7 @@ PLANS: dict[str, Plan] = {
         "Marketing agencies, consultants, service businesses — anyone whose "
         "output is words, pictures and proposals",
         includes=("core", "marketing", "leads", "email", "reel", "dev"),
-        addons=("boq", "bom", "attendance"),
+        addons=("inbox", "boq", "bom", "attendance"),
         note="Everything that makes and sells. The shop-floor tools are "
              "there if they ever need one, sold separately."),
 
@@ -130,11 +143,14 @@ PLANS: dict[str, Plan] = {
         "works", "Prism Works",
         "Manufacturers, fabricators, electrical and civil contractors — "
         "anyone whose output is a quoted, measured job",
-        includes=("core", "boq", "bom", "attendance", "email"),
+        includes=("core", "boq", "bom", "attendance", "email", "inbox"),
         addons=("marketing", "leads", "reel", "dev"),
-        note="The measuring and quoting tools inclusive. Most of these firms "
-             "do little marketing at first and buy it later — which is "
-             "exactly why it is the add-on."),
+        note="The measuring and quoting tools inclusive. Inbox to Order is in "
+             "here rather than sold on top, because it is the piece they use "
+             "every single day — it is what makes them open Prism at all, and "
+             "the rest is what they find once they have. Most of these firms "
+             "do little marketing at first and buy it later, which is exactly "
+             "why that is the add-on."),
 
     # ── 3. everything ────────────────────────────────────────────────────
     "complete": Plan(

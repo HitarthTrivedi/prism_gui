@@ -35,6 +35,13 @@ certifi
 ezdxf     # BOQ reads DXF geometry directly (pulls in numpy)
 pillow    # Prism Reel draws every frame with PIL
 
+# Inbox to Order reads the customer's own rate list, and a rate list is an
+# Excel file — asking a factory owner to "save as CSV first" before Prism can
+# quote anything is exactly the friction that stops it being used. Optional at
+# RUNTIME (core/quoting.py falls back to CSV with an instruction if this is
+# missing), but bundled in every build so nobody meets that fallback.
+openpyxl
+
 # ── Licensing ───────────────────────────────────────────────────────────────
 # Ed25519 to verify licence tokens, ChaCha20-Poly1305 to decrypt the engine
 # payload. Chosen over PyNaCl because PyInstaller ships maintained hooks for
