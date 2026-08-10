@@ -24,7 +24,17 @@ import paths
 # packaging/build.py writes this from PRISM_SERVER_URL so a test build can be
 # pointed at a laptop or a LAN address without editing source. Leave it unset
 # for real releases and this default ships.
-DEFAULT_SERVER = "https://prism-license-server.onrender.com"
+#
+# It must stay the DOMAIN, never the hosting provider's own address. The domain
+# is the only thing that lets the licence server move — to another host, to a
+# different region, off a free tier — without shipping a new app to everyone
+# who already installed one. A build that hard-codes prism-license-server
+# .onrender.com is welded to Render for the life of that binary.
+#
+# This was regressed once, silently, by a one-line change inside a commit about
+# something else. Every customer activation in that build would have gone to
+# the wrong host. tests/test_licensing_endpoint.py now fails if it drifts again.
+DEFAULT_SERVER = "https://api.alphakore.in"
 
 # Short on purpose. This runs at launch; if the server has not answered in five
 # seconds we would rather carry on with the cached token than make the customer

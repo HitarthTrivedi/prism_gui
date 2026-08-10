@@ -4,7 +4,7 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **413 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+Tests: **420 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
 
 ---
 
@@ -149,6 +149,34 @@ by a test:
   inquiries arrive under one. It matched nothing on a rate list and told a
   human nothing either. The opening line of the message — skipping the
   greeting — is now used when the subject carries no information.
+
+### Two bugs from round 2, found while chasing the CI failure
+
+Neither is part of Inbox to Order. Both were introduced by round 2 and both are
+the same shape as the scenario bugs — silent, no symptom, wrong only where it
+counts.
+
+- **The licence server address was regressed to the hosting provider's URL.**
+  A one-line change to `DEFAULT_SERVER` rode along inside a commit about
+  cold-start timeouts: `api.alphakore.in` became
+  `prism-license-server.onrender.com`. Nothing failed — the app built, started
+  and self-tested clean — and **every customer activation in that build would
+  have gone to the wrong host.** It also welds the binary to Render for its
+  whole life, since the domain is the only thing that lets the server move
+  without shipping a new app. `SHIPPING.md`, `LICENSING.md` and the comment in
+  `licensing/keys.py` all name the domain; only the code disagreed. Restored,
+  and `tests/test_licensing_endpoint.py` now fails if it drifts again — it also
+  checks the address is HTTPS, has no trailing slash, and still matches the
+  regex `packaging/prism.spec` uses to rewrite it for staging builds.
+- **`core_bridge.py` described the opposite of what it does.** It claimed a
+  sibling `../prism_terminal` checkout took priority "so you're always working
+  against the copy you're editing". It does not: `paths.resource()` resolves to
+  the submodule when running from source and is checked first, so a sibling was
+  never reached. The behaviour is right — the submodule is what gets committed
+  and built — so the sentence went rather than the code. And because this
+  machine genuinely has both copies, `core_bridge` now prints which one is
+  loaded and which is ignored, which is the sentence that ends the afternoon
+  somebody would otherwise lose editing the wrong tree.
 
 ### Two bugs found by the tests, both real
 - **A rate cut was measured against the wrong thing.** The PO comparison

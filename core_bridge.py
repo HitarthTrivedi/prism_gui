@@ -9,10 +9,20 @@ does. Both apps read/write the same ~/.prism/config.json, so signing in once
 (either app) carries over to the other.
 
 prism_terminal is a git submodule at ./prism_terminal (see .gitmodules) —
-`git clone --recurse-submodules` gets a fully self-contained checkout. If
-you're instead developing prism_terminal and prism_gui side by side in the
-same monorepo (a sibling ../prism_terminal folder, not the submodule), that
-takes priority so you're always working against the copy you're editing.
+`git clone --recurse-submodules` gets a fully self-contained checkout.
+
+**The submodule always wins.** This docstring used to claim the opposite — that
+a sibling ../prism_terminal checkout took priority "so you're always working
+against the copy you're editing" — and it was wrong, because `paths.resource()`
+resolves to ./prism_terminal when running from source and is checked first. A
+sibling checkout was never reached.
+
+The behaviour is right and the sentence was wrong, so the sentence went. The
+submodule is the copy that gets committed and the copy that gets built; a
+sibling silently overriding it would mean shipping code that was never tested
+against what is actually in the tree. But a stale sentence is worse than
+either, because somebody edits the sibling, sees nothing change, and loses an
+afternoon to it — which is why _warn_about_sibling() below says so out loud.
 """
 from __future__ import annotations
 import os
@@ -25,9 +35,13 @@ _CANDIDATES = [
     # Packaged app: the spec copies prism_terminal/ into the bundle root, so
     # this is the only one that exists (and it must be checked first — the dev
     # paths below would resolve to nothing useful inside _MEIPASS).
+    #
+    # Running from source this resolves to ./prism_terminal, the submodule,
+    # which is deliberately the winner: it is what gets committed and what
+    # gets built. See the module docstring.
     paths.resource("prism_terminal"),
-    os.path.join(_HERE, "..", "prism_terminal"),   # local monorepo dev
     os.path.join(_HERE, "prism_terminal"),         # standalone clone (submodule)
+    os.path.join(_HERE, "..", "prism_terminal"),   # sibling, last resort only
 ]
 
 _TERMINAL_DIR = next(
@@ -43,6 +57,30 @@ if _TERMINAL_DIR is None:
 
 if _TERMINAL_DIR not in sys.path:
     sys.path.insert(0, _TERMINAL_DIR)
+
+
+def _warn_about_sibling() -> None:
+    """Say so when a sibling checkout exists and is being ignored.
+
+    The failure it prevents: two checkouts of the engine on one machine, edits
+    going into the one that is not loaded, and no signal at all — the app runs,
+    the tests pass, and the change simply is not there. Cheap to print, and it
+    is the sentence that ends the confusion.
+    """
+    if getattr(sys, "frozen", False):
+        return
+    sibling = os.path.abspath(os.path.join(_HERE, "..", "prism_terminal"))
+    if not os.path.isdir(os.path.join(sibling, "core")):
+        return
+    if sibling == _TERMINAL_DIR:
+        return
+    print(f"note: two copies of the engine are on this machine.\n"
+          f"      loaded : {_TERMINAL_DIR}   <- edit this one\n"
+          f"      ignored: {sibling}",
+          file=sys.stderr)
+
+
+_warn_about_sibling()
 
 from core import config as config          # noqa: E402
 from core import agents as agents          # noqa: E402
