@@ -43,6 +43,12 @@ SECONDARY = [
     # finished one out, rather than being a general prompt. New verticals
     # (quotation from spec, BOM vs inventory, export papers) land here.
     ("ADD-ONS", [
+        # First in the list on purpose: it is the only add-on used every day.
+        # BOQ is occasional and Email is a task; this one is the reason the
+        # app gets opened at all, so it sits where the eye lands.
+        ("inquiry", "Inquiry Automation", "inbox",
+         "Read the inbox, register every inquiry, quote it and chase it",
+         "inbox"),
         ("boq",   "BOQ",   "file", "Bill of Quantities — from a CAD drawing, or from a written spec", "boq"),
         ("email", "Email", "mail", "Draft & send an email from attached files", "email"),
         # Shown but disabled on purpose: the shelf should look like a product

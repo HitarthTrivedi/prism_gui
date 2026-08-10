@@ -381,6 +381,8 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
+        elif key == "inquiry":
+            self._open_inquiry()
 
     def _authorized_then(self, feature: str, action: str, then):
         """Ask the licence server, then run `then()` if it said yes.
@@ -418,6 +420,18 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Reel", err)
             return
         ReelDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_inquiry(self):
+        self._authorized_then("inbox", "addon", self._open_inquiry_dialog)
+
+    def _open_inquiry_dialog(self):
+        from dialogs.inquiry_dialog import InquiryDialog
+        dialog = InquiryDialog(self.cfg, self)
+        dialog.exec()
+        # The dialog saves its own settings and its reading bookmark, so pick
+        # up whatever it wrote rather than overwriting it from a stale copy on
+        # the next Settings save.
+        self.cfg = CB.config.load()
 
     def _open_boq(self):
         self._authorized_then("boq", "addon", self._open_boq_dialog)

@@ -1,0 +1,397 @@
+"""Inquiry automation — the settings that stay the same every day.
+
+Asked once, at the start, and then never again. Everything here is a constant
+of the business rather than of a particular inquiry: which mailbox, which rate
+list, what your terms are, who your customers are.
+
+Laid out as four steps rather than one long form because the person filling it
+in has never set up software before, and a screen with twenty boxes on it is
+where they stop and telephone somebody.
+
+The password is the one thing worth saying out loud: it goes into
+~/.prism/config.json on this computer, the same file the sending account
+already uses, and nowhere else. Prism has no server to send it to.
+"""
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+    QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+)
+
+import core_bridge as CB
+import i18n
+from workers import InboxVerifyWorker
+
+DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Prism Inquiries")
+
+
+def settings_of(cfg: dict) -> dict:
+    return dict(cfg.get("inquiry") or {})
+
+
+def is_ready(cfg: dict) -> bool:
+    """Enough set up to run a check. Deliberately only the mailbox and the
+    folder — a rate list matters at quoting time, not at reading time, and
+    demanding one up front would stop somebody trying the read-only half."""
+    s = settings_of(cfg)
+    account = s.get("account") or {}
+    return bool(account.get("address") and account.get("password")
+                and account.get("host") and s.get("folder"))
+
+
+class _Picker(QWidget):
+    """A read-only path box with a Browse button next to it."""
+
+    def __init__(self, value: str = "", *, directory: bool = False,
+                 filters: str = "", placeholder: str = "", parent=None):
+        super().__init__(parent)
+        self.directory, self.filters = directory, filters
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.edit = QLineEdit(value)
+        self.edit.setPlaceholderText(placeholder)
+        row.addWidget(self.edit, stretch=1)
+        browse = QPushButton(i18n.t("Browse…"))
+        browse.clicked.connect(self._browse)
+        row.addWidget(browse)
+
+    def _browse(self):
+        start = self.edit.text().strip() or os.path.expanduser("~")
+        if self.directory:
+            # Captions are translated at the call site. QFileDialog's statics
+            # are deliberately never patched — doing that once broke every
+            # attachment in the app. See i18n.install().
+            path = QFileDialog.getExistingDirectory(
+                self, i18n.t("Choose a folder"), start)
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self, i18n.t("Choose a file"), start, self.filters)
+        if path:
+            self.edit.setText(path)
+
+    def value(self) -> str:
+        return self.edit.text().strip()
+
+
+class InquirySetupDialog(QDialog):
+
+    def __init__(self, cfg: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(i18n.t("Inquiry automation — setup"))
+        self.resize(680, 620)
+        self.cfg = dict(cfg)
+        self._verify = None
+
+        saved = settings_of(cfg)
+        self._account = dict(saved.get("account") or {})
+        self._saved_password = self._account.get("password", "")
+
+        root = QVBoxLayout(self)
+        intro = QLabel(i18n.t(
+            "Set this up once. Prism then reads your inbox, sorts it, and "
+            "keeps your inquiry register — without being asked again."))
+        intro.setWordWrap(True)
+        intro.setProperty("class", "muted")
+        root.addWidget(intro)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._mail_tab(), i18n.t("1 · Mailbox"))
+        self.tabs.addTab(self._folder_tab(), i18n.t("2 · Files"))
+        self.tabs.addTab(self._terms_tab(), i18n.t("3 · Your terms"))
+        self.tabs.addTab(self._people_tab(), i18n.t("4 · Who's who"))
+        root.addWidget(self.tabs, stretch=1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    # ── 1. the mailbox ────────────────────────────────────────────────────
+    def _mail_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        note = QLabel(i18n.t(
+            "Prism only READS this mailbox. It never marks anything as read, "
+            "never moves anything and never deletes anything — you can keep "
+            "using Outlook or your phone exactly as before.\n\n"
+            "Your password is saved on this computer only. Prism has no "
+            "server to send it to."))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        form = QFormLayout()
+        self.addr = QLineEdit(self._account.get("address", ""))
+        self.addr.setPlaceholderText("sales@yourcompany.co.in")
+        form.addRow(i18n.t("Email address:"), self.addr)
+
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
+        self.password.setPlaceholderText(i18n.t(
+            "leave blank to keep the saved password") if self._saved_password
+            else i18n.t("your mail password"))
+        form.addRow(i18n.t("Password:"), self.password)
+
+        self.host = QLineEdit(self._account.get("host", ""))
+        self.host.setPlaceholderText(i18n.t("found automatically — leave blank"))
+        form.addRow(i18n.t("Mail server:"), self.host)
+
+        self.folder_name = QLineEdit(self._account.get("folder", "") or "INBOX")
+        form.addRow(i18n.t("Folder to read:"), self.folder_name)
+        layout.addLayout(form)
+
+        row = QHBoxLayout()
+        self.test_btn = QPushButton(i18n.t("Find my server and test"))
+        self.test_btn.clicked.connect(self._test)
+        row.addWidget(self.test_btn)
+        self.test_result = QLabel("")
+        self.test_result.setWordWrap(True)
+        row.addWidget(self.test_result, stretch=1)
+        layout.addLayout(row)
+
+        gmail = QLabel(i18n.t(
+            "Gmail and Outlook need an app password rather than your normal "
+            "one. A mailbox on your own company domain usually takes the "
+            "normal password."))
+        gmail.setWordWrap(True)
+        gmail.setProperty("class", "muted")
+        layout.addWidget(gmail)
+        layout.addStretch(1)
+        return page
+
+    def _test(self):
+        address = self.addr.text().strip()
+        password = self.password.text() or self._saved_password
+        if not address or not password:
+            self.test_result.setText(i18n.t("Enter the address and password first."))
+            return
+        self.test_btn.setEnabled(False)
+        self.test_result.setText(i18n.t("Looking for your mail server…"))
+
+        def finished(settings: dict, error: str):
+            self.test_btn.setEnabled(True)
+            if error:
+                self.test_result.setText(error)
+                return
+            self.host.setText(settings.get("host", ""))
+            self._account.update(settings)
+            self.test_result.setText(
+                i18n.t("Connected. Server: {host}").replace(
+                    "{host}", settings.get("host", "")))
+
+        self._verify = InboxVerifyWorker(address, password)
+        self._verify.done.connect(finished)
+        self._verify.start()
+
+    # ── 2. where things are kept ──────────────────────────────────────────
+    def _folder_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        saved = settings_of(self.cfg)
+
+        note = QLabel(i18n.t(
+            "Everything Prism produces lands in one folder you choose — the "
+            "inquiry register, and a folder per inquiry holding the mail and "
+            "the drawings. They are ordinary files: the register opens in "
+            "Excel, and it stays yours whatever happens to Prism."))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        form = QFormLayout()
+        self.work_folder = _Picker(saved.get("folder", "") or DEFAULT_FOLDER,
+                                   directory=True)
+        form.addRow(i18n.t("Keep everything in:"), self.work_folder)
+
+        self.rate_file = _Picker(
+            saved.get("rate_list", ""),
+            filters=i18n.t("Price lists (*.csv *.xlsx *.xlsm);;All files (*)"),
+            placeholder=i18n.t("your price list — needed only for quoting"))
+        form.addRow(i18n.t("Rate list:"), self.rate_file)
+
+        self.cost_file = _Picker(
+            saved.get("cost_sheet", ""),
+            filters=i18n.t("Cost sheets (*.csv *.xlsx *.xlsm);;All files (*)"),
+            placeholder=i18n.t("optional — for made-to-drawing work"))
+        form.addRow(i18n.t("Cost sheet:"), self.cost_file)
+        layout.addLayout(form)
+
+        hint = QLabel(i18n.t(
+            "A rate list needs a heading row with at least a description and "
+            "a rate — for example: Code, Description, Unit, Rate. A "
+            "letterhead above it is fine. Columns like \"Rate @ 1000\" are "
+            "read as quantity discounts."))
+        hint.setWordWrap(True)
+        hint.setProperty("class", "muted")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return page
+
+    # ── 3. terms that go on every quotation ───────────────────────────────
+    def _terms_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        saved = settings_of(self.cfg)
+        terms = saved.get("terms") or {}
+
+        form = QFormLayout()
+        self.company = QLineEdit(saved.get("company", ""))
+        self.company.setPlaceholderText(i18n.t("as it should appear on the quotation"))
+        form.addRow(i18n.t("Company name:"), self.company)
+
+        self.signature = QLineEdit(saved.get("signature", ""))
+        self.signature.setPlaceholderText(i18n.t("who quotations are signed by"))
+        form.addRow(i18n.t("Sign off as:"), self.signature)
+
+        self.gst = QSpinBox()
+        self.gst.setRange(0, 100)
+        self.gst.setSuffix(" %")
+        self.gst.setValue(int(terms.get("gst_percent", 18) or 0))
+        form.addRow(i18n.t("GST:"), self.gst)
+
+        self.validity = QSpinBox()
+        self.validity.setRange(1, 365)
+        self.validity.setSuffix(i18n.t(" days"))
+        self.validity.setValue(int(terms.get("validity_days", 15) or 15))
+        form.addRow(i18n.t("Quotation valid for:"), self.validity)
+
+        self.payment = QLineEdit(terms.get("payment", "") or
+                                 "100% against proforma invoice")
+        form.addRow(i18n.t("Payment terms:"), self.payment)
+
+        self.delivery = QLineEdit(terms.get("delivery", "") or
+                                  "2–3 weeks from receipt of confirmed order")
+        form.addRow(i18n.t("Delivery:"), self.delivery)
+
+        self.followup_days = QSpinBox()
+        self.followup_days.setRange(1, 60)
+        self.followup_days.setSuffix(i18n.t(" days"))
+        self.followup_days.setValue(int(saved.get("followup_days", 3) or 3))
+        form.addRow(i18n.t("Chase a quiet quotation after:"), self.followup_days)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        return page
+
+    # ── 4. who is who ─────────────────────────────────────────────────────
+    def _people_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        saved = settings_of(self.cfg)
+        known = saved.get("knowledge") or {}
+
+        note = QLabel(i18n.t(
+            "Telling Prism who your customers and suppliers are makes the "
+            "sorting right from day one instead of week three — and it keeps "
+            "their mail on this computer, because a sender Prism already "
+            "recognises never has to be looked at by an AI.\n\n"
+            "One line each. A whole company works: type shaktiauto.in and "
+            "everybody there is covered."))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        def box(title: str, values, placeholder: str) -> QPlainTextEdit:
+            group = QGroupBox(title)
+            inner = QVBoxLayout(group)
+            edit = QPlainTextEdit("\n".join(values or []))
+            edit.setPlaceholderText(placeholder)
+            edit.setFixedHeight(74)
+            inner.addWidget(edit)
+            layout.addWidget(group)
+            return edit
+
+        self.own = box(i18n.t("Your own company's addresses"),
+                       known.get("own_domains"), "yourcompany.co.in")
+        self.customers = box(i18n.t("Customers"), known.get("customers"),
+                             "shaktiauto.in\nbuyer@gujaratmotors.in")
+        self.vendors = box(i18n.t("Suppliers"), known.get("vendors"),
+                           "steelsupply.co.in")
+
+        self.local_only = QCheckBox(i18n.t(
+            "Keep everything on this computer — never send any mail to an AI"))
+        self.local_only.setChecked(bool(saved.get("local_only", False)))
+        layout.addWidget(self.local_only)
+
+        explain = QLabel(i18n.t(
+            "With this ticked, Prism sorts using only the rules above and "
+            "anything it cannot place is listed for you to glance at. "
+            "Nothing whatsoever leaves the machine. Untick it and only the "
+            "few messages from senders Prism does not recognise are sent to "
+            "be labelled."))
+        explain.setWordWrap(True)
+        explain.setProperty("class", "muted")
+        layout.addWidget(explain)
+        layout.addStretch(1)
+        return page
+
+    # ── saving ────────────────────────────────────────────────────────────
+    @staticmethod
+    def _lines(edit: QPlainTextEdit) -> list[str]:
+        return [line.strip().lower().lstrip("@")
+                for line in edit.toPlainText().splitlines() if line.strip()]
+
+    def _save(self):
+        address = self.addr.text().strip()
+        password = self.password.text() or self._saved_password
+        folder = self.work_folder.value()
+
+        if not address or not password:
+            QMessageBox.information(
+                self, i18n.t("Inquiry automation"),
+                i18n.t("Prism needs the email address and password of the "
+                       "mailbox to read. Nothing else can start without it."))
+            self.tabs.setCurrentIndex(0)
+            return
+        if not folder:
+            QMessageBox.information(
+                self, i18n.t("Inquiry automation"),
+                i18n.t("Choose a folder for the inquiry register and the "
+                       "files that come with each inquiry."))
+            self.tabs.setCurrentIndex(1)
+            return
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            QMessageBox.warning(self, i18n.t("Inquiry automation"), str(e))
+            self.tabs.setCurrentIndex(1)
+            return
+
+        host = self.host.text().strip() or self._account.get("host", "")
+        if not host:
+            # No Test run and no saved host — work it out now rather than
+            # failing on the first check with a message about a server the
+            # customer never typed.
+            inbox = CB.get_inbox()
+            guesses = inbox.guess_hosts(address)
+            host = guesses[0] if guesses else ""
+
+        self.cfg["inquiry"] = {
+            "account": {"address": address, "password": password,
+                        "host": host, "port": 993,
+                        "folder": self.folder_name.text().strip() or "INBOX"},
+            "folder": folder,
+            "rate_list": self.rate_file.value(),
+            "cost_sheet": self.cost_file.value(),
+            "company": self.company.text().strip(),
+            "signature": self.signature.text().strip(),
+            "terms": {"gst_percent": self.gst.value(),
+                      "validity_days": self.validity.value(),
+                      "payment": self.payment.text().strip(),
+                      "delivery": self.delivery.text().strip()},
+            "followup_days": self.followup_days.value(),
+            "local_only": self.local_only.isChecked(),
+            "knowledge": {"own_domains": self._lines(self.own),
+                          "customers": self._lines(self.customers),
+                          "vendors": self._lines(self.vendors),
+                          # Corrections the customer makes as they go. Kept
+                          # across saves so re-opening setup never forgets
+                          # what Prism has learned about their senders.
+                          "learned": ((settings_of(self.cfg).get("knowledge")
+                                       or {}).get("learned") or {})},
+            "state": settings_of(self.cfg).get("state") or {},
+        }
+        CB.config.save(self.cfg)
+        self.accept()

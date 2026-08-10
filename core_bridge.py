@@ -136,6 +136,51 @@ def get_boq():
     return boq
 
 
+# ── Inquiry automation ───────────────────────────────────────────────────────
+# Imported on demand like the rest: the engine's mail modules pull in imaplib
+# and the CSV machinery, and a customer who never buys this add-on should not
+# pay for that at every launch.
+
+def get_inbox():
+    from core import inbox
+    return inbox
+
+
+def get_triage():
+    from core import triage
+    return triage
+
+
+def get_register():
+    from core import register
+    return register
+
+
+def get_quoting():
+    from core import quoting
+    return quoting
+
+
+def get_sop():
+    from core import sop
+    return sop
+
+
+def get_po():
+    from core import po
+    return po
+
+
+def get_mailflow():
+    from core import mailflow
+    return mailflow
+
+
+def get_files():
+    from core import files
+    return files
+
+
 def reel_available() -> tuple[bool, str]:
     """Pillow draws the frames, FFmpeg encodes them. Probe both so the add-on
     can explain what is missing instead of failing mid-render."""

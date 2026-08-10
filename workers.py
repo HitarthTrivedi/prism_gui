@@ -266,3 +266,56 @@ class ReelWorker(QThread):
             self.done.emit(self.out_path)
         except Exception as e:
             self.failed.emit(str(e))
+
+
+# ── Inquiry automation ────────────────────────────────────────────────────────
+
+class InboxVerifyWorker(QThread):
+    """Find the mail server and check the password, off the UI thread.
+
+    A wrong host means a DNS timeout, and three of those in a row is most of a
+    minute with the window frozen — at the exact moment somebody is deciding
+    whether this software works.
+    """
+    done = Signal(dict, str)      # settings (empty on failure), error ("" on success)
+
+    def __init__(self, address: str, password: str):
+        super().__init__()
+        self.address, self.password = address, password
+
+    def run(self):
+        try:
+            inbox = CB.get_inbox()
+            settings, error = inbox.discover(self.address, self.password)
+            self.done.emit(settings, error)
+        except Exception as e:
+            self.done.emit({}, str(e))
+
+
+class InboxCheckWorker(QThread):
+    """One run of the daily loop: fetch, sort, register, work out what is due.
+
+    Everything it does is a read, so it is safe to run on a timer and safe to
+    cancel by simply ignoring the result. mailflow.check() never raises and
+    never sends, so there is no partial state to unwind.
+    """
+    done = Signal(object)         # mailflow.Result
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, root: str, *, state=None, knowledge=None,
+                 local_only: bool = False, followup_days: int = 3):
+        super().__init__()
+        self.cfg, self.root, self.state = cfg, root, state
+        self.knowledge = knowledge
+        self.local_only, self.followup_days = local_only, followup_days
+
+    def run(self):
+        try:
+            mailflow = CB.get_mailflow()
+            result = mailflow.check(
+                self.cfg, mailflow.Paths(self.root), state=self.state,
+                knowledge=self.knowledge, local_only=self.local_only,
+                followup_days=self.followup_days)
+            self.done.emit(result)
+        except Exception as e:
+            self.failed.emit(str(e))
