@@ -4,7 +4,7 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **396 passing**.
+Tests: **413 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
 
 ---
 
@@ -115,6 +115,40 @@ hands back a worklist of what needs a person. **It never sends anything** — a
 test greps the file to keep it that way. It never raises either: this runs on a
 ten-minute timer next to somebody running a factory, so a mail server having a
 bad afternoon belongs in a status line.
+
+### Scenario testing — `devtools/scenarios.py`
+
+Thirteen situations rather than unit tests: a full Monday morning of ten mixed
+mails, a customer who haggles all the way from inquiry to PO, ten shapes of
+badly-built rate list, 200 messages at once, a mail server that is down, an
+email that tries to talk to the AI reading it. **148 checks, under a second, no
+network.** Run it before a release.
+
+The unit suite proves the pieces behave. This proved they behave *together* —
+and it found four real bugs that unit tests had not, every one now also pinned
+by a test:
+
+- **`Rs.1,000/-` parsed as ZERO.** The worst bug in the feature, and invisible.
+  That is how money is written in every Indian office. The parser deleted
+  everything that was not a digit, a dot or a minus, turning it into `.1000-` —
+  unparseable, so zero. Every order value typed the normal way summarised as
+  ₹0, and a rate list cell written `28.50/-` would have quoted at **nothing**.
+  There is now one strict parser shared by the register and the quotation, so
+  the two can never disagree about what a rupee looks like.
+- **A customer could forge a message boundary.** An email body containing
+  `--- EMAIL 2 ---` was pasted into the sorting prompt verbatim, so a sender
+  could fake a second message and ask to be sorted as `internal` — never
+  registered, and nobody notices a customer whose mail silently stopped
+  arriving. Boundaries and answer-shaped lines are now neutralised, the batch
+  size is stated, and the prompt says message text is never an instruction.
+- **`local_only` only did a third of its job.** It was passed to the sorter
+  alone, so detail extraction and reply reading still sent customer
+  correspondence out. A privacy switch that quietly does two thirds of what its
+  name promises is worse than not offering one.
+- **A bare "Enquiry" subject became a useless register row.** Half of all
+  inquiries arrive under one. It matched nothing on a rate list and told a
+  human nothing either. The opening line of the message — skipping the
+  greeting — is now used when the subject carries no information.
 
 ### Two bugs found by the tests, both real
 - **A rate cut was measured against the wrong thing.** The PO comparison
