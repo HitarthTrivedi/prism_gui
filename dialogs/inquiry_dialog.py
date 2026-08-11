@@ -85,8 +85,8 @@ class InquiryDialog(QDialog):
         self._worker = None
         self._send_worker = None
         self._result = None
-        self._messages = []
-        self._verdicts = []
+        self._sorted_mail = []
+        self._register_rows = []
 
         root = QVBoxLayout(self)
         root.addLayout(self._header())
@@ -328,8 +328,7 @@ class InquiryDialog(QDialog):
         CB.config.save(self.cfg)
 
     def _fill_arrived(self, result):
-        self._messages = list(getattr(result, "_messages", []) or [])
-        rows = getattr(result, "sorted_mail", None) or []
+        rows = list(getattr(result, "sorted_mail", None) or [])
         self.arrived.setRowCount(len(rows))
         for index, (message, verdict) in enumerate(rows):
             who = message.from_name or message.from_addr
@@ -392,11 +391,20 @@ class InquiryDialog(QDialog):
         due = register.awaiting_followup(
             rows, after_days=int(self._settings().get("followup_days", 3) or 3))
         for row in due:
+            # The QUOTATION number leads. That is the document the customer is
+            # sitting on and the one they will quote back on the phone; the
+            # inquiry number is our filing reference and comes second.
+            # "Reminders sent" is blank in a freshly quoted row, and a bare
+            # "reminders sent" with no number in front of it reads as broken.
+            sent = (row.get("Reminders sent") or "0").strip() or "0"
+            chased = (i18n.t("not chased yet") if sent == "0" else
+                      i18n.t("{n} reminder(s) sent").replace("{n}", sent))
             self.followups.addItem(QListWidgetItem(
-                f"{row.get('Inquiry no','')}  ·  "
-                f"{row.get('Customer','') or row.get('Email','')}  ·  "
-                f"{i18n.t('quoted')} {row.get('Quotation date','')}  ·  "
-                f"{row.get('Reminders sent','0')} {i18n.t('reminders sent')}"))
+                f"{row.get('Quotation no','') or i18n.t('(no quotation number)')}"
+                f"  ·  {row.get('Customer','') or row.get('Email','')}"
+                f"  ·  {i18n.t('quoted')} {row.get('Quotation date','')}"
+                f"  ·  {chased}"
+                f"  ·  {row.get('Inquiry no','')}"))
         if not due:
             self.followups.addItem(QListWidgetItem(
                 i18n.t("Nothing is waiting — every quotation has been answered.")))
