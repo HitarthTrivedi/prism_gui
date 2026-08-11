@@ -74,12 +74,16 @@ def _selftest(app) -> int:
     # Reel is probed in two halves rather than through CB.reel_available(),
     # because it needs two different kinds of thing and only one of them is a
     # property of the build. Pillow is FROZEN INTO the bundle — that half is
-    # the regression above and stays a hard failure. FFmpeg is a system tool
-    # the customer installs (reel.ffmpeg_path() says as much), never bundled
-    # and never bundle-able, so a build machine without it proves nothing
-    # about whether the build is whole. It is reported below alongside voice
-    # input instead of failing the build, which is the same call made for
-    # PortAudio and for the same reason.
+    # the regression above and stays a hard failure.
+    #
+    # FFmpeg used to be described here as "a system tool the customer
+    # installs, never bundled and never bundle-able". That was wrong, and a
+    # Windows customer paid for it: Windows ships no FFmpeg and nobody
+    # installs one by accident, so the first thing they met on pressing Reel
+    # was a codec install guide. It IS bundle-able — imageio-ffmpeg puts it in
+    # the wheel — and it is bundled now. Still reported rather than fatal,
+    # because a source checkout without the package is a normal thing to be
+    # and Prism can fetch it at runtime (core/ffmpeg.py).
     try:
         from PIL import Image, ImageDraw   # noqa: F401
         from core import reel              # noqa: F401
@@ -151,9 +155,17 @@ def _selftest(app) -> int:
     # here. split() rather than splitlines()[0] so an exception that stringifies
     # to "" can't turn a diagnostic into an IndexError.
     ffmpeg_why = ffmpeg_err.split("\n")[0]
+    # Say WHICH FFmpeg. "✓ Reel encoding" told us nothing about whether the
+    # build actually shipped one — which is the single fact this line exists
+    # to establish, and the one that was wrong on Windows.
+    try:
+        from core import ffmpeg as _ffmpeg
+        ffmpeg_which = _ffmpeg.describe()
+    except Exception:
+        ffmpeg_which = "unknown"
     print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
           f"{'' if ffmpeg_ok else f' — {ffmpeg_why}'}"
-          "  (optional — needs FFmpeg on the machine)")
+          f"  ({ffmpeg_which if ffmpeg_ok else 'Prism can download it'})")
     print(f"{app.applicationName()} {app.applicationVersion()} · "
           f"frozen={paths.is_frozen()} · {sys.platform} · py"
           f"{sys.version_info.major}.{sys.version_info.minor}")

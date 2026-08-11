@@ -319,3 +319,23 @@ class InboxCheckWorker(QThread):
             self.done.emit(result)
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class FFmpegWorker(QThread):
+    """Download and install FFmpeg, off the UI thread.
+
+    30 MB over an office connection is a minute of nothing, and a frozen
+    window for a minute is indistinguishable from a crash — which is the
+    impression this feature exists to avoid making.
+    """
+    progress = Signal(int, int)      # bytes done, bytes total (0 = unknown)
+    done = Signal(str)               # path to the executable
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            ffmpeg = CB.get_ffmpeg()
+            self.done.emit(ffmpeg.download(
+                lambda done, total: self.progress.emit(done, total)))
+        except Exception as e:
+            self.failed.emit(str(e))

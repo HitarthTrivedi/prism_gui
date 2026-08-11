@@ -247,11 +247,14 @@ _rule(r"ffmpeg",
       Problem(
           "Video needs one extra program",
           "Making a reel needs FFmpeg, a free video tool that isn't part of "
-          "Prism.",
-          ("Send us this message and we'll walk you through installing it — "
-           "it's a one-time, five-minute job.",
-           "Everything else in Prism works without it."),
-          ask_support=True))
+          "Prism. Prism can fetch it for you.",
+          # No longer "send us this message". Prism downloads and installs it
+          # itself now, so telling a customer to contact support for a job the
+          # software does in a minute would be an odd thing to do.
+          ("Open Reel and press Get FFmpeg. It's about 30 MB and takes a "
+           "minute; it only happens once.",
+           "Nothing else changes on this computer, and everything else in "
+           "Prism works without it.")))
 
 _rule(r"pyaudio|portaudio|microphone",
       Problem(

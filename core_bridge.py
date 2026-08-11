@@ -215,3 +215,8 @@ def studio_available() -> tuple[bool, str]:
 def get_studio():
     from core import reel_web
     return reel_web
+
+
+def get_ffmpeg():
+    from core import ffmpeg
+    return ffmpeg

@@ -131,6 +131,22 @@ for note in ("pros_cons.txt", "tool_notes.md", "tool_notes.txt"):
 # one moment the user is furthest from a terminal that would show the error.
 datas += collect_data_files("undetected_chromedriver")
 
+# The FFmpeg executable, which lives inside the imageio_ffmpeg package as a
+# data file rather than as Python. include_py_files is off, so this picks up
+# the binary and nothing else.
+#
+# A build without it produces an app whose Reel button fails on a customer's
+# machine with an install guide — which is exactly what happened to the first
+# Windows user. There is a runtime download as a fallback (core/ffmpeg.py),
+# but a customer should never meet it.
+try:
+    import imageio_ffmpeg  # noqa: F401
+    datas += collect_data_files("imageio_ffmpeg")
+    print("[prism] FFmpeg bundled")
+except ImportError:
+    print("[prism] WARNING: imageio-ffmpeg is not installed, so this build "
+          "ships no FFmpeg. Reel will have to download it on first use.")
+
 hiddenimports = [
     # Reached only through core_bridge's runtime sys.path insert, so static
     # analysis never sees them.

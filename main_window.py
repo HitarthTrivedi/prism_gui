@@ -36,7 +36,8 @@ from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
-                     InterpretWorker, FindWorker, AuthorizeWorker)
+                     InterpretWorker, FindWorker, AuthorizeWorker,
+                     FFmpegWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
@@ -417,9 +418,69 @@ class MainWindow(QMainWindow):
     def _open_reel_dialog(self):
         ok, err = CB.reel_available()
         if not ok:
-            QMessageBox.information(self, "Reel", err)
+            # FFmpeg specifically is something Prism can fix by itself, so it
+            # gets an offer rather than an apology. Everything else missing
+            # here (Pillow) is a broken install and needs a person.
+            if "ffmpeg" in err.lower():
+                self._offer_ffmpeg(then=self._open_reel_dialog)
+                return
+            QMessageBox.information(self, i18n.t("Reel"), err)
             return
         ReelDialog(self.cfg, self.attachments, self).exec()
+
+    def _offer_ffmpeg(self, then=None):
+        """Offer to fetch FFmpeg, then carry on with what they were doing.
+
+        Windows does not ship FFmpeg and nobody installs it by accident, so
+        before this the first Windows customer to press Reel was handed a
+        codec install guide. A build now bundles it; this is the path for a
+        build that somehow did not, and for anyone running from source.
+        """
+        answer = QMessageBox.question(
+            self, i18n.t("Reel"),
+            i18n.t("Making a video needs FFmpeg, a free standard program "
+                   "that isn't part of Prism.\n\nPrism can download and set "
+                   "it up for you — about 30 MB, roughly a minute, and it "
+                   "only happens once.\n\nDownload it now?"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer != QMessageBox.Yes:
+            return
+
+        from PySide6.QtWidgets import QProgressDialog
+        box = QProgressDialog(i18n.t("Downloading FFmpeg…"), "", 0, 100, self)
+        box.setWindowTitle(i18n.t("Reel"))
+        box.setCancelButton(None)      # a half-written binary helps nobody
+        box.setAutoClose(False)
+        box.setMinimumDuration(0)
+        box.setValue(0)
+
+        def moved(done: int, total: int):
+            if total:
+                box.setMaximum(100)
+                box.setValue(int(100 * done / total))
+            else:
+                # No content-length. Show motion rather than a bar stuck at 0.
+                box.setMaximum(0)
+            box.setLabelText(i18n.t("Downloading FFmpeg… {mb} MB").replace(
+                "{mb}", f"{done / 1e6:.0f}"))
+
+        def finished(_path: str):
+            box.close()
+            self.statusBar().showMessage(
+                i18n.t("FFmpeg is ready. Video will work from now on."), 6000)
+            if then:
+                then()
+
+        def broke(message: str):
+            box.close()
+            self._explain(message, "run")
+
+        worker = FFmpegWorker()
+        worker.progress.connect(moved)
+        worker.done.connect(finished)
+        worker.failed.connect(broke)
+        self._workers.append(worker)
+        worker.start()
 
     def _open_inquiry(self):
         self._authorized_then("inbox", "addon", self._open_inquiry_dialog)

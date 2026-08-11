@@ -35,6 +35,18 @@ certifi
 ezdxf     # BOQ reads DXF geometry directly (pulls in numpy)
 pillow    # Prism Reel draws every frame with PIL
 
+# FFmpeg, as a wheel. Pillow draws the frames and this encodes them.
+#
+# Not optional for a BUILD, and this is why: Windows does not come with
+# FFmpeg and nobody installs it by accident, so the first Windows customer
+# opened Reel and was handed a codec install guide instead of a video. macOS
+# developers never see it because Homebrew put it there years ago.
+#
+# ~21-31 MB depending on platform, and PyInstaller only bundles the one it is
+# building for. Prism runs it as a separate program rather than linking to it,
+# so its licence travels beside the binary — see core/ffmpeg.py.
+imageio-ffmpeg
+
 # Inbox to Order reads the customer's own rate list, and a rate list is an
 # Excel file — asking a factory owner to "save as CSV first" before Prism can
 # quote anything is exactly the friction that stops it being used. Optional at
