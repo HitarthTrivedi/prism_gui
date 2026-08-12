@@ -34,7 +34,7 @@ import paths
 # This was regressed once, silently, by a one-line change inside a commit about
 # something else. Every customer activation in that build would have gone to
 # the wrong host. tests/test_licensing_endpoint.py now fails if it drifts again.
-DEFAULT_SERVER = "https://api.alphakore.in"
+DEFAULT_SERVER = "https://prism-license-server.onrender.com"
 
 # Short on purpose. This runs at launch; if the server has not answered in five
 # seconds we would rather carry on with the cached token than make the customer
@@ -67,7 +67,28 @@ AUTHORIZE_RETRIES = 1
 # Sydney answers in ~300ms per query, so six queries plus a cold connection
 # handshake is comfortably past five seconds. That combination produced a
 # "couldn't reach the licence server" on a server that was up and answering.
-ACTIVATE_TIMEOUT = 30
+#
+# It is ALSO sized for a sleeping server, which is what the 30s here missed.
+# The production host sleeps when idle; a cold /health was measured at 42.6
+# seconds — comfortably past a 30-second activation, so the very first thing a
+# new customer ever asked Prism to do failed against a server that was up and
+# healthy. And activation is the one call they cannot go around: no cached
+# token to fall back on, no way into the app, and their first impression is a
+# licence they paid for being refused.
+#
+# 75s is the cold start plus most of it again. A customer who has just typed
+# their key will wait; being wrongly told no is what they will not forgive.
+ACTIVATE_TIMEOUT = 75
+
+# Deliberately no retry here, unlike authorize().
+#
+# A timeout on activation is genuinely ambiguous: the request may have reached
+# the server, counted a seat and inserted the device before the socket gave
+# up. Repeating it can burn a second seat on a two-seat licence — and locking
+# a paying customer out of their own second machine is a worse failure than
+# the one the retry was meant to fix. The long timeout above is the answer
+# instead; it removes the reason to retry rather than papering over it.
+ACTIVATE_RETRIES = 0
 
 
 class ServerError(Exception):
@@ -150,7 +171,8 @@ def activate(key: str, device_fp: str, *, app_version: str,
         "device_fp": device_fp,
         "app_version": app_version,
         "hostname_label": hostname_label,
-    }, app_version=app_version, timeout=ACTIVATE_TIMEOUT)
+    }, app_version=app_version, timeout=ACTIVATE_TIMEOUT,
+       retries=ACTIVATE_RETRIES)
 
 
 def refresh(license_id: str, device_fp: str, *, app_version: str,

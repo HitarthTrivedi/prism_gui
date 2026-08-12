@@ -242,15 +242,61 @@ The hooks are already in `packaging/prism.spec` (`codesign_identity`,
 `entitlements_file`), and the macOS bundle already carries the
 `NSMicrophoneUsageDescription` notarisation requires.
 
-## 3.2 Real domain
+## 3.2 Real domain — **outstanding, and it has a cost**
 
-Point `api.alphakore.in` at the service and set
-`DEFAULT_SERVER = "https://api.alphakore.in"` in `licensing/client.py` — then
-clear the `PRISM_SERVER_URL` repository variable so releases use it.
+Right now `licensing/client.py` ships:
 
-A Render subdomain in a client's firewall allowlist is a conversation you do not
-want; your own domain is one you can move later without rebuilding every
-customer's app.
+```python
+DEFAULT_SERVER = "https://prism-license-server.onrender.com"
+```
+
+That is a deliberate, temporary pin, and it is not where this should end up.
+It is there because **`api.alphakore.in` has no DNS record** — the name does
+not resolve at all, so a build pointed at it cannot activate a single
+customer. A provider address that works beats a domain that does not.
+
+What it costs, so nobody discovers it later:
+
+- Every build made from this source is **welded to Render**. Moving host,
+  region, or off the free tier means rebuilding and reinstalling on every
+  customer machine.
+- A Render subdomain in a client's firewall allowlist is a conversation you
+  do not want to have.
+
+### Undoing it — the whole job
+
+1. At the registrar for `alphakore.in`, add:
+
+   | Type | Name | Value |
+   |------|------|-------|
+   | CNAME | `api` | `prism-license-server.onrender.com` |
+
+2. Render → the service → Settings → Custom Domains → add `api.alphakore.in`.
+   Render issues the TLS certificate automatically, usually within minutes.
+
+3. Confirm: `curl https://api.alphakore.in/health` → `{"ok":true,...}`
+
+4. Set `DEFAULT_SERVER = "https://api.alphakore.in"` in `licensing/client.py`,
+   and `PRODUCTION_HOST` in `tests/test_licensing_endpoint.py` to match.
+
+5. Clear the `PRISM_SERVER_URL` repository variable if one is set, so releases
+   use the compiled-in default.
+
+Once the CNAME exists, every build already in customers' hands starts working
+against the domain without a reinstall — which is the entire reason to do it.
+
+## 3.2b The server sleeps
+
+Render's free tier spins down after about 15 minutes idle. A cold `/health`
+was measured at **42.6 seconds**.
+
+`ACTIVATE_TIMEOUT` is 75s and `AUTHORIZE_TIMEOUT` is 45s with one retry, both
+sized for that. Before those were raised, first-time activation failed against
+a server that was perfectly healthy — it had simply not finished waking.
+
+The customer-visible symptom that remains: the first action of each morning
+hangs for up to a minute. Render's paid tier (~$7/month) does not sleep and
+removes it. Keep the long timeouts either way; they cost nothing warm.
 
 ## 3.3 Support inbox
 

@@ -100,8 +100,15 @@ takeoffs.
 
 ## 2. Architecture
 
+The server's address is one constant, `DEFAULT_SERVER` in
+`licensing/client.py`. It currently ships as
+`https://prism-license-server.onrender.com` — a temporary pin, because
+`api.alphakore.in` has no DNS record yet. **SHIPPING.md §3.2 is the one place
+that says how to move it**, and `tests/test_licensing_endpoint.py` fails if
+that note goes missing.
+
 ```
-Prism desktop (PySide6)          api.alphakore.in (FastAPI + Postgres)
+Prism desktop (PySide6)          the licence server (FastAPI + Postgres)
 ┌──────────────────────┐         ┌────────────────────────────────┐
 │ licensing/           │  HTTPS  │ /v1/activate    → signed token │
 │  ├ device.py  fp     │────────▶│ /v1/refresh                    │
@@ -378,8 +385,9 @@ The part that decides whether customers hate this. Treat these as requirements.
 ### Phase 1 — T1 + T2 (~3 weeks), ships as v1.1
 
 - **Week 1** — backend: FastAPI + Postgres on Render/Railway (~₹1,500–2,000/mo),
-  `api.alphakore.in`, Ed25519 keypair, activate/refresh/deactivate, admin
+  on `api.alphakore.in`, Ed25519 keypair, activate/refresh/deactivate, admin
   issuance. No admin UI; `curl` is fine while you are the only operator.
+  *(Shipped on Render. The domain is still outstanding — SHIPPING.md §3.2.)*
 - **Week 2** — client: the `licensing/` package, launch gate, add-on gates,
   activation dialog, licence section in Setup.
 - **Week 3** — T2: extract the payload, serve it encrypted, consume it through

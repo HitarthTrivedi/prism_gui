@@ -9,10 +9,17 @@ gone to a host the signing keys are not documented against.
 That is the shape of failure worth a dedicated test: a single value, changed
 by accident, with no symptom until it is in front of a paying customer.
 
-It also has to stay a DOMAIN rather than a hosting provider's own address. The
-domain is the only thing that lets the licence server move — another host,
-another region, off a free tier — without shipping a new app to everyone who
-already installed one.
+This file used to also forbid a hosting provider's own address, on the grounds
+that only a domain lets the licence server move without shipping a new app.
+That reasoning has not changed and is still correct. It is suspended anyway,
+deliberately, because `api.alphakore.in` has no DNS record at all — and a
+build pointed at a domain that does not resolve cannot activate ANY customer,
+which is a worse problem than one that is merely hard to move later.
+
+So the ban is gone and a documentation check stands in its place: SHIPPING.md
+has to keep saying that the pin is temporary and how to undo it. A rule nobody
+can follow gets ignored, and an ignored test is worse than no test; a note in
+the release instructions is at least read by the person who could act on it.
 """
 from __future__ import annotations
 
@@ -28,12 +35,12 @@ from licensing import client  # noqa: E402
 
 # The production licence server. Changing this is a deliberate act: change it
 # here and in licensing/client.py together, and check SHIPPING.md still agrees.
-PRODUCTION_HOST = "api.alphakore.in"
+PRODUCTION_HOST = "prism-license-server.onrender.com"
 
-# Hosting providers. A build pinned to one of these cannot be moved off it.
-PROVIDER_DOMAINS = ("onrender.com", "railway.app", "herokuapp.com",
-                    "vercel.app", "fly.dev", "ngrok.io", "ngrok-free.app",
-                    "trycloudflare.com", "amazonaws.com", "azurewebsites.net")
+# The domain this is meant to become, once it has a DNS record. Named here so
+# the day somebody points the CNAME, the change is find-and-replace rather
+# than archaeology.
+INTENDED_HOST = "api.alphakore.in"
 
 
 def _repo(*parts: str) -> str:
@@ -45,15 +52,6 @@ class TheShippedAddress(unittest.TestCase):
 
     def test_it_is_the_production_host(self):
         self.assertEqual(urlsplit(client.DEFAULT_SERVER).hostname, PRODUCTION_HOST)
-
-    def test_it_is_not_pinned_to_a_hosting_provider(self):
-        host = urlsplit(client.DEFAULT_SERVER).hostname or ""
-        for provider in PROVIDER_DOMAINS:
-            self.assertFalse(
-                host.endswith(provider),
-                f"DEFAULT_SERVER is pinned to {provider}. Point the domain at "
-                f"the host instead — otherwise this binary can never be moved "
-                f"off that provider.")
 
     def test_it_is_https(self):
         """A licence token travels over this. Plain HTTP would let anyone on
@@ -95,13 +93,35 @@ class TheDocsAgree(unittest.TestCase):
     the code disagree, one of them sends somebody the wrong way at exactly the
     moment they are shipping to a customer."""
 
-    def test_shipping_md_names_the_same_host(self):
+    def _shipping(self) -> str:
         path = _repo("SHIPPING.md")
         if not os.path.exists(path):
             self.skipTest("SHIPPING.md not present")
         with open(path, encoding="utf-8") as f:
-            text = f.read()
-        self.assertIn(PRODUCTION_HOST, text)
+            return f.read()
+
+    def test_shipping_md_names_the_same_host(self):
+        self.assertIn(PRODUCTION_HOST, self._shipping())
+
+    def test_the_temporary_pin_is_still_written_down(self):
+        """Stands in for the hosting-provider ban this file used to enforce.
+
+        We are pinned to Render on purpose, because the domain does not
+        resolve. The cost of that is real and lands later: every build made
+        from this source is stuck on Render until somebody rebuilds. The only
+        thing stopping that becoming permanent by forgetfulness is the note in
+        the release instructions — so the note is what gets tested.
+
+        Fails if SHIPPING.md stops mentioning the domain we are meant to move
+        to, which is what would happen if somebody 'tidied up' the section
+        after reading that the Render address is the current one.
+        """
+        text = self._shipping()
+        self.assertIn(INTENDED_HOST, text,
+                      "SHIPPING.md no longer says which domain the licence "
+                      "server is meant to move to. Without it, the Render pin "
+                      "becomes permanent because nobody knows it was meant to "
+                      "be temporary.")
 
 
 if __name__ == "__main__":

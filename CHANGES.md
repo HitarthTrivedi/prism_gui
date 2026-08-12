@@ -4,7 +4,156 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **420 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+Tests: **586 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+
+---
+
+# Round 4 — the screens, and the rest of the loop
+
+Round 3 built the engine and said plainly that the screens did not exist. They
+do now, and the workflow runs end to end: read the mail, register it, quote it,
+read the answer, chase the silence, argue with the no.
+
+## The screen
+
+Four tabs, in the order the work happens — **What arrived → Inquiries → What
+they said back → Waiting on a reply.** The tab order is the explanation of the
+feature, so it has a test of its own.
+
+- **Colour.** Categories, statuses and reply intents are tinted so a
+  hundred-row register reads at arm's length. The word is always there as well
+  as the colour: roughly one man in twelve cannot tell the red from the green,
+  and a register printed on the office laser comes out grey. Tests assert every
+  category and every status has a colour, because an uncoloured cell in a
+  coloured column reads as a rendering bug.
+- **Checks on a timer.** Off by default; interval set in Setup. It only ever
+  READS. A tick is skipped while a check is already running — two IMAP fetches
+  racing on one bookmark is how the same inquiry gets registered twice — and
+  skipped while a quotation is open on top. Failures on a tick go to the status
+  line, not a dialog: a modal appearing over somebody's work every ten minutes
+  because the mail server had a bad afternoon is how the feature gets switched
+  off for good. For the same reason a tick never moves the tab.
+- **Time as well as date** in the register. Two inquiries from one customer on
+  the same morning were indistinguishable before. Converted to local time — a
+  mail header carries the *sender's* offset, so a 09:00 enquiry from Germany
+  was filing itself at 09:00 in a Gujarat register.
+- **Editing a row by hand.** They can always edit the CSV in Excel, but a
+  register that can only be corrected by closing the app is one they stop
+  correcting. The bookkeeping fields are deliberately not editable — letting
+  the inquiry number be retyped is how two rows end up sharing one.
+- **Starting from a register they already keep.** Setup imports it: their own
+  columns survive untouched, numbering carries on from theirs rather than
+  reissuing a number already on a quotation, and an existing register is never
+  overwritten. Columns Prism did not recognise are reported, not guessed.
+
+## Replies, which is the part it is bought for
+
+The engine already worked out what each reply meant. The GUI threw it away.
+
+Tab 3 now shows the reply, what Prism makes of it, what the register *would*
+say, and the customer's actual words underneath. **Nothing applies itself** — a
+machine silently rewriting a sales record on the strength of a sentence it
+might have misread is not something a business can check.
+
+`register.mark_reply()` is careful about three things:
+
+- **"Accepted" does not mean Converted.** Going ahead is a promise; Converted
+  is a fact with a PO number behind it. Collapsing them makes the month-end
+  conversion figure optimistic by exactly the orders that never arrived — the
+  one number an owner would repeat to a bank.
+- **An unreadable reply changes nothing but the date.** A wrong status is worse
+  than a stale one: the owner acts on the register without re-reading the mail,
+  and a quotation wrongly marked Not converted is never chased again.
+- **Haggling is not a refusal.** "Send your best price" is the commonest reply
+  there is, and reading it as a no closes a row that is still winnable.
+
+## Chasing, unattended
+
+Every two days, three times, then it stops. The schedule lives in the register
+— `Reminders sent` and `Last contact`, the same two columns the owner can see
+and edit — so there is no hidden second queue to drift out of step with it.
+
+One reminder per check, never a batch: three leaving in the same second, to
+three customers who talk to each other, reads as a machine. Each is worded
+differently — the first is a light touch, the third asks straight out whether
+to close the file. A failed send is not counted, or Prism gives up after three
+reminders that never left the building. Off until switched on.
+
+## Winning back a no — and less Groq
+
+**`core/drafting.py` is new.** Writing a page of persuasion that knows what was
+quoted, what they objected to, and how far this owner will move on price is a
+different job from labelling an inbox. It goes through the AI tools in the
+customer's own Chrome, on their own subscription — no API key, no per-token
+cost.
+
+The risk is a tool that offers 15% because it sounded persuasive. So: no figure
+may appear that is not in the owner's own policy file, **no policy file means
+no discount is offered at all**, and the customer's email is marked as
+information rather than instruction — a buyer cannot write "ignore your pricing
+policy" and negotiate with the tool directly.
+
+Two things deliberately did **not** move to the browser, with the reasoning in
+the module docstring: sorting the inbox (a browser round trip is most of a
+minute; two hundred emails is a working day with their Chrome held hostage) and
+writing the register (Python writes it atomically, gets the money right to the
+paisa, and cannot hallucinate a row — and it is the customer's order book, not
+something to post to a website).
+
+**Reading a reply now usually needs no AI at all.** `mailflow.local_intent()`
+settles the formulaic ones — 13 of 13 test phrases, zero calls. Only genuinely
+vague replies reach the model. The rules run first even when a key is
+configured, or they would be dead code.
+
+## Pricing from the owner's own formulas
+
+The engine could always run a cost sheet; the GUI only read rate lists, which
+locked out every shop quoting made-to-drawing work. Either source works now,
+and every line of the working is shown — this is the number they will be asked
+to justify on the phone.
+
+Two defects the testing found:
+
+- **The quotation totals the *rounded* per-piece rate**, so it does not equal
+  the cost. Reading ₹31,556 on screen and sending ₹31,550 is how an owner stops
+  believing the whole calculation. The gap is now stated in words.
+- **A blank weight quoted the labour alone** — an under-quote that looked like
+  a finished quotation. It refuses now.
+
+## FFmpeg
+
+A Windows customer met a codec install guide on pressing Reel. FFmpeg is now
+**bundled** (`imageio-ffmpeg` in the wheel), with a verified download as the
+fallback: the same wheel, checked against the SHA-256 PyPI publishes for that
+exact file, verified before it is unpacked. `reel.py` and `reel_web.py` each
+had their own `shutil.which("ffmpeg")`; both delegate to one resolver now, and
+a test parses the AST to keep it that way.
+
+The self-test line that read "optional — needs FFmpeg on the machine" *was* the
+belief that caused the bug. It names which FFmpeg is in use now.
+
+## The licence server
+
+- **`DEFAULT_SERVER` now ships the Render address.** `api.alphakore.in` has no
+  DNS record, and a build pointed at a name that does not resolve cannot
+  activate anybody. This is a temporary pin with a real cost — see
+  **SHIPPING.md §3.2**, which is now the only place that says how to undo it,
+  and which `tests/test_licensing_endpoint.py` fails if anyone deletes.
+- **`ACTIVATE_TIMEOUT` 30s → 75s.** A cold `/health` on that host measured
+  **42.6 seconds**; activation was giving up 13 seconds early against a server
+  that was up and healthy. Activation is the one call a new customer cannot go
+  around — no cached token, no way into the app.
+- Deliberately **no retry** on activation, unlike authorize. A timeout there is
+  ambiguous: the request may have counted a seat before the socket gave up, and
+  burning the second seat of a two-seat licence is worse than the failure the
+  retry would fix.
+
+### Not done
+`plans.py` feature names and blurbs are still not in the translation catalogue
+— unchanged from Round 3, still a pre-existing gap.
+
+The send path and the PO → BOQ hand-off are written and unit-tested but have
+never run against a real mailbox. Reading is the well-covered half.
 
 ---
 
