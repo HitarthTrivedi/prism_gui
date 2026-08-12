@@ -216,9 +216,22 @@ class InquirySetupDialog(QDialog):
         self.cost_file = _Picker(
             saved.get("cost_sheet", ""),
             filters=i18n.t("Cost sheets (*.csv *.xlsx *.xlsm);;All files (*)"),
-            placeholder=i18n.t("optional — for made-to-drawing work"))
+            placeholder=i18n.t("optional — your formulas, for made-to-drawing work"))
         form.addRow(i18n.t("Cost sheet:"), self.cost_file)
+
+        # A shop that has been trading for twenty years already keeps an
+        # inquiry list. Starting them at row one would mean running two
+        # registers side by side until they gave up on ours.
+        self.existing_register = _Picker(
+            "", filters=i18n.t("Registers (*.csv);;All files (*)"),
+            placeholder=i18n.t("optional — the list you already keep"))
+        form.addRow(i18n.t("Start from my register:"), self.existing_register)
         layout.addLayout(form)
+
+        self.import_note = QLabel("")
+        self.import_note.setWordWrap(True)
+        self.import_note.setProperty("class", "muted")
+        layout.addWidget(self.import_note)
 
         hint = QLabel(i18n.t(
             "A rate list needs a heading row with at least a description and "
@@ -228,6 +241,23 @@ class InquirySetupDialog(QDialog):
         hint.setWordWrap(True)
         hint.setProperty("class", "muted")
         layout.addWidget(hint)
+
+        # Worth spelling out with an example. "Cost sheet" means a dozen
+        # different documents in a dozen different factories, and the one
+        # Prism can run is a specific and simple shape.
+        formulas = QLabel(i18n.t(
+            "A cost sheet is your own working, three columns wide: the name "
+            "of the charge, how it is charged, and the rate. Prism does the "
+            "arithmetic and shows every line — it never invents a rate.\n\n"
+            "    Wire,          per_kg,     95\n"
+            "    Coiling,       per_piece,  1.20\n"
+            "    Tool setting,  per_lot,    800\n"
+            "    Overheads,     percent,    12\n\n"
+            "Percentages apply to the total of the lines above them, so the "
+            "order of your rows is the order of your own calculation."))
+        formulas.setWordWrap(True)
+        formulas.setProperty("class", "muted")
+        layout.addWidget(formulas)
         layout.addStretch(1)
         return page
 
@@ -272,7 +302,23 @@ class InquirySetupDialog(QDialog):
         self.followup_days.setSuffix(i18n.t(" days"))
         self.followup_days.setValue(int(saved.get("followup_days", 3) or 3))
         form.addRow(i18n.t("Chase a quiet quotation after:"), self.followup_days)
+
+        self.auto_minutes = QSpinBox()
+        self.auto_minutes.setRange(0, 240)
+        self.auto_minutes.setSuffix(i18n.t(" minutes"))
+        self.auto_minutes.setSpecialValueText(i18n.t("only when I ask"))
+        self.auto_minutes.setValue(int(saved.get("auto_minutes", 0) or 0))
+        form.addRow(i18n.t("Check the inbox every:"), self.auto_minutes)
         layout.addLayout(form)
+
+        auto_note = QLabel(i18n.t(
+            "Automatic checking only ever READS. It never replies, never "
+            "sends a quotation and never chases anybody — those stay on a "
+            "button. Ten minutes suits most offices; below five is more often "
+            "than any mail server expects to be asked."))
+        auto_note.setWordWrap(True)
+        auto_note.setProperty("class", "muted")
+        layout.addWidget(auto_note)
         layout.addStretch(1)
         return page
 
@@ -326,6 +372,72 @@ class InquirySetupDialog(QDialog):
         layout.addWidget(explain)
         layout.addStretch(1)
         return page
+
+    # ── bringing an existing register in ──────────────────────────────────
+    def _import_register(self, folder: str) -> str:
+        """Copy the customer's own inquiry list in, once.
+
+        Rules, in the order they matter:
+
+          · **Never overwrite a register that already has rows in it.** That
+            file is the only copy of their order book. If one is already
+            there, this does nothing and says so.
+          · **Never rewrite their columns.** register.load/save keep unknown
+            columns untouched, so their "Party Name" or "Remarks" survive
+            exactly as typed and sit alongside Prism's.
+          · **Say what was recognised.** A register whose columns Prism cannot
+            read still imports, but the screen will show blanks in those
+            columns, and finding that out on Monday is worse than being told
+            now.
+
+        Returns a sentence for the screen, or "" when there was nothing to do.
+        """
+        source = self.existing_register.value()
+        if not source:
+            return ""
+        register = CB.get_register()
+        destination = os.path.join(folder, register.FILENAME)
+
+        if os.path.exists(destination):
+            try:
+                already = register.load(destination)
+            except Exception:
+                already = [None]        # unreadable, but present — leave it
+            if already:
+                return i18n.t(
+                    "There is already an inquiry register in that folder with "
+                    "{n} row(s), so it was left alone. Nothing was imported."
+                ).replace("{n}", str(len(already)))
+
+        try:
+            rows = register.load(source)
+        except Exception as e:
+            return i18n.t("Couldn't read that register: {why}").replace(
+                "{why}", str(e))
+        if not rows:
+            return i18n.t("That file has no rows in it, so nothing was imported.")
+
+        try:
+            register.save(rows, destination)
+        except Exception as e:
+            return i18n.t("Couldn't write the register: {why}").replace(
+                "{why}", str(e))
+
+        # Which of ours they already have. Reported rather than corrected: a
+        # column-guessing importer that got it wrong would quietly mis-file
+        # somebody's twenty-year order book.
+        theirs = set(rows[0].keys())
+        wanted = ("Inquiry no", "Date received", "Customer", "Status")
+        missing = [c for c in wanted if c not in theirs]
+        message = i18n.t("Imported {n} row(s) from your register.").replace(
+            "{n}", str(len(rows)))
+        if missing:
+            message += " " + i18n.t(
+                "Prism didn't find these columns in it — {cols} — so those "
+                "boxes will be empty on the Inquiries screen until you fill "
+                "them in. Everything you already had is untouched."
+            ).replace("{cols}", ", ".join(missing))
+        return message
 
     # ── saving ────────────────────────────────────────────────────────────
     @staticmethod
@@ -382,6 +494,7 @@ class InquirySetupDialog(QDialog):
                       "payment": self.payment.text().strip(),
                       "delivery": self.delivery.text().strip()},
             "followup_days": self.followup_days.value(),
+            "auto_minutes": self.auto_minutes.value(),
             "local_only": self.local_only.isChecked(),
             "knowledge": {"own_domains": self._lines(self.own),
                           "customers": self._lines(self.customers),
@@ -394,4 +507,11 @@ class InquirySetupDialog(QDialog):
             "state": settings_of(self.cfg).get("state") or {},
         }
         CB.config.save(self.cfg)
+
+        # Last, and after the config is safely written: an import that fails
+        # must not also cost them the settings they just typed in.
+        imported = self._import_register(folder)
+        if imported:
+            self.import_note.setText(imported)
+            QMessageBox.information(self, i18n.t("Inquiry register"), imported)
         self.accept()

@@ -1304,6 +1304,121 @@ class _patched_groq:
         return False
 
 
+class TheTimeAnInquiryArrived(unittest.TestCase):
+    """A date-only register cannot order two inquiries from the same morning,
+    and "which came first" is exactly what gets asked when somebody revises
+    their requirement an hour after sending it."""
+
+    def test_the_clock_time_is_recorded(self):
+        row = register.from_message(message())
+        self.assertEqual(row["Time received"], "09:14")
+
+    def test_it_is_the_senders_time_converted_to_ours(self):
+        """A Date header carries the sender's offset. Filed raw, a 09:00
+        enquiry from Germany reads as 09:00 in a Gujarat register and the
+        column stops meaning "when it reached us"."""
+        from datetime import datetime, timedelta, timezone
+
+        berlin = datetime(2026, 8, 10, 9, 0,
+                          tzinfo=timezone(timedelta(hours=2)))
+        # 09:00+02:00 is 07:00 UTC. Whatever this machine's zone is, the
+        # recorded time must be that instant expressed locally.
+        expected = berlin.astimezone().strftime("%H:%M")
+
+        msg = message()
+        msg.date = berlin
+        self.assertEqual(register.from_message(msg)["Time received"], expected)
+
+    def test_a_message_with_no_date_leaves_the_time_blank(self):
+        """Rather than stamping the moment Prism happened to run, which would
+        read as the time the customer wrote."""
+        msg = message()
+        msg.date = None
+        row = register.from_message(msg)
+        self.assertEqual(row["Time received"], "")
+        self.assertTrue(row["Date received"])      # the date still falls back
+
+    def test_the_column_survives_a_save_and_reload(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "inquiries.csv")
+        register.save([register.from_message(message())], path)
+        self.assertEqual(register.load(path)[0]["Time received"], "09:14")
+
+
+class ReadingWhatTheCustomerAnswered(unittest.TestCase):
+    """The step the whole feature is bought for: a reply comes in and the
+    register moves on by itself."""
+
+    def quoted_row(self):
+        row = register.from_message(message())
+        register.mark_quoted(row, "QTN/26-27/0001", "50000")
+        return row
+
+    def test_yes_becomes_accepted(self):
+        row = register.mark_reply(self.quoted_row(), "accepted")
+        self.assertEqual(row["Status"], register.ACCEPTED)
+
+    def test_accepted_is_not_converted(self):
+        """"Go ahead" is a promise; Converted is a fact with a PO behind it.
+        Collapsing the two makes the month-end conversion figure optimistic by
+        exactly the orders that never arrived — and that is the number the
+        owner would repeat to a bank."""
+        row = register.mark_reply(self.quoted_row(), "accepted")
+        self.assertNotEqual(row["Status"], register.CONVERTED)
+        self.assertEqual(row["PO number"], "")
+        self.assertEqual(row["Order value"], "")
+
+    def test_no_closes_the_row_the_same_way_the_owner_would(self):
+        row = register.mark_reply(self.quoted_row(), "rejected")
+        self.assertEqual(row["Status"], register.NOT_CONVERTED)
+        self.assertEqual(row["Result"], register.NOT_CONVERTED)
+        self.assertTrue(row["Reason if lost"])
+
+    def test_haggling_is_not_a_refusal(self):
+        """"Send your best price" ends the deal in a register that reads it as
+        a rejection, and it is the single most common reply there is."""
+        row = register.mark_reply(self.quoted_row(), "negotiating")
+        self.assertEqual(row["Status"], register.NEGOTIATING)
+
+    def test_a_question_leaves_it_open_too(self):
+        row = register.mark_reply(self.quoted_row(), "needs_info")
+        self.assertIn(row["Status"], register.OPEN_STATUSES)
+
+    def test_an_unreadable_reply_changes_nothing_but_the_date(self):
+        """A wrong status is worse than a stale one: the owner acts on the
+        register without re-reading the mail, and a quotation wrongly marked
+        Not converted is one they will never chase again."""
+        row = self.quoted_row()
+        before = dict(row)
+        register.mark_reply(row, "unclear")
+        self.assertEqual(row["Status"], before["Status"])
+        self.assertEqual(row["Result"], before["Result"])
+
+    def test_an_unknown_word_is_treated_as_unreadable(self):
+        """The intent comes back from a language model. A model that answers
+        with something not on the list must not be able to reach into the
+        register through a dictionary lookup that happened to miss."""
+        row = self.quoted_row()
+        register.mark_reply(row, "ACCEPTED!! (definitely)")
+        self.assertEqual(row["Status"], register.QUOTED)
+
+    def test_a_row_still_awaits_chasing_after_haggling(self):
+        """Negotiating is an open status, so it must stay on the chase list —
+        a negotiation that goes quiet is still money on the table."""
+        row = self.quoted_row()
+        register.mark_reply(row, "negotiating")
+        row["Last contact"] = (date.today() - timedelta(days=9)).strftime("%d-%m-%Y")
+        self.assertEqual(len(register.awaiting_followup([row], after_days=3)), 1)
+
+    def test_an_accepted_row_is_no_longer_chased(self):
+        """They said yes. Sending them a "have you decided?" reminder is the
+        kind of thing that makes people stop trusting the software."""
+        row = self.quoted_row()
+        register.mark_reply(row, "accepted")
+        row["Last contact"] = (date.today() - timedelta(days=9)).strftime("%d-%m-%Y")
+        self.assertEqual(register.awaiting_followup([row], after_days=3), [])
+
+
 def _read(relative: str) -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(here, "..", "prism_terminal", relative)
