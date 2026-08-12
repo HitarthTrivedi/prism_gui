@@ -219,6 +219,17 @@ class InquirySetupDialog(QDialog):
             placeholder=i18n.t("optional — your formulas, for made-to-drawing work"))
         form.addRow(i18n.t("Cost sheet:"), self.cost_file)
 
+        # How far the owner will bend, in their own words. Only ever read when
+        # they press "Win this back", and the negotiation prompt refuses to
+        # offer anything at all when it is missing — the safe direction to
+        # fail in is "no discount", not "some discount".
+        self.policy_file = _Picker(
+            saved.get("pricing_policy", ""),
+            filters=i18n.t("Any document (*.pdf *.docx *.txt *.csv *.xlsx);;"
+                           "All files (*)"),
+            placeholder=i18n.t("optional — how much you can bargain"))
+        form.addRow(i18n.t("Bargaining limits:"), self.policy_file)
+
         # A shop that has been trading for twenty years already keeps an
         # inquiry list. Starting them at row one would mean running two
         # registers side by side until they gave up on ours.
@@ -300,8 +311,14 @@ class InquirySetupDialog(QDialog):
         self.followup_days = QSpinBox()
         self.followup_days.setRange(1, 60)
         self.followup_days.setSuffix(i18n.t(" days"))
-        self.followup_days.setValue(int(saved.get("followup_days", 3) or 3))
+        self.followup_days.setValue(int(saved.get("followup_days", 2) or 2))
         form.addRow(i18n.t("Chase a quiet quotation after:"), self.followup_days)
+
+        self.max_reminders = QSpinBox()
+        self.max_reminders.setRange(1, 6)
+        self.max_reminders.setSuffix(i18n.t(" times"))
+        self.max_reminders.setValue(int(saved.get("max_reminders", 3) or 3))
+        form.addRow(i18n.t("Then stop after:"), self.max_reminders)
 
         self.auto_minutes = QSpinBox()
         self.auto_minutes.setRange(0, 240)
@@ -312,13 +329,30 @@ class InquirySetupDialog(QDialog):
         layout.addLayout(form)
 
         auto_note = QLabel(i18n.t(
-            "Automatic checking only ever READS. It never replies, never "
-            "sends a quotation and never chases anybody — those stay on a "
-            "button. Ten minutes suits most offices; below five is more often "
-            "than any mail server expects to be asked."))
+            "Automatic checking only ever READS your mail. Ten minutes suits "
+            "most offices; below five is more often than any mail server "
+            "expects to be asked."))
         auto_note.setWordWrap(True)
         auto_note.setProperty("class", "muted")
         layout.addWidget(auto_note)
+
+        self.auto_followup = QCheckBox(i18n.t(
+            "Send the reminders by themselves, without asking me each time"))
+        self.auto_followup.setChecked(bool(saved.get("auto_followup", False)))
+        layout.addWidget(self.auto_followup)
+
+        chase_note = QLabel(i18n.t(
+            "With this ticked, a quotation nobody has replied to is chased on "
+            "the schedule above and the register is updated — the whole thing "
+            "runs without you. Every reminder is written afresh rather than "
+            "the same sentence three times, and Prism stops the moment they "
+            "reply.\n\n"
+            "It is off to begin with because these are letters going out in "
+            "your name. Leave it off for the first week, watch what the "
+            "reminders say, then turn it on once you trust them."))
+        chase_note.setWordWrap(True)
+        chase_note.setProperty("class", "muted")
+        layout.addWidget(chase_note)
         layout.addStretch(1)
         return page
 
@@ -493,8 +527,11 @@ class InquirySetupDialog(QDialog):
                       "validity_days": self.validity.value(),
                       "payment": self.payment.text().strip(),
                       "delivery": self.delivery.text().strip()},
+            "pricing_policy": self.policy_file.value(),
             "followup_days": self.followup_days.value(),
+            "max_reminders": self.max_reminders.value(),
             "auto_minutes": self.auto_minutes.value(),
+            "auto_followup": self.auto_followup.isChecked(),
             "local_only": self.local_only.isChecked(),
             "knowledge": {"own_domains": self._lines(self.own),
                           "customers": self._lines(self.customers),

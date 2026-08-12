@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 from dialogs.inquiry_setup_dialog import InquirySetupDialog, is_ready, settings_of
-from workers import InboxCheckWorker, SendWorker
+from workers import DraftWorker, InboxCheckWorker, SendWorker
 
 # What each sorted category is called on screen. The engine's keys are English
 # identifiers; these are the words a customer reads.
@@ -148,6 +148,8 @@ class InquiryDialog(QDialog):
         self.cfg = dict(cfg)
         self._worker = None
         self._send_worker = None
+        self._draft_worker = None
+        self._draft_row = None
         self._result = None
         self._sorted_mail = []
         self._register_rows = []
@@ -352,6 +354,14 @@ class InquiryDialog(QDialog):
         boq = QPushButton(i18n.t("Make a BOQ from the drawing"))
         boq.clicked.connect(self._make_boq)
         row.addWidget(boq)
+        win = QPushButton(i18n.t("Win this back"))
+        win.setToolTip(i18n.t(
+            "For a customer who said no, or wants a better rate. Prism writes "
+            "the reply using the AI tools in your browser and your own "
+            "bargaining limits — then shows it to you before anything is "
+            "sent."))
+        win.clicked.connect(self._win_back)
+        row.addWidget(win)
         lost = QPushButton(i18n.t("Mark as not converted"))
         lost.clicked.connect(self._mark_lost)
         row.addWidget(lost)
@@ -573,7 +583,8 @@ class InquiryDialog(QDialog):
         self._worker = InboxCheckWorker(
             engine_cfg, self._root(), state=state, knowledge=knowledge,
             local_only=bool(settings.get("local_only")),
-            followup_days=int(settings.get("followup_days", 3) or 3))
+            followup_days=int(settings.get("followup_days", 2) or 2),
+            max_reminders=int(settings.get("max_reminders", 3) or 3))
         self._worker.done.connect(self._checked)
         self._worker.failed.connect(self._check_failed)
         self._worker.start()
@@ -625,6 +636,10 @@ class InquiryDialog(QDialog):
             self.tabs.setCurrentIndex(
                 2 if result.replies else (0 if result.fetched else 1))
         self._quiet = False
+        # Last, and only after the register has been written: a reminder must
+        # never go out to somebody whose reply arrived in this same check and
+        # has not been filed yet.
+        self._chase_automatically()
 
     def _remember(self, result):
         """Persist the bookmark and anything the sorter learned."""
@@ -704,8 +719,11 @@ class InquiryDialog(QDialog):
                 self.register_table.setItem(index, column, cell)
 
         self.followups.clear()
+        settings = self._settings()
         due = register.awaiting_followup(
-            rows, after_days=int(self._settings().get("followup_days", 3) or 3))
+            rows,
+            after_days=int(settings.get("followup_days", 2) or 2),
+            max_reminders=int(settings.get("max_reminders", 3) or 3))
         self._followup_rows = list(due)
         for row in due:
             # The QUOTATION number leads. That is the document the customer is
@@ -855,6 +873,247 @@ class InquiryDialog(QDialog):
         self.status.setText("")
         self._explain(message)
 
+    # ── chasing without being asked ───────────────────────────────────────
+    def _chase_automatically(self):
+        """Send the reminders that are due, one per check, unattended.
+
+        Everything about this is deliberately conservative, because these are
+        letters going out in somebody else's name to their own customers:
+
+          · **One per check, never a batch.** Three reminders leaving in the
+            same second, to three customers who talk to each other, reads as a
+            machine. Spread over the day's checks, it reads as a person
+            working through a list.
+          · **The register is the schedule.** Who is due comes from Reminders
+            sent and Last contact in the CSV — the same two columns the owner
+            can see and edit. There is no second, hidden queue to get out of
+            step with it.
+          · **Counted only when the send succeeds**, or Prism gives up after
+            three reminders that never left the building.
+          · **Off unless they turned it on.**
+        """
+        settings = self._settings()
+        if not settings.get("auto_followup"):
+            return
+        if self._send_worker is not None and self._send_worker.isRunning():
+            return
+        if not CB.mailer.is_configured(self.cfg):
+            return
+        due = [r for r in getattr(self, "_followup_rows", []) if r.get("Email")]
+        if not due:
+            return
+
+        row = due[0]
+        subject, body = self._reminder_words(row)
+        self.status.setText(
+            i18n.t("Sending a reminder to {who}…").replace(
+                "{who}", row.get("Email", "")))
+        self._send_worker = SendWorker(
+            self.cfg, [{"email": row.get("Email", ""),
+                        "name": row.get("Contact person", "")}],
+            subject, body, [])
+        self._send_worker.done.connect(
+            lambda sent, failed: self._reminder_sent(row, sent, failed))
+        self._send_worker.failed.connect(self._reminder_failed)
+        self._send_worker.start()
+
+    def _reminder_words(self, row: dict) -> tuple[str, str]:
+        """Subject and body for the next reminder on this row.
+
+        The attempt number changes the wording. Three identical nudges in six
+        days is not persistence, it is a mail merge, and the customer can
+        tell — so the first is a light touch and the third asks straight out
+        whether to close the file.
+        """
+        settings = self._settings()
+        try:
+            sent = int(str(row.get("Reminders sent") or "0").strip() or 0)
+        except ValueError:
+            sent = 0
+        attempt = sent + 1
+        signature = settings.get("signature", "") or settings.get("company", "")
+        subject = (i18n.t("Reminder: our quotation {no}")
+                   .replace("{no}", row.get("Quotation no", "")))
+        openers = {
+            1: i18n.t("We sent you our quotation {no} on {when}. Just making "
+                      "sure it reached you."),
+            2: i18n.t("Following up on our quotation {no} of {when}. If any "
+                      "part of it does not suit, we are glad to revise it."),
+            3: i18n.t("This is our last note about quotation {no} of {when}. "
+                      "Would you like us to keep this enquiry open, or close "
+                      "it for now? Either is perfectly all right."),
+        }
+        opener = openers.get(attempt, openers[3])
+        body = (i18n.t("Dear Sir,\n\n{opener}\n\nRegards,\n{signature}")
+                .replace("{opener}", opener
+                         .replace("{no}", row.get("Quotation no", ""))
+                         .replace("{when}", row.get("Quotation date", "")))
+                .replace("{signature}", signature))
+        return subject, body
+
+    # ── winning back a customer who said no ───────────────────────────────
+    def _win_back(self):
+        """Draft a reply to a decline or a haggle, using the browser tools.
+
+        This one email is worth the wait. It has to know what was quoted, what
+        they objected to, and exactly how far this owner will move — and it is
+        read out loud by somebody before it goes. That is a completely
+        different job from labelling an inbox, and it goes to the best writer
+        available rather than the fastest one.
+        """
+        row = self._selected_row()
+        if not row:
+            return
+        settings = self._settings()
+        status = (row.get("Status") or "").strip()
+        register = CB.get_register()
+        if status not in (register.NOT_CONVERTED, register.NEGOTIATING,
+                          register.QUOTED, register.FOLLOWING_UP):
+            QMessageBox.information(
+                self, i18n.t("Win this back"),
+                i18n.t("There is nothing to win back yet — this one has not "
+                       "been quoted and turned down."))
+            return
+
+        drafting = CB.get_drafting()
+        ready, why = drafting.available(self.cfg)
+        if not ready:
+            self._explain(why)
+            return
+
+        policy_path = settings.get("pricing_policy", "")
+        policy_text, policy_files = drafting.load_policy(policy_path)
+        if not policy_text and not policy_files:
+            if QMessageBox.question(
+                    self, i18n.t("Win this back"),
+                    i18n.t("You have not given Prism your bargaining limits, "
+                           "so it will not offer any discount at all — it will "
+                           "argue on quality, delivery and service only.\n\n"
+                           "Add the file under Setup → Files to let it "
+                           "negotiate on price. Carry on without it?"),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes) != QMessageBox.Yes:
+                return
+
+        prompt = drafting.negotiation_prompt(
+            quotation_text=self._quotation_text(row),
+            customer_reply=self._last_reply_text(row),
+            policy_text=policy_text,
+            customer_name=row.get("Customer", "") or row.get("Email", ""),
+            product=row.get("Product asked", ""),
+            signature=settings.get("signature", "") or settings.get("company", ""),
+            language=self.cfg.get("output_language", "") or "")
+
+        self._draft_row = row
+        self.progress.setVisible(True)
+        self.status.setText(i18n.t(
+            "Writing it in your browser — this takes a minute or two. Chrome "
+            "will open by itself; leave it alone until it finishes."))
+        self._draft_worker = DraftWorker(self.cfg, prompt, purpose="negotiate",
+                                         attachments=policy_files)
+        self._draft_worker.progress.connect(self.status.setText)
+        self._draft_worker.done.connect(self._drafted)
+        self._draft_worker.failed.connect(self._draft_failed)
+        self._draft_worker.start()
+
+    def _quotation_text(self, row: dict) -> str:
+        """What we actually sent them, read back off the disk.
+
+        The quotation CSV written at send time is the only record of the
+        figures as the customer saw them; rebuilding it from today's rate list
+        could quote them something different from what they are holding.
+        """
+        folder = row.get("Folder", "")
+        number = (row.get("Quotation no", "") or "").replace("/", "-")
+        if folder and number:
+            path = os.path.join(folder, f"{number}.csv")
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8-sig") as f:
+                        return f.read()[:6000]
+                except OSError:
+                    pass
+        return (i18n.t("Quotation {no} dated {when}, value Rs.{value}")
+                .replace("{no}", row.get("Quotation no", ""))
+                .replace("{when}", row.get("Quotation date", ""))
+                .replace("{value}", row.get("Quotation value", "")))
+
+    def _last_reply_text(self, row: dict) -> str:
+        """Their own words, from this check if we have them.
+
+        Falls back to the reason recorded when the row was closed. Thin, but
+        an honest "they said the rate was too high" beats inventing an
+        objection for the tool to answer.
+        """
+        for item in getattr(self, "_replies", []):
+            if (item.row or {}).get("Inquiry no") == row.get("Inquiry no"):
+                message = item.message
+                if hasattr(message, "snippet"):
+                    return message.snippet(2000)
+        reason = row.get("Reason if lost", "") or row.get("Notes", "")
+        return reason or i18n.t("(they have not said why)")
+
+    def _drafted(self, result):
+        self.progress.setVisible(False)
+        self.status.setText("")
+        if result.error:
+            self._explain(result.error)
+            return
+        if not result.ok:
+            self._explain(i18n.t(
+                "The AI tool did not answer. Its tab is still open in Chrome "
+                "— the reply may have arrived after Prism stopped waiting."))
+            return
+        row = getattr(self, "_draft_row", None) or {}
+        subject = (i18n.t("Regarding our quotation {no}")
+                   .replace("{no}", row.get("Quotation no", "")))
+        dialog = _ReminderDialog(subject, result.text, row.get("Email", ""),
+                                 self, note=i18n.t(
+                                     "Written by {agent}. Read it before it "
+                                     "goes — it is your name on it.")
+                                 .replace("{agent}", result.agent))
+        if dialog.exec() != QDialog.Accepted:
+            return
+        if not CB.mailer.is_configured(self.cfg):
+            QMessageBox.information(
+                self, i18n.t("Win this back"),
+                i18n.t("Sending needs your outgoing account set up — open the "
+                       "Email add-on once and enter it."))
+            return
+        self._send_worker = SendWorker(
+            self.cfg, [{"email": row.get("Email", ""),
+                        "name": row.get("Contact person", "")}],
+            dialog.subject(), dialog.body(), [])
+        self._send_worker.done.connect(
+            lambda sent, failed: self._winback_sent(row, sent, failed))
+        self._send_worker.failed.connect(self._reminder_failed)
+        self._send_worker.start()
+
+    def _winback_sent(self, row: dict, sent: list, failed: list):
+        if failed:
+            self._explain(failed[0][1])
+            return
+        register = CB.get_register()
+        target = register.find(self._register_rows,
+                               row.get("Inquiry no", "")) or row
+        # Reopened. A row we are actively arguing with is not a lost one, and
+        # leaving it closed would drop it off every list Prism keeps.
+        target["Status"] = register.NEGOTIATING
+        target["Result"] = ""
+        target["Last contact"] = date.today().strftime("%d-%m-%Y")
+        try:
+            register.save(self._register_rows, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        self._refresh_register()
+        self.status.setText(i18n.t("Sent. This inquiry is open again."))
+
+    def _draft_failed(self, message: str):
+        self.progress.setVisible(False)
+        self.status.setText("")
+        self._explain(message)
+
     # ── correcting the register by hand ───────────────────────────────────
     def _edit_row(self):
         """Let the owner fix what Prism got wrong, in Prism.
@@ -975,13 +1234,19 @@ class _ReminderDialog(QDialog):
     """The reminder, shown before it goes. Editable, because the right words
     for a customer of fifteen years are not the right words for a new one."""
 
-    def __init__(self, subject: str, body: str, address: str, parent=None):
+    def __init__(self, subject: str, body: str, address: str, parent=None,
+                 note: str = ""):
         super().__init__(parent)
         self.setWindowTitle(i18n.t("Send a reminder"))
-        self.resize(560, 380)
+        self.resize(560, 420)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
             i18n.t("To: {who}").replace("{who}", address)))
+        if note:
+            caption = QLabel(note)
+            caption.setWordWrap(True)
+            caption.setProperty("class", "muted")
+            layout.addWidget(caption)
         self._subject = QLineEdit(subject)
         layout.addWidget(self._subject)
         self._body = QTextEdit(body)

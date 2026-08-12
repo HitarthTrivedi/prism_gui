@@ -181,6 +181,11 @@ def get_files():
     return files
 
 
+def get_drafting():
+    from core import drafting
+    return drafting
+
+
 def reel_available() -> tuple[bool, str]:
     """Pillow draws the frames, FFmpeg encodes them. Probe both so the add-on
     can explain what is missing instead of failing mid-render."""

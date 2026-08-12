@@ -975,6 +975,200 @@ class PricingFromTheOwnersFormulas(unittest.TestCase):
         self.assertIn("cost sheet", told[0].lower())
 
 
+class ChasingByItself(unittest.TestCase):
+    """Every two days, three times, driven off the register — and then it
+    stops. These are letters going out in the owner's name, so every guard
+    here is one they would ask for if they thought about it."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.cfg = ready_cfg(self.folder)
+        self.cfg["inquiry"]["auto_followup"] = True
+        self.cfg["inquiry"]["followup_days"] = 2
+        self.cfg["inquiry"]["max_reminders"] = 3
+        self.row = register.from_message(message())
+        register.mark_quoted(self.row, "QTN/26-27/0001", "50000")
+        self.row["Last contact"] = "01-01-2020"        # long overdue
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+
+    def dialog(self):
+        d = UI.InquiryDialog(self.cfg)
+        d._refresh_register()
+        self.sent = []
+        d._send_worker = None
+
+        class _Fake:
+            def __init__(_, cfg, recipients, subject, body, files):
+                _.done = _Signal()
+                _.failed = _Signal()
+                self.sent.append((recipients[0]["email"], subject, body))
+
+            def isRunning(_):
+                return False
+
+            def start(_):
+                pass
+
+        self._fake = _Fake
+        return d
+
+    def test_it_sends_when_switched_on(self):
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+            d._chase_automatically()
+        self.assertEqual(len(self.sent), 1)
+
+    def test_it_is_silent_when_switched_off(self):
+        """Off unless they turned it on. The default has to be that Prism
+        writes to nobody."""
+        self.cfg["inquiry"]["auto_followup"] = False
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+            d._chase_automatically()
+        self.assertEqual(self.sent, [])
+
+    def test_only_one_goes_out_per_check(self):
+        """Three reminders leaving in the same second, to three customers who
+        talk to each other, reads as a machine."""
+        rows = []
+        for n in range(3):
+            r = register.from_message(message(subject=f"Enquiry {n}"))
+            r["Email"] = f"buyer{n}@shaktiauto.in"
+            register.mark_quoted(r, f"QTN/26-27/000{n}", "1000")
+            r["Last contact"] = "01-01-2020"
+            rows.append(r)
+        register.save(rows, mailflow.Paths(self.folder).register_csv)
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+            d._chase_automatically()
+        self.assertEqual(len(self.sent), 1)
+
+    def test_it_stops_after_the_third(self):
+        self.row["Reminders sent"] = "3"
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+            d._chase_automatically()
+        self.assertEqual(self.sent, [])
+
+    def test_a_row_chased_yesterday_is_left_alone(self):
+        """Two days means two days. A timer running every ten minutes must not
+        turn that into 144 reminders."""
+        from datetime import timedelta
+        self.row["Last contact"] = (
+            date.today() - timedelta(days=1)).strftime("%d-%m-%Y")
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+            d._chase_automatically()
+        self.assertEqual(self.sent, [])
+
+    def test_nothing_is_sent_without_an_outgoing_account(self):
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake), \
+             _Patched(CB.mailer, "is_configured", lambda cfg: False):
+            d._chase_automatically()
+        self.assertEqual(self.sent, [])
+
+    def test_each_reminder_is_worded_differently(self):
+        """Three identical nudges in six days is a mail merge."""
+        d = self.dialog()
+        bodies = []
+        for n in ("0", "1", "2"):
+            row = dict(self.row)
+            row["Reminders sent"] = n
+            bodies.append(d._reminder_words(row)[1])
+        self.assertEqual(len(set(bodies)), 3)
+        self.assertIn("close it for now", bodies[2])
+
+    def test_the_last_one_makes_it_easy_to_say_no(self):
+        d = self.dialog()
+        row = dict(self.row)
+        row["Reminders sent"] = "2"
+        self.assertIn("perfectly all right", d._reminder_words(row)[1])
+
+
+class WinningBackACustomerWhoSaidNo(unittest.TestCase):
+    """The one email worth waiting two minutes for, written by the tools in
+    the owner's own browser rather than by Groq."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.cfg = ready_cfg(self.folder)
+        self.row = register.from_message(message())
+        register.mark_quoted(self.row, "QTN/26-27/0001", "50000")
+        register.mark_lost(self.row, "Rate too high")
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(self.cfg)
+        self.dialog._refresh_register()
+        self.dialog.register_table.setCurrentCell(0, 0)
+
+    def test_a_fresh_inquiry_has_nothing_to_win_back(self):
+        row = register.from_message(message(subject="New one"))
+        register.save([row], mailflow.Paths(self.folder).register_csv)
+        d = UI.InquiryDialog(self.cfg)
+        d._refresh_register()
+        d.register_table.setCurrentCell(0, 0)
+        shown = []
+        with _Patched(UI, "QMessageBox", _Recording(shown)):
+            d._win_back()
+        self.assertEqual(len(shown), 1)
+
+    def test_it_reads_back_the_quotation_we_actually_sent(self):
+        """Rebuilding it from today's rate list could quote them something
+        different from the paper they are holding."""
+        # check() sets Folder on a real row; from_message leaves it blank.
+        row = self.dialog._register_rows[0]
+        folder = mailflow.Paths(self.folder).folder_for(row["Inquiry no"])
+        row["Folder"] = folder
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "QTN-26-27-0001.csv"), "w",
+                  encoding="utf-8") as f:
+            f.write("Description,Qty,Rate\nSpring 2mm,5000,10.00\n")
+        text = self.dialog._quotation_text(self.dialog._register_rows[0])
+        self.assertIn("Spring 2mm", text)
+
+    def test_it_falls_back_to_the_recorded_figures(self):
+        text = self.dialog._quotation_text(self.dialog._register_rows[0])
+        self.assertIn("QTN/26-27/0001", text)
+
+    def test_their_own_reason_is_given_to_the_tool(self):
+        """An honest "they said the rate was too high" beats inventing an
+        objection for the tool to answer."""
+        self.assertIn("Rate too high",
+                      self.dialog._last_reply_text(
+                          self.dialog._register_rows[0]))
+
+    def test_a_won_back_row_reopens(self):
+        """A row we are actively arguing with is not a lost one — left closed
+        it drops off every list Prism keeps."""
+        self.dialog._winback_sent(self.dialog._register_rows[0], ["ok"], [])
+        saved = register.load(mailflow.Paths(self.folder).register_csv)
+        self.assertEqual(saved[0]["Status"], register.NEGOTIATING)
+        self.assertEqual(saved[0]["Result"], "")
+
+    def test_a_failed_send_does_not_reopen_it(self):
+        told = []
+        self.dialog._explain = told.append
+        self.dialog._winback_sent(self.dialog._register_rows[0],
+                                  [], [("a@b.c", "refused")])
+        saved = register.load(mailflow.Paths(self.folder).register_csv)
+        self.assertEqual(saved[0]["Status"], register.NOT_CONVERTED)
+        self.assertTrue(told)
+
+
+class _Signal:
+    """Just enough of a Qt signal for a fake worker to be connected to."""
+
+    def connect(self, *_a, **_kw):
+        return None
+
+
 class _Recording:
     """A stand-in QMessageBox that records instead of showing."""
 

@@ -303,11 +303,13 @@ class InboxCheckWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, cfg: dict, root: str, *, state=None, knowledge=None,
-                 local_only: bool = False, followup_days: int = 3):
+                 local_only: bool = False, followup_days: int = 2,
+                 max_reminders: int = 3):
         super().__init__()
         self.cfg, self.root, self.state = cfg, root, state
         self.knowledge = knowledge
         self.local_only, self.followup_days = local_only, followup_days
+        self.max_reminders = max_reminders
 
     def run(self):
         try:
@@ -315,10 +317,59 @@ class InboxCheckWorker(QThread):
             result = mailflow.check(
                 self.cfg, mailflow.Paths(self.root), state=self.state,
                 knowledge=self.knowledge, local_only=self.local_only,
-                followup_days=self.followup_days)
+                followup_days=self.followup_days,
+                max_reminders=self.max_reminders)
             self.done.emit(result)
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class DraftWorker(QThread):
+    """Write one email using the AI tools in the customer's own browser.
+
+    Minutes, not seconds: it opens Chrome, types the prompt into whichever
+    tool they picked, and waits for the answer to finish streaming. That is
+    the price of using their subscription instead of an API key, and it is
+    why this is only ever used for the handful of emails a week that are
+    worth writing well — never for sorting the inbox.
+    """
+    progress = Signal(str)           # a line for the status label
+    done = Signal(object)            # drafting.Draft
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, prompt: str, *, purpose: str = "draft",
+                 attachments: list | None = None):
+        super().__init__()
+        self.cfg, self.prompt, self.purpose = cfg, prompt, purpose
+        self.attachments = list(attachments or [])
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        try:
+            drafting = CB.get_drafting()
+            result = drafting.draft(
+                self.cfg, self.prompt, purpose=self.purpose,
+                attachments=self.attachments,
+                on_event=self._event,
+                should_stop=self._stop.is_set)
+            self.done.emit(result)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+    def _event(self, kind: str, payload):
+        """Turn the pipeline's own progress events into one readable line.
+
+        The tool names are worth showing: a customer watching Chrome open by
+        itself wants to know Prism meant to do that.
+        """
+        if kind == "stage_start":
+            self.progress.emit(
+                f"Asking {payload.get('agent', 'the AI tool')}…")
+        elif kind == "stage_done":
+            self.progress.emit("Reading the answer…")
 
 
 class FFmpegWorker(QThread):
