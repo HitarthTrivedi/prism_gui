@@ -87,6 +87,43 @@ class TheBuildCanStillRewriteIt(unittest.TestCase):
             spec = f.read()
         self.assertIn(r'^DEFAULT_SERVER = ".*"$', spec)
 
+    def test_baking_in_the_url_already_in_source_is_not_an_error(self):
+        """The failure that cost two rounds of CI chasing.
+
+        The spec used to decide "did I find DEFAULT_SERVER?" by asking whether
+        the file CHANGED. Those two questions come apart in one ordinary case:
+        PRISM_SERVER_URL set to the address already written in source. The
+        substitution then produces an identical file, and the build died with
+        "DEFAULT_SERVER not found" about a line sitting right there.
+
+        It was invisible locally — with PRISM_SERVER_URL unset the whole branch
+        is skipped, so every local build passed while all three CI platforms
+        failed. Which is exactly the kind of thing worth a test.
+        """
+        import re
+
+        with open(_repo("licensing", "client.py"), encoding="utf-8") as f:
+            source = f.read()
+        same_url = client.DEFAULT_SERVER          # the pathological case
+        patched, hits = re.subn(r'^DEFAULT_SERVER = ".*"$',
+                                f'DEFAULT_SERVER = "{same_url}"', source,
+                                count=1, flags=re.M)
+        self.assertEqual(hits, 1, "the spec's regex no longer finds the line")
+        self.assertEqual(patched, source,
+                         "baking in the same URL should be a no-op, and the "
+                         "spec must treat a no-op as success — not as a "
+                         "missing DEFAULT_SERVER")
+
+    def test_the_spec_checks_the_match_not_the_diff(self):
+        """The specific line that was wrong. `_patched == _src` is the bug;
+        counting matches is the fix."""
+        with open(_repo("packaging", "prism.spec"), encoding="utf-8") as f:
+            spec = f.read()
+        self.assertIn("subn", spec,
+                      "prism.spec must count regex matches, not compare the "
+                      "file before and after — see the test above")
+        self.assertNotIn("_patched == _src", spec)
+
 
 class TheDocsAgree(unittest.TestCase):
     """SHIPPING.md tells whoever does the release what to put here. If it and

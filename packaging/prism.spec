@@ -62,10 +62,19 @@ if _server_url:
     with open(_client_py, "r", encoding="utf-8") as _f:
         _src = _f.read()
     import re as _re
-    _patched = _re.sub(r'^DEFAULT_SERVER = ".*"$',
-                       f'DEFAULT_SERVER = "{_server_url}"', _src,
-                       count=1, flags=_re.M)
-    if _patched == _src:
+    # subn, not sub: what matters is whether the PATTERN MATCHED, not whether
+    # the text changed. Those come apart in one ordinary case — the URL in
+    # source already being the URL we are baking in — and the old `_patched ==
+    # _src` test read that as "DEFAULT_SERVER not found" and killed the build
+    # over a line sitting right there in the file.
+    #
+    # It cost two rounds of chasing, because it is invisible locally: with
+    # PRISM_SERVER_URL unset this whole branch is skipped, so every local build
+    # passed while CI failed on all three platforms.
+    _patched, _hits = _re.subn(r'^DEFAULT_SERVER = ".*"$',
+                               f'DEFAULT_SERVER = "{_server_url}"', _src,
+                               count=1, flags=_re.M)
+    if not _hits:
         raise SystemExit("PRISM_SERVER_URL set but DEFAULT_SERVER not found "
                          "in licensing/client.py — has it been renamed?")
     # Written back so the analyser bundles the patched module. build.py restores
