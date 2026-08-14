@@ -43,6 +43,43 @@ from widgets import sidebar  # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 
+# ── the guard that should have been here from the start ──────────────────────
+# The docstring above has always said "every test that would write settings
+# patches config.save". It was a convention, and a convention is exactly as
+# strong as the last person who remembered it.
+#
+# One did not. test_a_reply_arriving_opens_that_tab called _checked(), which
+# calls _remember(), which calls config.save() — and wrote a bare test fixture
+# over the developer's real ~/.prism/config.json. Groq key, profile, agent
+# choices, Chrome pin: gone, and the only symptom was Prism asking to be set up
+# again on every launch, which reads like a Prism bug rather than a test one.
+#
+# So the rule now has teeth. save() refuses for the whole module unless a test
+# has deliberately taken it over with _NoSave, and CONFIG_PATH points at a
+# scratch file so even a direct write cannot reach the real one. A test that
+# forgets now FAILS; it does not quietly cost somebody their afternoon.
+_REAL_SAVE = CB.config.save
+_REAL_CONFIG_PATH = CB.config.CONFIG_PATH
+_SCRATCH = tempfile.mkdtemp(prefix="prism-test-config-")
+
+
+def _refuse(cfg):
+    raise AssertionError(
+        "This test called config.save() without patching it. That writes the "
+        "real ~/.prism/config.json and destroys whoever is running the "
+        "tests.\n\nWrap the call:  with _NoSave(): ...")
+
+
+def setUpModule():
+    CB.config.save = _refuse
+    CB.config.CONFIG_PATH = os.path.join(_SCRATCH, "config.json")
+
+
+def tearDownModule():
+    CB.config.save = _REAL_SAVE
+    CB.config.CONFIG_PATH = _REAL_CONFIG_PATH
+
+
 class _NoSave:
     """Stop a dialog writing to the real ~/.prism/config.json."""
 
@@ -652,7 +689,11 @@ class WhatTheCustomerSaidBack(unittest.TestCase):
 
     def test_a_reply_arriving_opens_that_tab(self):
         self.dialog._quiet = False
-        self.dialog._checked(self._result())
+        # _checked -> _remember -> config.save. This is the test that wrote a
+        # bare fixture over a real ~/.prism/config.json before the module
+        # guard existed.
+        with _NoSave():
+            self.dialog._checked(self._result())
         self.assertEqual(self.dialog.tabs.currentIndex(), 2)
 
     def test_a_timer_tick_never_moves_the_tab(self):
