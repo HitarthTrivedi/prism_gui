@@ -293,5 +293,126 @@ class SleepInhibitor(unittest.TestCase):
         self.assertFalse(awake.held())
 
 
+class ClosingDuringARunMustNotAbort(unittest.TestCase):
+    """Reported as "python stopped working and prism ended".
+
+    Qt's ~QThread calls qFatal() on a thread that is still running, and PySide
+    destroys every QThread during interpreter shutdown. So closing Prism while
+    a worker is alive does not leak quietly — it raises SIGABRT and produces a
+    macOS crash report, while the app's own log signs off with an ordinary
+    "Prism closed" and no traceback at all.
+
+    It happened on a Studio run: four seconds into a ChatGPT stage, the window
+    closed, and the process aborted.
+    """
+
+    class _Worker:
+        """Stands in for a QThread. Records what it was asked to do."""
+
+        def __init__(self, *, stops=True, obeys=True):
+            self.running, self.stopped = True, False
+            self.terminated, self.waited = False, False
+            self._stops, self._obeys = stops, obeys
+
+        def isRunning(self):
+            return self.running
+
+        def stop(self):
+            if not self._stops:
+                raise RuntimeError("this worker cannot be asked")
+            self.stopped = True
+
+        def wait(self, _ms):
+            self.waited = True
+            if self._obeys:
+                self.running = False
+            return self._obeys
+
+        def terminate(self):
+            self.terminated = True
+            self.running = False
+
+    def _window(self, workers):
+        """A MainWindow shell — just enough for _retire_workers, without
+        building a real one (which reaches for the licence server)."""
+        import main_window
+
+        win = main_window.MainWindow.__new__(main_window.MainWindow)
+        win._workers = list(workers)
+        return win
+
+    def test_a_live_worker_is_stopped_and_waited_for(self):
+        worker = self._Worker()
+        self._window([worker])._retire_workers()
+        self.assertTrue(worker.stopped, "never asked to stop")
+        self.assertTrue(worker.waited, "never joined — this is the abort")
+        self.assertFalse(worker.running)
+
+    def test_every_worker_is_stopped_before_any_is_waited_on(self):
+        """Stop-all-then-wait-all, so the waits overlap. Stopping and waiting
+        each in turn makes three stuck workers cost thirty seconds."""
+        order = []
+        workers = []
+        for n in range(3):
+            w = self._Worker()
+            w.stop = lambda n=n: order.append(f"stop{n}")
+            w.wait = lambda _ms, n=n: (order.append(f"wait{n}"), True)[1]
+            workers.append(w)
+        self._window(workers)._retire_workers()
+        self.assertEqual(order, ["stop0", "stop1", "stop2",
+                                 "wait0", "wait1", "wait2"])
+
+    def test_a_worker_that_ignores_stop_is_terminated(self):
+        """Unpleasant, but the alternative is a guaranteed abort a moment
+        later, and a killed thread in a process that is exiting anyway can
+        corrupt nothing that outlives it."""
+        worker = self._Worker(obeys=False)
+        self._window([worker])._retire_workers()
+        self.assertTrue(worker.terminated)
+
+    def test_a_worker_that_cannot_be_asked_is_still_waited_on(self):
+        worker = self._Worker(stops=False)
+        self._window([worker])._retire_workers()
+        self.assertTrue(worker.waited)
+
+    def test_a_dead_worker_does_not_break_the_ones_after_it(self):
+        """isRunning() on a deleted QThread raises RuntimeError rather than
+        returning False. Unhandled, it would skip every worker later in the
+        list and put the abort straight back."""
+        class _Deleted:
+            def isRunning(self):
+                raise RuntimeError("wrapped C/C++ object has been deleted")
+
+        alive = self._Worker()
+        self._window([_Deleted(), alive])._retire_workers()
+        self.assertTrue(alive.stopped)
+        self.assertTrue(alive.waited)
+
+    def test_finished_workers_are_left_alone(self):
+        worker = self._Worker()
+        worker.running = False
+        self._window([worker])._retire_workers()
+        self.assertFalse(worker.stopped)
+
+    def test_closeevent_actually_calls_it(self):
+        """The unit above is worthless if nothing wires it to the close."""
+        import ast
+
+        with open(_repo("main_window.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        close = next(n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == "closeEvent")
+        called = {n.func.attr for n in ast.walk(close)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        self.assertIn("_retire_workers", called,
+                      "closeEvent does not retire the workers — closing Prism "
+                      "mid-run will abort the process")
+
+
+def _repo(*parts: str) -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        *parts)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

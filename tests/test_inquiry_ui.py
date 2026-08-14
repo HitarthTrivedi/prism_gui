@@ -476,6 +476,78 @@ class ItIsOnTheShelf(unittest.TestCase):
         self.assertIn('_authorized_then("inbox"', source)
 
 
+class ClosingTheScreenMidCheck(unittest.TestCase):
+    """A QThread destroyed while still running aborts the whole process. Reel
+    and BOQ have guarded this since they were written; this screen has more
+    workers than either — a mailbox check, a send, and a browser draft that
+    runs for minutes."""
+
+    class _Worker:
+        def __init__(self, obeys=True):
+            self.running, self.stopped = True, False
+            self.terminated, self._obeys = False, obeys
+
+        def isRunning(self):
+            return self.running
+
+        def stop(self):
+            self.stopped = True
+
+        def wait(self, _ms):
+            if self._obeys:
+                self.running = False
+            return self._obeys
+
+        def terminate(self):
+            self.terminated = True
+            self.running = False
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.dialog = UI.InquiryDialog(ready_cfg(self.folder))
+
+    def close(self):
+        from PySide6.QtGui import QCloseEvent
+
+        self.dialog.closeEvent(QCloseEvent())
+
+    def test_every_worker_is_stopped_and_joined(self):
+        workers = [self._Worker() for _ in range(3)]
+        (self.dialog._worker, self.dialog._send_worker,
+         self.dialog._draft_worker) = workers
+        self.close()
+        for w in workers:
+            self.assertTrue(w.stopped)
+            self.assertFalse(w.running)
+
+    def test_a_stuck_worker_is_terminated_rather_than_left_to_abort(self):
+        stuck = self._Worker(obeys=False)
+        self.dialog._draft_worker = stuck
+        self.close()
+        self.assertTrue(stuck.terminated)
+
+    def test_the_timer_is_stopped_first(self):
+        """Otherwise it can fire during the waits and start a fresh check on a
+        dialog that is closing."""
+        self.dialog._auto.start(60_000)
+        self.close()
+        self.assertFalse(self.dialog._auto.isActive())
+
+    def test_closing_with_nothing_running_is_harmless(self):
+        self.close()        # must not raise
+
+    def test_a_deleted_worker_does_not_stop_the_others(self):
+        class _Deleted:
+            def isRunning(self):
+                raise RuntimeError("wrapped C/C++ object has been deleted")
+
+        alive = self._Worker()
+        self.dialog._worker = _Deleted()
+        self.dialog._send_worker = alive
+        self.close()
+        self.assertTrue(alive.stopped)
+
+
 class ColourCarriesMeaning(unittest.TestCase):
     """Colour is what makes a hundred-row register readable at arm's length.
     It is also the thing most easily got wrong in a way nobody notices until a

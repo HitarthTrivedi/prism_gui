@@ -200,6 +200,37 @@ class InquiryDialog(QDialog):
         self._refresh_register()
         QTimer.singleShot(0, self._first_look)
 
+    def closeEvent(self, event):
+        """Wind up every worker before this dialog is destroyed.
+
+        A QThread destroyed while still running aborts the whole process — Qt
+        calls qFatal() from ~QThread. Reel and BOQ have guarded this since they
+        were written; this screen did not, and it has more workers than either:
+        a mailbox check, a send, and a browser draft that runs for minutes.
+
+        The timer is stopped first. Otherwise it can fire while the waits are
+        running and start a fresh check on a dialog that is closing.
+        """
+        self._auto.stop()
+        for worker in (self._worker, self._send_worker, self._draft_worker):
+            if worker is None:
+                continue
+            try:
+                if not worker.isRunning():
+                    continue
+            except RuntimeError:
+                continue        # already deleted; nothing to wait for
+            stop = getattr(worker, "stop", None)
+            if callable(stop):
+                stop()
+            # A browser draft sits in a Selenium poll that is seconds wide, so
+            # a short wait would expire and terminate a thread that was about
+            # to finish on its own.
+            if not worker.wait(10_000):
+                worker.terminate()
+                worker.wait(1000)
+        super().closeEvent(event)
+
     # ── chrome ────────────────────────────────────────────────────────────
     def _header(self) -> QHBoxLayout:
         row = QHBoxLayout()

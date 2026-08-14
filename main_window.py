@@ -57,6 +57,20 @@ COMPOSE, RUNNING = 0, 1
 _retired_listeners: list = []
 
 
+def _is_running(worker) -> bool:
+    """True if this QThread is still alive.
+
+    A worker whose C++ side has already been deleted raises RuntimeError from
+    isRunning() rather than returning False, and that exception thrown during
+    closeEvent would skip retiring every worker after it in the list — turning
+    a tidy shutdown back into the abort this is here to prevent.
+    """
+    try:
+        return bool(worker.isRunning())
+    except RuntimeError:
+        return False
+
+
 def _retire_listener(listener, wait_ms: int = 3000) -> None:
     """Stop a wake-word listener, and make sure nothing drops it while its
     thread is still alive.
@@ -1351,5 +1365,58 @@ class MainWindow(QMainWindow):
         # `caffeinate` alive after Prism has gone, and the machine would never
         # sleep again until reboot.
         awake.release_all()
+        # Every worker still running has to be stopped and JOINED before the
+        # process is allowed to tear down.
+        #
+        # Skipping this does not leak quietly — it aborts. Qt's ~QThread calls
+        # qFatal() on a thread that is still running, and PySide destroys every
+        # QThread during interpreter shutdown, so closing Prism mid-run ends in
+        # "Python quit unexpectedly" with a macOS crash report. The user sees a
+        # crash; the log's last line is a perfectly ordinary "Prism closed".
+        #
+        # Reported as exactly that: a Studio run was four seconds into a
+        # ChatGPT stage when the window closed, and Prism aborted.
+        self._retire_workers()
         diagnostics.write("INFO", "--- Prism closed ---")
         event.accept()
+
+    # How long to wait for a worker to notice it should stop. A routed run is
+    # inside a Selenium poll that can be several seconds wide, so a short wait
+    # would time out and abort anyway; ten seconds covers the widest of them.
+    _WORKER_WAIT_MS = 10_000
+
+    def _retire_workers(self):
+        """Ask every live worker to stop, then wait for it.
+
+        Ordered stop-all-then-wait-all rather than stop-and-wait each: the
+        waits then overlap, so three stuck workers cost ten seconds between
+        them instead of thirty.
+        """
+        live = [w for w in self._workers if w is not None and _is_running(w)]
+        if not live:
+            return
+        diagnostics.write("INFO", f"stopping {len(live)} worker(s) before exit")
+
+        for worker in live:
+            stop = getattr(worker, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception:               # noqa: BLE001
+                    pass    # a worker that cannot be asked still gets waited on
+
+        for worker in live:
+            try:
+                if not worker.wait(self._WORKER_WAIT_MS):
+                    # Out of options. terminate() is unsafe in general, but the
+                    # alternative here is a guaranteed abort a moment later, and
+                    # a killed thread in a process that is exiting anyway can
+                    # corrupt nothing that outlives it.
+                    diagnostics.write(
+                        "WARN", f"{type(worker).__name__} did not stop in "
+                                f"{self._WORKER_WAIT_MS}ms — terminating it")
+                    worker.terminate()
+                    worker.wait(2000)
+            except RuntimeError:
+                pass        # already gone; nothing to wait for
+        self._workers.clear()
