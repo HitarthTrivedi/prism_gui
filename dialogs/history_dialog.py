@@ -327,7 +327,7 @@ class HistoryDialog(QDialog):
 
         if not ran:
             parts.append(f"<p style='color:{theme.NEUTRAL[600]}'>This run didn't "
-                         f"get as far as a plan — no step was marked needed.</p>")
+                         f"get as far as the steps — none was marked needed.</p>")
             return "".join(parts)
 
         agents = record.get("agents") or {}

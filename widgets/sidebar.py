@@ -1,11 +1,14 @@
-"""Left rail: brand, the four primary destinations, the wake-word switch,
+"""Left rail: brand, the five primary destinations, the wake-word switch,
 and favorites.
 
-The design gives the rail four nav items (Home / AI tools / History /
-Settings). Prism has more commands than that, so the rest keep the same
-.navitem shape one size down under a tracked section label — the same
-treatment the mock already uses for Favorites — rather than inventing a
-second kind of control."""
+Prism has more commands than that, so the rest keep the same .navitem shape
+one size down under a tracked section label — the same treatment the mock
+already uses for Favorites. CONFIGURE is the one exception: its seven rows
+are all doors into the same Setup dialog the primary Settings button already
+opens (see main_window._open_setup), so they ride behind a disclosure — the
+same collapsed-by-default chevron pattern "Behind the scenes" already uses
+(widgets/prompt_panel.py) — instead of showing seven settings to someone who
+hasn't used the product once yet."""
 from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
@@ -60,7 +63,10 @@ SECONDARY = [
     ]),
     ("WORKSPACE", [
         ("status", "Status",       "chart", "Current profile, key & agents", ""),
-        ("login",  "Login tabs",   "lock",  "Re-open your tools in Chrome to sign in", ""),
+        # Not "lock": that glyph means "you don't own this" everywhere else in
+        # the rail (see set_entitlements below), and Login tabs is always
+        # available — reusing it here would teach the wrong lesson.
+        ("login",  "Login tabs",   "external", "Re-open your tools in Chrome to sign in", ""),
     ]),
     ("CONFIGURE", [
         ("licence", "Licence", "archive",
@@ -164,8 +170,12 @@ class Sidebar(QFrame):
 
         # -- everything else ------------------------------------------------
         self._gated: dict[str, tuple[QPushButton, str, str, str]] = {}
+        self._configure_toggle: QPushButton | None = None
         for section, items in SECONDARY:
             root.addSpacing(12)
+            if section == "CONFIGURE":
+                root.addWidget(self._build_configure_group(items))
+                continue
             root.addWidget(kicker(section, muted=True))
             root.addSpacing(4)
             for key, label, icon_name, tip, feature in items:
@@ -261,6 +271,46 @@ class Sidebar(QFrame):
         line.setFixedHeight(1)
         return line
 
+    def _build_configure_group(self, items) -> QWidget:
+        """Seven raw settings collapsed behind one disclosure row instead of
+        sitting flat in the rail. None of them are gated by licence (every
+        `feature` field in CONFIGURE is empty), so — unlike ADD-ONS — there's
+        no lock state to track here."""
+        wrap = QWidget()
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+
+        toggle = QPushButton(f"  {i18n.t('More settings')}")
+        toggle.setObjectName("navItem")
+        toggle.setCursor(Qt.PointingHandCursor)
+        toggle.setFlat(True)
+        toggle.setCheckable(True)
+        toggle.setLayoutDirection(Qt.RightToLeft)   # chevron on the right
+        toggle.setStyleSheet("padding: 6px 11px; font-size: 13px;")
+        icons.button_icon(toggle, "chevron-right", 15, theme.NEUTRAL[600])
+        col.addWidget(toggle)
+
+        body = QWidget()
+        body_col = QVBoxLayout(body)
+        body_col.setContentsMargins(0, 0, 0, 0)
+        body_col.setSpacing(2)
+        for key, label, icon_name, tip, _feature in items:
+            btn = nav_button(label, icon_name, small=True, tip=tip)
+            btn.clicked.connect(
+                lambda _=False, k=key: self.command_triggered.emit(k))
+            body_col.addWidget(btn)
+        body.setVisible(False)
+        col.addWidget(body)
+
+        def _on_toggled(open_: bool):
+            icons.button_icon(toggle, "chevron-down" if open_ else "chevron-right",
+                              15, theme.NEUTRAL[600])
+            body.setVisible(open_)
+        toggle.toggled.connect(_on_toggled)
+        self._configure_toggle = toggle
+        return wrap
+
     def _mini(self, icon_name: str, tip: str, slot) -> QPushButton:
         btn = QPushButton()
         btn.setObjectName("ghostBtn")
@@ -274,6 +324,11 @@ class Sidebar(QFrame):
     # ── nav ───────────────────────────────────────────────────────────────
     def _go(self, key: str):
         self.set_current(key)
+        if key == "config" and self._configure_toggle is not None:
+            # Settings just got clicked on purpose: reveal the direct-jump
+            # shortcuts underneath for next time, instead of making a
+            # returning user find the disclosure themselves.
+            self._configure_toggle.setChecked(True)
         if key != "home":
             self.command_triggered.emit(key)
 

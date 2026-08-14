@@ -129,14 +129,14 @@ class AgentsPanel(QWidget):
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        head.addWidget(heading("Your plan"), stretch=1)
+        head.addWidget(heading("Your steps"), stretch=1)
         self.count = meta("")
         head.addWidget(self.count)
         root.addLayout(head)
 
         self.empty = QLabel(
-            "Describe a task above and press Make a plan — Prism will lay out "
-            "the steps here, and you can drop any of them before it runs.")
+            "Describe a task above and press Show steps — Prism will lay "
+            "them out here, and you can drop any of them before it runs.")
         self.empty.setObjectName("emptyState")
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
@@ -153,7 +153,7 @@ class AgentsPanel(QWidget):
         self.run_btn.setMinimumHeight(44)
         icons.button_icon(self.run_btn, "play", 16, theme.BG)
         self.run_btn.setEnabled(False)
-        self.run_btn.setToolTip("Make a plan first — this fills in once Prism picks the steps.")
+        self.run_btn.setToolTip("Show steps first — this fills in once Prism picks them.")
         self.run_btn.clicked.connect(self.run_requested.emit)
 
         # "Start the work" is the commitment; this is the way back out of it.
@@ -168,8 +168,8 @@ class AgentsPanel(QWidget):
         self.discard_btn.setCursor(Qt.PointingHandCursor)
         self.discard_btn.setMinimumHeight(44)
         self.discard_btn.setToolTip(
-            "Throws this plan away and clears the task, ready for a new one. "
-            "Your attached files stay.")
+            "Throws these steps away and clears the task, ready for a new "
+            "one. Your attached files stay.")
         icons.button_icon(self.discard_btn, "trash", 15, theme.NEUTRAL[600])
         self.discard_btn.clicked.connect(self.discard_requested.emit)
         self.discard_btn.setVisible(False)
@@ -181,8 +181,8 @@ class AgentsPanel(QWidget):
         self.run_btn.setEnabled(enabled)
         self.run_btn.setToolTip(
             "Runs every step still switched on." if enabled else
-            "Make a plan first — this fills in once Prism picks the steps.")
-        # Discard only exists while there is a plan to discard.
+            "Show steps first — this fills in once Prism picks them.")
+        # Discard only exists while there are steps to discard.
         self.discard_btn.setVisible(enabled)
 
     def clear(self):

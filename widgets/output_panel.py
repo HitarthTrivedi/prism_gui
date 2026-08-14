@@ -301,11 +301,11 @@ class OutputPanel(QWidget):
             self.set_running(False)
             self.back_btn.setText(" Start something new")
             icons.button_icon(self.back_btn, "plus", 15, theme.ACCENT_RAMP[700])
-            self.back_btn.setToolTip("Clears this plan and the task, ready for the next one")
+            self.back_btn.setToolTip("Clears these steps and the task, ready for the next one")
         else:
-            self.back_btn.setText(" Back to the plan")
+            self.back_btn.setText(" Back to the steps")
             icons.button_icon(self.back_btn, "chevron-left", 15, theme.ACCENT_RAMP[700])
-            self.back_btn.setToolTip("Your plan is still there — nothing is lost")
+            self.back_btn.setToolTip("Your steps are still there — nothing is lost")
 
     def clear(self):
         self._cards = {}

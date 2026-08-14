@@ -642,7 +642,7 @@ class SetupDialog(QDialog):
     def _agents_section(self) -> Section:
         s = Section("Your specialists",
                     "One tool per kind of step. These are the names you'll see "
-                    "on the plan — skip any you don't want Prism to use.")
+                    "on the steps — skip any you don't want Prism to use.")
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(9)

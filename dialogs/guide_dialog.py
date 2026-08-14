@@ -81,7 +81,7 @@ TOPICS: tuple[Topic, ...] = (
         action="home", action_label="Go to the task box",
     ),
     Topic(
-        "search", "The plan, and changing it",
+        "search", "The steps, and changing them",
         "Before anything runs, Prism shows you the steps it intends to take — "
         "look things up, think it through, write it up, and so on. Each step "
         "names the tool that will do it.\n\n"

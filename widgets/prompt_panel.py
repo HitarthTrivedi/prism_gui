@@ -61,7 +61,7 @@ class PromptPanel(QWidget):
             self.view.setVisible(True)
             return
         self.view.setVisible(False)
-        self.blurb.setText("Nothing to show yet — make a plan first."
+        self.blurb.setText("Nothing to show yet — show the steps first."
                            if open_ else self._BLURB)
         self.blurb.setVisible(True)
 

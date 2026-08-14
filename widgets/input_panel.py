@@ -19,7 +19,7 @@ from widgets.controls import Chip, kicker
 # state key -> (chip text, icon, objectName)
 _STATES = {
     "empty":   ("Waiting on you", "help",  "tagWarn"),
-    "ready":   ("Ready to plan",  "check", "tagOk"),
+    "ready":   ("Ready to go",    "check", "tagOk"),
     "routing": ("Planning…",      "clock", "tagWarn"),
     "planned": ("Ready to run",   "check", "tagOk"),
     "running": ("Working…",       "clock", "tagOk"),
@@ -147,7 +147,7 @@ class InputPanel(BlueprintFrame):
         row.addWidget(self.add_task_btn)
         row.addStretch(1)
 
-        self.route_btn = QPushButton(" Make a plan")
+        self.route_btn = QPushButton(" Show steps")
         self.route_btn.setObjectName("primaryBtn")
         self.route_btn.setCursor(Qt.PointingHandCursor)
         icons.button_icon(self.route_btn, "arrow-right", 16, theme.BG)
@@ -223,7 +223,7 @@ class InputPanel(BlueprintFrame):
     def tasks(self) -> list[str]:
         """Everything to run, in order: the queue, then whatever is still in
         the box. The box counts as the final task so the user never has to
-        press Add task before Make a plan."""
+        press Add task before Show steps."""
         tail = self.text.toPlainText().strip()
         return self._queue + ([tail] if tail else [])
 
@@ -295,6 +295,6 @@ class InputPanel(BlueprintFrame):
 
     def set_busy(self, busy: bool):
         self.route_btn.setEnabled(not busy)
-        self.route_btn.setText(" Planning…" if busy else " Make a plan")
+        self.route_btn.setText(" Planning…" if busy else " Show steps")
         if busy:
             self.set_state("routing")
