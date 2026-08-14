@@ -90,11 +90,49 @@ class Asked(unittest.TestCase):
         self.assertEqual(route("build me an editable deck for the board",
                                "presentation"), "canva")
 
-    def test_the_canva_branch_still_demands_the_link_back(self):
+    def test_the_link_is_still_demanded_back(self):
         """An editable design nobody can open is worth less than a flat
-        image, so the link is the deliverable."""
+        image, so the link is the deliverable.
+
+        It moved: the first prompt now asks only for the picture, and the
+        follow-up asks Canva to convert it. Same requirement, second message.
+        """
+        self.assertIn("CANVA LINK:", A._CANVA_FOLLOWUP)
+
+    def test_the_first_prompt_no_longer_asks_canva_to_compose(self):
+        """The change this file exists to defend. Asking for the image AND
+        the Canva design in one prompt makes Canva BUILD the image — a stock
+        template where DALL-E would have rendered the scene — so the customer
+        had to choose between a good picture and an editable one."""
         suffix = _resolve_suffix(CHATGPT, "visual", "make it in canva")
-        self.assertIn("CANVA LINK:", suffix)
+        low = suffix.lower()
+        self.assertIn("highest quality", low)
+        self.assertIn("do not route this through canva", low)
+        self.assertNotIn("build this as a real, editable canva", low)
+
+    def test_both_branches_now_ask_for_the_same_picture(self):
+        """Asked-for-Canva and not-asked-for-Canva both generate at full
+        quality. They differ in what happens AFTER, not in the artwork."""
+        asked = _resolve_suffix(CHATGPT, "visual", "make it in canva")
+        plain = _resolve_suffix(CHATGPT, "visual", "make me a poster")
+        for text in (asked, plain):
+            self.assertIn("highest quality", text.lower())
+
+    def test_the_followup_addresses_the_canva_app(self):
+        """"@canva" is how ChatGPT routes a message to a connected app. Without
+        it the model answers about Canva instead of using it."""
+        self.assertTrue(A._CANVA_FOLLOWUP.lstrip().startswith("@canva"))
+
+    def test_the_followup_points_at_the_image_above_it(self):
+        """It must convert the artwork already in the thread, not invent a
+        new design from the words — inventing is the template failure."""
+        low = A._CANVA_FOLLOWUP.lower()
+        self.assertIn("image above", low)
+
+    def test_a_missing_canva_app_has_a_defined_answer(self):
+        """Otherwise the model writes a paragraph apologising, and that
+        paragraph gets captured as if it were the deliverable."""
+        self.assertIn("CANVA LINK: none", A._CANVA_FOLLOWUP)
 
     def test_case_and_wording_do_not_matter(self):
         self.assertEqual(route("Make This In CANVA Please"), "canva")
@@ -229,6 +267,74 @@ class SelfDirectingTools(unittest.TestCase):
     def test_marking_a_new_tool_self_directing_needs_only_the_flag(self):
         from core import router as R
         self.assertIn("LAZYCOOK", R._self_directing_names())
+
+
+class TheSecondPrompt(unittest.TestCase):
+    """Generate the picture properly, then convert it. Nothing here opens a
+    browser: _reask is swapped for a recorder."""
+
+    def setUp(self):
+        from core import automation as AU
+        self.AU = AU
+        self.asked = []
+        self._real = AU._reask
+        AU._reask = lambda drv, cfg, prompt, expect="": (
+            self.asked.append(prompt) or self.reply)
+        self.reply = ["CANVA LINK: https://canva.com/design/abc"]
+
+    def tearDown(self):
+        self.AU._reask = self._real
+
+    def run_it(self, stage="visual", query="make it in canva",
+               responses=("here is your image",)):
+        return self.AU._make_editable(None, CHATGPT, stage, query,
+                                      list(responses))
+
+    def test_it_asks_canva_after_the_image_exists(self):
+        out = self.run_it()
+        self.assertEqual(len(self.asked), 1)
+        self.assertTrue(self.asked[0].lstrip().startswith("@canva"))
+        self.assertIn("CANVA LINK: https://canva.com/design/abc", out[-1])
+
+    def test_the_image_is_kept_as_well_as_the_link(self):
+        """Replacing the first answer with the link would throw away the
+        artwork the customer actually asked for."""
+        out = self.run_it(responses=("here is your image",))
+        self.assertIn("here is your image", out[0])
+        self.assertEqual(len(out), 2)
+
+    def test_nothing_happens_unless_the_user_asked(self):
+        self.run_it(query="make me a poster of a spring")
+        self.assertEqual(self.asked, [])
+
+    def test_only_the_stages_that_make_artwork(self):
+        """A research answer cannot be opened in Canva, and asking would only
+        confuse the tool."""
+        for stage in ("research", "content", "brains", "development"):
+            self.run_it(stage=stage)
+        self.assertEqual(self.asked, [])
+
+    def test_it_does_not_ask_when_nothing_was_made(self):
+        """With no image in the thread, Canva would invent a design from the
+        words alone — which is exactly the template-instead-of-artwork
+        failure this whole change removes."""
+        self.run_it(responses=())
+        self.assertEqual(self.asked, [])
+
+    def test_a_disconnected_canva_app_does_not_pollute_the_output(self):
+        """"CANVA LINK: none" is a status, not a deliverable. Appending it
+        would hand the next stage a sentence about Canva instead of an
+        image."""
+        self.reply = ["CANVA LINK: none"]
+        out = self.run_it()
+        self.assertEqual(out, ["here is your image"])
+
+    def test_a_silent_canva_leaves_the_image_intact(self):
+        """The follow-up failing must never cost the picture that already
+        worked."""
+        self.reply = []
+        out = self.run_it()
+        self.assertEqual(out, ["here is your image"])
 
 
 if __name__ == "__main__":
