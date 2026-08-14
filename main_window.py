@@ -1159,6 +1159,53 @@ class MainWindow(QMainWindow):
             licensing.meter.record(
                 "stage", tool=self._stage_agents.get(stage, ""), stage=stage,
                 ok=bool(texts))
+        elif kind == "stage_failover":
+            # A tool could not finish and Prism is handing the step to another
+            # one. Said out loud rather than done quietly: the customer is
+            # about to wait several more minutes, and a screen that sits still
+            # for that long without explaining itself reads as a hang.
+            failed = payload.get("failed", "the tool")
+            agent = payload.get("agent", "")
+            why = ("has hit its usage limit" if payload.get("exhausted")
+                   else "couldn't finish")
+            self._stage_agents[stage] = agent
+            self.statusBar().showMessage(
+                i18n.t("{failed} {why} — trying {agent} instead…")
+                .replace("{failed}", failed).replace("{why}", why)
+                .replace("{agent}", agent), 15000)
+            self.output_panel.stage_started(stage, agent)
+        elif kind == "stage_recovered":
+            texts = payload.get("texts") or []
+            url = payload.get("url", "")
+            agent = payload.get("agent", "")
+            self.output_panel.stage_done(stage, texts, url, False)
+            # Replace the failed record rather than appending a second one, or
+            # the completion popup lists the step twice — once failed, once
+            # done — and the customer cannot tell which one they got.
+            record = {
+                "stage": stage, "agent": agent,
+                "text": "\n\n---\n\n".join(texts), "url": url,
+                "snippet": (texts[0][:150] + "…") if texts and len(texts[0]) > 150
+                           else (texts[0] if texts else ""),
+                "ok": True, "timed_out": False,
+                # Kept for History: which tool was asked first, and why the
+                # answer came from somewhere other than the plan said.
+                "failover_from": payload.get("failed", ""),
+            }
+            for i, existing in enumerate(self._stage_results):
+                if existing.get("stage") == stage and not existing.get("ok"):
+                    self._stage_results[i] = record
+                    break
+            else:
+                self._stage_results.append(record)
+            licensing.meter.record("stage", tool=agent, stage=stage, ok=True)
+            self.statusBar().showMessage(
+                i18n.t("{agent} finished the {stage} step.")
+                .replace("{agent}", agent).replace("{stage}", stage), 8000)
+        elif kind == "stage_unrecovered":
+            self.statusBar().showMessage(
+                i18n.t("No other tool could finish the {stage} step either.")
+                .replace("{stage}", stage), 10000)
         elif kind == "stage_error":
             error = payload.get("error", "")
             licensing.meter.record(
