@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from licensing import device, keyformat, token as T
+from licensing import device, keyformat, lease as L, token as T
 import workspace as W
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -135,12 +135,64 @@ def cmd_install(args) -> int:
     return 0
 
 
+def sign_lease(claims: dict, private: Ed25519PrivateKey) -> str:
+    """Produce an authorisation lease. Uses licensing.lease's own helpers, for
+    the same reason sign() uses licensing.token's: one encoder shared by the
+    signer and the verifier is what stops the two drifting apart."""
+    payload_b64 = L.encode_payload(claims)
+    signature = private.sign(L.signing_input(payload_b64))
+    return f"{L.PREFIX}.{payload_b64}.{T.b64u_encode(signature)}"
+
+
+def cmd_lease(args) -> int:
+    """Mint an authorisation lease, and optionally install it.
+
+    The licence server does this in production (app/signing.py issue_lease).
+    This exists so the client half can be exercised without running uvicorn —
+    and so a dev build can be put into a specific lease STATE (fresh, in
+    grace, stale) on purpose, which is the only practical way to look at the
+    offline behaviour with your own eyes.
+
+        python3 devtools/mint.py lease --license-id lic_dev --install
+        python3 devtools/mint.py lease --license-id lic_dev --ttl -60 --install
+    """
+    from licensing import authorization as A
+    from licensing import store
+
+    private = load_private()
+    user_dir = os.path.join(os.path.expanduser("~"), ".prism")
+    device_fp = args.device or device.fingerprint(user_dir)[0]
+    now = int(args.now or time.time())
+    claims = L.build_claims(
+        kid=args.kid, license_id=args.license_id, device_fp=device_fp,
+        scope=[s.strip() for s in args.scopes.split(",") if s.strip()],
+        features=[f.strip() for f in args.features.split(",") if f.strip()],
+        metered=args.metered, jti=args.jti, now=now, ttl=args.ttl,
+        offline=args.offline)
+    lease_str = sign_lease(claims, private)
+
+    if args.install:
+        A.remember(user_dir, lease_str, now=now)
+        print(f"Installed a lease for {claims['scope']} → "
+              f"{A.path(user_dir)}")
+    else:
+        print(lease_str)
+    if args.verbose:
+        print(json.dumps(claims, indent=2), file=sys.stderr)
+    return 0
+
+
 def cmd_vector(args) -> int:
     """Regenerate the committed test vector.
 
     The vector is the one thing proving the signer and the verifier agree, on
     every platform and in a frozen build. Regenerating it invalidates that
-    proof, so only do it when the token format itself changes.
+    proof, so only do it when the token or lease format itself changes.
+
+    It covers BOTH credentials. A build where token verification survived
+    freezing but lease verification did not would open perfectly and then
+    refuse every protected operation — which looks exactly like a revoked
+    licence, and would be diagnosed as one.
     """
     private = Ed25519PrivateKey.generate()
     claims = {
@@ -152,14 +204,21 @@ def cmd_vector(args) -> int:
         "exp": 1750604800, "lend": 1781536000, "grace": 3,
         "pk": "", "petag": "",
     }
+    lease_claims = L.build_claims(
+        kid="vector", license_id="lic_vector", device_fp=claims["dev"],
+        scope=["core", "workflow", "boq"],
+        features=["core", "boq", "email"], metered=False,
+        jti="lse_vector0001", now=1750000000, ttl=1800, offline=3600)
     vector = {
         "_comment": "Committed test vector. Signer and verifier must agree on "
-                    "these exact bytes. Regenerate only if the token format "
-                    "changes — see devtools/mint.py vector.",
+                    "these exact bytes. Regenerate only if the token or lease "
+                    "format changes — see devtools/mint.py vector.",
         "public_key": public_hex(private),
         "device_fp": claims["dev"],
         "token": sign(claims, private),
         "claims": claims,
+        "lease": sign_lease(lease_claims, private),
+        "lease_claims": lease_claims,
     }
     os.makedirs(os.path.dirname(VECTOR_PATH), exist_ok=True)
     with open(VECTOR_PATH, "w", encoding="utf-8") as f:
@@ -234,6 +293,30 @@ def main() -> int:
         p.add_argument("--device", default="")
         p.add_argument("--verbose", action="store_true")
 
+    lease_parser = sub.add_parser(
+        "lease", help="mint an authorisation lease (and optionally install it)")
+    lease_parser.add_argument("--license-id", default="lic_dev")
+    lease_parser.add_argument("--scopes", default="core,workflow,boq,email,reel")
+    lease_parser.add_argument("--features", default="core,boq,email,reel")
+    lease_parser.add_argument("--metered", action="store_true",
+                              help="mark the licence as quota'd, so the client "
+                                   "goes to the server for plan actions")
+    # Negative values are the point of this being adjustable: --ttl -60 mints a
+    # lease that expired a minute ago, which is how the GRACE path gets looked
+    # at without waiting half an hour for one to lapse.
+    lease_parser.add_argument("--ttl", type=int, default=1800,
+                              help="seconds until expiry (negative = already "
+                                   "expired, for testing GRACE and STALE)")
+    lease_parser.add_argument("--offline", type=int, default=3600,
+                              help="offline grace after expiry, seconds")
+    lease_parser.add_argument("--jti", default="lse_dev00000001")
+    lease_parser.add_argument("--kid", default="dev1")
+    lease_parser.add_argument("--now", type=int, default=0)
+    lease_parser.add_argument("--device", default="")
+    lease_parser.add_argument("--install", action="store_true",
+                              help="write it into ~/.prism/authorization.json")
+    lease_parser.add_argument("--verbose", action="store_true")
+
     des = sub.add_parser("designation",
                          help="mint a member's designation key")
     des.add_argument("--license-id", required=True,
@@ -251,7 +334,7 @@ def main() -> int:
     return {
         "keygen": cmd_keygen, "key": cmd_key, "token": cmd_token,
         "install": cmd_install, "vector": cmd_vector,
-        "designation": cmd_designation,
+        "designation": cmd_designation, "lease": cmd_lease,
     }[args.cmd](args)
 
 

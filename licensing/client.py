@@ -193,8 +193,14 @@ def deactivate(license_id: str, device_fp: str, *, app_version: str) -> dict[str
 
 
 def authorize(license_id: str, device_fp: str, *, app_version: str,
-              action: str = "run", feature: str = "core") -> dict[str, Any]:
+              action: str = "run", feature: str = "core",
+              scopes: list[str] | None = None) -> dict[str, Any]:
     """Ask permission for one run, or for one add-on being opened.
+
+    This is the METERED call: the server writes a usage row and counts it
+    against the daily allowance. Use lease() when all you need is
+    authorisation — spending a quota unit to answer "may I open a dialog"
+    would bill the customer for the question rather than the work.
 
     Uses a longer timeout than the launch calls: this one the customer is
     knowingly waiting on, having just pressed a button, so a slow answer beats
@@ -205,6 +211,29 @@ def authorize(license_id: str, device_fp: str, *, app_version: str,
         "device_fp": device_fp,
         "action": action,
         "feature": feature,
+        "scopes": scopes or [],
+        "app_version": app_version,
+    }, app_version=app_version, timeout=AUTHORIZE_TIMEOUT,
+       retries=AUTHORIZE_RETRIES)
+
+
+def lease(license_id: str, device_fp: str, *, app_version: str,
+          scopes: list[str] | None = None) -> dict[str, Any]:
+    """Fetch a fresh authorisation lease.
+
+    Separate from authorize() because it is FREE: it records no usage event
+    and consumes no daily allowance. The server still does the whole check —
+    licence status, revocation, seat, device, entitlements, client version —
+    it simply is not a billable action.
+
+    Gets the authorise timeout because when the cached lease has gone stale
+    this is on the path the customer is watching; the rest of the time it runs
+    in the background where the duration does not matter.
+    """
+    return _post("/v1/lease", {
+        "license_id": license_id,
+        "device_fp": device_fp,
+        "scopes": scopes or [],
         "app_version": app_version,
     }, app_version=app_version, timeout=AUTHORIZE_TIMEOUT,
        retries=AUTHORIZE_RETRIES)

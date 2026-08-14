@@ -1,8 +1,8 @@
 {
-  "_comment": "Committed test vector. Signer and verifier must agree on these exact bytes. Regenerate only if the token format changes \u2014 see devtools/mint.py vector.",
-  "public_key": "163a3237853f550c7067fa85a94c89e411aac7af06ce12a41c4c9c8f6f3e03fe",
+  "_comment": "Committed test vector. Signer and verifier must agree on these exact bytes. Regenerate only if the token or lease format changes \u2014 see devtools/mint.py vector.",
+  "public_key": "f0ddb72243d721aa9071d5aea106ae2196f4267b163cf8e533a47063ab86d482",
   "device_fp": "0123456789abcdef",
-  "token": "PRSMv1.eyJjdXN0IjoiVmVjdG9yIFRlc3QgTHRkIiwiZGV2IjoiMDEyMzQ1Njc4OWFiY2RlZiIsImV4cCI6MTc1MDYwNDgwMCwiZmVhdCI6WyJjb3JlIiwiYm9xIiwiZW1haWwiXSwiZ3JhY2UiOjMsImlhdCI6MTc1MDAwMDAwMCwia2lkIjoidmVjdG9yIiwia2luZCI6InBhaWQiLCJsZW5kIjoxNzgxNTM2MDAwLCJuYmYiOjE3NTAwMDAwMDAsInBldGFnIjoiIiwicGsiOiIiLCJwbGFuIjoiYnVzaW5lc3MiLCJzZWF0cyI6NSwic3ViIjoibGljX3ZlY3RvciJ9.9gILg8QzRoJUMy4viazfhIDVhronsG4YwxIa-Lbpf59eRvoHmDs4aaK9EHKUmFbCpCRN1NDreaXdl9wAYDNFBw",
+  "token": "PRSMv1.eyJjdXN0IjoiVmVjdG9yIFRlc3QgTHRkIiwiZGV2IjoiMDEyMzQ1Njc4OWFiY2RlZiIsImV4cCI6MTc1MDYwNDgwMCwiZmVhdCI6WyJjb3JlIiwiYm9xIiwiZW1haWwiXSwiZ3JhY2UiOjMsImlhdCI6MTc1MDAwMDAwMCwia2lkIjoidmVjdG9yIiwia2luZCI6InBhaWQiLCJsZW5kIjoxNzgxNTM2MDAwLCJuYmYiOjE3NTAwMDAwMDAsInBldGFnIjoiIiwicGsiOiIiLCJwbGFuIjoiYnVzaW5lc3MiLCJzZWF0cyI6NSwic3ViIjoibGljX3ZlY3RvciJ9.jkpa-pREeizssGdoh8B1bNmWHhk_wYbm6TM3doZZuuT-Rf5DYSzv4Kf9sBXApYObwpGTKyLxvV_yG-d9HIzHBQ",
   "claims": {
     "kid": "vector",
     "sub": "lic_vector",
@@ -23,5 +23,28 @@
     "grace": 3,
     "pk": "",
     "petag": ""
+  },
+  "lease": "PRSMLv1.eyJkZXYiOiIwMTIzNDU2Nzg5YWJjZGVmIiwiZXhwIjoxNzUwMDAxODAwLCJmZWF0IjpbImJvcSIsImNvcmUiLCJlbWFpbCJdLCJpYXQiOjE3NTAwMDAwMDAsImp0aSI6ImxzZV92ZWN0b3IwMDAxIiwia2lkIjoidmVjdG9yIiwibGlkIjoibGljX3ZlY3RvciIsIm10ciI6ZmFsc2UsIm5iZiI6MTc1MDAwMDAwMCwib2ZmIjozNjAwLCJzY29wZSI6WyJib3EiLCJjb3JlIiwid29ya2Zsb3ciXSwidmVyIjoxfQ.cHAi7WKCz1cd3jp4mcXEF-8dpl-s-pYpnnRwINPYzCKQ2AsdicTaOvgz6zwUh8-jMPj9luNWFaBq0tPjFUE1BQ",
+  "lease_claims": {
+    "kid": "vector",
+    "lid": "lic_vector",
+    "dev": "0123456789abcdef",
+    "scope": [
+      "boq",
+      "core",
+      "workflow"
+    ],
+    "feat": [
+      "boq",
+      "core",
+      "email"
+    ],
+    "mtr": false,
+    "iat": 1750000000,
+    "nbf": 1750000000,
+    "exp": 1750001800,
+    "off": 3600,
+    "jti": "lse_vector0001",
+    "ver": 1
   }
 }

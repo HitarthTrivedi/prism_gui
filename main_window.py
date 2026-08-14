@@ -135,15 +135,56 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._wire()
         self.refresh_licence_ui()
+        self._start_licence_timer()
 
-        # Only nag about setup once the licence is sorted — a customer who
-        # cannot use Prism yet does not need a Groq key dialog on top.
-        if licensing.state().usable and not CB.config.is_configured(self.cfg):
+        # The explainer needs nothing but eyes on the window, so it no longer
+        # waits on the licence — a first launch with a stuck licence sync is
+        # exactly when a brand-new user most needs to be told what Prism is,
+        # not left alone with a locked sidebar and no context. _first_run
+        # keeps the Groq key dialog behind the licence check: a customer who
+        # cannot use Prism yet does not need a key dialog on top of that.
+        if not CB.config.is_configured(self.cfg):
             # Deferred to the event loop rather than run here. A modal opened
             # from inside __init__ blocks before the window is on screen, so
             # it can appear behind it or with nowhere to centre itself — and
             # the constructor never returns until it is dismissed.
             QTimer.singleShot(0, self._first_run)
+
+    # ── keeping the licence and lease current ───────────────────────────────
+    # The authorisation lease is short by design (about half an hour), so a
+    # window left open all afternoon would let it lapse and turn the next
+    # click into a blocking round trip — the exact latency the lease exists to
+    # remove. This tops it up quietly instead.
+    #
+    # The timer lives here rather than in the licensing package for the same
+    # reason set_paywall_handler does: that package deliberately never imports
+    # Qt, so the CLI and the tests can use it without a display.
+    LICENCE_REFRESH_MS = 10 * 60 * 1000
+
+    def _start_licence_timer(self):
+        """Renew token and lease in the background, forever, off the UI thread.
+
+        licensing.refresh() returns immediately and does its work on a daemon
+        thread, so this costs the event loop nothing. Ten minutes against a
+        thirty-minute lease means two chances to recover from a blip before
+        anyone notices one — and /v1/lease records no usage, so a customer is
+        never billed for Prism keeping itself current.
+        """
+        self._licence_timer = QTimer(self)
+        self._licence_timer.setInterval(self.LICENCE_REFRESH_MS)
+        self._licence_timer.timeout.connect(self._tick_licence)
+        self._licence_timer.start()
+
+    def _tick_licence(self):
+        try:
+            licensing.refresh()
+            # Repaint from the CACHED state, which the previous tick's refresh
+            # has by now written. Reading it here rather than waiting on this
+            # tick's network call is what keeps the timer non-blocking.
+            licensing.reload()
+            self.refresh_licence_ui()
+        except Exception:                          # noqa: BLE001
+            pass    # a licence refresh must never be able to crash the window
 
     # ── layout ──────────────────────────────────────────────────────────────
     def _fit_to_screen(self):
@@ -184,8 +225,6 @@ class MainWindow(QMainWindow):
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
 
-        self.statusBar().showMessage("Ready.")
-
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
         self.banner = QFrame()
@@ -207,10 +246,19 @@ class MainWindow(QMainWindow):
         return self.banner
 
     def refresh_licence_ui(self):
-        """Repaint everything that depends on the licence: the banner, and the
-        locks in the rail. Called at startup and after any licence change."""
+        """Repaint everything that depends on the licence: the banner, the
+        locks in the rail, and the idle status message. That last one used to
+        be a hardcoded "Ready." set once in _build_ui — which stayed on
+        screen, unchanged, underneath a banner saying new work was paused.
+        `usable` is the same flag the rest of the licence gate goes by, so the
+        status bar never again claims something the banner just denied.
+        Called at startup and after any licence change."""
         state = licensing.state()
         self.sidebar.set_entitlements(state.features, state.usable)
+        if state.usable:
+            self.statusBar().showMessage("Ready.")
+        else:
+            self.statusBar().clearMessage()
 
         if state.status == licensing.VALID:
             # A healthy licence frees the banner for the other thing worth
@@ -375,7 +423,7 @@ class MainWindow(QMainWindow):
         if count:
             self.statusBar().showMessage(
                 f"{count} task{'s' if count != 1 else ''} queued. Add more, or "
-                "Make a plan to start the first one.", 5000)
+                "Show steps to start the first one.", 5000)
 
     # ── sidebar commands ─────────────────────────────────────────────────────
     def _handle_command(self, key: str):
@@ -548,7 +596,8 @@ class MainWindow(QMainWindow):
 
     def _first_run(self):
         self._welcome()
-        self._open_setup()
+        if licensing.state().usable:
+            self._open_setup()
 
     def _welcome(self):
         """Shown once, before Setup, on a machine that has never been set up.
@@ -940,6 +989,16 @@ class MainWindow(QMainWindow):
             self._finish_queue()
             return
         self._run_id = getattr(auth, "run_id", "")
+        if getattr(auth, "offline", False):
+            # Authorised from the cached lease because the server could not be
+            # reached. Say so, and do not stop: an arbitrary network failure is
+            # not a licence failure, and the whole point of the offline window
+            # is that the customer keeps working through it. A status message
+            # rather than a dialog — nothing here needs a decision from them.
+            self.statusBar().showMessage(
+                i18n.t("Working offline — Prism couldn't reach the licence "
+                       "server, so it's using this computer's saved "
+                       "authorisation."), 8000)
         worker = RouteWorker(query, self.cfg, self.attachments)
         worker.done.connect(self._on_routed)
         worker.failed.connect(self._on_route_failed)
@@ -968,9 +1027,9 @@ class MainWindow(QMainWindow):
             return
         total = len(self._task_queue)
         self.statusBar().showMessage(
-            "Plan ready — drop any step you don't want, then Start the work."
+            "Steps ready — drop any you don't want, then Start the work."
             if total <= 1 else
-            f"Plan ready for task 1 of {total}. Start the work and Prism will "
+            f"Steps ready for task 1 of {total}. Start the work and Prism will "
             f"run all {total} in order.", 8000)
 
     def _on_route_failed(self, error: str):
@@ -1013,10 +1072,10 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self, "Not in your licence",
                 (i18n.t("{tools} isn't part of your licence, so those steps "
-                        "can't run.\n\nRun the rest of the plan without them?")
+                        "can't run.\n\nRun the rest of the steps without them?")
                  if len(locked) > 1 else
                  i18n.t("{tools} isn't part of your licence, so that step "
-                        "can't run.\n\nRun the rest of the plan without it?")
+                        "can't run.\n\nRun the rest of the steps without it?")
                  ).format(tools=names),
                 QMessageBox.Yes | QMessageBox.Cancel)
             if answer != QMessageBox.Yes:
@@ -1027,7 +1086,7 @@ class MainWindow(QMainWindow):
                           if stage not in locked}
             if not run_agents:
                 QMessageBox.information(
-                    self, "Run", "Every step in this plan needs an add-on that "
+                    self, "Run", "Every step here needs an add-on that "
                                  "isn't in your licence.")
                 return
         # Prism Studio needs a browser engine the rest of Prism does not. Say
@@ -1101,8 +1160,8 @@ class MainWindow(QMainWindow):
         usually about the same files.
         """
         if QMessageBox.question(
-                self, "Discard this plan",
-                "Throw this plan away and clear the task?\n\n"
+                self, "Discard these steps",
+                "Throw these steps away and clear the task?\n\n"
                 "Files you've attached stay attached.",
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return

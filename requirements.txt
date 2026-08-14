@@ -55,11 +55,26 @@ imageio-ffmpeg
 openpyxl
 
 # ── Licensing ───────────────────────────────────────────────────────────────
-# Ed25519 to verify licence tokens, ChaCha20-Poly1305 to decrypt the engine
-# payload. Chosen over PyNaCl because PyInstaller ships maintained hooks for
-# it, where PyNaCl's cffi _sodium extension is exactly the kind of thing that
-# imports cleanly in development and dies in a frozen build.
+# Ed25519 to verify licence tokens and authorisation leases, ChaCha20-Poly1305
+# to decrypt the engine payload. Chosen over PyNaCl because PyInstaller ships
+# maintained hooks for it, where PyNaCl's cffi _sodium extension is exactly
+# the kind of thing that imports cleanly in development and dies in a frozen
+# build.
 cryptography
+
+# The OS credential store (Keychain / Credential Manager / Secret Service),
+# for the one reusable credential in the system: the licence key, which Prism
+# keeps so it can silently re-activate a seat somebody released by mistake.
+#
+# DELIBERATELY OPTIONAL, and licensing/secretstore.py must keep working
+# without it. A headless Linux box has no Secret Service, a locked keyring
+# raises on first use, and neither may stop Prism starting — the fallback is
+# the plaintext file the previous version used unconditionally, which is no
+# worse than before and is reported honestly in diagnostics.
+#
+# Uncomment to build with it. Recommended for release builds on Windows and
+# macOS, where a working backend is always present.
+# keyring
 
 # ── Voice input & wake word — needs PortAudio on the system first:
 #   macOS:  brew install portaudio

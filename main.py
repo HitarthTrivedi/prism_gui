@@ -258,6 +258,29 @@ def _paywall(feature: str, parent, state) -> None:
 def _licence_gate() -> bool:
     """Decide whether the app may open, before the window is built.
 
+    ────────────────────────────────────────────────────────────────────────
+    STARTUP IS LOCAL-FIRST, AND MUST STAY THAT WAY
+    ────────────────────────────────────────────────────────────────────────
+    Nothing on this path touches the network. The whole decision comes from
+    the signed licence token already on disk:
+
+        read ~/.prism/license.json
+          → verify the Ed25519 signature
+          → verify the device binding and not-before
+          → resolve expiry and grace  (licensing/status.py)
+          → open the window
+
+    licensing.refresh() below returns immediately and does its work on a
+    daemon thread. It is deliberately fired BEFORE state() is read, so the
+    renewal is already in flight while the window builds — and deliberately
+    not waited on, so it cannot add a millisecond to launch.
+
+    If you are tempted to make anything here synchronous, don't: a customer on
+    a corporate network with slow DNS, or on a site with no signal, would wait
+    on a request whose answer they already hold a valid signed copy of. The
+    same rule applies to moving a network call into MainWindow.__init__ —
+    that is still the startup path, just further down it.
+
     Returns False only when there is no licence at all and the customer closed
     the activation screen — an expired one still opens, read-only, because
     History and everything already produced must stay reachable. Locking
@@ -270,8 +293,9 @@ def _licence_gate() -> bool:
     from dialogs.license_dialog import LicenseDialog
 
     licensing.set_paywall_handler(_paywall)
-    # Fire-and-forget: renews the token in the background. The window builds
-    # against the cached one, so a slow corporate DNS costs nothing at startup.
+    # Fire-and-forget: renews the token AND the authorisation lease in the
+    # background. The window builds against the cached pair, so a slow
+    # corporate DNS costs nothing at startup.
     licensing.refresh()
 
     state = licensing.state()

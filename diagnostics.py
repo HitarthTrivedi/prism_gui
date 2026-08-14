@@ -44,6 +44,11 @@ _SECRETS = (
     re.compile(r"PRSM[-A-Z0-9]{12,}"),                     # licence key
     re.compile(r"PRSD1\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),  # designation key
     re.compile(r"PRSMv1\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),  # licence token
+    # Authorisation lease. Ordered BEFORE nothing in particular — the regexes
+    # are independent — but it must exist: a lease is a bearer credential for
+    # protected backend calls, and a support log is exactly the place one
+    # would otherwise be pasted.
+    re.compile(r"PRSMLv1\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
     re.compile(r"(?i)(password|passwd|secret|token)[\"'\s:=]+\S+"),
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),  # addresses
 )
@@ -195,6 +200,29 @@ def report() -> str:
             f"Device id       {licensing.device_fingerprint()}",
             f"Server          {_safe(lambda: licensing.client.server_url())}",
         ]
+        # The lease is what protected work is actually checked against, so
+        # "my licence looks fine but nothing will start" is answered here and
+        # nowhere else. Times and scopes only — never the lease itself, which
+        # is a bearer credential and belongs in no support attachment.
+        lease_state = _safe(licensing.lease_state)
+        lines.append(f"Authorisation   {lease_state}")
+        try:
+            lease_obj, _ = licensing._read_lease()
+        except Exception:                           # noqa: BLE001
+            lease_obj = None
+        if lease_obj is not None:
+            lines += [
+                f"  scopes        {', '.join(sorted(lease_obj.scopes)) or 'none'}",
+                f"  expires in    {lease_obj.expires_at - int(time.time())}s",
+                f"  offline for   {lease_obj.offline_seconds}s after that",
+                f"  metered       {lease_obj.metered}",
+            ]
+        # Where the reusable licence key ended up. "file" is the honest
+        # answer on a machine with no OS credential store, and support needs
+        # to be able to tell that from "we never stored one".
+        lines.append(
+            "Key storage     " + _safe(lambda: licensing.secretstore.where(
+                bool(licensing.store.load(licensing.user_dir()).get("key")))))
     except Exception as e:                          # noqa: BLE001
         lines.append(f"(couldn't read the licence: {e})")
 

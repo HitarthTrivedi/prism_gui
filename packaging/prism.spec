@@ -197,6 +197,24 @@ except ImportError:
 hiddenimports += collect_submodules("undetected_chromedriver")
 hiddenimports += collect_submodules("selenium")
 
+# The OS credential store, for the licence key (licensing/secretstore.py).
+# Optional in exactly the same way as the Drive libraries above: a build made
+# without it falls back to the plaintext file the previous version used, and
+# says so in diagnostics rather than failing.
+#
+# collect_submodules matters here — keyring picks its backend by ENTRY POINT
+# at runtime, so nothing static imports keyring.backends.Windows, and a build
+# that bundled only `keyring` itself would find no usable backend and silently
+# degrade to the file on every machine.
+try:
+    import keyring  # noqa: F401
+    hiddenimports += collect_submodules("keyring")
+    print("[prism] OS credential store bundled - licence key will be "
+          "kept in the keychain")
+except ImportError:
+    print("[prism] keyring not installed - the licence key will be stored in "
+          "~/.prism/license.json instead")
+
 # Qt is modular and PyInstaller takes the lot by default; these are the big
 # ones Prism never touches. Dropping them roughly halves the download.
 excludes = [

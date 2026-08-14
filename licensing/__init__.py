@@ -7,7 +7,8 @@ Everything outside this package imports only this module:
     licensing.require("boq", self)     check, and show the paywall if not
     licensing.activate(key)            from the activation dialog
     licensing.deactivate()             release this machine's seat
-    licensing.refresh()                background token renewal
+    licensing.refresh()                background token + lease renewal
+    licensing.authorize("boq")         may a protected operation go ahead?
     licensing.set_paywall_handler(fn)  wire the UI in, once, at startup
 
 There is deliberately no start_trial(). Trials are keys we issue by hand; the
@@ -20,6 +21,60 @@ Two rules run through all of it:
   · Fail toward the customer. Any unexpected failure in here resolves to the
     last state we were sure about, never to "expired". A bug in our code must
     not lock out someone who has paid.
+
+════════════════════════════════════════════════════════════════════════════
+THE SECURITY BOUNDARY
+════════════════════════════════════════════════════════════════════════════
+Assume this process is compromised. Everything below runs on the customer's
+machine, in a language they can read, from files they can edit; a determined
+user can patch out any `if` in this package. Treat every client-side check as
+a UX affordance and nothing more.
+
+    LOCAL CLIENT (this package, and the app around it)
+      · presentation — which padlocks show, what the banner says
+      · workflow editing, local history, local settings
+      · Chrome automation against the customer's OWN logged-in sessions
+      · verifying — never issuing — backend signatures
+      · deciding when to ASK the backend
+
+    BACKEND (license_server/)
+      · licence authority: status, expiry, revocation, seats
+      · authorisation authority: who gets a lease, with which scopes
+      · entitlements: the `feat` list a token and a lease carry
+      · quotas and metering
+      · every proprietary credential Prism owns
+      · the Ed25519 PRIVATE key. It exists there and nowhere else.
+
+The client holds only public verification keys (keys.py). That asymmetry is
+the entire design: a modified client can lie to its own user about what it is
+allowed to do, but it cannot manufacture a signature, so it cannot obtain
+anything the backend actually gates — a lease, a protected response, a
+proprietary credential.
+
+The practical rule when adding a feature: if it costs Alphakore money or
+exposes something proprietary, it must be gated by a backend check that
+independently re-validates. `if licensing.has(...)` is never sufficient for
+that class of thing, and is exactly right for deciding whether to grey out a
+button.
+
+════════════════════════════════════════════════════════════════════════════
+TWO CREDENTIALS, TWO QUESTIONS
+════════════════════════════════════════════════════════════════════════════
+    licence token   (token.py, ~/.prism/license.json)
+        "Is this Prism installation licensed?"
+        Hours to days. Read at startup, offline, with no network at all.
+
+    authorisation lease (lease.py, ~/.prism/authorization.json)
+        "May this licensed client perform protected operations right now?"
+        ~30 minutes, backend-configurable. Names its scopes. Checked before
+        anything protected, and re-presented to the backend for anything
+        genuinely valuable.
+
+Splitting them is what makes Prism both instant and live. The old design had
+only the token, so the only way to get a current answer was a blocking round
+trip on every plan — up to 90 seconds against a cold host, with no offline
+fallback at all. Now the token opens the app with no network, the lease covers
+protected work for half an hour, and the network happens in the background.
 """
 from __future__ import annotations
 
@@ -30,8 +85,9 @@ from typing import Any, Callable
 import app_meta
 import paths
 
-from . import (client, device, keyformat, keys, meter, status as _status,
-               store, token)
+from . import (authorization, client, device, keyformat, keys, lease as _lease_mod,
+               meter, secretstore, status as _status, store, token)
+from .authorization import Decision, Lease
 from .client import ServerError, Unreachable
 from .status import (EXPIRED, GRACE, NONE, STALE, TAMPERED,  # noqa: F401
                      VALID, LicenseState)
@@ -48,7 +104,18 @@ __all__ = [
     "set_paywall_handler", "device_fingerprint", "reload", "user_dir",
     "LicenseState", "ServerError", "Unreachable", "TokenError", "keyformat",
     "NONE", "VALID", "GRACE", "STALE", "EXPIRED", "TAMPERED",
+    "authorization", "lease_state", "lease_bearer", "Decision", "Lease",
+    "PROTECTED_ACTIONS", "secretstore", "store",
 ]
+
+# Actions the backend meters and counts against a daily allowance. These go to
+# the server when the licence is metered, because a quota can only be counted
+# where the counter lives — a lease authorises CAPABILITY, never CONSUMPTION.
+#
+# Everything not in here (opening an add-on, starting the pipeline against the
+# customer's own browser sessions) costs Alphakore nothing per use, so a valid
+# lease is a complete answer and no round trip happens at all.
+PROTECTED_ACTIONS = frozenset({"plan"})
 
 _lock = threading.Lock()
 _cached: LicenseState | None = None
@@ -155,20 +222,102 @@ def require(feature: str, parent: Any = None) -> bool:
     return False
 
 
+# ── the authorisation lease ────────────────────────────────────────────────
+def _scopes_wanted() -> list[str]:
+    """What to ask the backend to put in a lease.
+
+    Asking for what we hold a token for keeps one lease sufficient for a whole
+    session — the point of a lease is one fetch covering many operations, not
+    a fetch per feature. The BACKEND decides what it actually grants; this is
+    a request, and a lease that comes back narrower is honoured as it came
+    back.
+    """
+    current = state()
+    return sorted({authorization.SCOPE_CORE, authorization.SCOPE_WORKFLOW,
+                   *current.features})
+
+
+def _read_lease() -> tuple[Lease | None, str]:
+    """The cached lease and its state. Signature checked on every read."""
+    return authorization.current(
+        user_dir(), device_fp=device_fingerprint(),
+        public_keys=keys.public_keys(), license_id=state().license_id)
+
+
+def lease_state() -> str:
+    """authorization.FRESH | GRACE | STALE | NONE | TAMPERED. For the UI."""
+    try:
+        return _read_lease()[1]
+    except Exception:                               # noqa: BLE001
+        return authorization.NONE
+
+
+def lease_bearer() -> str:
+    """The raw signed lease, to send as `Authorization: Bearer …` on a call to
+    a protected backend endpoint.
+
+    Handing the BACKEND the lease — rather than the client deciding locally
+    and then asking for the goods — is what makes a protected operation
+    actually protected. The backend re-verifies the signature, the device
+    binding, the scope and the revocation list itself, so a patched client
+    gains nothing by lying to its own `if`.
+
+    Empty string when there is no usable lease; callers must treat that as
+    "not authorised" rather than as "skip the header".
+    """
+    try:
+        lease_obj, lstate = _read_lease()
+    except Exception:                               # noqa: BLE001
+        return ""
+    if lease_obj is None or lstate == authorization.STALE:
+        return ""
+    return lease_obj.raw
+
+
+def _store_lease(response: dict[str, Any]) -> bool:
+    """Cache a lease from a server response, if it verifies.
+
+    Verified BEFORE it is written, never after. Caching something unverified
+    would let one bad deploy poison every client's cache with a lease none of
+    them can use, and the only cure would be telling customers to delete a
+    file.
+    """
+    raw = (response or {}).get("lease") or ""
+    if not raw:
+        return False
+    try:
+        _lease_mod.verify(raw, device_fp=device_fingerprint(),
+                          public_keys=keys.public_keys(),
+                          license_id=state().license_id)
+    except Exception:                               # noqa: BLE001
+        # A TokenError means the backend and this build disagree about the
+        # lease format or the signing key. Either way the lease is unusable,
+        # and dropping it here leaves the previous one in place.
+        return False
+    authorization.remember(user_dir(), raw)
+    return True
+
+
 # ── talking to the server ──────────────────────────────────────────────────
 def _apply(response: dict[str, Any], *, key: str = "") -> LicenseState:
     """Persist whatever the server just told us, and re-read."""
     data = store.load(user_dir())
     if response.get("token"):
         data["token"] = response["token"]
-    if key:
-        data["key"] = keyformat.normalise(key)
     if response.get("license_id"):
         data["license_id"] = response["license_id"]
     data["server"] = client.server_url()
     store.save(user_dir(), data)
     store.touch_clock(user_dir())
-    return reload()
+    if key:
+        # Through save_key(), which prefers the OS credential store and clears
+        # any plaintext copy a previous version of Prism left behind.
+        store.save_key(user_dir(), keyformat.normalise(key))
+    result = reload()
+    # After reload(), so state().license_id is the new licence — a lease is
+    # bound to it and would be rejected against the old one.
+    _store_lease(response)
+    return result
 
 
 def activate(key: str) -> LicenseState:
@@ -202,35 +351,80 @@ def _refresh_once() -> LicenseState:
     license_id = data.get("license_id") or state().license_id
     if not license_id:
         return state()
+    stored_key = store.load_key(user_dir())
     try:
         response = client.refresh(license_id, device_fingerprint(),
                                   app_version=app_meta.VERSION,
                                   payload_etag=data.get("payload_etag") or "")
     except ServerError as e:
-        if e.code == "DEVICE_NOT_ACTIVATED" and data.get("key"):
+        if e.code == "DEVICE_NOT_ACTIVATED" and stored_key:
             # Someone released this seat, probably by accident. We still hold
             # the key, so re-activate and heal it without troubling anyone.
             try:
-                return activate(data["key"])
+                return activate(stored_key)
             except (ServerError, Unreachable):
                 return state()
-        # Any other refusal — expired, revoked — changes nothing right now.
-        # The token we already hold is the authority until it runs out.
+        if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED"):
+            # The server has definitively withdrawn this licence. The signed
+            # token we hold is still valid until it expires and deliberately
+            # keeps working — pulling the rug mid-session over a message we
+            # cannot verify offline would be its own kind of bug. But the
+            # LEASE goes now: it is the thing protected work is checked
+            # against, and a revoked licence must stop getting new ones.
+            authorization.clear(user_dir())
+        # Any other refusal changes nothing right now. The token we already
+        # hold is the authority until it runs out.
         return state()
     except Unreachable:
         return state()
     return _apply(response)
 
 
+def _refresh_lease_once() -> bool:
+    """Renew the authorisation lease. True if a fresh one was cached.
+
+    Free — /v1/lease records no usage and consumes no daily allowance — so
+    this can run on a timer without billing anybody for the question.
+    """
+    license_id = store.load(user_dir()).get("license_id") or state().license_id
+    if not license_id or state().status in (NONE, TAMPERED):
+        return False
+    try:
+        response = client.lease(license_id, device_fingerprint(),
+                                app_version=app_meta.VERSION,
+                                scopes=_scopes_wanted())
+    except ServerError as e:
+        if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
+                      "DEVICE_NOT_ACTIVATED"):
+            # A definite withdrawal. Drop the cached lease so protected work
+            # stops at the end of this call rather than at the end of the
+            # offline window — this is what makes revocation bite.
+            authorization.clear(user_dir())
+        else:
+            authorization.note_attempt(user_dir())
+        return False
+    except Unreachable:
+        authorization.note_attempt(user_dir())
+        return False
+    return _store_lease(response)
+
+
 def refresh(blocking: bool = False) -> LicenseState | None:
-    """Renew the token. Returns immediately unless `blocking`.
+    """Renew the token and the lease. Returns immediately unless `blocking`.
 
     Called at launch and periodically. Never surfaces an error: an unreachable
-    server is a normal condition that the cached token already covers.
+    server is a normal condition that the cached token and lease already cover.
+
+    The lease refresh follows the token refresh on the SAME thread rather than
+    on a second one — they are ordered (a lease is bound to the licence id the
+    token carries) and neither is urgent, so one background thread doing both
+    in sequence is both correct and cheaper than two racing.
     """
     store.touch_clock(user_dir())
     if blocking:
-        return _refresh_once()
+        result = _refresh_once()
+        _refresh_lease_once()
+        return result
     threading.Thread(target=_safe_refresh, name="prism-license-refresh",
                      daemon=True).start()
     return None
@@ -241,95 +435,268 @@ def _safe_refresh() -> None:
         _refresh_once()
     except Exception:                               # noqa: BLE001
         pass
+    try:
+        _refresh_lease_once()
+    except Exception:                               # noqa: BLE001
+        pass
 
 
 # ── live authorisation & metering ──────────────────────────────────────────
 class Authorization:
-    """The server's answer for one run or one add-on."""
+    """The answer for one run or one add-on.
+
+    `allowed` is the only field a call site should branch on. `state` and
+    `offline` exist so the UI can say something useful — "running on cached
+    authorisation" reads very differently from "your licence has ended" — and
+    neither is a permission.
+    """
 
     def __init__(self, allowed: bool, run_id: str = "", message: str = "",
-                 code: str = ""):
+                 code: str = "", state: str = "", offline: bool = False):
         self.allowed = allowed
         self.run_id = run_id
         self.message = message
         self.code = code
+        # authorization.FRESH | GRACE | STALE | NONE | TAMPERED, or "" when
+        # the answer came straight from the server.
+        self.state = state
+        # True when this was answered from cache because the server could not
+        # be reached. The caller may want a non-blocking warning; it must not
+        # change what runs.
+        self.offline = offline
 
     def __bool__(self) -> bool:
         return self.allowed
 
 
+def _local_run_id(action: str) -> str:
+    """A run id for work the server did not hand one out for.
+
+    The fast path and the offline path both proceed without a round trip, so
+    there is no server-issued run_id to group that run's usage events under.
+    Without one, everything a customer does offline lands in the reporting as
+    a single anonymous blob.
+
+    Deliberately prefixed and deliberately not authoritative: it is a grouping
+    key for telemetry the client reports anyway, never an authorisation. The
+    `loc_` prefix is what lets the admin console tell a run the server
+    authorised from one it merely heard about afterwards.
+    """
+    import uuid
+    if action in PROTECTED_ACTIONS:
+        # Recorded here rather than at the call site so that taking the fast
+        # path can never quietly cost the admin console its plan counts —
+        # which is what happens if metering lives only in the branch that
+        # talks to the server.
+        meter.record(action, stage=action)
+    return f"loc_{uuid.uuid4().hex[:16]}"
+
+
+def _licence_blocks_protected_work(current: LicenseState) -> Authorization | None:
+    """Statuses no lease may override, or None if the licence is no obstacle.
+
+    A lease is normally the FRESHER evidence — the backend caps a lease's
+    expiry at the licence's own hard stop, so a valid lease implies a valid
+    licence at the moment it was issued, and that is why `stale` (token
+    expired, licence fine) is deliberately absent here: a fresh lease is
+    exactly the right thing to trust in that case, and refusing it would put
+    the round trip back on the path the lease exists to keep clear.
+
+    These three are different. In each of them we cannot establish that the
+    licence is alive at all, so a lease that says otherwise is either a clock
+    being wound, or a lease that was never ours:
+
+        none      never activated
+        expired   past the licence end AND its grace
+        tampered  the token does not verify
+
+    Without this the fast path would happily authorise protected work on an
+    expired licence for as long as a lease sat on disk — which is precisely
+    the hole that "check the cache first" opens if the cache is checked
+    *instead of* the licence rather than *as well as*.
+    """
+    if current.status == NONE:
+        return Authorization(False, code="NONE", state=authorization.NONE,
+                             message="Prism isn't activated on this computer "
+                                     "yet.")
+    if current.status == EXPIRED:
+        return Authorization(
+            False, code=EXPIRED, state=authorization.NONE,
+            message="Your licence has ended, so Prism can't start new "
+                    "work.\n\nEverything you've already produced is still in "
+                    "History. Get in touch and we'll renew it.")
+    if current.status == TAMPERED:
+        return Authorization(
+            False, code=TAMPERED, state=authorization.TAMPERED,
+            message=current.message
+            or "Prism can't verify this computer's licence, so it can't start "
+               "new work. Please re-enter your licence key.")
+    return None
+
+
+def _unreachable_answer(feature: str) -> Authorization:
+    """What to say when the server is down and no lease covers this."""
+    if _offline_dev():
+        # Working on the UI shouldn't require running uvicorn. Source builds
+        # only — see _offline_dev().
+        if not feature or has(feature):
+            return Authorization(True, run_id="dev", state="dev")
+        return Authorization(False, code="FEATURE_NOT_LICENSED",
+                             message="Not in this dev licence.")
+    # Name the address. Without it this message is the same whether the
+    # network is down, a firewall is in the way, or the build is simply
+    # pointed at a server that does not exist yet — and those need completely
+    # different fixes.
+    return Authorization(
+        False, code="UNREACHABLE", offline=True,
+        message=f"Prism couldn't reach the licence server at "
+                f"{client.server_url()}, so it can't start new work right "
+                "now.\n\nCheck this computer's internet connection and try "
+                "again. Everything you've already produced is still in "
+                "History.")
+
+
 def authorize(feature: str = "core", action: str = "run") -> Authorization:
-    """Ask the server whether this may go ahead, right now.
+    """May this protected operation go ahead?
 
-    **There is no offline fallback.** If the licence server cannot be reached,
-    the answer is no. That is a deliberate product decision: Prism needs the
-    internet regardless — it calls Groq for every plan and drives claude.ai
-    through a browser — so a customer who cannot reach us cannot do useful
-    work anyway, and the alternative is a window in which a revoked or expired
-    licence keeps running.
+    ────────────────────────────────────────────────────────────────────────
+    The order, and why it is this order
+    ────────────────────────────────────────────────────────────────────────
+        1. Local signed lease. Valid and in scope → proceed, no network.
+        2. Missing, expired or out of scope → ask the backend.
+        3. Backend re-validates licence, device, seat, revocation,
+           entitlement, quota and client version, and signs a new lease.
+        4. Cache it, and proceed.
 
-    The cost is real and is being paid on purpose: our availability is now our
-    customers' availability. That is why the licence server is deliberately
-    tiny (three endpoints, one table's worth of writes per run) and hosted
-    accordingly.
+    This replaced a design that went to the server on EVERY plan with no
+    offline fallback at all. That was up to 90 seconds against a cold host
+    before the customer saw anything, and one flaky connection meant no work.
+    The trade it was making — live control in exchange for our availability
+    becoming our customers' availability — is now paid for by a signed lease
+    instead of by a round trip, which is strictly better on both sides.
+
+    ────────────────────────────────────────────────────────────────────────
+    What still always goes to the server
+    ────────────────────────────────────────────────────────────────────────
+    Metered actions on a metered licence (PROTECTED_ACTIONS, and the lease's
+    signed `mtr` flag). A daily allowance can only be counted where the
+    counter lives; a lease says what a client MAY do, never how much of it it
+    has already done. Prism's own pipeline is browser automation against the
+    customer's logged-in sessions and costs Alphakore nothing, so only
+    planning — three Groq calls — is in that set.
+
+    ────────────────────────────────────────────────────────────────────────
+    The honest limit of the offline window
+    ────────────────────────────────────────────────────────────────────────
+    Inside GRACE a metered licence can plan without the server counting it.
+    That window is the backend-signed `off` claim (default one hour), so the
+    exposure is bounded, per-licence, and adjustable without shipping an app.
+    A local counter would look like a fix and would not be one — anything this
+    process counts, this process can be patched to forget.
 
     Called at the START of a run or add-on — never during one. A pipeline is
     tens of minutes of browser automation, and failing it part-way would
     discard real work for a reason the customer cannot act on.
     """
     current = state()
-    if current.status == NONE:
-        return Authorization(False, message="Prism isn't activated on this "
-                                            "computer yet.", code="NONE")
+    blocked = _licence_blocks_protected_work(current)
+    if blocked is not None and current.status != TAMPERED:
+        # `none` and `expired` are settled facts the network cannot change.
+        # `tampered` falls through: it can be healed by a successful
+        # re-activation, and refusing without trying would strand someone
+        # whose token was invalidated by a licence reissue.
+        return blocked
 
+    scope = feature or authorization.SCOPE_CORE
+    lease_obj, lstate = _read_lease()
+    decision = authorization.decide(lease_obj, lstate, scope)
+
+    # A lease that is genuinely signed, in date, and simply does not cover
+    # this scope is a definite no. Going to the network would produce the same
+    # answer more slowly — the backend signs scopes from the same licence.
+    if not decision.allowed and decision.code == "SCOPE_NOT_GRANTED":
+        return Authorization(False, code="FEATURE_NOT_LICENSED",
+                             message=decision.message, state=lstate)
+
+    metered = action in PROTECTED_ACTIONS and (lease_obj is None
+                                               or lease_obj.metered)
+
+    # ── the fast path: no network at all ───────────────────────────────────
+    # `blocked` is None here for every status that may take it — see
+    # _licence_blocks_protected_work. A lease is checked AS WELL AS the
+    # licence, never instead of it.
+    if (blocked is None and decision.allowed
+            and lstate == authorization.FRESH and not metered):
+        return Authorization(True, run_id=_local_run_id(action), state=lstate)
+
+    # ── everything else needs the backend ──────────────────────────────────
     data = store.load(user_dir())
     license_id = data.get("license_id") or current.license_id
-    if license_id:
-        try:
+    if not license_id:
+        # No licence id at all — never activated, or the file was cleared.
+        return Authorization(False, code=current.status,
+                             message="Prism isn't activated on this computer.")
+
+    stored_key = store.load_key(user_dir())
+    try:
+        if metered:
             response = client.authorize(
                 license_id, device_fingerprint(),
-                app_version=app_meta.VERSION, action=action, feature=feature)
-            _apply(response)
-            return Authorization(True, run_id=response.get("run_id", ""))
-        except ServerError as e:
-            if e.code == "DEVICE_NOT_ACTIVATED" and data.get("key"):
-                # A seat released by mistake. Heal it and try once more.
-                try:
-                    activate(data["key"])
-                    response = client.authorize(
-                        license_id, device_fingerprint(),
-                        app_version=app_meta.VERSION, action=action,
-                        feature=feature)
-                    _apply(response)
-                    return Authorization(True, run_id=response.get("run_id", ""))
-                except (ServerError, Unreachable):
-                    pass
-            # A definite no — revoked, expired, add-on not licensed. The
-            # server's wording is customer-facing copy; show it as-is.
-            return Authorization(False, message=e.message, code=e.code)
-        except Unreachable:
-            if _offline_dev():
-                # Working on the UI shouldn't require running uvicorn. Source
-                # builds only — see _offline_dev().
-                if not feature or has(feature):
-                    return Authorization(True, run_id="dev")
-                return Authorization(False, code="FEATURE_NOT_LICENSED",
-                                     message="Not in this dev licence.")
-            # Name the address. Without it this message is the same whether
-            # the network is down, a firewall is in the way, or the build is
-            # simply pointed at a server that does not exist yet — and those
-            # need completely different fixes.
-            return Authorization(
-                False, code="UNREACHABLE",
-                message=f"Prism couldn't reach the licence server at "
-                        f"{client.server_url()}, so it can't start new work "
-                        "right now.\n\nCheck this computer's internet "
-                        "connection and try again. Everything you've already "
-                        "produced is still in History.")
-
-    # No licence id at all — never activated, or the file was cleared.
-    return Authorization(False, code=state().status,
-                         message="Prism isn't activated on this computer.")
+                app_version=app_meta.VERSION, action=action, feature=feature,
+                scopes=_scopes_wanted())
+        else:
+            response = client.lease(
+                license_id, device_fingerprint(),
+                app_version=app_meta.VERSION, scopes=_scopes_wanted())
+        _apply(response)
+        return Authorization(True, run_id=response.get("run_id", ""),
+                             state=authorization.FRESH)
+    except ServerError as e:
+        if e.code == "DEVICE_NOT_ACTIVATED" and stored_key:
+            # A seat released by mistake. Heal it and try once more.
+            try:
+                activate(stored_key)
+                response = (client.authorize(
+                                license_id, device_fingerprint(),
+                                app_version=app_meta.VERSION, action=action,
+                                feature=feature, scopes=_scopes_wanted())
+                            if metered else
+                            client.lease(
+                                license_id, device_fingerprint(),
+                                app_version=app_meta.VERSION,
+                                scopes=_scopes_wanted()))
+                _apply(response)
+                return Authorization(True, run_id=response.get("run_id", ""),
+                                     state=authorization.FRESH)
+            except (ServerError, Unreachable):
+                pass
+        if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED"):
+            # Withdrawn. Drop the cached lease so the offline window cannot
+            # carry a revoked licence any further.
+            authorization.clear(user_dir())
+        # A definite no — revoked, expired, add-on not licensed, out of
+        # allowance, client too old. The server's wording is customer-facing
+        # copy; show it as-is.
+        return Authorization(False, message=e.message, code=e.code,
+                             state=lstate)
+    except Unreachable:
+        # The server is down. THIS is where a cached lease earns its keep: an
+        # arbitrary network failure must not read as a licence failure.
+        authorization.note_attempt(user_dir())
+        if blocked is not None:
+            # Offline AND unable to establish a live licence. The cached lease
+            # does not get to answer this one — that would make "pull the
+            # network cable" the way around an expired licence.
+            return blocked
+        offline = authorization.decide(lease_obj, lstate, scope,
+                                       server_reachable=False)
+        if offline.allowed:
+            return Authorization(True, run_id=_local_run_id(action),
+                                 state=lstate, offline=True)
+        if offline.code == "LEASE_STALE":
+            return Authorization(False, code="LEASE_STALE", offline=True,
+                                 message=offline.message, state=lstate)
+        return _unreachable_answer(feature)
 
 
 def report_usage(run_id: str = "") -> None:
@@ -367,6 +734,11 @@ def selftest() -> tuple[bool, str]:
     same class of failure as the SSL trust store and the browser automation
     checks alongside it, both of which are in that self-test because a build
     that imported cleanly still died on a customer's machine.
+
+    Covers BOTH credentials. A build where the token verified and the lease
+    did not would open perfectly and then refuse every protected operation —
+    which presents exactly like a revoked licence, and would be diagnosed as
+    one for as long as it took someone to think of this.
     """
     import json
 
@@ -377,10 +749,11 @@ def selftest() -> tuple[bool, str]:
     except OSError as e:
         return False, f"test vector missing ({e})"
 
+    pubs = {"vector": vector["public_key"]}
     try:
         claims = token.verify(vector["token"],
                               device_fp=vector["device_fp"],
-                              public_keys={"vector": vector["public_key"]},
+                              public_keys=pubs,
                               now=int(vector["claims"]["iat"]) + 10)
     except TokenError as e:
         return False, f"vector rejected: {e}"
@@ -389,6 +762,22 @@ def selftest() -> tuple[bool, str]:
 
     if claims != vector["claims"]:
         return False, "vector claims did not round-trip"
+
+    # The lease half. Absent from vectors generated before leases existed, so
+    # a missing key is skipped rather than failed — an old vector should mean
+    # "regenerate it", not "this build is broken".
+    if vector.get("lease"):
+        try:
+            leased = _lease_mod.verify(
+                vector["lease"], device_fp=vector["device_fp"],
+                public_keys=pubs, license_id=vector["lease_claims"]["lid"],
+                now=int(vector["lease_claims"]["iat"]) + 10)
+        except TokenError as e:
+            return False, f"lease vector rejected: {e}"
+        except Exception as e:                      # noqa: BLE001
+            return False, f"lease crypto unusable: {e}"
+        if leased != vector["lease_claims"]:
+            return False, "lease vector claims did not round-trip"
     return True, ""
 
 

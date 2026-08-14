@@ -34,7 +34,15 @@ MAX_BUFFERED = 2000
 def record(kind: str, *, tool: str = "", stage: str = "",
            prompt_tokens: int = 0, completion_tokens: int = 0,
            ok: bool = True, ms: int = 0) -> None:
-    """Buffer one event. `kind` is run | stage | groq | addon."""
+    """Buffer one event. `kind` is plan | run | stage | groq | addon.
+
+    `plan` is recorded by licensing.authorize() when it takes the lease fast
+    path — on a metered licence the server writes that row itself, so this is
+    the unmetered case only. It is reporting, never enforcement: a client that
+    simply never sent it would change the admin console's numbers and nothing
+    else, which is precisely why a daily allowance is counted server-side
+    instead.
+    """
     try:
         with _lock:
             _buffer.append({

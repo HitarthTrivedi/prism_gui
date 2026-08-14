@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS hardened-runtime entitlements for Prism.
+
+  The hardened runtime is REQUIRED for notarisation, and notarisation is
+  required for a customer to be able to open the app at all on a current
+  macOS. But the hardened runtime also blocks several things CPython does by
+  design, so each exception below is here because the app does not start
+  without it — not as a precaution.
+
+  Every one of these is a real reduction in the sandbox. They are the minimum
+  a frozen CPython app that drives Chrome actually needs; do not add more
+  without a failure to point at.
+-->
+<plist version="1.0">
+<dict>
+    <!-- CPython generates and executes code at runtime (that is what an
+         interpreter is). Without this the process is killed on launch. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- PyInstaller loads extension modules (.so) from the bundle at runtime.
+         The hardened runtime otherwise requires every loaded library to be
+         signed with the SAME team id, and the wheels we ship are not. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Prism reads DYLD_* to find its bundled libraries. -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- The product is browser automation: Prism launches Chrome and drives
+         it through chromedriver, both separate signed processes. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!-- Voice input (wakeword.py / core.voice) records from the microphone.
+         Optional at runtime — Prism starts without it — but a notarised build
+         that omits this makes voice fail with no prompt and no explanation. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>
