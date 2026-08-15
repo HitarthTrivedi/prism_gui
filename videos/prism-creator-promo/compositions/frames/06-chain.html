@@ -2,45 +2,43 @@
   <style>
     /* Prism brand type — the Barlow cuts vendored with the product itself.
        Condensed ships Regular + SemiBold only; 600-900 map to SemiBold.
-       IBM Plex Mono is pre-bundled by the renderer (no @font-face needed). */
+       IBM Plex Mono is pre-bundled by the renderer and needs no declaration. */
     @font-face {
-      font-family: "Barlow Condensed", system-ui, sans-serif;
+      font-family: "Barlow Condensed";
       src: url("assets/fonts/BarlowCondensed-Regular.ttf") format("truetype");
       font-weight: 100 500;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow Condensed", system-ui, sans-serif;
+      font-family: "Barlow Condensed";
       src: url("assets/fonts/BarlowCondensed-SemiBold.ttf") format("truetype");
       font-weight: 600 900;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Regular.ttf") format("truetype");
       font-weight: 100 400;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Medium.ttf") format("truetype");
       font-weight: 500;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Bold.ttf") format("truetype");
       font-weight: 600 900;
       font-style: normal;
       font-display: block;
     }
 
-    /* ───────── embedded brand faces (subset, self-contained) ───────── */
-            
     /* ───────── frame ground ───────── */
     #root {
       position: relative;
@@ -50,6 +48,13 @@
       container-type: size;
       font-family: "Barlow", system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
+    }
+    /* declared explicitly — every fixed height below is a border-box height */
+    #root,
+    #root *,
+    #root *::before,
+    #root *::after {
+      box-sizing: border-box;
     }
 
     /* full-bleed ground lives on a clip layer, never on #root */
@@ -76,18 +81,25 @@
       will-change: transform;
     }
 
-    /* ───────── stage card ───────── */
-    .f06-chain-card {
+    /* depth shell — carries blur + dim so the card keeps its own entrance */
+    .f06-chain-depth {
       position: absolute;
       left: 100px;
       width: 880px;
-      height: 356px;
+      height: 376px;
+      z-index: 2;
+    }
+
+    /* ───────── stage card ───────── */
+    .f06-chain-card {
+      position: relative;
+      width: 880px;
+      height: 376px;
       background: #141618;
       border: 1px solid #26292c;
       padding: 28px 40px 28px 44px;
       display: flex;
       flex-direction: column;
-      z-index: 2;
     }
     .f06-chain-band {
       position: absolute;
@@ -100,7 +112,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 24px;
+      height: 34px;
+      flex: none;
     }
     .f06-chain-num {
       font-family: "Barlow", system-ui, sans-serif;
@@ -108,7 +121,7 @@
       font-size: 1.85cqw;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: #5b6166;
+      color: #7b8084;
     }
     .f06-chain-chip {
       font-family: "Barlow", system-ui, sans-serif;
@@ -120,11 +133,12 @@
       background: #0b0c0e;
       border: 1px solid #26292c;
       border-left-width: 2px;
-      padding: 6px 14px 5px 12px;
+      padding: 7px 14px 6px 12px;
       line-height: 1;
+      flex: none;
     }
     .f06-chain-title {
-      margin-top: 18px;
+      margin-top: 14px;
       font-family: "Barlow Condensed", system-ui, sans-serif;
       font-weight: 600;
       font-size: 4.26cqw;
@@ -132,11 +146,13 @@
       letter-spacing: -0.02em;
       text-transform: lowercase;
       color: #f2f2f3;
+      flex: none;
     }
     .f06-chain-rule {
       margin-top: 18px;
       height: 1px;
       background: #26292c;
+      flex: none;
     }
     .f06-chain-body {
       margin-top: 18px;
@@ -146,17 +162,20 @@
     .f06-chain-col-in {
       width: 360px;
       margin-right: 40px;
+      flex: none;
     }
     .f06-chain-col-out {
       width: 391px;
+      flex: none;
     }
     .f06-chain-collabel {
       font-family: "Barlow", system-ui, sans-serif;
       font-weight: 500;
       font-size: 1.85cqw;
+      line-height: 1.2;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: #5b6166;
+      color: #7b8084;
       margin-bottom: 12px;
     }
     .f06-chain-collabel-accent {
@@ -168,13 +187,13 @@
       font-size: 2.5cqw;
       line-height: 1.2;
       color: #f2f2f3;
-      padding: 5px 0 10px;
+      padding: 4px 0 8px;
       border-bottom: 1px solid #26292c;
       white-space: nowrap;
     }
     /* handed-down context reads dimmed — the literal hand-off */
     .f06-chain-ctx .f06-chain-row {
-      color: #5b6166;
+      color: #7b8084;
     }
     .f06-chain-tc {
       color: #9aa0a6;
@@ -253,218 +272,146 @@
       text-transform: lowercase;
       color: #f2f2f3;
     }
+    .f06-chain-h2 span {
+      display: block;
+    }
     .f06-chain-h2 .accent {
       color: #4cd9b4;
-      display: block;
     }
   </style>
 
-  <div
-    id="root"
-    data-composition-id="06-chain"
-    data-start="0"
-    data-duration="7.5"
-    data-width="1080"
-    data-height="1920"
-  >
+  <div data-hf-id="hf-b2g5" id="root" data-composition-id="06-chain" data-start="0" data-duration="7.5" data-width="1080" data-height="1920">
     <!-- track 0 — full-bleed ink ground -->
-    <div
-      class="clip f06-chain-bg"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="0"
-    ></div>
+    <div data-hf-id="hf-49ha" class="clip f06-chain-bg" data-start="0" data-duration="7.5" data-track-index="0"></div>
 
     <!-- track 1 — the camera stage -->
-    <div
-      class="clip f06-chain-stage"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="1"
-    >
-      <div class="f06-chain-world" id="f06-chain-world">
+    <div data-hf-id="hf-03fm" class="clip f06-chain-stage" data-start="0" data-duration="7.5" data-track-index="1">
+      <div data-hf-id="hf-j4eg" class="f06-chain-world" id="f06-chain-world">
         <!-- ── stage 1 ── -->
-        <div class="f06-chain-card" id="f06-chain-card1" style="top: 344px">
-          <span class="f06-chain-band" style="background: #a78bfa"></span>
-          <div class="f06-chain-head" id="f06-chain-head1">
-            <span class="f06-chain-num">STAGE 01</span>
-            <span class="f06-chain-chip" style="border-left-color: #a78bfa"
-              >PERPLEXITY</span
-            >
-          </div>
-          <div class="f06-chain-title" id="f06-chain-title1">look things up</div>
-          <div class="f06-chain-rule"></div>
-          <div class="f06-chain-body">
-            <div class="f06-chain-col-in f06-chain-ctx">
-              <div class="f06-chain-collabel" id="f06-chain-inlabel1">
-                CONTEXT IN
-              </div>
-              <div id="f06-chain-in1">
-                <div class="f06-chain-row">your one plain task</div>
-              </div>
+        <div data-hf-id="hf-h4oo" class="f06-chain-depth" id="f06-chain-depth1" style="top: 336px">
+          <div data-hf-id="hf-tv0v" class="f06-chain-card" id="f06-chain-card1">
+            <span data-hf-id="hf-8ahp" class="f06-chain-band" style="background: #a78bfa"></span>
+            <div data-hf-id="hf-e5sn" class="f06-chain-head" id="f06-chain-head1">
+              <span data-hf-id="hf-t0qp" class="f06-chain-num">STAGE 01</span>
+              <span data-hf-id="hf-0pgu" class="f06-chain-chip" style="border-left-color: #a78bfa">PERPLEXITY</span>
             </div>
-            <div class="f06-chain-col-out">
-              <div class="f06-chain-collabel" id="f06-chain-outlabel1">
-                FINDINGS OUT
+            <div data-hf-id="hf-kca0" class="f06-chain-title" id="f06-chain-title1">
+              look things up
+            </div>
+            <div data-hf-id="hf-ikun" class="f06-chain-rule"></div>
+            <div data-hf-id="hf-rtm1" class="f06-chain-body">
+              <div data-hf-id="hf-wqnf" class="f06-chain-col-in f06-chain-ctx">
+                <div data-hf-id="hf-8vpu" class="f06-chain-collabel" id="f06-chain-inlabel1">
+                  CONTEXT IN
+                </div>
+                <div data-hf-id="hf-71ua" id="f06-chain-in1">
+                  <div data-hf-id="hf-1itx" class="f06-chain-row">your one plain task</div>
+                </div>
               </div>
-              <div id="f06-chain-out1">
-                <div class="f06-chain-row">who it's for</div>
-                <div class="f06-chain-row">what's already out there</div>
-                <div class="f06-chain-row">the angle no one took</div>
+              <div data-hf-id="hf-scoi" class="f06-chain-col-out">
+                <div data-hf-id="hf-uipn" class="f06-chain-collabel" id="f06-chain-outlabel1">
+                  FINDINGS OUT
+                </div>
+                <div data-hf-id="hf-j0bd" id="f06-chain-out1">
+                  <div data-hf-id="hf-qqyf" class="f06-chain-row">who it's for</div>
+                  <div data-hf-id="hf-qquh" class="f06-chain-row">what's already out there</div>
+                  <div data-hf-id="hf-zne7" class="f06-chain-row">the angle no one took</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- ── stage 2 ── -->
-        <div class="f06-chain-card" id="f06-chain-card2" style="top: 780px">
-          <span class="f06-chain-band" style="background: #4cd9b4"></span>
-          <div class="f06-chain-head" id="f06-chain-head2">
-            <span class="f06-chain-num">STAGE 02</span>
-            <span class="f06-chain-chip" style="border-left-color: #4cd9b4"
-              >CLAUDE</span
-            >
-          </div>
-          <div class="f06-chain-title" id="f06-chain-title2">write it up</div>
-          <div class="f06-chain-rule"></div>
-          <div class="f06-chain-body">
-            <div class="f06-chain-col-in f06-chain-ctx">
-              <div
-                class="f06-chain-collabel f06-chain-collabel-accent"
-                id="f06-chain-inlabel2"
-              >
-                CONTEXT IN
-              </div>
-              <div id="f06-chain-in2">
-                <div class="f06-chain-row">who it's for</div>
-                <div class="f06-chain-row">what's already out there</div>
-                <div class="f06-chain-row">the angle no one took</div>
-              </div>
+        <div data-hf-id="hf-sz3h" class="f06-chain-depth" id="f06-chain-depth2" style="top: 772px">
+          <div data-hf-id="hf-izj8" class="f06-chain-card" id="f06-chain-card2">
+            <span data-hf-id="hf-gl0o" class="f06-chain-band" style="background: #4cd9b4"></span>
+            <div data-hf-id="hf-5hws" class="f06-chain-head" id="f06-chain-head2">
+              <span data-hf-id="hf-u7ns" class="f06-chain-num">STAGE 02</span>
+              <span data-hf-id="hf-nsbn" class="f06-chain-chip" style="border-left-color: #4cd9b4">CLAUDE</span>
             </div>
-            <div class="f06-chain-col-out">
-              <div class="f06-chain-collabel" id="f06-chain-outlabel2">
-                SCRIPT OUT
+            <div data-hf-id="hf-7n5n" class="f06-chain-title" id="f06-chain-title2">write it up</div>
+            <div data-hf-id="hf-rewf" class="f06-chain-rule"></div>
+            <div data-hf-id="hf-y1lp" class="f06-chain-body">
+              <div data-hf-id="hf-lx3f" class="f06-chain-col-in f06-chain-ctx">
+                <div data-hf-id="hf-dawl" class="f06-chain-collabel f06-chain-collabel-accent" id="f06-chain-inlabel2">
+                  CONTEXT IN
+                </div>
+                <div data-hf-id="hf-33q9" id="f06-chain-in2">
+                  <div data-hf-id="hf-0z5j" class="f06-chain-row">who it's for</div>
+                  <div data-hf-id="hf-z7fh" class="f06-chain-row">what's already out there</div>
+                  <div data-hf-id="hf-i43z" class="f06-chain-row">the angle no one took</div>
+                </div>
               </div>
-              <div id="f06-chain-out2">
-                <div class="f06-chain-row">00:00 the hook</div>
-                <div class="f06-chain-row">00:12 the proof</div>
-                <div class="f06-chain-row">00:34 the ask</div>
+              <div data-hf-id="hf-tm9i" class="f06-chain-col-out">
+                <div data-hf-id="hf-yc9x" class="f06-chain-collabel" id="f06-chain-outlabel2">
+                  SCRIPT OUT
+                </div>
+                <div data-hf-id="hf-myfe" id="f06-chain-out2">
+                  <div data-hf-id="hf-plon" class="f06-chain-row">00:00 the hook</div>
+                  <div data-hf-id="hf-oxf5" class="f06-chain-row">00:12 the proof</div>
+                  <div data-hf-id="hf-o6q2" class="f06-chain-row">00:34 the ask</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- ── stage 3 ── -->
-        <div class="f06-chain-card" id="f06-chain-card3" style="top: 1216px">
-          <span class="f06-chain-band" style="background: #a3e635"></span>
-          <div class="f06-chain-head" id="f06-chain-head3">
-            <span class="f06-chain-num">STAGE 03</span>
-            <span class="f06-chain-chip" style="border-left-color: #a3e635"
-              >CHATGPT</span
-            >
-          </div>
-          <div class="f06-chain-title" id="f06-chain-title3">
-            make the images
-          </div>
-          <div class="f06-chain-rule"></div>
-          <div class="f06-chain-body">
-            <div class="f06-chain-col-in f06-chain-ctx">
-              <div
-                class="f06-chain-collabel f06-chain-collabel-accent"
-                id="f06-chain-inlabel3"
-              >
-                CONTEXT IN
-              </div>
-              <div id="f06-chain-in3">
-                <div class="f06-chain-row">00:00 the hook</div>
-              </div>
+        <div data-hf-id="hf-aghj" class="f06-chain-depth" id="f06-chain-depth3" style="top: 1208px">
+          <div data-hf-id="hf-lyst" class="f06-chain-card" id="f06-chain-card3">
+            <span data-hf-id="hf-m12l" class="f06-chain-band" style="background: #a3e635"></span>
+            <div data-hf-id="hf-69kl" class="f06-chain-head" id="f06-chain-head3">
+              <span data-hf-id="hf-ttcr" class="f06-chain-num">STAGE 03</span>
+              <span data-hf-id="hf-ols7" class="f06-chain-chip" style="border-left-color: #a3e635">CHATGPT</span>
             </div>
-            <div class="f06-chain-col-out">
-              <div class="f06-chain-collabel" id="f06-chain-outlabel3">
-                THUMBNAILS OUT
+            <div data-hf-id="hf-usfo" class="f06-chain-title" id="f06-chain-title3">
+              make the images
+            </div>
+            <div data-hf-id="hf-r0le" class="f06-chain-rule"></div>
+            <div data-hf-id="hf-z8is" class="f06-chain-body">
+              <div data-hf-id="hf-lise" class="f06-chain-col-in f06-chain-ctx">
+                <div data-hf-id="hf-m05c" class="f06-chain-collabel f06-chain-collabel-accent" id="f06-chain-inlabel3">
+                  CONTEXT IN
+                </div>
+                <div data-hf-id="hf-04go" id="f06-chain-in3">
+                  <div data-hf-id="hf-8aav" class="f06-chain-row">00:00 the hook</div>
+                </div>
               </div>
-              <div class="f06-chain-tiles" id="f06-chain-tiles">
-                <div class="f06-chain-tile"></div>
-                <div class="f06-chain-tile"></div>
-                <div class="f06-chain-tile"></div>
+              <div data-hf-id="hf-u0kj" class="f06-chain-col-out">
+                <div data-hf-id="hf-safa" class="f06-chain-collabel" id="f06-chain-outlabel3">
+                  THUMBNAILS OUT
+                </div>
+                <div data-hf-id="hf-5p1i" class="f06-chain-tiles" id="f06-chain-tiles">
+                  <div data-hf-id="hf-r0b1" class="f06-chain-tile"></div>
+                  <div data-hf-id="hf-9j7l" class="f06-chain-tile"></div>
+                  <div data-hf-id="hf-aq4o" class="f06-chain-tile"></div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- ── the unbroken thread ── -->
-        <svg
-          class="f06-chain-thread"
-          viewBox="0 0 1080 1920"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            class="seg"
-            id="f06-chain-seg1"
-            d="M 780 700 L 780 740 L 220 740 L 220 780"
-          />
-          <path
-            class="pulse"
-            id="f06-chain-pulse1"
-            d="M 780 700 L 780 740 L 220 740 L 220 780"
-          />
-          <path
-            class="seg"
-            id="f06-chain-seg2"
-            d="M 780 1136 L 780 1176 L 220 1176 L 220 1216"
-          />
-          <path
-            class="pulse"
-            id="f06-chain-pulse2"
-            d="M 780 1136 L 780 1176 L 220 1176 L 220 1216"
-          />
-          <rect
-            class="node"
-            id="f06-chain-node1a"
-            x="772"
-            y="694"
-            width="16"
-            height="7"
-          />
-          <rect
-            class="node"
-            id="f06-chain-node1b"
-            x="212"
-            y="779"
-            width="16"
-            height="7"
-          />
-          <rect
-            class="node"
-            id="f06-chain-node2a"
-            x="772"
-            y="1130"
-            width="16"
-            height="7"
-          />
-          <rect
-            class="node"
-            id="f06-chain-node2b"
-            x="212"
-            y="1215"
-            width="16"
-            height="7"
-          />
+        <svg data-hf-id="hf-8tmc" class="f06-chain-thread" viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+          <path data-hf-id="hf-8rm6" class="seg" id="f06-chain-seg1" d="M 780 712 L 780 742 L 220 742 L 220 772" />
+          <path data-hf-id="hf-gl1q" class="pulse" id="f06-chain-pulse1" d="M 780 712 L 780 742 L 220 742 L 220 772" />
+          <path data-hf-id="hf-a6ms" class="seg" id="f06-chain-seg2" d="M 780 1148 L 780 1178 L 220 1178 L 220 1208" />
+          <path data-hf-id="hf-qgvk" class="pulse" id="f06-chain-pulse2" d="M 780 1148 L 780 1178 L 220 1178 L 220 1208" />
+          <rect data-hf-id="hf-008l" class="node" id="f06-chain-node1a" x="772" y="706" width="16" height="7" />
+          <rect data-hf-id="hf-1zgd" class="node" id="f06-chain-node1b" x="212" y="771" width="16" height="7" />
+          <rect data-hf-id="hf-b1x1" class="node" id="f06-chain-node2a" x="772" y="1142" width="16" height="7" />
+          <rect data-hf-id="hf-qz15" class="node" id="f06-chain-node2b" x="212" y="1207" width="16" height="7" />
         </svg>
       </div>
     </div>
 
     <!-- track 2 — the resolve line -->
-    <div
-      class="clip f06-chain-titlelayer"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="2"
-    >
-      <div class="f06-chain-stub" id="f06-chain-stub"></div>
-      <div class="f06-chain-h2" id="f06-chain-h2">
-        <span class="line1">you never paste</span>
-        <span class="accent">context twice</span>
+    <div data-hf-id="hf-t3p4" class="clip f06-chain-titlelayer" data-start="0" data-duration="7.5" data-track-index="2">
+      <div data-hf-id="hf-m3ou" class="f06-chain-stub" id="f06-chain-stub"></div>
+      <div data-hf-id="hf-jgn2" class="f06-chain-h2" id="f06-chain-h2">
+        <span data-hf-id="hf-qw61">you never paste</span>
+        <span data-hf-id="hf-iqp6" class="accent">context twice</span>
       </div>
     </div>
   </div>
@@ -475,7 +422,7 @@
     (function () {
       var ROOT = document.querySelector('[data-composition-id="06-chain"]');
       var q = function (id) {
-        return ROOT.querySelector("#" + CSS.escape(id));
+        return ROOT.querySelector("#" + id);
       };
 
       /* ── per-word split (deterministic, built once) ───────────────── */
@@ -504,9 +451,9 @@
 
       var out1Rows = rowsOf("f06-chain-out1");
       var out2Rows = rowsOf("f06-chain-out2");
+      var in1Rows = rowsOf("f06-chain-in1");
       var in2Rows = rowsOf("f06-chain-in2");
       var in3Rows = rowsOf("f06-chain-in3");
-      var in1Rows = rowsOf("f06-chain-in1");
 
       var out1Words = out1Rows.map(function (r) {
         return splitWords(r, false);
@@ -516,8 +463,9 @@
       });
       splitWords(in3Rows[0], true);
 
-      /* ── dynamic-content-sequencing: durations from content length,
-            pre-computed ONCE into a flat timeline (never in onUpdate) ── */
+      /* ── dynamic-content-sequencing: per-entry duration from content
+            length, reduced ONCE at build into a flat start/end table
+            (never recomputed inside an onUpdate) ─────────────────────── */
       var SEQ_BASE = 0.16;
       var SEQ_PER_CHAR = 0.008;
       var SEQ_HOLD = 0.02;
@@ -543,7 +491,7 @@
         3.32,
       );
 
-      /* ── svg-path-draw: measured lengths, never guessed ───────────── */
+      /* ── svg-path-draw: dash pattern from measured getTotalLength ──── */
       var seg1 = q("f06-chain-seg1"),
         seg2 = q("f06-chain-seg2");
       var pulse1 = q("f06-chain-pulse1"),
@@ -560,39 +508,31 @@
       pulse2.style.strokeDasharray = PULSE_LEN + " " + LEN2;
       pulse2.style.strokeDashoffset = String(PULSE_LEN);
 
-      /* ── viewport-change: ONE world wrapper, one cam, one writer ──── */
+      /* ── viewport-change: ONE .world wrapper carries the whole camera ──
+         The camera is tweened as GSAP transform props ON that one wrapper,
+         never through an onUpdate writer: the renderer seeks frame-by-frame
+         and gsap seek() suppresses callbacks, so an onUpdate-driven camera
+         silently freezes at its seeded pose in the render.
+         GSAP composes transform as translate(x,y) then scale(S), so the
+         single-wrapper counter-translate is T = -offset x S.
+         world centres: card1 524 · card2 960 · card3 1396 (viewport 960)
+           card1 -> T = -(524 - 960) x 1.3 =  566.8
+           card2 -> T = -(960 - 960) x 1.3 =    0
+           card3 -> T = -(1396 - 960) x 1.3 = -566.8                     */
       var world = q("f06-chain-world");
-      var cam = { scale: 1.3, x: 0, y: 569.4 };
-      function applyCamera() {
-        world.style.transform =
-          "translate(" +
-          cam.x +
-          "px, " +
-          cam.y +
-          "px) scale(" +
-          cam.scale +
-          ")";
-      }
-      applyCamera(); // seed frame 0 — punched in on stage 1
-
-      /* layered depth — receded cards blur back */
-      var card1 = q("f06-chain-card1"),
-        card2 = q("f06-chain-card2"),
-        card3 = q("f06-chain-card3");
-      var blur1 = { v: 0 },
-        blur2 = { v: 0 };
-      function writeBlur1() {
-        card1.style.filter = blur1.v > 0.02 ? "blur(" + blur1.v + "px)" : "none";
-      }
-      function writeBlur2() {
-        card2.style.filter = blur2.v > 0.02 ? "blur(" + blur2.v + "px)" : "none";
-      }
+      var depth1 = q("f06-chain-depth1"),
+        depth2 = q("f06-chain-depth2");
+      var CAM_A = 566.8,
+        CAM_C = -566.8,
+        CAM_S = 1.3;
 
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
       window.__timelines["06-chain"] = tl;
 
-      var IR = { immediateRender: false };
+      /* frame 0 — punched in on stage 1, both depth shells crisp */
+      gsap.set(world, { x: 0, y: CAM_A, scale: CAM_S, transformOrigin: "50% 50%" });
+      gsap.set([depth1, depth2], { opacity: 1, filter: "blur(0px)" });
 
       /* helper: staggered per-word reveal inside one row */
       function revealWords(spans, at, dur) {
@@ -612,7 +552,7 @@
 
       /* ════ SCENE 1 (0.0–1.5) — tight on stage 1, findings arrive ════ */
       tl.fromTo(
-        card1,
+        q("f06-chain-card1"),
         { opacity: 0, y: 22 },
         { opacity: 1, y: 0, duration: 0.42, ease: "power2.out" },
         0,
@@ -620,25 +560,13 @@
       tl.fromTo(
         [q("f06-chain-head1"), q("f06-chain-title1")],
         { opacity: 0, y: 14 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.38,
-          ease: "power2.out",
-          stagger: 0.08,
-        },
+        { opacity: 1, y: 0, duration: 0.38, ease: "power2.out", stagger: 0.08 },
         0.08,
       );
       tl.fromTo(
         [q("f06-chain-inlabel1"), in1Rows[0]],
         { opacity: 0, y: 12 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.34,
-          ease: "power2.out",
-          stagger: 0.09,
-        },
+        { opacity: 1, y: 0, duration: 0.34, ease: "power2.out", stagger: 0.09 },
         0.3,
       );
       tl.fromTo(
@@ -664,35 +592,26 @@
         { strokeDashoffset: 0, duration: 0.7, ease: "power2.out" },
         1.52,
       );
+      /* the camera travels down with the thread — ONE decelerating move */
       tl.fromTo(
-        cam,
-        { y: 569.4 },
+        world,
+        { y: CAM_A, scale: CAM_S },
         {
-          y: 2.6,
+          y: 0,
+          scale: CAM_S,
           duration: 1.3,
           ease: "power3.out",
-          onUpdate: applyCamera,
           immediateRender: false,
         },
         1.58,
       );
+      /* layered depth — stage 1 stays in frame above, blurred back */
       tl.fromTo(
-        blur1,
-        { v: 0 },
-        {
-          v: 6,
-          duration: 1.1,
-          ease: "power2.out",
-          onUpdate: writeBlur1,
-          immediateRender: false,
-        },
-        1.7,
-      );
-      tl.fromTo(
-        card1,
-        { opacity: 1 },
+        depth1,
+        { opacity: 1, filter: "blur(0px)" },
         {
           opacity: 0.42,
+          filter: "blur(6px)",
           duration: 1.1,
           ease: "power2.out",
           immediateRender: false,
@@ -700,7 +619,7 @@
         1.7,
       );
       tl.fromTo(
-        card2,
+        q("f06-chain-card2"),
         { opacity: 0, y: 18 },
         { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" },
         1.9,
@@ -708,23 +627,13 @@
       tl.fromTo(
         [q("f06-chain-head2"), q("f06-chain-title2")],
         { opacity: 0, y: 12 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.36,
-          ease: "power2.out",
-          stagger: 0.08,
-        },
+        { opacity: 1, y: 0, duration: 0.36, ease: "power2.out", stagger: 0.08 },
         2.05,
       );
       tl.fromTo(
         pulse1,
         { strokeDashoffset: PULSE_LEN },
-        {
-          strokeDashoffset: -LEN1,
-          duration: 0.47,
-          ease: "power1.inOut",
-        },
+        { strokeDashoffset: -LEN1, duration: 0.47, ease: "power1.inOut" },
         2.15,
       );
       tl.fromTo(
@@ -743,13 +652,7 @@
       tl.fromTo(
         in2Rows,
         { opacity: 0, y: -26 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.42,
-          ease: "power2.out",
-          stagger: 0.13,
-        },
+        { opacity: 1, y: 0, duration: 0.42, ease: "power2.out", stagger: 0.13 },
         2.6,
       );
 
@@ -776,34 +679,23 @@
         4.03,
       );
       tl.fromTo(
-        cam,
-        { y: 2.6 },
+        world,
+        { y: 0, scale: CAM_S },
         {
-          y: -564.2,
+          y: CAM_C,
+          scale: CAM_S,
           duration: 1.0,
           ease: "power3.out",
-          onUpdate: applyCamera,
           immediateRender: false,
         },
         4.08,
       );
       tl.fromTo(
-        blur2,
-        { v: 0 },
-        {
-          v: 5,
-          duration: 0.9,
-          ease: "power2.out",
-          onUpdate: writeBlur2,
-          immediateRender: false,
-        },
-        4.2,
-      );
-      tl.fromTo(
-        card2,
-        { opacity: 1 },
+        depth2,
+        { opacity: 1, filter: "blur(0px)" },
         {
           opacity: 0.5,
+          filter: "blur(5px)",
           duration: 0.9,
           ease: "power2.out",
           immediateRender: false,
@@ -811,7 +703,7 @@
         4.2,
       );
       tl.fromTo(
-        card3,
+        q("f06-chain-card3"),
         { opacity: 0, y: 18 },
         { opacity: 1, y: 0, duration: 0.46, ease: "power2.out" },
         4.32,
@@ -819,23 +711,13 @@
       tl.fromTo(
         [q("f06-chain-head3"), q("f06-chain-title3")],
         { opacity: 0, y: 12 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.34,
-          ease: "power2.out",
-          stagger: 0.08,
-        },
+        { opacity: 1, y: 0, duration: 0.34, ease: "power2.out", stagger: 0.08 },
         4.44,
       );
       tl.fromTo(
         pulse2,
         { strokeDashoffset: PULSE_LEN },
-        {
-          strokeDashoffset: -LEN2,
-          duration: 0.45,
-          ease: "power1.inOut",
-        },
+        { strokeDashoffset: -LEN2, duration: 0.45, ease: "power1.inOut" },
         4.55,
       );
       tl.fromTo(
@@ -867,58 +749,28 @@
       tl.fromTo(
         q("f06-chain-tiles").children,
         { opacity: 0, y: 16 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.36,
-          ease: "power2.out",
-          stagger: 0.11,
-        },
+        { opacity: 1, y: 0, duration: 0.36, ease: "power2.out", stagger: 0.11 },
         5.2,
       );
-      /* ONE decelerating pull-back to the whole chain */
+      /* ONE decelerating pull-back — the whole chain, one unbroken thread */
       tl.fromTo(
-        cam,
-        { scale: 1.3, y: -564.2 },
+        world,
+        { y: CAM_C, scale: CAM_S },
         {
-          scale: 1,
           y: 0,
+          scale: 1,
           duration: 0.95,
           ease: "power3.out",
-          onUpdate: applyCamera,
           immediateRender: false,
         },
         5.45,
       );
       tl.fromTo(
-        blur1,
-        { v: 6 },
-        {
-          v: 0,
-          duration: 0.7,
-          ease: "power2.out",
-          onUpdate: writeBlur1,
-          immediateRender: false,
-        },
-        5.5,
-      );
-      tl.fromTo(
-        blur2,
-        { v: 5 },
-        {
-          v: 0,
-          duration: 0.7,
-          ease: "power2.out",
-          onUpdate: writeBlur2,
-          immediateRender: false,
-        },
-        5.5,
-      );
-      tl.fromTo(
-        card1,
-        { opacity: 0.42 },
+        depth1,
+        { opacity: 0.42, filter: "blur(6px)" },
         {
           opacity: 1,
+          filter: "blur(0px)",
           duration: 0.7,
           ease: "power2.out",
           immediateRender: false,
@@ -926,16 +778,18 @@
         5.5,
       );
       tl.fromTo(
-        card2,
-        { opacity: 0.5 },
+        depth2,
+        { opacity: 0.5, filter: "blur(5px)" },
         {
           opacity: 1,
+          filter: "blur(0px)",
           duration: 0.7,
           ease: "power2.out",
           immediateRender: false,
         },
         5.5,
       );
+
       /* the resolve line — lands as the camera settles, then dead still */
       tl.fromTo(
         q("f06-chain-stub"),
@@ -952,13 +806,7 @@
       tl.fromTo(
         q("f06-chain-h2").children,
         { opacity: 0, y: 22 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.42,
-          ease: "power3.out",
-          stagger: 0.1,
-        },
+        { opacity: 1, y: 0, duration: 0.42, ease: "power3.out", stagger: 0.1 },
         6.2,
       );
     })();

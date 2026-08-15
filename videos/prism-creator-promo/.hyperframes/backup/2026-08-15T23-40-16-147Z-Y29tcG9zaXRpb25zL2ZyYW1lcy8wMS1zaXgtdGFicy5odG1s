@@ -292,7 +292,6 @@
       var SCENE_DURATION = 6;
 
       window.__timelines = window.__timelines || {};
-      gsap.set("[data-hf-id=\"hf-w0i1\"]", { x: 94, y: -2 });
       var tl = gsap.timeline({ paused: true });
 
       /* ────────────────────────────────────────────────────────────────

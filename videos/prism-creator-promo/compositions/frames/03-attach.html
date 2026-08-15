@@ -2,37 +2,37 @@
   <style>
     /* Prism brand type — the Barlow cuts vendored with the product itself.
        Condensed ships Regular + SemiBold only; 600-900 map to SemiBold.
-       IBM Plex Mono is pre-bundled by the renderer (no @font-face needed). */
+       IBM Plex Mono is pre-bundled by the renderer and needs no declaration. */
     @font-face {
-      font-family: "Barlow Condensed", system-ui, sans-serif;
+      font-family: "Barlow Condensed";
       src: url("assets/fonts/BarlowCondensed-Regular.ttf") format("truetype");
       font-weight: 100 500;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow Condensed", system-ui, sans-serif;
+      font-family: "Barlow Condensed";
       src: url("assets/fonts/BarlowCondensed-SemiBold.ttf") format("truetype");
       font-weight: 600 900;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Regular.ttf") format("truetype");
       font-weight: 100 400;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Medium.ttf") format("truetype");
       font-weight: 500;
       font-style: normal;
       font-display: block;
     }
     @font-face {
-      font-family: "Barlow", system-ui, sans-serif;
+      font-family: "Barlow";
       src: url("assets/fonts/Barlow-Bold.ttf") format("truetype");
       font-weight: 600 900;
       font-style: normal;
@@ -40,7 +40,7 @@
     }
 
     /* ---- fonts (frame.md families; project-root relative sources) ---- */
-                
+
     /* ---- frame root (styled by #root, never by a class) ---- */
     #root {
       position: relative;
@@ -247,8 +247,13 @@
       top: 195px;
       width: 176px;
       height: 53px;
-      background: radial-gradient(closest-side, rgba(76, 217, 180, 0.95), rgba(76, 217, 180, 0));
-      filter: blur(26px);
+      background: radial-gradient(
+        ellipse at center,
+        rgba(76, 217, 180, 0.85) 0%,
+        rgba(76, 217, 180, 0.34) 42%,
+        rgba(76, 217, 180, 0) 70%
+      );
+      filter: blur(22px);
       transform-origin: 50% 50%;
       opacity: 0;
       z-index: 3;
@@ -321,65 +326,48 @@
     }
   </style>
 
-  <div
-    id="root"
-    data-composition-id="03-attach"
-    data-start="0"
-    data-duration="8.5"
-    data-width="1080"
-    data-height="1920"
-  >
-    <div
-      class="clip a3-ground"
-      data-start="0"
-      data-duration="8.5"
-      data-track-index="0"
-    ></div>
+  <div data-hf-id="hf-t4xh" id="root" data-composition-id="03-attach" data-start="0" data-duration="8.5" data-width="1080" data-height="1920">
+    <div data-hf-id="hf-zstt" class="clip a3-ground" data-start="0" data-duration="8.5" data-track-index="0"></div>
 
-    <div
-      class="clip a3-stage"
-      data-start="0"
-      data-duration="8.5"
-      data-track-index="1"
-    >
-      <div id="a3-kicker" class="a3-kicker">Your task</div>
+    <div data-hf-id="hf-kft1" class="clip a3-stage" data-start="0" data-duration="8.5" data-track-index="1">
+      <div data-hf-id="hf-b89q" id="a3-kicker" class="a3-kicker">Your task</div>
 
-      <div id="a3-panel" class="a3-panel">
-        <div class="a3-crop">
-          <img src="assets/app-task-card.png" alt="" />
+      <div data-hf-id="hf-ipru" id="a3-panel" class="a3-panel">
+        <div data-hf-id="hf-yi1z" class="a3-crop">
+          <img data-hf-id="hf-yllb" src="assets/app-task-card.png" alt="">
         </div>
 
-        <div id="a3-ask-input" class="a3-ask-input">
-          <div class="a3-ask-row">
-            <span id="a3-ask" class="a3-ask"></span><span id="a3-caret" class="a3-caret"></span>
+        <div data-hf-id="hf-ocxm" id="a3-ask-input" class="a3-ask-input">
+          <div data-hf-id="hf-l6i7" class="a3-ask-row">
+            <span data-hf-id="hf-6t2j" id="a3-ask" class="a3-ask"></span><span data-hf-id="hf-s76z" id="a3-caret" class="a3-caret"></span>
           </div>
         </div>
 
-        <svg id="a3-sweep" class="a3-sweep" viewBox="0 0 252 3" width="252" height="3">
-          <path id="a3-sweep-path" d="M 0 1.5 L 252 1.5" />
+        <svg data-hf-id="hf-p66t" id="a3-sweep" class="a3-sweep" viewBox="0 0 252 3" width="252" height="3">
+          <path data-hf-id="hf-yi57" id="a3-sweep-path" d="M 0 1.5 L 252 1.5" />
         </svg>
 
-        <div id="a3-burst" class="a3-burst"></div>
-        <div id="a3-plan-btn" class="a3-plan-btn">Make a plan</div>
+        <div data-hf-id="hf-p2uu" id="a3-burst" class="a3-burst"></div>
+        <div data-hf-id="hf-hy8o" id="a3-plan-btn" class="a3-plan-btn">Make a plan</div>
       </div>
 
-      <div id="a3-rule-a" class="a3-rule a3-rule-a"></div>
+      <div data-hf-id="hf-vbip" id="a3-rule-a" class="a3-rule a3-rule-a"></div>
 
-      <div id="a3-cue-add" class="a3-cue-left">add file &rarr;</div>
+      <div data-hf-id="hf-2jqv" id="a3-cue-add" class="a3-cue-left">add file →</div>
 
-      <div id="a3-attached" class="a3-attached-label">Attached</div>
+      <div data-hf-id="hf-3k3b" id="a3-attached" class="a3-attached-label">Attached</div>
 
-      <div id="a3-chip" class="a3-chip">
-        <svg class="a3-chip-icon" viewBox="0 0 34 42">
-          <path d="M 5 1 L 22 1 L 33 12 L 33 41 L 5 41 Z" />
-          <path d="M 22 1 L 22 12 L 33 12" />
+      <div data-hf-id="hf-wz4c" id="a3-chip" class="a3-chip">
+        <svg data-hf-id="hf-ycv6" class="a3-chip-icon" viewBox="0 0 34 42">
+          <path data-hf-id="hf-3w60" d="M 5 1 L 22 1 L 33 12 L 33 41 L 5 41 Z" />
+          <path data-hf-id="hf-w4ui" d="M 22 1 L 22 12 L 33 12" />
         </svg>
-        <span class="a3-chip-name">last-collab-transcript.txt</span>
+        <span data-hf-id="hf-0ga5" class="a3-chip-name">last-collab-transcript.txt</span>
       </div>
 
-      <div id="a3-rule-b" class="a3-rule a3-rule-b"></div>
+      <div data-hf-id="hf-szdv" id="a3-rule-b" class="a3-rule a3-rule-b"></div>
 
-      <div id="a3-cue-plan" class="a3-cue-right">make a plan</div>
+      <div data-hf-id="hf-i2cn" id="a3-cue-plan" class="a3-cue-right">make a plan</div>
     </div>
   </div>
 

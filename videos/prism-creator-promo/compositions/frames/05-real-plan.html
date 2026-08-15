@@ -4,7 +4,7 @@
   <style>
     /* Prism brand type — the Barlow cuts vendored with the product itself.
        Condensed ships Regular + SemiBold only; 600-900 map to SemiBold.
-       IBM Plex Mono is pre-bundled by the renderer (no @font-face needed). */
+       IBM Plex Mono is pre-bundled by the renderer and needs no declaration. */
     @font-face {
       font-family: "Barlow Condensed";
       src: url("assets/fonts/BarlowCondensed-Regular.ttf") format("truetype");
@@ -41,7 +41,6 @@
       font-display: block;
     }
 
-                
     #root {
       position: relative;
       width: 1080px;
@@ -68,7 +67,8 @@
     }
     .r05-hairline {
       position: absolute;
-      left: 40px;
+      left: 0;
+      top: 0;
       width: 1000px;
       height: 1px;
       background: #26292c;
@@ -86,24 +86,24 @@
     .r05-kicker {
       position: absolute;
       left: 0;
-      top: 0;
+      top: 24px;
       color: #4cd9b4;
     }
     .r05-count {
       position: absolute;
       right: 0;
-      top: 0;
-      color: #5b6166;
+      top: 24px;
+      color: #7b8084;
       text-align: right;
     }
     .r05-foot {
       position: absolute;
       left: 0;
-      top: 0;
-      color: #5b6166;
+      top: 22px;
+      color: #7b8084;
     }
 
-    /* ── ui-inset: real screenshot, cropped to the plan-rows column ──────── */
+    /* ── ui-inset: the real screenshot, cropped to the plan-rows column ───── */
     .r05-inset {
       position: absolute;
       left: 40px;
@@ -155,18 +155,18 @@
       opacity: 0;
     }
 
-    /* ── the display cue (one display moment) ────────────────────────────── */
+    /* ── the display cue — the frame's one display moment ────────────────── */
     .r05-cue {
       position: absolute;
       left: 40px;
-      top: 690px;
+      top: 640px;
       width: 1000px;
       will-change: transform, filter;
     }
     .r05-cue-line {
       font-family: "Barlow Condensed", system-ui, sans-serif;
       font-weight: 900;
-      font-size: 168px;
+      font-size: 196px;
       line-height: 0.88;
       letter-spacing: -0.04em;
       text-transform: lowercase;
@@ -174,7 +174,7 @@
       white-space: nowrap;
     }
 
-    /* ── tool-chip: the overridable control ──────────────────────────────── */
+    /* ── tool-chip: the router's pick, staged as the control it really is ─── */
     .r05-press {
       position: absolute;
       left: 40px;
@@ -216,7 +216,7 @@
       font-family: "IBM Plex Mono", ui-monospace, monospace;
       font-size: 22px;
       font-weight: 500;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.1em;
       color: #0b0c0e;
       background: #9aa0a6;
       width: 40px;
@@ -252,109 +252,64 @@
     }
   </style>
 
-  <div
-    id="root"
-    data-composition-id="05-real-plan"
-    data-start="0"
-    data-duration="7.5"
-    data-width="1080"
-    data-height="1920"
-  >
-    <!-- full-bleed ground (never on #root) -->
-    <div
-      class="clip r05-ground"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="0"
-    ></div>
+  <div data-hf-id="hf-bfi5" id="root" data-composition-id="05-real-plan" data-start="0" data-duration="7.5" data-width="1080" data-height="1920">
+    <!-- full-bleed ground (a clip layer, never a background on #root) -->
+    <div data-hf-id="hf-g1pj" class="clip r05-ground" data-start="0" data-duration="7.5" data-track-index="0"></div>
 
     <!-- top chrome bar -->
-    <div
-      class="clip r05-chrome"
-      id="r05-topchrome"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="1"
-      style="top: 108px; height: 60px"
-    >
-      <div class="r05-hairline" id="r05-rule-top" style="left: 0; top: 0"></div>
-      <div class="r05-mono r05-kicker" id="r05-kicker" style="top: 24px">The actual app</div>
-      <div class="r05-mono r05-count" id="r05-count" style="top: 24px"></div>
+    <div data-hf-id="hf-7cv6" class="clip r05-chrome" id="r05-topchrome" data-start="0" data-duration="7.5" data-track-index="1" style="top: 108px; height: 60px">
+      <div data-hf-id="hf-u3ow" class="r05-hairline" id="r05-rule-top"></div>
+      <div data-hf-id="hf-t0t1" class="r05-mono r05-kicker" id="r05-kicker">The actual app</div>
+      <div data-hf-id="hf-28fb" class="r05-mono r05-count" id="r05-count"></div>
     </div>
 
-    <!-- ui-inset: the cropped plan-rows column -->
-    <div
-      class="clip r05-inset"
-      id="r05-inset"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="2"
-    >
-      <div class="r05-strip" id="r05-strip">
-        <img class="r05-shot" src="assets/app-plan-rows.png" alt="" />
+    <!-- ui-inset: the cropped "Your plan" rows column and its tool chips -->
+    <div data-hf-id="hf-6634" class="clip r05-inset" id="r05-inset" data-start="0" data-duration="7.5" data-track-index="2">
+      <div data-hf-id="hf-k0te" class="r05-strip" id="r05-strip">
+        <img data-hf-id="hf-j2u9" class="r05-shot" src="assets/app-plan-rows.png" alt="">
 
-        <svg class="r05-edges" id="r05-edges" viewBox="0 0 1000 607" width="1000" height="607">
-          <path id="r05-edge-1" d="M 3 7.59 L 3 77.12" />
-          <path id="r05-edge-2" d="M 3 94.82 L 3 164.35" />
-          <path id="r05-edge-3" d="M 3 182.05 L 3 251.58" />
-          <path id="r05-edge-4" d="M 3 269.28 L 3 338.81" />
+        <svg data-hf-id="hf-szwj" class="r05-edges" id="r05-edges" viewBox="0 0 1000 607" width="1000" height="607">
+          <path data-hf-id="hf-bolo" id="r05-edge-1" d="M 3 7.59 L 3 77.12" />
+          <path data-hf-id="hf-yhjx" id="r05-edge-2" d="M 3 94.82 L 3 164.35" />
+          <path data-hf-id="hf-4ggv" id="r05-edge-3" d="M 3 182.05 L 3 251.58" />
+          <path data-hf-id="hf-teez" id="r05-edge-4" d="M 3 269.28 L 3 338.81" />
         </svg>
 
-        <div
-          class="r05-chipglow"
-          data-chip="c1"
-          style="left: 847px; top: 25.28px; width: 132.7px"
-        ></div>
-        <div
-          class="r05-chipglow"
-          data-chip="c2"
-          style="left: 852.1px; top: 112.5px; width: 127.7px"
-        ></div>
-        <div
-          class="r05-chipglow"
-          data-chip="c3"
-          style="left: 862.2px; top: 199.7px; width: 117.6px"
-        ></div>
-        <div
-          class="r05-chipglow"
-          data-chip="c4"
-          style="left: 852.1px; top: 287px; width: 127.7px"
-        ></div>
+        <div data-hf-id="hf-77ke" class="r05-chipglow" data-chip="c1" style="left: 847px; top: 25.28px; width: 132.7px"></div>
+        <div data-hf-id="hf-qvys" class="r05-chipglow" data-chip="c2" style="left: 852.1px; top: 112.5px; width: 127.7px"></div>
+        <div data-hf-id="hf-bizu" class="r05-chipglow" data-chip="c3" style="left: 862.2px; top: 199.7px; width: 117.6px"></div>
+        <div data-hf-id="hf-cap0" class="r05-chipglow" data-chip="c4" style="left: 852.1px; top: 287px; width: 127.7px"></div>
       </div>
     </div>
 
     <!-- the display cue -->
-    <div class="clip r05-cue" id="r05-cue" data-start="0" data-duration="7.5" data-track-index="3">
-      <div class="r05-cue-line" id="r05-cue-1"></div>
-      <div class="r05-cue-line" id="r05-cue-2"></div>
+    <div data-hf-id="hf-3pxb" class="clip r05-cue" id="r05-cue" data-start="0" data-duration="7.5" data-track-index="3">
+      <!-- Two lines of ONE display cue. frame.md sets the display ramp at
+           line-height 0.88, so consecutive line boxes touch by design — that
+           tight leading is the broadside signature, not a collision. -->
+      <div data-hf-id="hf-kfnz" class="r05-cue-line" id="r05-cue-1" data-layout-allow-overlap=""></div>
+      <div data-hf-id="hf-9k6c" class="r05-cue-line" id="r05-cue-2" data-layout-allow-overlap=""></div>
     </div>
 
     <!-- the tool chip -->
-    <div class="clip r05-press" id="r05-press" data-start="0" data-duration="7.5" data-track-index="4">
-      <div class="r05-bgglow" id="r05-bgglow"></div>
-      <div class="r05-burst" id="r05-burst"></div>
-      <div class="r05-chip" id="r05-chip">
-        <div class="r05-chip-key" id="r05-chip-key"></div>
-        <div class="r05-chip-label" id="r05-chip-label"></div>
+    <div data-hf-id="hf-iejq" class="clip r05-press" id="r05-press" data-start="0" data-duration="7.5" data-track-index="4">
+      <div data-hf-id="hf-naua" class="r05-bgglow" id="r05-bgglow"></div>
+      <div data-hf-id="hf-5kma" class="r05-burst" id="r05-burst"></div>
+      <div data-hf-id="hf-2xsy" class="r05-chip" id="r05-chip">
+        <div data-hf-id="hf-3umi" class="r05-chip-key" id="r05-chip-key"></div>
+        <div data-hf-id="hf-itu6" class="r05-chip-label" id="r05-chip-label"></div>
       </div>
     </div>
 
     <!-- the honesty line -->
-    <div class="clip r05-lead" id="r05-lead" data-start="0" data-duration="7.5" data-track-index="5">
+    <div data-hf-id="hf-7rba" class="clip r05-lead" id="r05-lead" data-start="0" data-duration="7.5" data-track-index="5">
       don’t like a pick? change the chip.
     </div>
 
     <!-- bottom chrome bar -->
-    <div
-      class="clip r05-chrome"
-      id="r05-botchrome"
-      data-start="0"
-      data-duration="7.5"
-      data-track-index="6"
-      style="top: 1500px; height: 60px"
-    >
-      <div class="r05-hairline" id="r05-rule-bot" style="left: 0; top: 0"></div>
-      <div class="r05-mono r05-foot" style="top: 22px">Prism — your plan</div>
+    <div data-hf-id="hf-g5r8" class="clip r05-chrome" id="r05-botchrome" data-start="0" data-duration="7.5" data-track-index="6" style="top: 1500px; height: 60px">
+      <div data-hf-id="hf-umwm" class="r05-hairline" id="r05-rule-bot"></div>
+      <div data-hf-id="hf-3ot6" class="r05-mono r05-foot">Prism — your plan</div>
     </div>
   </div>
 
@@ -367,14 +322,15 @@
       };
 
       var TOTAL = 7;
-      var STEP = 87.23; // one row of the cropped strip, at the inset's scale
-      var TEAL = "#4cd9b4";
+      var STEP = 87.23; // exactly one plan row, at the inset's crop scale
+      var CUTS = [1.2, 2.4, 3.6, 4.8];
+      var STEP_DUR = 0.46;
 
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
       window.__timelines["05-real-plan"] = tl;
 
-      /* ── elements ───────────────────────────────────────────────────── */
+      /* ── elements ───────────────────────────────────────────────────────── */
       var inset = q("#r05-inset");
       var strip = q("#r05-strip");
       var kicker = q("#r05-kicker");
@@ -395,45 +351,13 @@
       var edges = [q("#r05-edge-1"), q("#r05-edge-2"), q("#r05-edge-3"), q("#r05-edge-4")];
       var glows = Array.prototype.slice.call(root.querySelectorAll(".r05-chipglow"));
 
-      /* ── discrete-text-sequence — the cue swaps whole states on hard cuts ─ */
+      /* ── discrete-text-sequence — whole states swapped at hard thresholds ── */
       var SEQUENCE = [
         { t: 0.0, l1: "", l2: "", key: "", tool: "", band: "#a78bfa", count: "" },
-        {
-          t: 1.2,
-          l1: "look things",
-          l2: "up",
-          key: "P",
-          tool: "Perplexity",
-          band: "#a78bfa",
-          count: "01 / 07",
-        },
-        {
-          t: 2.4,
-          l1: "think it",
-          l2: "through",
-          key: "C",
-          tool: "ChatGPT",
-          band: "#60a5fa",
-          count: "02 / 07",
-        },
-        {
-          t: 3.6,
-          l1: "write it",
-          l2: "up",
-          key: "C",
-          tool: "Claude",
-          band: "#4cd9b4",
-          count: "03 / 07",
-        },
-        {
-          t: 4.8,
-          l1: "make the",
-          l2: "images",
-          key: "C",
-          tool: "ChatGPT",
-          band: "#a3e635",
-          count: "04 / 07",
-        },
+        { t: 1.2, l1: "look things", l2: "up", key: "P", tool: "Perplexity", band: "#a78bfa", count: "01 / 07" },
+        { t: 2.4, l1: "think it", l2: "through", key: "C", tool: "ChatGPT", band: "#60a5fa", count: "02 / 07" },
+        { t: 3.6, l1: "write it", l2: "up", key: "C", tool: "Claude", band: "#4cd9b4", count: "03 / 07" },
+        { t: 4.8, l1: "make the", l2: "images", key: "C", tool: "ChatGPT", band: "#a3e635", count: "04 / 07" }
       ];
 
       function stateAt(time) {
@@ -455,16 +379,26 @@
         countEl.textContent = s.count;
         chip.style.borderLeftColor = s.band;
       }
-      applyState(0); // seed frame 0
 
-      /* ── viewport-change — one camera object, one writer ────────────────── */
+      /* ── viewport-change — ONE cam object, ONE writer.
+         The step is solved from scene time through a single eased piecewise
+         function, so the camera is identical at any seek, forward or back.   */
+      var stepEase = gsap.parseEase("power3.inOut");
       var cam = { y: 0 };
       function applyCamera() {
         strip.style.transform = "translateY(" + cam.y + "px)";
       }
-      applyCamera(); // seed frame 0
+      function camYAt(time) {
+        var y = 0;
+        for (var i = 1; i < CUTS.length; i++) {
+          var p = (time - CUTS[i]) / STEP_DUR;
+          p = p <= 0 ? 0 : p >= 1 ? 1 : stepEase(p);
+          y -= STEP * p;
+        }
+        return y;
+      }
 
-      /* ── svg-path-draw — measured lengths, never guessed ────────────────── */
+      /* ── svg-path-draw — measured lengths, never guessed ─────────────────── */
       var lens = edges.map(function (p) {
         var len = (p.getTotalLength && p.getTotalLength()) || 69.53;
         p.style.strokeDasharray = String(len);
@@ -472,89 +406,7 @@
         return len;
       });
 
-      /* ── seek-safe rest states for everything that arrives later ────────── */
-      tl.set([kicker, botChrome, cue, press, lead, countEl], { opacity: 0 }, 0);
-      tl.set([ruleTop, ruleBot], { scaleX: 0 }, 0);
-
-      /* ── SCENE 1 (0.0–1.2s) · the crop lands ────────────────────────────── */
-      tl.fromTo(
-        ruleTop,
-        { scaleX: 0, opacity: 1 },
-        { scaleX: 1, duration: 0.6, ease: "power3.out" },
-        0.02
-      );
-      tl.fromTo(
-        kicker,
-        { opacity: 0, x: -26 },
-        { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" },
-        0.04
-      );
-      // spring-pop-entrance (restrained: smooth long-tail settle, no overshoot)
-      tl.fromTo(
-        inset,
-        { scale: 0.96, opacity: 0 },
-        { scale: 1, opacity: 1, duration: 0.62, ease: "power3.out" },
-        0.08
-      );
-      tl.fromTo(
-        ruleBot,
-        { scaleX: 0, opacity: 1 },
-        { scaleX: 1, duration: 0.65, ease: "power3.out" },
-        0.5
-      );
-      tl.fromTo(botChrome, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, 0.62);
-
-      /* ── the cue cut — a hard state swap plus a velocity-matched entrance ── */
-      var CUTS = [1.2, 2.4, 3.6, 4.8];
-      CUTS.forEach(function (t, i) {
-        tl.fromTo(
-          cue,
-          { opacity: 0, y: 36, filter: "blur(10px)" },
-          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.42, ease: "power3.out" },
-          t
-        );
-        tl.fromTo(
-          press,
-          { opacity: i === 0 ? 0 : 0.35, y: i === 0 ? 34 : 16 },
-          { opacity: 1, y: 0, duration: i === 0 ? 0.46 : 0.34, ease: "power3.out" },
-          t
-        );
-        if (i === 0) {
-          tl.fromTo(countEl, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, t);
-        }
-        // the lit edge draws down the focused row's left side
-        tl.fromTo(
-          edges[i],
-          { strokeDashoffset: lens[i] },
-          { strokeDashoffset: 0, duration: 0.42, ease: "power2.out" },
-          t + 0.05
-        );
-        // …and hands off to the next row (row 4 holds a beat longer — it stays lit)
-        if (i < 3) {
-          tl.fromTo(
-            edges[i],
-            { strokeDashoffset: 0 },
-            { strokeDashoffset: lens[i], duration: 0.14, ease: "power2.in" },
-            CUTS[i + 1] - 0.1
-          );
-        }
-        // SCENES 3–5 · the panel steps exactly one row, matched on both sides
-        if (i > 0) {
-          tl.fromTo(
-            cam,
-            { y: -(i - 1) * STEP },
-            {
-              y: -i * STEP,
-              duration: 0.46,
-              ease: "power3.inOut",
-              onUpdate: applyCamera,
-            },
-            t
-          );
-        }
-      });
-
-      /* ── asr-keyword-glow — one linear driver, envelope over every chip ─── */
+      /* ── asr-keyword-glow — ONE linear driver, envelope over every chip ──── */
       var ATTACK_DUR = 0.18;
       var RELEASE = 0.35;
       var REST_LEVEL = 0.15;
@@ -564,7 +416,7 @@
         c1: { start: 1.3, end: 2.3 },
         c2: { start: 2.5, end: 3.5 },
         c3: { start: 3.7, end: 4.7 },
-        c4: { start: 4.9, end: 6.9 },
+        c4: { start: 4.9, end: 6.9 }
       };
 
       function envelope(time, start, end) {
@@ -587,72 +439,138 @@
           el.style.transform = "scale(" + (1 + MAX_SCALE_BOOST * env) + ")";
         }
       }
-      paintGlows(); // seed frame 0
+      function paintScene() {
+        applyState(driver.t);
+        cam.y = camYAt(driver.t);
+        applyCamera();
+        paintGlows();
+      }
+      paintScene(); // seed frame 0
 
-      tl.to(
-        driver,
-        {
-          t: TOTAL,
-          duration: TOTAL,
-          ease: "none",
-          onUpdate: function () {
-            applyState(driver.t);
-            paintGlows();
-          },
-        },
-        0
+      /* ── seek-safe rest states; every later arrival departs from here ────── */
+      tl.set([kicker, botChrome, cue, press, lead, countEl], { opacity: 0 }, 0);
+      tl.set([ruleTop, ruleBot], { scaleX: 0 }, 0);
+      tl.set(inset, { scale: 0.96, opacity: 0 }, 0);
+      tl.set(burst, { scale: 1, opacity: 0 }, 0);
+      tl.set(bgGlow, { opacity: 0 }, 0);
+      tl.set(chip, { scale: 1 }, 0);
+
+      // Every fromTo below is deferred: its from-state must not be stamped onto
+      // the DOM at build time, only once the playhead reaches it.
+      function to(o) {
+        o.immediateRender = false;
+        return o;
+      }
+
+      /* ── SCENE 1 (0.0–1.2s) · the crop lands ─────────────────────────────── */
+      tl.fromTo(ruleTop, { scaleX: 0 }, to({ scaleX: 1, duration: 0.6, ease: "power3.out" }), 0.02);
+      tl.fromTo(
+        kicker,
+        { opacity: 0, x: -26 },
+        to({ opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }),
+        0.04
       );
+      // spring-pop-entrance, restrained: a smooth long-tail settle, no overshoot
+      tl.fromTo(
+        inset,
+        { scale: 0.96, opacity: 0 },
+        to({ scale: 1, opacity: 1, duration: 0.62, ease: "power3.out" }),
+        0.08
+      );
+      tl.fromTo(ruleBot, { scaleX: 0 }, to({ scaleX: 1, duration: 0.65, ease: "power3.out" }), 0.5);
+      tl.fromTo(
+        botChrome,
+        { opacity: 0 },
+        to({ opacity: 1, duration: 0.45, ease: "power2.out" }),
+        0.62
+      );
+
+      /* ── SCENES 2–5 · the cue cuts, the edge hands off, the panel steps ──── */
+      CUTS.forEach(function (t, i) {
+        // The state swap is instant; the block re-enters on the same upward
+        // vector the panel is travelling — a velocity-matched seam.
+        tl.fromTo(
+          cue,
+          { opacity: 0, y: 36, filter: "blur(10px)" },
+          to({ opacity: 1, y: 0, filter: "blur(0px)", duration: 0.42, ease: "power3.out" }),
+          t
+        );
+        tl.fromTo(
+          press,
+          { opacity: i === 0 ? 0 : 0.35, y: i === 0 ? 34 : 16 },
+          to({ opacity: 1, y: 0, duration: i === 0 ? 0.46 : 0.34, ease: "power3.out" }),
+          t
+        );
+        if (i === 0) {
+          tl.fromTo(
+            countEl,
+            { opacity: 0 },
+            to({ opacity: 1, duration: 0.3, ease: "power2.out" }),
+            t
+          );
+        }
+        // the lit teal edge draws DOWN the focused row's left side
+        tl.fromTo(
+          edges[i],
+          { strokeDashoffset: lens[i] },
+          to({ strokeDashoffset: 0, duration: 0.42, ease: "power2.out" }),
+          t + 0.05
+        );
+        // …then hands off to the next row. Row 4 holds — it stays lit to the end.
+        if (i < 3) {
+          tl.fromTo(
+            edges[i],
+            { strokeDashoffset: 0 },
+            to({ strokeDashoffset: lens[i], duration: 0.14, ease: "power2.in" }),
+            CUTS[i + 1] - 0.1
+          );
+        }
+      });
+
+      // the single linear driver — scene time in, every per-frame paint out
+      tl.to(driver, { t: TOTAL, duration: TOTAL, ease: "none", lazy: false, onUpdate: paintScene }, 0);
 
       /* ── SCENE 6 (5.8–7.0s) · stepping stops; the chip proves it's a control ─ */
       tl.fromTo(
         lead,
         { opacity: 0, y: 30, filter: "blur(8px)" },
-        { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.5, ease: "power3.out" },
+        to({ opacity: 1, y: 0, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }),
         5.82
       );
 
-      // press-release-spring — linear compression, spring recovery (adjacent)
+      // press-release-spring — linear compression, spring release, adjacent so
+      // the release starts exactly where the press ended.
       var PRESS_START = 5.95;
       var PRESS_DUR = 0.16;
       var RELEASE_START = PRESS_START + PRESS_DUR;
       tl.fromTo(
         chip,
         { scale: 1, backgroundColor: "#141618" },
-        {
-          scale: 0.93,
-          backgroundColor: "#0e1012",
-          duration: PRESS_DUR,
-          ease: "power1.in",
-        },
+        to({ scale: 0.93, backgroundColor: "#0e1012", duration: PRESS_DUR, ease: "power1.in" }),
         PRESS_START
       );
       tl.fromTo(
         chip,
         { scale: 0.93, backgroundColor: "#0e1012" },
-        {
-          scale: 1,
-          backgroundColor: "#141618",
-          duration: 0.55,
-          ease: "back.out(1.5)",
-        },
+        to({ scale: 1, backgroundColor: "#141618", duration: 0.55, ease: "back.out(1.5)" }),
         RELEASE_START
       );
       tl.fromTo(
         burst,
         { scale: 1, opacity: 0 },
-        { scale: 3.4, opacity: 0.45, duration: 0.42, ease: "power2.out" },
+        to({ scale: 3.4, opacity: 0.45, duration: 0.42, ease: "power2.out" }),
         RELEASE_START
       );
       tl.fromTo(
         burst,
         { opacity: 0.45 },
-        { opacity: 0, duration: 0.38, ease: "power2.in" },
+        to({ opacity: 0, duration: 0.38, ease: "power2.in" }),
         RELEASE_START + 0.42
       );
       tl.fromTo(
         bgGlow,
         { opacity: 0 },
-        { opacity: 0.14, duration: 0.6, ease: "power2.out" },
+        to({ opacity: 0.14, duration: 0.6, ease: "power2.out" }),
         RELEASE_START
       );
       // …then still.

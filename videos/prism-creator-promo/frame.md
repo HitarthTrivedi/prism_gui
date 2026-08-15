@@ -16,7 +16,10 @@ colors:
   fire-orange: "#4CD9B4"
   cream: "#F2F2F3"
   cream-muted: "#9AA0A6"
-  cream-hint: "#5B6166"
+  # raised from the preset's darker hint so mono chrome as TEXT clears WCAG AA
+  # (4.5:1) on the ink ground — PRODUCT.md commits to AA. Use the darker
+  # #5B6166 only for hairlines and inert non-text chrome.
+  cream-hint: "#7B8084"
   border-dark: "#26292C"
   ink-on-orange-muted: "rgba(11,12,14,0.75)"
   ink-on-orange-hint: "rgba(11,12,14,0.55)"
