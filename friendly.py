@@ -121,6 +121,30 @@ _rule(r"no groq api key|set your groq api key",
           action="settings:key", action_label="Open Settings"))
 
 # ── the browser ───────────────────────────────────────────────────────────
+# BEFORE the version-mismatch rule below, and the order is the whole point.
+#
+# A "no such window" error arrives with a Selenium stack trace, and every
+# frame of that trace says "undetected_chromedriver" — which matches the
+# chromedriver pattern below. So a closed tab was diagnosed as a driver
+# version mismatch, and the customer was sent to update a browser that was
+# working perfectly. A wrong answer given confidently is worse than the
+# generic "something went wrong" it replaced.
+_rule(r"no such window|target window already closed|web view not found|"
+      r"invalid session id|session deleted because of page crash|"
+      r"disconnected: not connected to devtools|chrome not reachable|"
+      r"browser has closed",
+      Problem(
+          "The browser window was closed",
+          "Prism was working in a Chrome window and that window went away — "
+          "usually because it was closed by hand while the run was going, or "
+          "because Chrome itself quit. Nothing is wrong with your computer or "
+          "your setup.",
+          ("Everything finished before this point was kept — check History.",
+           "Start the run again, and leave Prism's Chrome window alone while "
+           "it works. You can use a different Chrome window in the meantime.",
+           "If you did not close it, Chrome may have run out of memory — "
+           "close some other tabs and try again.")))
+
 _rule(r"couldn't start chrome|chromedriver|session not created|"
       r"this version of chrome|webdriver",
       Problem(

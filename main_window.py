@@ -1191,6 +1191,18 @@ class MainWindow(QMainWindow):
 
     def _on_stage_event(self, kind: str, payload: dict):
         stage = payload.get("stage", "")
+        if kind == "browser_lost":
+            # The run stopped because Chrome went away, not because a step
+            # failed. Said plainly and once — the engine already refused to
+            # grind through the remaining stages producing the same error.
+            done = payload.get("done", 0)
+            self.statusBar().showMessage(
+                i18n.t("The browser window was closed. {n} step(s) finished "
+                       "before that and were kept.").replace("{n}", str(done))
+                if done else
+                i18n.t("The browser window was closed before anything ran."),
+                12000)
+            return
         if kind == "cancelled":
             done = payload.get("done", 0)
             self.statusBar().showMessage(

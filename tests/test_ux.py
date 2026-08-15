@@ -273,3 +273,77 @@ class BoqIsLocked(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class AClosedBrowserWindow(unittest.TestCase):
+    """The error a customer actually pasted in, with its stack trace.
+
+    Two things were wrong with how Prism met it: the advice was confidently
+    incorrect, and the run kept going against a dead session.
+    """
+
+    REAL = ("Message: no such window: target window already closed\n"
+            "from unknown error: web view not found\n"
+            "  (Session info: chrome=151.0.7922.138)\n"
+            "Stacktrace:\n"
+            "0   undetected_chromedriver  0x0000000102928e84 "
+            "undetected_chromedriver + 3427972\n"
+            "1   undetected_chromedriver  0x000000010262833c "
+            "undetected_chromedriver + 279356")
+
+    def test_it_is_not_diagnosed_as_a_chrome_version_problem(self):
+        """Every frame of the stack trace says "undetected_chromedriver",
+        which matched the version-mismatch rule — so a closed tab sent the
+        customer off to update a browser that was working perfectly. A
+        confident wrong answer is worse than the generic one it replaced."""
+        import friendly
+        p = friendly.explain(self.REAL, "run")
+        self.assertNotIn("update", " ".join(p.steps).lower())
+        self.assertIn("closed", p.title.lower())
+
+    def test_it_says_the_finished_work_was_kept(self):
+        """This arrives mid-run, so the first question is always "did I lose
+        everything?"."""
+        import friendly
+        p = friendly.explain(self.REAL, "run")
+        self.assertIn("history", " ".join(p.steps).lower())
+
+    def test_it_does_not_ask_them_to_email_support(self):
+        """There is nothing for us to diagnose: they closed a window."""
+        import friendly
+        self.assertFalse(friendly.explain(self.REAL, "run").ask_support)
+
+    def test_the_engine_knows_the_session_is_dead(self):
+        import core_bridge  # noqa: F401  (puts core on sys.path)
+        from core import automation as AU
+        for wording in ("no such window: target window already closed",
+                        "invalid session id",
+                        "session deleted because of page crash",
+                        "chrome not reachable",
+                        "disconnected: not connected to DevTools"):
+            self.assertTrue(AU._browser_is_gone(wording), wording)
+
+    def test_an_ordinary_stage_failure_is_not_mistaken_for_it(self):
+        """Stopping the whole run on a normal error would throw away every
+        stage after it for no reason."""
+        import core_bridge  # noqa: F401  (puts core on sys.path)
+        from core import automation as AU
+        for wording in ("timed out waiting for the response",
+                        "element not interactable",
+                        "no response scraped"):
+            self.assertFalse(AU._browser_is_gone(wording), wording)
+
+    def test_the_run_stops_instead_of_failing_every_remaining_stage(self):
+        """Each later stage would open the same dead session, wait for its own
+        timeout and report the same error — so a run broken at step two
+        reported five identical failures over several minutes."""
+        import ast
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, "..", "prism_terminal", "core", "automation.py")
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        run = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "run")
+        called = {n.func.id for n in ast.walk(run)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn("_browser_is_gone", called)
