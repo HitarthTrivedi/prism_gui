@@ -299,6 +299,15 @@ def _licence_gate() -> bool:
     from dialogs.license_dialog import LicenseDialog
 
     licensing.set_paywall_handler(_paywall)
+    # Server-published selector fixes from the last run, re-verified and applied
+    # before anything can use them. Offline and synchronous on purpose: it reads
+    # one small local file, and a customer who starts with no connection must
+    # still get the fix that was delivered yesterday. The fetch, when the etag
+    # is stale, happens on refresh()'s background thread below.
+    overridden = licensing.apply_cached_payload()
+    if overridden:
+        print(f"[prism] applied server config for {overridden} tool(s)")
+
     # Fire-and-forget: renews the token AND the authorisation lease in the
     # background. The window builds against the cached pair, so a slow
     # corporate DNS costs nothing at startup.

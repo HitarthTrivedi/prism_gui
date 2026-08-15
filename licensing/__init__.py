@@ -86,7 +86,7 @@ import app_meta
 import paths
 
 from . import (authorization, client, device, keyformat, keys, lease as _lease_mod,
-               meter, secretstore, status as _status, store, token)
+               meter, payload, secretstore, status as _status, store, token)
 from .authorization import Decision, Lease
 from .client import ServerError, Unreachable
 from .status import (EXPIRED, GRACE, NONE, STALE, TAMPERED,  # noqa: F401
@@ -379,7 +379,81 @@ def _refresh_once() -> LicenseState:
         return state()
     except Unreachable:
         return state()
-    return _apply(response)
+    applied = _apply(response)
+    if response.get("payload_stale"):
+        _fetch_payload(license_id)
+    return applied
+
+
+def _fetch_payload(license_id: str) -> bool:
+    """Pull the published configuration, verify it, cache it, apply it.
+
+    Called only when refresh has already said our etag is stale, so the steady
+    state costs nothing.
+
+    Every failure path here is a silent no-op that leaves the built-in
+    configuration in place. That is the safety property of the whole channel:
+    a bad publish, an unreachable server, a signature that does not verify, or
+    a payload meant for a newer build all leave the customer exactly as well
+    off as the version they installed. Nothing here may ever be able to stop
+    Prism working.
+    """
+    try:
+        response = client.payload(license_id, device_fingerprint(),
+                                  app_version=app_meta.VERSION)
+    except (ServerError, Unreachable):
+        return False
+
+    blob = response.get("payload") or ""
+    if not blob:
+        # Nothing published. Drop any overrides we were holding, so unpublishing
+        # is a real undo rather than something that only affects new installs.
+        _apply_payload_content({})
+        store.clear_payload(user_dir())
+        store.update(user_dir(), payload_etag="")
+        return True
+    try:
+        claims = payload.verify(blob, public_keys=keys.public_keys(),
+                                app_version=app_meta.VERSION)
+    except payload.PayloadError:
+        return False
+
+    _apply_payload_content(payload.selectors_for(claims))
+    store.save_payload(user_dir(), blob)
+    # The etag we record is the SIGNED one, never the envelope's — otherwise a
+    # stale payload relabelled in transit would stop us asking for the real fix.
+    store.update(user_dir(), payload_etag=str(claims.get("petag") or ""))
+    return True
+
+
+def _apply_payload_content(selectors: dict) -> None:
+    """Hand verified overrides to the engine. Never raises."""
+    try:
+        import core_bridge as CB
+        CB.agents.apply_overrides(selectors)
+    except Exception:
+        pass
+
+
+def apply_cached_payload() -> int:
+    """Re-apply the last verified payload at startup. Returns agents overridden.
+
+    The cache is re-VERIFIED here rather than trusted, for the same reason
+    _store_lease verifies before caching: a signature checked once on the way
+    in is not a signature, if the file it landed in is one the customer can
+    edit afterwards.
+    """
+    blob = store.load_payload(user_dir())
+    if not blob:
+        return 0
+    try:
+        claims = payload.verify(blob, public_keys=keys.public_keys(),
+                                app_version=app_meta.VERSION)
+    except payload.PayloadError:
+        return 0
+    selectors = payload.selectors_for(claims)
+    _apply_payload_content(selectors)
+    return len(selectors)
 
 
 def _refresh_lease_once() -> bool:

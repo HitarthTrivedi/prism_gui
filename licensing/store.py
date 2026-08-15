@@ -119,6 +119,39 @@ def payload_path(user_dir: str) -> str:
     return os.path.join(user_dir, PAYLOAD_FILENAME)
 
 
+def save_payload(user_dir: str, blob: str) -> None:
+    """Cache the signed payload verbatim.
+
+    Kept out of license.json and stored as the raw signed string, because it is
+    re-VERIFIED on every load rather than trusted. Storing the parsed content
+    would throw away the signature and turn a verified fact into an editable
+    one — the same mistake as caching a lease's `allowed` instead of the lease.
+    """
+    try:
+        os.makedirs(user_dir, exist_ok=True)
+        tmp = payload_path(user_dir) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(blob)
+        os.replace(tmp, payload_path(user_dir))
+    except OSError:
+        pass            # a cache that cannot be written costs one fetch
+
+
+def load_payload(user_dir: str) -> str:
+    try:
+        with open(payload_path(user_dir), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def clear_payload(user_dir: str) -> None:
+    try:
+        os.remove(payload_path(user_dir))
+    except OSError:
+        pass
+
+
 def load(user_dir: str) -> dict[str, Any]:
     return read_json(path(user_dir), _DEFAULT)
 
