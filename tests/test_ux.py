@@ -347,3 +347,56 @@ class AClosedBrowserWindow(unittest.TestCase):
         called = {n.func.id for n in ast.walk(run)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
         self.assertIn("_browser_is_gone", called)
+
+
+class WhenTheDesignWillNotParse(unittest.TestCase):
+    """"No JSON found in the agent's reply" is unanswerable on its own: the
+    customer can see JSON on the ChatGPT page and Prism cannot, and there is
+    no way to tell which of them is looking at the truth."""
+
+    def test_the_reply_that_failed_is_kept(self):
+        import core_bridge  # noqa: F401
+        from core import automation as AU
+        path = AU._keep_failed_spec(["this is not json", "neither is this"])
+        self.assertTrue(path and os.path.exists(path))
+        body = open(path, encoding="utf-8").read()
+        self.assertIn("this is not json", body)
+        self.assertIn("neither is this", body)
+        os.remove(path)
+
+    def test_saving_it_can_never_break_the_run(self):
+        """A bad design is already a bad day. A full disk must not turn it
+        into a crash on top."""
+        import core_bridge  # noqa: F401
+        from core import automation as AU
+        # A source that cannot be written still returns a string, never raises.
+        try:
+            AU._keep_failed_spec([None])
+        except Exception as e:
+            self.fail(f"raised {e}")
+
+    def test_a_linkified_stylesheet_is_repaired(self):
+        """Chat UIs turn URLs into links. A stylesheet URL runs straight into
+        the CSS after it, so the anchor swallows half the stylesheet — and the
+        design then renders with no fonts even when the JSON parses fine."""
+        import core_bridge  # noqa: F401
+        from core import reel_web as RW
+        broken = ("@import url('[https://fonts.googleapis.com/css2?family=DM"
+                  "&display=swap');*{margin:0}h1{font-family:'DM]"
+                  "(https://fonts.googleapis.com/css2?family=DM%29;*)"
+                  " Sans',sans-serif}")
+        fixed = RW._unlink_markdown(broken)
+        self.assertNotIn("](", fixed)
+        self.assertIn("@import url('https://fonts.googleapis.com", fixed)
+        self.assertIn("font-family:'DM Sans',sans-serif", fixed)
+
+    def test_ordinary_css_is_untouched(self):
+        """CSS is full of brackets and parentheses — attribute selectors,
+        url(), rgba(). A looser pattern would eat them."""
+        import core_bridge  # noqa: F401
+        from core import reel_web as RW
+        for css in ("a[href]{color:red}",
+                    ".x{background:url(asset:art1)}",
+                    ".y{color:rgba(0,0,0,.5)}",
+                    "@import url('https://fonts.googleapis.com/css2?x=1');"):
+            self.assertEqual(RW._unlink_markdown(css), css, css)
