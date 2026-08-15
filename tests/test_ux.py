@@ -455,3 +455,62 @@ class AReelWithNoPictures(unittest.TestCase):
         out = RW._drop_missing(html)
         self.assertNotIn("asset:", out)
         self.assertIn("hi", out)
+
+
+class TheChatWindowMangledTheDesign(unittest.TestCase):
+    """Diagnosed from a real saved failure. The model wrote valid JSON; the
+    page it was rendered on broke it in two different ways."""
+
+    def setUp(self):
+        import core_bridge  # noqa: F401
+        from core import reel, reel_web
+        self.reel, self.web = reel, reel_web
+
+    def test_a_wrapped_url_no_longer_kills_the_design(self):
+        """The fatal one. A very long @import URL was soft-wrapped by the chat
+        window, and the scrape turned that visual wrap into a real newline
+        inside a JSON string — an unescaped control character, so the whole
+        design was thrown away over a line break that only existed on screen.
+        """
+        import json
+        broken = ('{"design":{"css":"@import url(\'https://fonts.googleapis.com'
+                  '/css2?family=DM+Sans&display=swap\n\');*{margin:0}"},'
+                  '"scenes":[{"type":"a","seconds":3,"html":"<p>x</p>"}]}')
+        with self.assertRaises(Exception):
+            json.loads(broken)
+        spec = self.web.parse_spec(broken)
+        self.assertEqual(len(spec["scenes"]), 1)
+        self.assertIn("@import url(", spec["design"]["css"])
+
+    def test_ordinary_pretty_printed_json_is_untouched(self):
+        """Newlines BETWEEN members are perfectly legal and must survive —
+        only the ones trapped inside a string value get escaped."""
+        pretty = '{\n  "a": 1,\n  "b": "two"\n}'
+        self.assertEqual(self.reel._escape_control_chars(pretty), pretty)
+
+    def test_an_escaped_newline_is_not_double_escaped(self):
+        already = '{"css":"a\\nb"}'
+        self.assertEqual(self.reel._escape_control_chars(already), already)
+
+    def test_tabs_and_returns_are_handled_too(self):
+        out = self.reel._escape_control_chars('{"x":"a\tb\rc"}')
+        self.assertNotIn("\t", out)
+        self.assertNotIn("\r", out)
+        self.assertIn("\\t", out)
+
+    def test_the_design_prompt_now_demands_a_code_fence(self):
+        """The second corruption, and the cause was our own instruction. Asked
+        for BARE json, the reply renders as prose — and prose is markdown, so
+        every asterisk in the CSS is eaten as an emphasis marker. The saved
+        failure had zero asterisks in 17KB.
+
+        Inside a fence markdown processes nothing. The parser has always
+        skipped fences, so forbidding them bought nothing and cost designs.
+        """
+        for text in (self.web.script_instructions(),
+                     self.web.design_instructions()
+                     if hasattr(self.web, "design_instructions") else ""):
+            if not text:
+                continue
+            self.assertIn("fenced code block", text)
+            self.assertNotIn("no fences", text)
