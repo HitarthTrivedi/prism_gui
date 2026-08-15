@@ -108,9 +108,20 @@ first (Prism's sidebar has a **Login tabs** button that opens them for you).
 
 ## Troubleshooting
 
-**"No response captured" / a step comes back empty.**
-Almost always means you're not signed into that tool in Chrome. Use **Login
-tabs** in the sidebar, sign in, and run again.
+**A step comes back empty.**
+Prism now tells you which of these it is, so read the message rather than
+assuming. There are four:
+
+- *"You're not signed in to this tool"* — use **Login tabs** in the sidebar,
+  sign in once, and run again. The login is remembered from then on.
+- *"This tool has hit its usage limit"* — that tool's free allowance is spent
+  for now. Use a different one for that step, or wait for the reset.
+- *"Prism could not read the reply off the page"* — the website changed its
+  layout. **Signing in again will not help.** Your prompt did go through, so
+  the answer is sitting in the open tab and you can copy it from there. Please
+  report it: it needs a Prism update.
+- *"still writing its answer when Prism stopped waiting"* — give that step
+  longer in Settings, or copy the answer from the tab once it finishes.
 
 **Prism says Chrome isn't found.**
 Install it from [google.com/chrome](https://www.google.com/chrome/) — Prism
