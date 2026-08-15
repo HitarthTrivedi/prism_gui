@@ -185,10 +185,19 @@ def refresh(license_id: str, device_fp: str, *, app_version: str,
     }, app_version=app_version)
 
 
-def deactivate(license_id: str, device_fp: str, *, app_version: str) -> dict[str, Any]:
+def deactivate(license_id: str, device_fp: str, *, app_version: str,
+               token: str = "") -> dict[str, Any]:
+    """Release this machine's seat.
+
+    `token` is proof we are the machine that holds it. The licence id and the
+    fingerprint are not secrets — both sit in ~/.prism and travel in the token
+    itself — so without it the server had no way to tell this call apart from a
+    stranger releasing someone else's seat.
+    """
     return _post("/v1/deactivate", {
         "license_id": license_id,
         "device_fp": device_fp,
+        "token": token,
     }, app_version=app_version)
 
 

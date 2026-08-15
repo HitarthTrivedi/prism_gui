@@ -163,9 +163,21 @@ class StatCard(Card):
 
 class HomePanel(QScrollArea):
     """The dashboard. Rebuilt wholesale by refresh() rather than mutated —
-    it is a read-only report over two stores, it is rebuilt only on navigation
-    or when a run finishes, and a rebuild is far easier to keep correct than a
-    dozen setText() paths that each have to remember the empty case."""
+    it is a read-only report over two stores, and a rebuild is far easier to
+    keep correct than a dozen setText() paths that each have to remember the
+    empty case.
+
+    With ONE exception, and it is the reason the run section has its own host
+    widget. refresh() costs three full reads of the register CSV plus two walks
+    of the runs folder, and on a company install both live on a shared drive.
+    set_active() is called from the window on every `stage_started`, so a
+    nine-stage run was paying that whole cost nine times — about 27 register
+    reads mid-run, synchronously, on the UI thread. That is the "it freezes for
+    a few seconds every time it moves to the next step" report, and it is worst
+    over VPN or a Drive-for-Desktop mount where a blocked stat is not
+    interruptible. A run in flight changes one card, so set_active() now
+    repaints one card and touches neither store.
+    """
 
     describe_task = Signal()
     open_addon = Signal(str)
@@ -176,6 +188,7 @@ class HomePanel(QScrollArea):
         super().__init__(parent)
         self.cfg = cfg
         self._active: list[dict] = []
+        self._rows: list[dict] = []     # register, read once per refresh()
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -186,28 +199,64 @@ class HomePanel(QScrollArea):
         # being clipped by the scroll viewport.
         self._col.setContentsMargins(40, 32, 40, 32)
         self._col.setSpacing(24)
+        # Owns the active-run section and outlives every refresh(), so
+        # set_active() can repaint it without rebuilding the dashboard around
+        # it. Built before the first refresh() because refresh() adds it.
+        self._active_host = QWidget()
+        _slot = QVBoxLayout(self._active_host)
+        _slot.setContentsMargins(0, 0, 0, 0)
         self.refresh()
 
     # ── live run state, pushed in by the window ──────────────────────────
     def set_active(self, runs: list[dict]):
         """`runs` is [{title, stages, fraction, note, started}]. Empty clears
-        the section — Home must not keep showing a run that has finished."""
+        the section — Home must not keep showing a run that has finished.
+
+        Repaints ONLY the run card. Called on every stage of every run, so it
+        must not touch the register or the runs folder — see the class
+        docstring for what it used to cost.
+        """
         self._active = list(runs or [])
-        self.refresh()
+        self._fill_active()
+
+    def _fill_active(self):
+        """Rebuild the run section alone, from state already in memory."""
+        slot = self._active_host.layout()
+        while slot.count():
+            item = slot.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._drop(item.layout())
+        if self._active:
+            slot.addLayout(self._active_runs())
+        # Hidden rather than absent, so the section carries no spacing of its
+        # own when there is no run — the host is always in the column.
+        self._active_host.setVisible(bool(self._active))
 
     # ── build ─────────────────────────────────────────────────────────────
     def refresh(self):
         while self._col.count():
             item = self._col.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is self._active_host:
+                widget.setParent(None)      # persistent — re-added below
+            elif widget:
+                widget.deleteLater()
             elif item.layout():
                 self._drop(item.layout())
 
+        # ONE read, threaded through everything below. _stats() called
+        # inquiry_stats() and inquiries_per_day() without rows, and _addons()
+        # called inquiry_stats() again — three full reads of a CSV that on a
+        # company install sits on a shared drive, for one screen. All three
+        # already accepted a `rows` argument; nothing passed one.
+        self._rows = DATA.register_rows(self.cfg)
+
         self._col.addLayout(self._header())
         self._col.addWidget(self._hero())
-        if self._active:
-            self._col.addLayout(self._active_runs())
+        self._col.addWidget(self._active_host)
+        self._fill_active()
         self._col.addLayout(self._stats())
         self._col.addLayout(self._bottom())
         self._col.addStretch(1)
@@ -341,10 +390,10 @@ class HomePanel(QScrollArea):
         row.setSpacing(16)
         series = DATA.runs_per_day(self.cfg)
         done, failed = DATA.run_counts(self.cfg)
-        stats = DATA.inquiry_stats(self.cfg)
+        stats = DATA.inquiry_stats(self.cfg, self._rows)
 
         if stats:
-            inq = DATA.inquiries_per_day(self.cfg)
+            inq = DATA.inquiries_per_day(self.cfg, self._rows)
             row.addWidget(StatCard(
                 "inbox", theme.OK, str(stats["logged_week"]),
                 i18n.t("Inquiries logged"), i18n.t("· this week"), inq))
@@ -428,7 +477,7 @@ class HomePanel(QScrollArea):
         col = card.body((22, 20, 22, 20), spacing=0)
         col.addWidget(_label(i18n.t("Your add-ons"), "h5"))
         col.addSpacing(8)
-        stats = DATA.inquiry_stats(self.cfg)
+        stats = DATA.inquiry_stats(self.cfg, self._rows)
         waiting = f"{stats['waiting']} waiting" if stats and stats["waiting"] else ""
         for key, label, desc, icon_name, hue, badge in (
             ("inquiry", i18n.t("Inquiry Automation"), i18n.t("Register, quote, chase"),

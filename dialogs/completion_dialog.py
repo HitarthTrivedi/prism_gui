@@ -57,8 +57,13 @@ class StageResultDialog(QDialog):
             # the tool keeps working in that tab after we stop watching.
             label = (f"The result is still being made in {agent} — open it"
                      if unfinished else f"Open in {agent}")
+            # The one QLabel in the app that genuinely wants markup, so it opts
+            # back in — i18n.install() makes every other one PlainText, because
+            # register values come from customer email. Safe here: both halves
+            # are ours. `url` is a tool tab we opened, `label` is our own copy.
             link = QLabel(f'<a href="{url}" style="color:{theme.ACCENT_RAMP[700]}">'
                           f'{label}</a>')
+            link.setTextFormat(Qt.RichText)
             link.setOpenExternalLinks(True)
             root.addWidget(link)
         body = QTextEdit()

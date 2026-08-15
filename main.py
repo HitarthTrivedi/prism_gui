@@ -192,6 +192,12 @@ def main():
     # dialog is the very first thing a new customer sees, and it is the one
     # screen they cannot skip. Also before the stylesheet, which both of
     # these rewrite.
+    # Before diagnostics, because diagnostics.log_dir() is the first thing to
+    # create anything under ~/.prism — and whoever creates the root decides its
+    # mode. Owner-only, so nothing written underneath (runs, logs, workspace)
+    # is readable on a shared workstation regardless of the umask in force.
+    paths.ensure_user_dir()
+
     # Before anything that can fail: from here on, a crash lands in
     # ~/.prism/logs instead of on a stdout a windowed build does not have.
     diagnostics.install()

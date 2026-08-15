@@ -21,14 +21,31 @@ import sys
 
 
 def is_frozen() -> bool:
-    """True when running from a PyInstaller bundle."""
-    return getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+    """True in ANY packaged build — PyInstaller or Nuitka.
+
+    Deliberately not `hasattr(sys, "_MEIPASS")`: that marker is PyInstaller's
+    alone, so a Nuitka build reported "running from source" and switched on
+    three bypasses at once — the DEVELOPMENT signing key (licensing/keys.py,
+    which calls it "a universal skeleton key for the whole product"),
+    PRISM_LICENSE_OFFLINE_DEV (licensing/__init__.py) and PRISM_LICENSE_SERVER
+    (licensing/client.py). The app would start and run normally, which is what
+    made it dangerous. build.py recommends Nuitka *for tamper resistance*, so
+    the engine someone reaches for to harden the app was the one that opened it.
+    """
+    if "__compiled__" in globals():                 # Nuitka standalone
+        return True
+    return bool(getattr(sys, "frozen", False))      # PyInstaller
 
 
 def bundle_dir() -> str:
-    """Root of the read-only payload: _MEIPASS when frozen, else the repo."""
-    if is_frozen():
-        return sys._MEIPASS
+    """Root of the read-only payload: _MEIPASS when frozen, else the repo.
+
+    Must not read sys._MEIPASS unconditionally on the frozen branch — under
+    Nuitka is_frozen() is now True and that attribute does not exist.
+    """
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        return meipass
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -40,6 +57,32 @@ def resource(*parts: str) -> str:
 def user_dir(*parts: str) -> str:
     """Absolute path inside ~/.prism — the user's own state, never bundled."""
     return os.path.join(os.path.expanduser("~"), ".prism", *parts)
+
+
+def ensure_user_dir() -> str:
+    """Create ~/.prism owner-only, and tighten it if an older build did not.
+
+    Call once at startup. Tightening the ROOT is the whole fix: a 0700 parent
+    cannot be traversed by anyone else, so runs/, logs/, workspace/ and
+    gui_favorites.json are covered without chasing each writer — every one of
+    them creates its directory with the default mode, which under the usual
+    0002 umask is 0775.
+
+    The credentials themselves were never the problem: config.json,
+    license.json, authorization.json and device_id are all written 0600. What
+    sat at 0664 was the work — customer queries, BOQ outputs, run records —
+    and device.py names shared workstations as a target deployment.
+
+    Best-effort by design. A failure here must not stop the app starting; on
+    Windows the mode is largely advisory anyway.
+    """
+    path = user_dir()
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        os.chmod(path, 0o700)       # exist_ok=True ignores mode on an existing dir
+    except OSError:
+        pass
+    return path
 
 
 def is_local_result(url: str) -> bool:

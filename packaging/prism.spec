@@ -112,15 +112,27 @@ datas = [
 # devtools/ is deliberately absent: it holds the token-signing logic and a
 # private key. Nothing in it may ever reach a build.
 
-# The engine also ships as files, because core_bridge puts this directory on
-# sys.path at runtime and router._tool_notes() reads pros_cons.txt/tool_notes.md
-# off disk. (The code itself is additionally analysed — see pathex below — so
-# that the stdlib modules core/*.py import actually get bundled. Shipping the
-# sources without analysing them is how a build ends up missing smtplib.)
+# The engine's DATA ships as files. Its CODE comes from the archive — pathex
+# below plus the enumerated core.* hiddenimports.
+#
+# This used to ship the sources too, and that was the whole product in editable
+# form sitting next to the binary: 19 .py files at mode 0664, including
+# automation.py, boq.py and a prism.py with a complete licence-free main().
+# Two bypasses came free with it. core_bridge put this directory AHEAD of the
+# archive on sys.path, so editing a file here changed what the "compiled" app
+# did — verified, not theorised. And run_prism.command shipped at mode 0755:
+# double-click it and a venv builds itself, pip installs requirements.txt and
+# runs the engine with no licence check at all, needing no Python knowledge.
+#
+# The launchers and requirements.txt exist to start the CLI from a source
+# checkout and have no purpose in a bundle. requirements.txt is worth removing
+# on its own account: it is unpinned, so that launcher also pulled whatever
+# PyPI served that day into the customer's install folder.
+_ENGINE_SKIP = {"run_prism.bat", "run_prism.command", "requirements.txt"}
 for root, dirs, files in os.walk(ENGINE_DIR):
     dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git", ".venv")]
     for name in files:
-        if name.endswith((".pyc", ".pyo")):
+        if name.endswith((".py", ".pyc", ".pyo")) or name in _ENGINE_SKIP:
             continue
         src = os.path.join(root, name)
         rel = os.path.relpath(root, GUI_DIR)
@@ -156,14 +168,39 @@ except ImportError:
     print("[prism] WARNING: imageio-ffmpeg is not installed, so this build "
           "ships no FFmpeg. Reel will have to download it on first use.")
 
-hiddenimports = [
-    # Reached only through core_bridge's runtime sys.path insert, so static
-    # analysis never sees them.
-    "core", "core.config", "core.agents", "core.router", "core.pathfinder",
-    "core.files", "core.voice", "core.mailer", "core.automation",
-    "core.onboarding", "core.remote", "core.ui",
+def _engine_modules() -> list[str]:
+    """Every core.* module, read off disk rather than listed by hand.
+
+    This used to be a hand-maintained list. It named 11 modules; the engine has
+    25. The other 14 reached the archive only because PyInstaller also scans
+    function-level imports and found core_bridge's lazy `def get_X(): from core
+    import X` getters — an accident, not a plan, and one nobody could see.
+
+    That was survivable only while the loose .py files also shipped and
+    core_bridge put them ahead of the archive: a module missing from here was
+    silently imported from disk instead. Now that the sources do not ship,
+    anything missing from this list is an ImportError in front of a customer,
+    in a windowed build with no console to print it. So enumerate, never list.
+    """
+    core = os.path.join(ENGINE_DIR, "core")
+    found = ["core"] + [
+        "core." + name[:-3] for name in sorted(os.listdir(core))
+        if name.endswith(".py") and name != "__init__.py"]
+    print(f"[prism] engine modules bundled: {len(found) - 1}")
+    return found
+
+
+hiddenimports = _engine_modules() + [
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "pyaudio",
+    # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`
+    # inside mx_host(), which degrades SILENTLY to guessing when absent. That
+    # is right on a customer machine and wrong in a build — and it was already
+    # happening: dnspython was installed on the build box and PyInstaller still
+    # did not bundle it, because a function-level import of a package it has no
+    # hook for is invisible. Every shipped copy had MX detection dead, which is
+    # precisely the bug the lazy import was added to fix.
+    "dns", "dns.resolver", "dns.rdatatype",
     # undetected_chromedriver's patcher imports distutils, gone from the 3.12
     # stdlib — rthook_distutils.py aliases setuptools' copy, which has to be
     # bundled for that to be possible.

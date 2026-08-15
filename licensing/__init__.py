@@ -339,7 +339,9 @@ def deactivate() -> None:
     try:
         if current.license_id:
             client.deactivate(current.license_id, device_fingerprint(),
-                              app_version=app_meta.VERSION)
+                              app_version=app_meta.VERSION,
+                              # Our own signed token, as proof we hold the seat.
+                              token=store.load(user_dir()).get("token") or "")
     except (ServerError, Unreachable):
         pass
     store.clear(user_dir())

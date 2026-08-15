@@ -79,6 +79,7 @@ class InquiryPanel(QScrollArea):
         super().__init__(parent)
         self.cfg = cfg
         self._tab = "arrived"
+        self._rows: list | None = None      # register cache; None = never read
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -90,7 +91,10 @@ class InquiryPanel(QScrollArea):
         self.refresh()
 
     # ── build ─────────────────────────────────────────────────────────────
-    def refresh(self):
+    def refresh(self, reread: bool = True):
+        """Rebuild the panel. `reread` False re-renders from the rows already
+        in hand — the register is a CSV that may sit on a shared drive, and
+        switching tabs is not new information about it."""
         while self._col.count():
             item = self._col.takeAt(0)
             if item.widget():
@@ -106,7 +110,8 @@ class InquiryPanel(QScrollArea):
                    "chase it."), size=13, colour=theme.NEUTRAL[600]))
         self._col.addLayout(head)
 
-        self._rows = DATA.register_rows(self.cfg)
+        if reread or self._rows is None:
+            self._rows = DATA.register_rows(self.cfg)
         stats = DATA.inquiry_stats(self.cfg, self._rows)
         if not stats:
             self._col.addWidget(self._not_set_up())
@@ -180,7 +185,11 @@ class InquiryPanel(QScrollArea):
 
     def _pick(self, key: str):
         self._tab = key
-        self.refresh()
+        # Re-render, do not re-read: every tab is a different view of the same
+        # rows, and the register is a CSV that may be on a shared drive, open
+        # in Excel, or on a disconnected mount. An explicit refresh() — or the
+        # working dialog closing — is what should cost a read.
+        self.refresh(reread=False)
 
     def _tab_body(self) -> QWidget:
         if self._tab == "register":

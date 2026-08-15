@@ -33,6 +33,15 @@ def save(cfg: dict) -> None:
     tmp = CONFIG + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+    # Before the replace, not after: os.replace carries the TEMP file's mode
+    # across, so without this the config lands at 0666 & ~umask — typically
+    # 0664, i.e. world-readable. It holds the Groq key and the IMAP password.
+    # core/config.py:76 and licensing/store.py:101 both do this; this script
+    # reimplemented their atomic-write pattern and dropped the line.
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
     os.replace(tmp, CONFIG)
 
 

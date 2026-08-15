@@ -44,19 +44,27 @@ _CANDIDATES = [
     os.path.join(_HERE, "..", "prism_terminal"),   # sibling, last resort only
 ]
 
-_TERMINAL_DIR = next(
-    (os.path.abspath(c) for c in _CANDIDATES
-     if os.path.isdir(os.path.join(c, "core"))), None)
+if paths.is_frozen():
+    # Nothing goes on sys.path. core.* lives in the archive, named by
+    # prism.spec's enumerated hiddenimports, and a directory of loose .py files
+    # inserted at position 0 is exactly how an edited engine silently overrode
+    # the compiled one — the sources are no longer shipped, and this is what
+    # makes sure they could not win even if something put them back.
+    _TERMINAL_DIR = paths.resource("prism_terminal")
+else:
+    _TERMINAL_DIR = next(
+        (os.path.abspath(c) for c in _CANDIDATES
+         if os.path.isdir(os.path.join(c, "core"))), None)
 
-if _TERMINAL_DIR is None:
-    raise ImportError(
-        "Can't find prism_terminal's core/ package. Expected either a sibling "
-        "'../prism_terminal' folder, or the submodule at './prism_terminal' "
-        "(run 'git submodule update --init' if you cloned without "
-        "--recurse-submodules).")
+    if _TERMINAL_DIR is None:
+        raise ImportError(
+            "Can't find prism_terminal's core/ package. Expected either a "
+            "sibling '../prism_terminal' folder, or the submodule at "
+            "'./prism_terminal' (run 'git submodule update --init' if you "
+            "cloned without --recurse-submodules).")
 
-if _TERMINAL_DIR not in sys.path:
-    sys.path.insert(0, _TERMINAL_DIR)
+    if _TERMINAL_DIR not in sys.path:
+        sys.path.insert(0, _TERMINAL_DIR)
 
 
 def _warn_about_sibling() -> None:

@@ -259,6 +259,7 @@ def install() -> None:
     if _installed:
         return
 
+    from PySide6.QtCore import Qt
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import (
         QAbstractButton, QComboBox, QGroupBox, QLabel, QLineEdit,
@@ -364,6 +365,32 @@ def install() -> None:
     from PySide6.QtWidgets import QCheckBox, QRadioButton, QToolButton
     for cls in (QCheckBox, QRadioButton, QToolButton):
         wrap_ctor(cls)
+
+    # ── every QLabel is plain text unless it asks not to be ──────────────
+    #
+    # QLabel defaults to Qt.AutoText, which runs a heuristic over the string
+    # and renders it as HTML if it looks like markup. The register panels feed
+    # it values that come from customer email: register.py fills "Customer"
+    # from the From display name and "Product asked" from the message body, so
+    # both are written by whoever emails the sales inbox. The sharpest one is
+    # the quotation dialog, which is the screen the owner reads to decide a
+    # price.
+    #
+    # Done HERE rather than in the four _label() helpers because the helpers
+    # are not the whole surface — the worst sinks are bare QLabel(...) calls,
+    # and Pill/Avatar/ToolBadge are subclasses. This constructor is the one
+    # place all 142 of them already pass through.
+    #
+    # It is also cheaper: AutoText makes Qt scan every string with
+    # mightBeRichText() on each setText; PlainText skips that outright.
+    _translating_init = QLabel.__init__
+
+    def _plain_by_default_init(self, *args, **kwargs):
+        _translating_init(self, *args, **kwargs)
+        if "textFormat" not in kwargs:      # an explicit request still wins
+            self.setTextFormat(Qt.TextFormat.PlainText)
+
+    QLabel.__init__ = _plain_by_default_init
 
     _installed = True
 

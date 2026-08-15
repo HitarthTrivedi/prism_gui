@@ -110,6 +110,18 @@ def preflight(engine: str = "pyinstaller"):
     if not os.path.isdir(engine):
         sys.exit("prism_terminal/core is missing — run:\n"
                  "    git submodule update --init --recursive")
+    # Silently-degrading dependencies, asserted where a miss is loud. Both of
+    # these are imported inside a function at runtime and fall back rather than
+    # raise, which is correct on a customer machine and wrong in a build: the
+    # build succeeds and every shipped copy has the feature dead.
+    try:
+        import dns.resolver  # noqa: F401
+    except ImportError:
+        sys.exit("dnspython is missing — pip install dnspython\n"
+                 "Without it core/inbox.py's mx_host() returns '' and "
+                 "mail-server discovery ships broken, with the symptom it was "
+                 "written to fix: 'the mail server didn't answer' on a "
+                 "perfectly good hosted mailbox.")
 
 
 def build(engine: str = "pyinstaller"):
@@ -199,10 +211,15 @@ def nuitka_args() -> list[str]:
         f"--include-data-dir={os.path.join(GUI, 'assets')}=assets",
         f"--include-data-files={os.path.join(GUI, 'style.qss')}=style.qss",
         f"--include-data-dir={os.path.join(GUI, 'lang')}=lang",
-        # The engine ships as FILES as well as being compiled: core_bridge
-        # puts this directory on sys.path and router._tool_notes() reads
-        # pros_cons.txt off disk.
-        f"--include-data-dir={engine_dir}=prism_terminal",
+        # The engine's DATA only. --include-package=core below compiles the
+        # code in. Shipping the sources as well put an editable, directly
+        # runnable, licence-free copy of the whole product next to the binary —
+        # see the long note in prism.spec. router._tool_notes() reads these off
+        # disk, which is the entire reason anything from the engine ships as a
+        # file at all.
+        *[f"--include-data-files={os.path.join(engine_dir, note)}={note}"
+          for note in ("pros_cons.txt", "tool_notes.md", "tool_notes.txt")
+          if os.path.exists(os.path.join(engine_dir, note))],
         # The committed licence + lease test vector. --selftest verifies real
         # signatures against it, which is the only check that proves the
         # crypto survived compilation on this platform.

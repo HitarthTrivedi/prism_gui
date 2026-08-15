@@ -193,6 +193,7 @@ class InquiryDialog(QDialog):
         # Checking on a timer is what makes this "runs by itself" rather than
         # "a button somebody remembers". Started here rather than in the
         # constructor of the timer so a saved interval of 0 leaves it stopped.
+        self._auth_failures = 0     # consecutive rejected sign-ins; see _note_failure
         self._auto = QTimer(self)
         self._auto.timeout.connect(self._auto_check)
         self._apply_auto_interval()
@@ -620,12 +621,50 @@ class InquiryDialog(QDialog):
         self._worker.failed.connect(self._check_failed)
         self._worker.start()
 
+    #: Consecutive rejected sign-ins before the timer gives up. Three, because
+    #: one can be a provider hiccup and two can be a password mid-rotation.
+    AUTH_FAILURES_BEFORE_STOP = 3
+
     def _check_failed(self, message: str):
         self.check_btn.setEnabled(True)
         self.progress.setVisible(False)
         self.status.setText("")
+        self._note_failure(message)
         self._explain(message)
         self._quiet = False
+
+    def _note_failure(self, message: str):
+        """Count rejected sign-ins, and stop the timer once they are settled.
+
+        Only automatic checks are counted. Pressing "Check now" is a person
+        asserting the credentials are right — that resets the count and is
+        allowed to try, which is also how the user gets going again after
+        fixing the password.
+
+        A network failure never counts: retrying is exactly what the timer is
+        for. A rejected password does, because the provider will throttle and
+        then lock the account, and the customer's report is "Prism locked me
+        out of my email".
+        """
+        if not getattr(self, "_quiet", False):
+            self._auth_failures = 0
+            return
+        if not CB.get_inbox().is_auth_failure(message):
+            return                          # transport, not credentials
+
+        self._auth_failures = getattr(self, "_auth_failures", 0) + 1
+        if self._auth_failures < self.AUTH_FAILURES_BEFORE_STOP:
+            return
+
+        self._auto.stop()
+        address = ((self._settings().get("account") or {}).get("address") or "")
+        # Loud, unlike every other quiet-run failure: automatic checking has
+        # stopped and will not restart on its own, so saying nothing would
+        # leave the register silently going stale.
+        self.status.setText(i18n.t(
+            "Automatic checking is off — {who} kept refusing the password. "
+            "Update it in Settings, then press Check now."
+        ).replace("{who}", address or i18n.t("the mail server")))
 
     def _explain(self, message: str):
         """Plain-English failure, through the same translator as the rest."""
@@ -645,12 +684,16 @@ class InquiryDialog(QDialog):
 
         if result.error:
             self.status.setText("")
+            self._note_failure(result.error)
             self._explain(result.error)
             # A locked register still leaves the bookmark alone, so the same
             # mail comes back next time. Nothing to save.
             if not result.fetched:
                 self._quiet = False
                 return
+
+        # Got in, so the credentials are good — clear any run of rejections.
+        self._auth_failures = 0
 
         self._remember(result)
         self.status.setText(result.headline())
@@ -1621,13 +1664,21 @@ class QuotationDialog(QDialog):
                     self, i18n.t("Quotation"),
                     i18n.t("This inquiry has no email address to reply to."))
                 return
-            if QMessageBox.question(
-                    self, i18n.t("Send the quotation"),
-                    i18n.t("Send this quotation to {who} for "
-                           "₹{total}?").replace("{who}", address).replace(
-                        "{total}", quoting.indian_currency(self.quote.total)),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No) != QMessageBox.Yes:
+            # Built rather than QMessageBox.question(...), for one reason:
+            # the static helpers give no way to set a text format, and they
+            # default to AutoText. `address` is the customer's own From header,
+            # so markup in it would render as markup — in the dialog that
+            # confirms who is being sent a quotation, and for how much. The
+            # confirmation has to say what is actually about to happen.
+            confirm = QMessageBox(
+                QMessageBox.Question, i18n.t("Send the quotation"),
+                i18n.t("Send this quotation to {who} for "
+                       "₹{total}?").replace("{who}", address).replace(
+                    "{total}", quoting.indian_currency(self.quote.total)),
+                QMessageBox.Yes | QMessageBox.No, self)
+            confirm.setTextFormat(Qt.PlainText)
+            confirm.setDefaultButton(QMessageBox.No)
+            if confirm.exec() != QMessageBox.Yes:
                 return
             if not CB.mailer.is_configured(self.cfg):
                 QMessageBox.information(

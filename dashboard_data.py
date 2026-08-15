@@ -73,7 +73,15 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 record = json.load(f) or {}
-        except Exception:
+            # Inside the try, and not for tidiness: a run file that vanishes
+            # between _run_files() listing it and this stat raises OSError, and
+            # Home is built during MainWindow.__init__ — so an unguarded stat
+            # here does not blank a panel, it stops the window existing at all.
+            # A frozen build has no console to say why. run_counts() and
+            # runs_per_day() have always guarded theirs; this one was the odd
+            # one out. Real on a synced or shared team folder.
+            when = _ago(os.path.getmtime(path))
+        except (OSError, Exception):
             continue
         agents = record.get("agents") or {}
         # Ordered by stage as the run executed, de-duplicated — a task that

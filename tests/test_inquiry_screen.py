@@ -32,7 +32,11 @@ from datetime import date, timedelta
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ.setdefault("PRISM_LICENSE_OFFLINE_DEV", "1")
+# No PRISM_LICENSE_OFFLINE_DEV here. Nothing in this file needs it — every
+# licence answer it depends on is mocked — and setting it at module scope set
+# it for the whole process, because pytest imports every test module during
+# collection. That opened licensing's offline-dev bypass underneath the
+# revoked-licence test in test_authorization.py. See tests/conftest.py.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
