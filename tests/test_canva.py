@@ -314,6 +314,31 @@ class TheSecondPrompt(unittest.TestCase):
             self.run_it(stage=stage)
         self.assertEqual(self.asked, [])
 
+    def test_studio_internal_stages_are_left_alone(self):
+        """Caught on the first real run. The Studio pipeline\'s design stage
+        emits a JSON scene spec for Prism\'s own renderer, so asking Canva to
+        "import the image above" pointed it at a CSS blob. Canva answered
+        "none", and the turn was pure waste on a conversation that had just
+        been asked twice for strict JSON."""
+        for stage in ("design", "artwork"):
+            self.run_it(stage=stage)
+        self.assertEqual(self.asked, [])
+
+    def test_a_machine_read_stage_is_never_interrupted(self):
+        """Belt and braces for the same failure. A stage told to reply with
+        ONLY a JSON object must not then be sent a chat message — it wastes a
+        round trip and leaves prose where the parser looks for the spec."""
+        self.AU._make_editable(None, CHATGPT, "visual", "make it in canva",
+                               ["{...}"], machine_shaped=True)
+        self.assertEqual(self.asked, [])
+
+    def test_the_editable_stages_match_the_registry(self):
+        """The suffix and the follow-up have to agree on which stages are in
+        play. They drifted apart once already, and that drift WAS the bug."""
+        from core.agents import AGENT_REGISTRY
+        configured = set(AGENT_REGISTRY["ChatGPT"]["stage_suffix"])
+        self.assertEqual(set(self.AU._EDITABLE_STAGES), configured)
+
     def test_it_does_not_ask_when_nothing_was_made(self):
         """With no image in the thread, Canva would invent a design from the
         words alone — which is exactly the template-instead-of-artwork
