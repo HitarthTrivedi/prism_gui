@@ -70,34 +70,37 @@ def icon_label(icon_name: str, text: str, size: int = 16,
 
 # ── elevation ───────────────────────────────────────────────────────────────
 def shadows_enabled() -> bool:
-    """Whether to hang a QGraphicsDropShadowEffect off every card.
+    """Whether to hang a QGraphicsDropShadowEffect off every card. OFF by
+    default, and that default is the fix for the blank-panels bug.
 
-    There is a switch here because the effect is the single least portable
-    thing in the interface. A widget with a QGraphicsEffect is painted through
-    a separate pipeline, and on some setups — software rasterisers, virtual
-    machines, remote desktop sessions, older Intel drivers — that pipeline
-    produces NOTHING. The widget reserves its space in the layout and never
-    paints, so the screen shows correctly-sized gaps where the cards should be
-    while everything without an effect (headings, the timeline dots) draws
-    normally. It looks like the app lost its content rather than like a
-    graphics problem, which is what makes it hard to report and hard to guess.
+    A widget carrying a QGraphicsEffect is painted through a separate pipeline
+    — and that pipeline draws the WHOLE widget, background and children
+    included, not just the shadow. On some setups (software rasterisers,
+    virtual machines, remote desktop, older drivers) it produces nothing at
+    all. The card then reserves its space in the layout and never paints, so
+    the screen shows correctly-sized gaps where the content should be, while
+    everything WITHOUT an effect — headings, the timeline dots — draws
+    normally. It reads as the app having lost your work rather than as a
+    graphics fault, which is what made it so hard to report.
 
-    Off means the cards lose their lift and keep everything else. That is a
-    trade worth making instantly on a machine where the alternative is a blank
-    screen — and it is the first thing to try when someone reports one.
+    A soft shadow is not worth that. Cards now read as cards from their white
+    fill and hairline border, which are ordinary QSS and paint everywhere,
+    and the design's own predecessor used hairline borders anyway.
 
-        PRISM_NO_SHADOWS=1        one run, no restart of anything else
-        ~/.prism/config.json      "no_shadows": true, to make it stick
+    Opt back in per machine if you want the lift and know it works there:
+
+        PRISM_SHADOWS=1           one run
+        ~/.prism/config.json      "shadows": true, to make it stick
     """
-    if os.environ.get("PRISM_NO_SHADOWS"):
-        return False
+    if os.environ.get("PRISM_SHADOWS"):
+        return True
     try:
         import core_bridge as CB
-        if (CB.config.load() or {}).get("no_shadows"):
-            return False
+        if (CB.config.load() or {}).get("shadows"):
+            return True
     except Exception:
-        pass                    # config unreadable is not a reason to go plain
-    return True
+        pass                    # unreadable config must not turn them back on
+    return False
 
 
 def elevate(widget: QWidget, spec=None, hue: str = None) -> QWidget:
@@ -146,8 +149,13 @@ class Card(QFrame):
         self._radius = radius
         self._stripe = stripe
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # The border is what separates a card from the canvas now that the drop
+        # shadow is off by default — see shadows_enabled(). Plain QSS, so it
+        # paints through the ordinary path on every machine, which the shadow
+        # did not.
         self.setStyleSheet(
-            f"#card {{ background: {theme.CARD}; border-radius: {radius}px; }}")
+            f"#card {{ background: {theme.CARD}; border-radius: {radius}px; "
+            f"border: 1px solid {theme.HAIRLINE}; }}")
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
 
     def body(self, margins=(20, 20, 20, 20), spacing: int = 0) -> QVBoxLayout:
