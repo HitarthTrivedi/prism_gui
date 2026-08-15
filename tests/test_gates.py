@@ -38,6 +38,42 @@ DAY = 86400
 _app = QApplication.instance() or QApplication([])
 
 
+# ── keep the test suite out of the developer's own run history ──────────────
+# These tests drive a real MainWindow, and several of them call _on_run_failed
+# to prove a broken run is still recorded. That record is written with
+# config.save_run(), which writes to ~/.prism/runs — the REAL one.
+#
+# Found by counting: 55 of the 127 files in a working ~/.prism/runs were fake
+# "Chrome would not launch" failures left by this file. Nearly half of
+# somebody's History was test litter, and because those records carry no query
+# they looked exactly like real runs whose prompt had been lost — which is a
+# far more alarming thing to believe than the truth.
+#
+# Redirected for the whole module rather than per-test: the next person to add
+# a test here will not remember, and should not have to.
+#
+# BOTH doors have to be shut. config.RUNS_DIR is only the CLI's default —
+# MainWindow._save_run passes an explicit folder from workspace.runs_dir(), so
+# patching the constant alone still let one file through. Verified by counting
+# ~/.prism/runs before and after the suite.
+import core_bridge as _CB  # noqa: E402
+import workspace as _WS  # noqa: E402
+
+_REAL_RUNS_DIR = _CB.config.RUNS_DIR
+_REAL_RUNS_FN = _WS.runs_dir
+_SCRATCH_RUNS = tempfile.mkdtemp(prefix="prism-test-runs-")
+
+
+def setUpModule():
+    _CB.config.RUNS_DIR = _SCRATCH_RUNS
+    _WS.runs_dir = lambda *a, **kw: _SCRATCH_RUNS
+
+
+def tearDownModule():
+    _CB.config.RUNS_DIR = _REAL_RUNS_DIR
+    _WS.runs_dir = _REAL_RUNS_FN
+
+
 class GateTest(unittest.TestCase):
     """Shared harness: a temp ~/.prism and a throwaway signing key."""
 

@@ -1035,6 +1035,12 @@ class MainWindow(QMainWindow):
     def _on_route_failed(self, error: str):
         self.input_panel.set_busy(False)
         self.input_panel.set_state("ready")
+        # Keep the task. Planning is where runs fail most often — a Groq rate
+        # limit, a dead connection, a key that expired — and it fails before
+        # anything has been written down, so the customer's own words were the
+        # only casualty. Somebody who spent five minutes describing a job
+        # should not have to remember it and type it again.
+        self._save_run(error=f"Planning failed: {error}")
         # Mid-queue a planning failure is one bad task, not a dead run — record
         # it and carry on, the same way a failed stage doesn't end a pipeline.
         if self._auto_run and self._task_pos < len(self._task_queue):
