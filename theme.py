@@ -228,6 +228,28 @@ def badge_initial(tool: str) -> str:
     return (tool or "?").strip()[:1].upper() or "?"
 
 
+def over(alpha: float, fg: str = "#ffffff", bg: str = None) -> str:
+    """`fg` at `alpha` composited onto `bg`, as a solid hex.
+
+    The rail's text and glyphs are all white at some fraction. QSS takes
+    rgba() happily, but the icons are rendered by handing a colour string to
+    QSvgRenderer, and rgba() there is not dependable across Qt's SVG backends —
+    a glyph that silently renders black on navy is invisible, which is the
+    worst possible failure for a nav icon. Flattening against the rail gives
+    the identical pixel with no renderer to trust.
+
+    Defaults to the current RAIL, so it follows the role's hue like everything
+    else. Callers wanting a fixed background pass one.
+    """
+    base = bg or RAIL
+    fv, bv = fg.lstrip("#"), base.lstrip("#")
+    out = []
+    for i in (0, 2, 4):
+        f, b = int(fv[i:i + 2], 16), int(bv[i:i + 2], 16)
+        out.append(round(f * alpha + b * (1 - alpha)))
+    return "#%02x%02x%02x" % tuple(out)
+
+
 def tint(hex_colour: str, alpha_hex: str = "1f") -> str:
     """A brand colour at low opacity, for the pad behind its own icon.
 

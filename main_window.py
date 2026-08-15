@@ -30,6 +30,14 @@ import theme
 import workspace
 from widgets import icons
 from widgets.sidebar import Sidebar
+from widgets.home_panel import HomePanel
+from widgets.inquiry_panel import InquiryPanel
+from widgets.settings_panel import SettingsPanel
+from widgets.tour import TourOverlay
+from widgets.simple_panels import (
+    BoqPanel, CatalogPanel, EmailPanel, GuidePanel, HistoryPanel,
+)
+from widgets.controls import kicker
 from widgets.input_panel import InputPanel
 from widgets.files_panel import FilesPanel
 from widgets.prompt_panel import PromptPanel
@@ -48,7 +56,10 @@ from dialogs.reel_dialog import ReelDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
-COMPOSE, RUNNING = 0, 1
+COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
+# screens of the body stack the rail switches between
+HOME, WORKBENCH, INQUIRY, SETTINGS = 0, 1, 2, 3
+GUIDE, CATALOG, HISTORY, BOQ, EMAIL = 4, 5, 6, 7, 8
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -220,10 +231,83 @@ class MainWindow(QMainWindow):
 
         self.sidebar = Sidebar()
         outer.addWidget(self.sidebar)
-        outer.addWidget(self._work_column(), stretch=1)
-        outer.addWidget(self._context_column())
+
+        # The redesign turns the rail's destinations into screens rather than
+        # dialogs, so the body is a stack the rail switches between. The
+        # workbench keeps its own inner stack (compose → running) and its own
+        # context rail; both live inside the one screen, because the files and
+        # prompt panels are about the task being composed and mean nothing on
+        # any other screen — which is why they used to be a permanently
+        # visible third column showing "nothing attached yet".
+        self.screens = QStackedWidget()
+        self.home_panel = HomePanel(self.cfg)
+        self.screens.addWidget(self.home_panel)          # HOME
+        self.screens.addWidget(self._workbench_screen())  # WORKBENCH
+        self.inquiry_panel = InquiryPanel(self.cfg)
+        self.screens.addWidget(self.inquiry_panel)        # INQUIRY
+        self.settings_panel = SettingsPanel(self.cfg)
+        self.screens.addWidget(self.settings_panel)       # SETTINGS
+        self.guide_panel = GuidePanel(self.cfg)
+        self.screens.addWidget(self.guide_panel)          # GUIDE
+        self.catalog_panel = CatalogPanel(self.cfg)
+        self.screens.addWidget(self.catalog_panel)        # CATALOG
+        self.history_panel = HistoryPanel(self.cfg)
+        self.screens.addWidget(self.history_panel)        # HISTORY
+        self.boq_panel = BoqPanel(self.cfg)
+        self.screens.addWidget(self.boq_panel)            # BOQ
+        self.email_panel = EmailPanel(self.cfg)
+        self.screens.addWidget(self.email_panel)          # EMAIL
+        outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
+
+        self.home_panel.describe_task.connect(
+            lambda: self._handle_command("workbench"))
+        self.home_panel.open_addon.connect(self._handle_command)
+        self.home_panel.open_history.connect(lambda: self._handle_command("runs"))
+        self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
+        self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
+        self.settings_panel.edit_requested.connect(self._open_setup)
+        self.settings_panel.login_tabs.connect(self._open_login_tabs)
+        self.history_panel.open_run.connect(self._open_run_record)
+        self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.email_panel.opened.connect(self._open_email_dialog)
+        # "Open →" on an active-run card goes to the run itself, not a blank
+        # bench — the run is already on the workbench's RUNNING page.
+        self.home_panel.open_run.connect(lambda: self._show_screen("workbench"))
+
+    def _workbench_screen(self) -> QWidget:
+        wrap = QWidget()
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(self._work_column(), stretch=1)
+        row.addWidget(self._context_column())
+        return wrap
+
+    def _show_screen(self, name: str = "workbench"):
+        """Switch the body stack and keep the rail's highlight in step."""
+        index = {"home": HOME, "workbench": WORKBENCH,
+                 "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
+                 "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
+                 "email": EMAIL}.get(name, HOME)
+        self.screens.setCurrentIndex(index)
+        # Re-read on arrival. Both screens are reports over stores that other
+        # parts of the app (and the inquiry dialog) write to, so what was true
+        # when they were last built may not be true now.
+        if index == HOME:
+            self.home_panel.refresh()
+        elif index == INQUIRY:
+            self.inquiry_panel.refresh()
+        elif index == SETTINGS:
+            self.settings_panel.cfg = self.cfg
+            self.settings_panel.refresh()
+        elif index == HISTORY:
+            self.history_panel.refresh()
+        elif index == CATALOG:
+            self.catalog_panel.cfg = self.cfg
+            self.catalog_panel.refresh()
+        self.sidebar.set_current("home" if index == HOME else "")
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
@@ -255,6 +339,7 @@ class MainWindow(QMainWindow):
         Called at startup and after any licence change."""
         state = licensing.state()
         self.sidebar.set_entitlements(state.features, state.usable)
+        self.sidebar.set_plan(*self._plan_summary(state))
         if state.usable:
             self.statusBar().showMessage("Ready.")
         else:
@@ -292,6 +377,29 @@ class MainWindow(QMainWindow):
                     "already made are still here — new runs are paused until "
                     "it's renewed.")
         self._show_banner(text, tone, icon_name)
+
+    @staticmethod
+    def _plan_summary(state) -> tuple[str, str]:
+        """Two lines for the rail's licence card: what you have, and whether
+        it is working.
+
+        Deliberately not the banner's text. The banner interrupts and explains;
+        this is a standing label that has to stay true in every state and fit
+        on two short lines, so it says the plan name and one clause about it.
+        """
+        plan = (state.plan or "").strip()
+        title = i18n.t("{plan} plan").format(plan=plan) if plan else i18n.t("Licence")
+        if state.status == licensing.VALID:
+            days = getattr(state, "days_left", 0)
+            if 0 < days <= 14:
+                return title, i18n.t("Renews in {n} days").format(n=days)
+            return title, i18n.t("Your licence is active")
+        return title, {
+            licensing.STALE: i18n.t("Can't reach the licence server"),
+            licensing.GRACE: i18n.t("Couldn't confirm — still working"),
+            licensing.TAMPERED: i18n.t("Can't be verified on this computer"),
+            licensing.EXPIRED: i18n.t("Ended — renew to start new work"),
+        }.get(state.status, i18n.t("No licence yet"))
 
     def _show_banner(self, text: str, tone: str, icon_name: str):
         self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
@@ -334,39 +442,222 @@ class MainWindow(QMainWindow):
 
         wrap = QWidget()
         layout = QVBoxLayout(wrap)
-        layout.setContentsMargins(26, 22, 26, 22)
+        layout.setContentsMargins(40, 32, 40, 32)
+        layout.setSpacing(20)
+        layout.addLayout(self._workbench_header())
         layout.addWidget(self.work_stack)
+        # Lifted out of the scrolling column and pinned to its foot. Prism's
+        # full pipeline is nine stages, and with nine plan cards on screen
+        # "Start the work" sat well below the fold — the one action the screen
+        # exists for was the one thing you had to go looking for. The design
+        # only ever had to lay out four.
+        #
+        # addWidget reparents on its own. Do NOT setParent(None) first: that
+        # makes the row a top-level widget, and anything that shows it before
+        # it lands here pops it up as a floating "Prism" window with its own
+        # title bar.
+        layout.addWidget(self.agents_panel.cta)
+        # Only on the compose page: the running page has its own Stop control,
+        # and a Start button under a run in progress invites starting it twice.
+        self.work_stack.currentChanged.connect(
+            lambda i: self.agents_panel.cta.setVisible(
+                i == COMPOSE and bool(self.agents_panel.selected_agents())))
         return wrap
 
+    def _workbench_header(self) -> QHBoxLayout:
+        """"New task", and the 1 Describe → 2 Plan → 3 Run breadcrumb.
+
+        The breadcrumb is the design's answer to a complaint the old workbench
+        earned honestly: the compose card and the results page looked like two
+        unrelated screens, and nothing said the plan step sat between them or
+        that you could go back to it. Three labels and two chevrons make the
+        whole shape of the job visible before any of it has happened.
+        """
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        title = QLabel(i18n.t("New task"))
+        title.setObjectName("h2")
+        row.addWidget(title, stretch=1)
+
+        self._steps_crumb = {}
+        crumb = QHBoxLayout()
+        crumb.setSpacing(6)
+        for i, (key, label) in enumerate((("describe", i18n.t("Describe")),
+                                          ("plan", i18n.t("Plan")),
+                                          ("run", i18n.t("Run")))):
+            if i:
+                sep = QLabel()
+                sep.setPixmap(icons.pixmap("chevron-right", 12,
+                                           theme.NEUTRAL[300], stroke=2))
+                crumb.addWidget(sep)
+            step = QLabel(f"{i + 1} {label}")
+            step.setObjectName("stepOff")
+            self._steps_crumb[key] = step
+            crumb.addWidget(step)
+        row.addLayout(crumb)
+        self._set_stage("describe")
+        return row
+
+    def _start_tour(self):
+        """Run the six-step tour, from Home so every step has something to
+        point at. Created lazily — most sessions never ask for it."""
+        self._show_screen("home")
+        if getattr(self, "_tour", None) is None:
+            self._tour = TourOverlay(self)
+        self._tour.start()
+
+    def _push_active_run(self, stage: str, agent: str):
+        """Mirror the live run onto Home's Active runs section.
+
+        Home is a report on what the app is doing, so a run in flight has to
+        appear there — otherwise someone who navigated to Home mid-run sees a
+        dashboard claiming nothing is happening while a browser is being driven
+        behind it.
+        """
+        from widgets.agents_panel import STAGE_COPY
+        planned = list(self.agents_panel.selected_agents().items())
+        if not planned:
+            planned = [(stage, agent)]
+        stages = [(tool, STAGE_COPY.get(key, ("", key.title(), ""))[1])
+                  for key, tool in planned]
+        keys = [k for k, _ in planned]
+        position = keys.index(stage) + 1 if stage in keys else 1
+        self.home_panel.set_active([{
+            "title": (getattr(self, "_last_query", "") or "").strip()
+                     or i18n.t("Untitled task"),
+            "stages": stages,
+            "fraction": position / max(1, len(keys)),
+            "note": i18n.t("{tool} is on “{step}”…").format(
+                tool=agent,
+                step=STAGE_COPY.get(stage, ("", stage.title(), ""))[1]),
+            "started": i18n.t("Step {n} of {total}").format(
+                n=position, total=len(keys)),
+            "hue": theme.WARN,
+        }])
+
+    def _clear_active_run(self):
+        self.home_panel.set_active([])
+
+    def _set_stage(self, stage: str):
+        """Light the current step in the breadcrumb."""
+        for key, label in getattr(self, "_steps_crumb", {}).items():
+            label.setObjectName("stepCur" if key == stage else "stepOff")
+            label.style().unpolish(label)
+            label.style().polish(label)
+
     def _context_column(self) -> QWidget:
+        """The files/prompt rail, which now collapses to a 44px strip.
+
+        It used to be a permanent 272px column, and on a fresh install its
+        entire content was "Nothing attached yet" — a fifth of the window
+        spent saying nothing. The design collapses it to a strip you can click
+        open, and it expands itself the moment a file is actually attached,
+        which is the only time it has anything to report.
+        """
         self.files_panel = FilesPanel()
         self.prompt_panel = PromptPanel()
 
-        rail = QFrame()
-        rail.setObjectName("contextRail")
-        rail.setFixedWidth(272)
+        self.context_rail = QFrame()
+        self.context_rail.setObjectName("contextRail")
         # Scoped by object name on purpose: an unscoped rule set on a parent
         # cascades into every descendant, which would draw this border down
         # the left edge of each child in the rail too.
-        rail.setStyleSheet("QFrame#contextRail { border-left: 1px solid #d0d0d1; }")
-        layout = QVBoxLayout(rail)
-        layout.setContentsMargins(18, 22, 18, 18)
+        self.context_rail.setStyleSheet(
+            f"QFrame#contextRail {{ border-left: 1px solid {theme.HAIRLINE}; }}")
+        outer = QVBoxLayout(self.context_rail)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # -- collapsed: a chevron and a folder glyph -------------------------
+        self._context_strip = QWidget()
+        strip = QVBoxLayout(self._context_strip)
+        strip.setContentsMargins(0, 20, 0, 0)
+        strip.setSpacing(14)
+        open_btn = QPushButton()
+        open_btn.setFlat(True)
+        open_btn.setCursor(Qt.PointingHandCursor)
+        open_btn.setToolTip(i18n.t("Show the files you mentioned"))
+        open_btn.setFixedSize(28, 28)
+        open_btn.setStyleSheet("border: none; background: transparent;")
+        icons.button_icon(open_btn, "chevron-left", 17, theme.NEUTRAL[500])
+        open_btn.clicked.connect(lambda: self._set_context_open(True))
+        strip.addWidget(open_btn, alignment=Qt.AlignHCenter)
+        self._context_count = QLabel()
+        self._context_count.setAlignment(Qt.AlignHCenter)
+        self._context_count.setPixmap(
+            icons.pixmap("folder", 17, theme.NEUTRAL_350))
+        strip.addWidget(self._context_count, alignment=Qt.AlignHCenter)
+        strip.addStretch(1)
+        outer.addWidget(self._context_strip)
+
+        # -- expanded --------------------------------------------------------
+        self._context_body = QWidget()
+        layout = QVBoxLayout(self._context_body)
+        layout.setContentsMargins(18, 20, 18, 18)
         layout.setSpacing(20)
+        head = QHBoxLayout()
+        head.addWidget(kicker(i18n.t("Files you mentioned")), stretch=1)
+        shut = QPushButton()
+        shut.setFlat(True)
+        shut.setCursor(Qt.PointingHandCursor)
+        shut.setToolTip(i18n.t("Hide this panel"))
+        shut.setFixedSize(22, 22)
+        shut.setStyleSheet("border: none; background: transparent;")
+        icons.button_icon(shut, "chevron-right", 15, theme.NEUTRAL[500])
+        shut.clicked.connect(lambda: self._set_context_open(False))
+        head.addWidget(shut)
+        layout.addLayout(head)
         layout.addWidget(self.files_panel)
         layout.addWidget(self.prompt_panel)
         layout.addStretch(1)
 
-        tip = QLabel("Tip.  Click any step to leave it out, or click its tool "
-                     "chip to run that step somewhere else.")
+        tip = QLabel(i18n.t("Tip.  Click any step to leave it out, or click "
+                            "its tool chip to run that step somewhere else."))
         tip.setObjectName("note")
         tip.setWordWrap(True)
         layout.addWidget(tip)
-        return rail
+        outer.addWidget(self._context_body)
+
+        # False, not None: a fresh window has nothing attached, so the rail
+        # starts shut but has not been shut *by anyone* — the first attachment
+        # is still allowed to open it.
+        self._context_user_shut = False
+        self._set_context_open(False)
+        self._context_user_shut = False
+        return self.context_rail
+
+    def _set_context_open(self, open_: bool):
+        self._context_body.setVisible(open_)
+        self._context_strip.setVisible(not open_)
+        self.context_rail.setFixedWidth(280 if open_ else 44)
+        self._context_user_shut = not open_
+
+    def _sync_context_rail(self):
+        """Open the rail the first time something is attached; leave it alone
+        after that.
+
+        Auto-opening every time would fight anyone who deliberately shut it —
+        attaching a second file would reopen a panel they just closed. So the
+        rail opens on the transition from nothing-attached to something, and
+        respects the close from then on.
+        """
+        has = bool(self.attachments) or bool(self.pending_mentions)
+        if has and not self._context_body.isVisible() and not self._context_user_shut:
+            self._set_context_open(True)
+        # The collapsed strip carries the count, so a shut rail still says
+        # whether Prism is holding anything.
+        self._context_count.setPixmap(icons.pixmap(
+            "folder", 17,
+            theme.ACCENT if has else theme.NEUTRAL_350))
+        self._context_count.setToolTip(
+            i18n.t("{n} attached").format(n=len(self.attachments)) if has
+            else i18n.t("Nothing attached yet"))
 
     def _wire(self):
         self.sidebar.command_triggered.connect(self._handle_command)
         self.sidebar.favorite_chosen.connect(self._attach_path)
         self.sidebar.wakeword_toggled.connect(self.toggle_wakeword)
+        self.sidebar.tour_requested.connect(self._start_tour)
 
         self.input_panel.route_clicked.connect(self._route)
         self.input_panel.mic_toggle_clicked.connect(self._toggle_mic)
@@ -401,6 +692,7 @@ class MainWindow(QMainWindow):
         explicit choices sitting visibly in the rail with their own Detach
         button, and the next task usually concerns the same files."""
         self._run_finished = False
+        self._set_stage("describe")
         self.routing = None
         self._last_query = ""
         self._stage_agents = {}
@@ -427,19 +719,37 @@ class MainWindow(QMainWindow):
 
     # ── sidebar commands ─────────────────────────────────────────────────────
     def _handle_command(self, key: str):
-        if key == "catalog":
-            AIDirectoryDialog(self).exec()
+        if key == "home":
+            self._show_screen("home")
+        elif key == "workbench":
+            # "New task" clears the bench; Home → "Describe a task" lands on
+            # whatever is already there, because someone who came back to
+            # finish a sentence has not asked to lose it.
+            if self.work_stack.currentIndex() == RUNNING and self._run_finished:
+                self._reset_for_new_task()
+            self.work_stack.setCurrentIndex(COMPOSE)
+            self._show_screen("workbench")
+        elif key == "catalog":
+            self._show_screen("catalog")
+        elif key == "reel":
+            self._open_reel()
         elif key == "guide":
-            self._open_guide()
+            self._show_screen("guide")
         elif key in ("agents", "profile", "key", "chrome", "licence",
-                     "language", "team", "config"):
-            self._open_setup(focus=key)
+                     "language", "team", "config", "status"):
+            # All nine land on the Settings screen now. The three that have no
+            # section of their own go to the one that states them: your role
+            # is part of Profile, and the API key and Chrome version are both
+            # facts on Status. Editing still happens in SetupDialog — the
+            # screen's buttons open it focused, exactly as the rail used to.
+            self._show_screen("config")
+            self.settings_panel.show_section(
+                {"team": "profile", "key": "status",
+                 "chrome": "status", "config": "licence"}.get(key, key))
         elif key == "login":
             self._open_login_tabs()
-        elif key == "status":
-            self._show_status()
         elif key == "runs":
-            self._show_runs()
+            self._show_screen("runs")
         elif key == "email":
             self._open_email()
         elif key == "boq":
@@ -545,7 +855,31 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _open_inquiry(self):
-        self._authorized_then("inbox", "addon", self._open_inquiry_dialog)
+        # The redesign lands this on a screen rather than straight in the
+        # dialog: the first thing you want on opening it is the state of the
+        # book, not a working modal. The gate is unchanged and still runs
+        # first — the screen reads a register the customer may not own.
+        self._authorized_then("inbox", "addon",
+                              lambda: self._show_screen("inquiry"))
+
+    def _open_inquiry_setup(self):
+        """Straight into setup from the screen's empty state.
+
+        It used to route through the working dialog, which then opened setup
+        itself — so "Set up Inquiry Automation" put three stacked windows on
+        screen (the app, the inbox screen, and the setup sheet on top). The
+        empty state's whole point is that there is nothing to work on yet, so
+        the working screen in the middle has nothing to show.
+        """
+        from PySide6.QtWidgets import QDialog
+        from dialogs.inquiry_setup_dialog import InquirySetupDialog
+        dialog = InquirySetupDialog(self.cfg, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.cfg = dialog.cfg
+            CB.config.save(self.cfg)
+            self.inquiry_panel.cfg = self.cfg
+            self.inquiry_panel.refresh()
+            self.home_panel.refresh()
 
     def _open_inquiry_dialog(self):
         from dialogs.inquiry_dialog import InquiryDialog
@@ -555,9 +889,18 @@ class MainWindow(QMainWindow):
         # up whatever it wrote rather than overwriting it from a stale copy on
         # the next Settings save.
         self.cfg = CB.config.load()
+        # It also works the register — new inquiries, sent quotes, logged
+        # replies. The screen behind it is a report on exactly that file, so
+        # it is stale the moment the dialog closes.
+        self.inquiry_panel.cfg = self.cfg
+        self.inquiry_panel.refresh()
 
     def _open_boq(self):
-        self._authorized_then("boq", "addon", self._open_boq_dialog)
+        # Land on the front door, not straight in the dialog — same reasoning
+        # as Inquiry: the rail switches screens everywhere else, and a modal
+        # thrown from one rail item teaches nothing consistent. The gate still
+        # runs first; the screen's button opens the working dialog.
+        self._authorized_then("boq", "addon", lambda: self._show_screen("boq"))
 
     def _open_boq_dialog(self):
         # Dependency probe comes AFTER the licence check: a customer who
@@ -575,7 +918,8 @@ class MainWindow(QMainWindow):
         BoqDialog(self.cfg, self.attachments, self).exec()
 
     def _open_email(self):
-        self._authorized_then("email", "addon", self._open_email_dialog)
+        self._authorized_then("email", "addon",
+                              lambda: self._show_screen("email"))
 
     def _open_email_dialog(self):
         if not CB.mailer.is_configured(self.cfg):
@@ -665,6 +1009,23 @@ class MainWindow(QMainWindow):
     def _show_runs(self):
         HistoryDialog(self).exec()
 
+    def _open_run_record(self, path: str):
+        """Open History on one particular run.
+
+        The screen lists runs; the dialog is what knows how to re-render a
+        stored record into readable output, so clicking a row hands that path
+        over rather than duplicating the renderer.
+        """
+        dialog = HistoryDialog(self)
+        runs = getattr(dialog, "runs", None)
+        if runs is not None:
+            for i in range(runs.count()):
+                item = runs.item(i)
+                if item is not None and item.data(1000) == path:
+                    runs.setCurrentRow(i)
+                    break
+        dialog.exec()
+
     # ── attachments ───────────────────────────────────────────────────────────
     def _explain(self, error: object, context: str = "") -> None:
         """Show a problem the way a first-time user needs to see it.
@@ -724,6 +1085,7 @@ class MainWindow(QMainWindow):
         self.attachments.extend(fresh)
         try:
             self.files_panel.set_attached(self.attachments)
+            self._sync_context_rail()
         except Exception as e:                          # noqa: BLE001
             # The read succeeded; only the drawing failed. Say so rather than
             # letting the exception escape the slot, where Qt swallows it and
@@ -808,6 +1170,7 @@ class MainWindow(QMainWindow):
     def _detach(self, path: str):
         self.attachments = [a for a in self.attachments if a["path"] != path]
         self.files_panel.set_attached(self.attachments)
+        self._sync_context_rail()
 
     def _detach_folder(self, folder: str):
         """Take a whole "Add folder" back out in one go.
@@ -820,6 +1183,7 @@ class MainWindow(QMainWindow):
         removed = len(self.attachments) - len(keep)
         self.attachments = keep
         self.files_panel.set_attached(self.attachments)
+        self._sync_context_rail()
         if removed:
             where = os.path.basename(folder.rstrip(os.sep))
             self.statusBar().showMessage(
@@ -834,6 +1198,7 @@ class MainWindow(QMainWindow):
         count = len(self.attachments)
         self.attachments = []
         self.files_panel.set_attached(self.attachments)
+        self._sync_context_rail()
         self.statusBar().showMessage(
             (i18n.t("Detached the one attached file.") if count == 1
              else i18n.t("Detached all {n} files.").format(n=count)), 4000)
@@ -1011,6 +1376,7 @@ class MainWindow(QMainWindow):
         # send them now rather than waiting for a run that may never happen.
         licensing.report_usage(getattr(self, "_run_id", ""))
         self.input_panel.set_state("planned")
+        self._set_stage("plan")
         self.routing = routing
         agents_cfg = CB.config.active_agents(self.cfg)
         self.prompt_panel.set_content(self._last_query, routing, agents_cfg)
@@ -1142,6 +1508,7 @@ class MainWindow(QMainWindow):
         self._stage_agents = {}
         self._stage_results = []
         self.input_panel.set_state("running")
+        self._set_stage("run")
         self._run_finished = False
         self.output_panel.set_finished(False)
         self.output_panel.set_running(True)
@@ -1213,6 +1580,7 @@ class MainWindow(QMainWindow):
             agent = payload.get("agent", "")
             self._stage_agents[stage] = agent
             self.output_panel.stage_started(stage, agent)
+            self._push_active_run(stage, agent)
         elif kind == "waiting":
             self.output_panel.stage_waiting(stage, payload.get("seconds", 0))
         elif kind == "stage_done":
@@ -1393,6 +1761,8 @@ class MainWindow(QMainWindow):
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self.input_panel.set_state("done")
+        self._clear_active_run()
+        self._set_stage("run")
         self._run_finished = True
         self.output_panel.set_finished(True)
         self.output_panel.set_running(False)
@@ -1424,6 +1794,8 @@ class MainWindow(QMainWindow):
         self.agents_panel.set_run_enabled(True)
         self.output_panel.set_running(False)
         self.input_panel.set_state("planned")
+        self._set_stage("plan")
+        self._clear_active_run()
         # A failed run is still consumption — it drove browsers and spent Groq
         # tokens — and it is the more interesting half of the usage data.
         licensing.report_usage(getattr(self, "_run_id", ""))

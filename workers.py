@@ -279,14 +279,18 @@ class InboxVerifyWorker(QThread):
     """
     done = Signal(dict, str)      # settings (empty on failure), error ("" on success)
 
-    def __init__(self, address: str, password: str):
+    def __init__(self, address: str, password: str, host: str = ""):
         super().__init__()
         self.address, self.password = address, password
+        # Whatever the user typed into the Mail server box, tried before any
+        # guess. Empty means "work it out".
+        self.host = host
 
     def run(self):
         try:
             inbox = CB.get_inbox()
-            settings, error = inbox.discover(self.address, self.password)
+            settings, error = inbox.discover(self.address, self.password,
+                                             host=self.host)
             self.done.emit(settings, error)
         except Exception as e:
             self.done.emit({}, str(e))

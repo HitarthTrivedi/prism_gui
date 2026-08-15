@@ -742,6 +742,215 @@ QCheckBox::indicator:checked {
     image: url(%ASSETS%/check.svg);
 }
 
+/* ── tabs ────────────────────────────────────────────────────────────────
+   Neither this stylesheet nor the one before it ever styled QTabWidget, so
+   the tab pane fell through to the desktop palette. On a machine running a
+   dark GTK/KDE theme that painted the whole body of the setup dialogs
+   near-black behind our dark ink — unreadable, and nothing to do with the
+   app's own theme. Everything Qt can paint has to be named here.
+
+   Shaped like the segmented strip on Inquiry Automation, so a tab reads the
+   same whether it is in a dialog or on a screen. */
+QTabWidget::pane {
+    background: #ffffff;
+    border: 1px solid #e7e7ea;
+    border-radius: 10px;
+    top: -1px;
+}
+
+QTabWidget > QWidget {
+    background: #ffffff;
+}
+
+QTabBar {
+    background: transparent;
+    qproperty-drawBase: 0;
+}
+
+QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    padding: 8px 16px;
+    margin: 0 4px 4px 0;
+    font-family: "Barlow";
+    font-size: 13px;
+    font-weight: 600;
+    color: #5d5d60;
+}
+
+QTabBar::tab:hover {
+    background: #f7f8f9;
+}
+
+QTabBar::tab:selected {
+    background: #eef6ff;
+    color: #2c455d;
+}
+
+QTabBar::tab:disabled {
+    color: #b7b7ba;
+}
+
+/* ── tables ──────────────────────────────────────────────────────────── */
+QTableWidget, QTableView {
+    background: #ffffff;
+    alternate-background-color: #fbfbfc;
+    border: 1px solid #e7e7ea;
+    border-radius: 10px;
+    gridline-color: #f0f0f1;
+    selection-background-color: #eef6ff;
+    selection-color: #2c455d;
+}
+
+QTableWidget::item, QTableView::item {
+    padding: 7px 9px;
+    border: none;
+}
+
+QHeaderView {
+    background: transparent;
+}
+
+QHeaderView::section {
+    background: #ffffff;
+    border: none;
+    border-bottom: 1px solid #f0f0f1;
+    padding: 9px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #98989b;
+}
+
+QTableCornerButton::section {
+    background: #ffffff;
+    border: none;
+}
+
+/* ── the rest of what Qt can paint ───────────────────────────────────── */
+QTextBrowser {
+    background: #ffffff;
+    border: 1px solid #e7e7ea;
+    border-radius: 9px;
+    padding: 10px 12px;
+    color: #1d1f20;
+}
+
+QRadioButton {
+    color: #1d1f20;
+    spacing: 8px;
+    background: transparent;
+}
+
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #d4d4d7;
+    border-radius: 9px;
+    background: #ffffff;
+}
+
+QRadioButton::indicator:hover { border-color: #5980a6; }
+
+/* No image: a radio's dot is drawn as a thick accent ring, which needs no
+   asset and cannot go missing from a frozen build the way a url() can. */
+QRadioButton::indicator:checked {
+    border: 5px solid #5980a6;
+    background: #ffffff;
+}
+
+QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit {
+    background: #ffffff;
+    border: 1px solid #e7e7ea;
+    border-radius: 9px;
+    padding: 7px 10px;
+    color: #1d1f20;
+    selection-background-color: #5980a6;
+    selection-color: #ffffff;
+}
+
+QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QDateEdit:hover {
+    border-color: #d4d4d7;
+}
+
+QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QDateEdit:focus {
+    border-color: #5980a6;
+}
+
+/* The steppers. Left unstyled they fall through to the desktop's own arrows,
+   which on this system drew as a bare angular bracket half outside the box —
+   the same gap that made the tab pane render dark. Sized generously on
+   purpose: these are pressed by somebody setting a GST rate, not a developer
+   nudging a value. */
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QTimeEdit::up-button, QDateEdit::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 24px;
+    height: 17px;
+    border: none;
+    border-top-right-radius: 9px;
+    background: transparent;
+    image: url(%ASSETS%/caret-up.svg);
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button,
+QTimeEdit::down-button, QDateEdit::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 24px;
+    height: 17px;
+    border: none;
+    border-bottom-right-radius: 9px;
+    background: transparent;
+    image: url(%ASSETS%/caret-down.svg);
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+    background: #f0f0f1;
+}
+
+QSpinBox::up-arrow, QSpinBox::down-arrow,
+QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {
+    width: 12px;
+    height: 12px;
+}
+
+QProgressBar {
+    background: #f0f0f1;
+    border: none;
+    border-radius: 4px;
+    height: 8px;
+    text-align: center;
+    font-size: 11px;
+    color: #5d5d60;
+}
+
+QProgressBar::chunk {
+    background: #5980a6;
+    border-radius: 4px;
+}
+
+QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 5px;
+    color: #424244;
+}
+
+QToolButton:hover { background: #f7f8f9; }
+QToolButton:pressed { background: #f0f0f1; }
+
+/* Labels never paint a background of their own. Without this a QLabel on a
+   dark desktop theme draws the system window colour behind its text; the
+   painted components (Pill, Avatar, ToolBadge, IconPad) set their own
+   background via a widget stylesheet, which outranks this rule. */
+QLabel {
+    background: transparent;
+}
+
 /* ── groupbox (setup dialogs) ────────────────────────────────────────── */
 QGroupBox {
     background: transparent;

@@ -81,3 +81,14 @@ cryptography
 #   Linux:  sudo apt install portaudio19-dev
 # then:
 pyaudio
+
+# ── Mail-server discovery (optional, strongly recommended)
+# Lets setup find the IMAP server from the domain's MX record. Without it,
+# Prism can only guess imap./mail./<their-domain> — which works for a company
+# running its own mail, and cannot work for anyone hosted on GoDaddy, Google
+# Workspace, Microsoft 365 or Zoho. That is most small manufacturers, and the
+# symptom is "the mail server didn't answer" on a perfectly good mailbox.
+#
+# core/inbox.py imports it defensively and falls back to guessing when absent,
+# so leaving it out degrades setup rather than breaking the build.
+dnspython

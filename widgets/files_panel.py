@@ -129,7 +129,9 @@ class FilesPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(9)
-        root.addWidget(kicker("Files you mentioned"))
+        # No "Files you mentioned" heading here. The context rail draws it
+        # itself, on the same line as the collapse chevron — having both
+        # printed it put the title on screen twice.
 
         self.empty = QLabel(
             "Nothing attached yet. Mention a file out loud, or use Add file.")

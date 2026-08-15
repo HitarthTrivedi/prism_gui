@@ -61,6 +61,10 @@ _STROKED: dict[str, list[str]] = {
     "trash":      ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13"],
     "x":          ["M6 6l12 12", "M18 6L6 18"],
     "alert":      ["M12 4l9 16H3z", "M12 10v4", "M12 17h.01"],
+    # Two subpaths on purpose — body and clapper — so the dot badge the
+    # dashboard paints over the top has a shoulder to sit on.
+    "bell":       ["M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z",
+                   "M10 20a2 2 0 0 0 4 0"],
     "spinner":    ["M12 4v4", "M12 16v4", "M4 12h4", "M16 12h4"],
     "bulb":       ["M12 3a6 6 0 0 1 3.5 10.9V17h-7v-3.1A6 6 0 0 1 12 3z",
                    "M10 20h4"],

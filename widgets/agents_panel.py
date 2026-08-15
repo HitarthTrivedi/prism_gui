@@ -18,7 +18,7 @@ import core_bridge as CB
 import i18n
 import theme
 from widgets import icons
-from widgets.controls import StepMark, ToolChip, heading, meta
+from widgets.controls import StepMark, ToolChip, elevate, heading, meta
 
 # stage -> (icon, plain title, plain one-liner)
 STAGE_COPY = {
@@ -42,22 +42,25 @@ class PlanRow(QFrame):
         super().__init__(parent)
         self.stage = stage
         self.setObjectName("row")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
+        elevate(self, theme.SHADOW_CARD)
 
         icon_name, title, blurb = STAGE_COPY.get(
             stage, ("grid", meta_data.get("label", stage), meta_data.get("desc", "")))
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(14, 11, 14, 11)
-        row.setSpacing(13)
+        row.setContentsMargins(16, 14, 16, 14)
+        row.setSpacing(14)
 
         self.mark = StepMark(included)
         self.mark.setToolTip("Click to leave this step out of the run")
         row.addWidget(self.mark)
 
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap(icon_name, 18, theme.ACCENT))
-        row.addWidget(glyph)
+        self._icon_name = icon_name
+        self.glyph = QLabel()
+        self.glyph.setPixmap(icons.pixmap(icon_name, 18, theme.ACCENT))
+        row.addWidget(self.glyph)
 
         text = QVBoxLayout()
         text.setSpacing(1)
@@ -72,10 +75,10 @@ class PlanRow(QFrame):
             head.addWidget(self._tag("Suggested", "tagAccent"))
         head.addStretch(1)
         text.addLayout(head)
-        blurb_label = QLabel(blurb)
-        blurb_label.setObjectName("meta")
-        blurb_label.setWordWrap(True)
-        text.addWidget(blurb_label)
+        self.blurb = QLabel(blurb)
+        self.blurb.setObjectName("meta")
+        self.blurb.setWordWrap(True)
+        text.addWidget(self.blurb)
         row.addLayout(text, stretch=1)
 
         tools = meta_data.get("agents", []) or ([current] if current else [])
@@ -102,12 +105,28 @@ class PlanRow(QFrame):
     def set_included(self, included: bool):
         self._included = included
         self.mark.set_included(included)
-        self.setObjectName("row" if included else "rowMuted")
-        self.style().unpolish(self)
-        self.style().polish(self)
         self.name.setStyleSheet(
             "" if included else f"color: {theme.NEUTRAL[500]};")
         self.chip.setEnabled(included)
+        self.blurb.setStyleSheet(
+            "" if included else f"color: {theme.NEUTRAL[400]};")
+        self.glyph.setPixmap(icons.pixmap(
+            self._icon_name, 18,
+            theme.ACCENT if included else theme.NEUTRAL[400]))
+        # The row keeps its card shape and loses its lift instead. Swapping it
+        # for an outlined box changed the shape of the list every time a step
+        # was dropped, which made the plan feel like it was being rebuilt
+        # rather than edited.
+        #
+        # Expressed in colour, not opacity: a widget can hold only one
+        # QGraphicsEffect, and the shadow is already using it.
+        effect = self.graphicsEffect()
+        if effect is not None:
+            effect.setEnabled(included)
+        self.setStyleSheet(
+            "" if included
+            else f"#row {{ background: {theme.NEUTRAL[100]};"
+                 f" border-radius: 11px; }}")
 
     def selected_agent(self) -> str | None:
         return self.chip.current()
@@ -129,14 +148,14 @@ class AgentsPanel(QWidget):
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        head.addWidget(heading("Your steps"), stretch=1)
+        head.addWidget(heading(i18n.t("Your plan"), level=5), stretch=1)
         self.count = meta("")
         head.addWidget(self.count)
         root.addLayout(head)
 
-        self.empty = QLabel(
-            "Describe a task above and press Show steps — Prism will lay "
-            "them out here, and you can drop any of them before it runs.")
+        self.empty = QLabel(i18n.t(
+            "Describe a task above and press Make a plan — Prism will lay "
+            "them out here, and you can drop any of them before it runs."))
         self.empty.setObjectName("emptyState")
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
@@ -147,24 +166,29 @@ class AgentsPanel(QWidget):
         self.rows_box.setSpacing(9)
         root.addWidget(rows_wrap)
 
-        self.run_btn = QPushButton("  Start the work")
+        self.run_btn = QPushButton(f"  {i18n.t('Start the work')}")
         self.run_btn.setObjectName("primaryBtn")
         self.run_btn.setCursor(Qt.PointingHandCursor)
         self.run_btn.setMinimumHeight(44)
-        icons.button_icon(self.run_btn, "play", 16, theme.BG)
+        icons.button_icon(self.run_btn, "play", 15, "#ffffff")
         self.run_btn.setEnabled(False)
-        self.run_btn.setToolTip("Show steps first — this fills in once Prism picks them.")
+        self.run_btn.setToolTip(i18n.t(
+            "Make a plan first — this fills in once Prism picks the steps."))
         self.run_btn.clicked.connect(self.run_requested.emit)
 
         # "Start the work" is the commitment; this is the way back out of it.
         # Without it a plan you did not want could only be escaped by editing
         # the task and re-planning over the top, which is not obviously
         # possible and leaves the old plan armed in the meantime.
-        cta = QHBoxLayout()
+        # A widget, not a bare layout, so the window can lift it out of the
+        # scrolling column and pin it — see main_window._work_column.
+        self.cta = QWidget()
+        cta = QHBoxLayout(self.cta)
+        cta.setContentsMargins(0, 0, 0, 0)
         cta.setSpacing(9)
         cta.addWidget(self.run_btn, stretch=1)
-        self.discard_btn = QPushButton(" Discard")
-        self.discard_btn.setObjectName("smallBtn")
+        self.discard_btn = QPushButton(f" {i18n.t('Discard')}")
+
         self.discard_btn.setCursor(Qt.PointingHandCursor)
         self.discard_btn.setMinimumHeight(44)
         self.discard_btn.setToolTip(
@@ -174,16 +198,21 @@ class AgentsPanel(QWidget):
         self.discard_btn.clicked.connect(self.discard_requested.emit)
         self.discard_btn.setVisible(False)
         cta.addWidget(self.discard_btn)
-        root.addLayout(cta)
+        root.addWidget(self.cta)
 
     # ── state ─────────────────────────────────────────────────────────────
     def set_run_enabled(self, enabled: bool):
         self.run_btn.setEnabled(enabled)
         self.run_btn.setToolTip(
-            "Runs every step still switched on." if enabled else
-            "Show steps first — this fills in once Prism picks them.")
+            i18n.t("Runs every step still switched on.") if enabled else
+            i18n.t("Make a plan first — this fills in once Prism picks the "
+                   "steps."))
         # Discard only exists while there are steps to discard.
         self.discard_btn.setVisible(enabled)
+        # The whole bar goes with it: pinned to the foot of the column, an
+        # always-present Start button on an empty bench is a dead control
+        # occupying the most valuable strip on the screen.
+        self.cta.setVisible(enabled)
 
     def clear(self):
         self._rows = []

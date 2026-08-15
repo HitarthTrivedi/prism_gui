@@ -25,6 +25,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import date
 from email.message import EmailMessage
 
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 import core_bridge as CB  # noqa: E402
 from core import inbox, mailflow, register, triage  # noqa: E402
 from dialogs import inquiry_dialog as UI  # noqa: E402
+import dialogs.inquiry_setup_dialog as UI_SETUP  # noqa: E402
 from dialogs.inquiry_setup_dialog import (  # noqa: E402
     InquirySetupDialog, is_ready, settings_of)
 from widgets import sidebar  # noqa: E402
@@ -214,6 +216,69 @@ class SetupKeepsWhatItIsGiven(unittest.TestCase):
             dialog._save()
         self.assertEqual(settings_of(dialog.cfg)["account"]["host"],
                          "imap.acme.co.in")
+
+    def test_a_typed_server_is_tried_before_any_guess(self):
+        """The Mail server box used to be ignored by "Find my server and test".
+
+        Anyone whose mail is hosted rather than on their own domain — GoDaddy,
+        Google Workspace, Microsoft 365 — cannot be found by guessing
+        imap./mail./<domain>, so the way out is to type the server their
+        provider documents. That only works if we actually try it.
+        """
+        tried = []
+
+        def fake_connect(ic, timeout=20):
+            tried.append(ic["host"])
+            raise OSError("nope")
+
+        with mock.patch.object(inbox, "_connect", fake_connect):
+            inbox.discover("sales@acme.co.in", "p",
+                           host="imap.secureserver.net")
+        self.assertEqual(tried[0], "imap.secureserver.net")
+
+    def test_a_typed_server_does_not_stop_the_guesses(self):
+        """A typo in the box must not be a dead end — whatever answers wins."""
+        tried = []
+
+        def fake_connect(ic, timeout=20):
+            tried.append(ic["host"])
+            raise OSError("nope")
+
+        with mock.patch.object(inbox, "_connect", fake_connect):
+            inbox.discover("sales@acme.co.in", "p", host="typo.example")
+        self.assertEqual(tried[0], "typo.example")
+        self.assertIn("imap.acme.co.in", tried)
+
+    def test_the_typed_server_is_not_tried_twice(self):
+        tried = []
+
+        def fake_connect(ic, timeout=20):
+            tried.append(ic["host"])
+            raise OSError("nope")
+
+        with mock.patch.object(inbox, "_connect", fake_connect):
+            inbox.discover("sales@acme.co.in", "p", host="imap.acme.co.in")
+        self.assertEqual(tried.count("imap.acme.co.in"), 1)
+
+    def test_the_dialog_hands_the_typed_server_to_the_worker(self):
+        """The bug was here, not in discover(): the dialog never read the box."""
+        seen = {}
+
+        class FakeWorker:
+            def __init__(self, address, password, host=""):
+                seen.update(address=address, password=password, host=host)
+                self.done = mock.MagicMock()
+
+            def start(self):
+                pass
+
+        dialog = InquirySetupDialog({})
+        dialog.addr.setText("sales@acme.co.in")
+        dialog.password.setText("p")
+        dialog.host.setText("imap.secureserver.net")
+        with mock.patch.object(UI_SETUP, "InboxVerifyWorker", FakeWorker):
+            dialog._test()
+        self.assertEqual(seen.get("host"), "imap.secureserver.net")
 
     def test_the_folder_is_created(self):
         target = os.path.join(self.folder, "Prism Inquiries")
@@ -440,11 +505,14 @@ class NoJargonOnScreen(unittest.TestCase):
 
 class ItIsOnTheShelf(unittest.TestCase):
 
+    # The rail's one grouped SECONDARY list became three flat ones when the
+    # redesign split the shelf (ADDONS) from the generic destinations (MORE)
+    # and the settings shortcuts (DIRECT). The tuple layout is unchanged —
+    # key, label, icon, tip, feature — so only the lookup moved.
     def _entry(self):
-        for _group, items in sidebar.SECONDARY:
-            for item in items:
-                if item[0] == "inquiry":
-                    return item
+        for item in sidebar.ADDONS:
+            if item[0] == "inquiry":
+                return item
         return None
 
     def test_it_is_in_the_sidebar(self):
@@ -457,7 +525,7 @@ class ItIsOnTheShelf(unittest.TestCase):
     def test_it_sits_above_boq(self):
         """It is the only add-on used every day, so it goes where the eye
         lands. BOQ is occasional; this is the reason the app gets opened."""
-        keys = [item[0] for _group, items in sidebar.SECONDARY for item in items]
+        keys = [item[0] for item in sidebar.ADDONS]
         self.assertLess(keys.index("inquiry"), keys.index("boq"))
 
     def test_the_icon_exists(self):

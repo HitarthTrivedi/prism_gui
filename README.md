@@ -232,9 +232,17 @@ python3 -m devtools.scenarios        # 148 end-to-end scenario checks
 python3 devtools/inbox_demo.py       # the inbox pipeline on sample mail
 ```
 
-588 tests, plus the 148 scenarios. Nothing in either suite touches the network:
+705 tests, plus the 148 scenarios. Nothing in either suite touches the network:
 IMAP and Groq are both faked, because a test that needs a mail server is a test
 nobody runs.
+
+Most of the GUI suites build a real `MainWindow`, which asks the licence server
+before it will do anything. Export `PRISM_LICENSE_OFFLINE_DEV=1` so they fall
+back to a local token instead of waiting on the network:
+
+```bash
+PRISM_LICENSE_OFFLINE_DEV=1 python3 -m pytest tests/ -q
+```
 
 **That one deselect is not decoration.** `test_each_task_is_planned_in_turn`
 builds a real `MainWindow`, which reaches for the licence server, and it hangs

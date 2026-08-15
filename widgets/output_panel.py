@@ -1,52 +1,141 @@
 """Live per-stage output, shown in the centre column while the run is on.
 
 Same contract as before — one card per stage, Copy and Open-in-tool on each —
-restyled onto the blueprint frame so a running step reads as the same kind of
-object as the plan step it came from. Per-stage copy matters: if a later stage
-fails, the user can still take the last good text and finish by hand."""
+but laid out as the design's run timeline: a dot-and-line rail down the left,
+so the stack of stages reads as a sequence with a position in it rather than as
+a pile of identical panels.
+
+Per-stage copy matters: if a later stage fails, the user can still take the last
+good text and finish by hand."""
 from __future__ import annotations
 import os
 from html import escape as _escape
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import (
+    Qt, QPropertyAnimation, QEasingCurve, QRectF, QTimer, QUrl, Signal,
+)
+from PySide6.QtGui import QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
-    QScrollArea, QApplication, QGraphicsOpacityEffect,
+    QScrollArea, QApplication, QGraphicsOpacityEffect, QSizePolicy,
 )
 
+import i18n
 import paths
 import theme
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
-from widgets.blueprint import BlueprintFrame
-from widgets.controls import Chip, heading
+from widgets.controls import Card, Pill, heading
 from widgets.markdown import render_markdown
 
 
-class StageCard(BlueprintFrame):
+class TimelineDot(QWidget):
+    """The circle and the line beneath it, down the left of a run.
+
+    This is what turns a stack of stage cards into a *sequence*. The old
+    layout gave every stage an identical frame, so "which one is Prism on"
+    could only be read by finding the one chip that said working — on a
+    four-stage run that is a search, not a glance. Here the filled dots are
+    behind you, the pulsing one is now, and the hollow ones are still to come.
+    """
+
+    SIZE = 30
+
+    def __init__(self, icon_name: str, parent=None):
+        super().__init__(parent)
+        self._icon_name = icon_name
+        self._state = "queued"
+        self._last = False
+        self.setFixedWidth(self.SIZE)
+        self.setMinimumHeight(self.SIZE)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+
+    def set_state(self, state: str, last: bool = False):
+        self._state, self._last = state, last
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        done = self._state == "done"
+        running = self._state == "running"
+        failed = self._state == "failed"
+
+        if failed:
+            fill, ink = theme.ERR_BG, theme.ERR
+        elif done:
+            fill, ink = theme.ACCENT, "#ffffff"
+        elif running:
+            fill, ink = theme.ACCENT_RAMP[100], theme.ACCENT_RAMP[700]
+        else:
+            fill, ink = theme.NEUTRAL[100], theme.NEUTRAL[400]
+
+        # The running dot is ramp-100 on a ramp-adjacent canvas, which is very
+        # nearly the same value — the design gets away with it because the dot
+        # is also pulsing. Static, it needs a ring, or the one stage you most
+        # want to find is the one that disappears.
+        if running:
+            painter.setPen(QPen(theme.c(theme.ACCENT, 0.45), 1.5))
+        else:
+            painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.c(fill))
+        inset = 0.75 if running else 0
+        painter.drawEllipse(QRectF(inset, inset, self.SIZE - inset * 2,
+                                   self.SIZE - inset * 2))
+        glyph = icons.pixmap(
+            "check" if done else ("alert" if failed else self._icon_name),
+            15, ink)
+        painter.drawPixmap(int((self.SIZE - 15) / 2),
+                           int((self.SIZE - 15) / 2), glyph)
+
+        # The connector only reaches the next dot, so the last stage does not
+        # trail a line into empty space.
+        if not self._last and self.height() > self.SIZE:
+            painter.setBrush(theme.c(theme.ACCENT if done else theme.NEUTRAL[200]))
+            painter.drawRect(QRectF((self.SIZE - 2) / 2, self.SIZE, 2,
+                                    self.height() - self.SIZE))
+
+
+class StageCard(QWidget):
     def __init__(self, stage: str, agent: str, parent=None):
-        super().__init__(parent, padding=(16, 13, 16, 13), surface=True)
+        super().__init__(parent)
         self.stage = stage
         self._url = ""
         self._raw = ""   # raw text kept for copy, even when the body is rich
 
         icon_name, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
 
+        shell = QHBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(14)
+        # No alignment: the dot column must fill this row's full height so its
+        # connector reaches the next stage. Top-aligning it collapsed the
+        # widget to its own sizeHint — which for a bare QWidget is zero — and
+        # nothing painted at all.
+        self.dot = TimelineDot(icon_name)
+        shell.addWidget(self.dot)
+
+        card = Card()
+        self.panel = card
+        # The gap between stages lives inside this row rather than between
+        # rows, so the dot column spans it and the connector stays unbroken.
+        # With the spacing in the parent layout the line came out dashed.
+        gapped = QVBoxLayout()
+        gapped.setContentsMargins(0, 0, 0, 14)
+        gapped.addWidget(card)
+        shell.addLayout(gapped, stretch=1)
+        self.content = card.body((16, 14, 16, 14), spacing=0)
+
         head = QHBoxLayout()
         head.setSpacing(9)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap(icon_name, 18, theme.ACCENT))
-        head.addWidget(glyph)
         name = QLabel(title)
-        name.setObjectName("h5")
-        head.addWidget(name)
-        tool = QLabel(agent)
-        tool.setObjectName("tagNeutral")
-        head.addWidget(tool)
-        head.addStretch(1)
-        self.status = Chip("queued…", "clock", "tagWarn")
+        name.setObjectName("h6")
+        head.addWidget(name, stretch=1)
+        self.tool = Pill(agent, "neutral")
+        head.addWidget(self.tool)
+        self.status = Pill(i18n.t("Queued"), "quiet")
         head.addWidget(self.status)
         self.content.addLayout(head)
+        self.content.addSpacing(6)
 
         self.body = QTextEdit()
         self.body.setObjectName("stageBody")
@@ -93,17 +182,31 @@ class StageCard(BlueprintFrame):
         row.addStretch(1)
         self.content.addWidget(self.actions)
 
-        # The fade goes on the frame's inner panel — a widget holds only one
-        # QGraphicsEffect, and the frame itself must stay free to paint its
-        # registration marks.
-        effect = QGraphicsOpacityEffect(self.panel)
-        self.panel.setGraphicsEffect(effect)
+        # The card owns its one QGraphicsEffect slot for the drop shadow, so
+        # the entrance fade goes on this outer widget instead. Same effect on
+        # screen — the whole row fades in together, dot and all, which is
+        # actually truer to a stage arriving than fading the card alone was.
+        effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(effect)
         self._fade_anim = QPropertyAnimation(effect, b"opacity", self)
         self._fade_anim.setDuration(220)
         self._fade_anim.setStartValue(0.0)
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.setEasingCurve(QEasingCurve.OutQuart)
         self._fade_anim.start()
+
+    def _set_status(self, text: str, tone: str, dot: str):
+        """One call for the pill and the timeline dot, so the two can never
+        disagree about what this stage is doing."""
+        self.status.setText(text)
+        self.status.set_tone(tone)
+        self.dot.set_state(dot, self._last)
+
+    _last = False
+
+    def set_last(self, last: bool):
+        self._last = last
+        self.dot.set_state(self.dot._state, last)
 
     def _autosize(self):
         has_content = bool(self.body.toPlainText().strip())
@@ -131,7 +234,8 @@ class StageCard(BlueprintFrame):
             icons.button_icon(self.open_btn, "external", 14, theme.ACCENT_RAMP[700])
 
     def set_waiting(self, seconds: int):
-        self.status.set(f"waiting up to {seconds}s", "clock", "tagWarn")
+        self._set_status(i18n.t("Waiting up to {n}s").format(n=seconds), "warn",
+                         "running")
 
     def set_done(self, texts: list[str], url: str, timed_out: bool = False):
         self._set_url(url)
@@ -160,7 +264,7 @@ class StageCard(BlueprintFrame):
                 f"<b>{_escape(os.path.basename(url))}</b>{size}<br>"
                 f"<span style='color:{theme.NEUTRAL[600]}'>"
                 f"{_escape(os.path.dirname(url))}</span></p>")
-            self.status.set("done", "check", "tagOk")
+            self._set_status(i18n.t("Done"), "accent", "done")
             self.copy_btn.setEnabled(True)
             return
         if texts:
@@ -169,9 +273,9 @@ class StageCard(BlueprintFrame):
             # but keep the raw text for copy so paste-elsewhere is verbatim
             self.body.setHtml(note + render_markdown(self._raw))
             if timed_out:
-                self.status.set("still generating", "clock", "tagWarn")
+                self._set_status(i18n.t("Still generating"), "warn", "running")
             else:
-                self.status.set("done", "check", "tagOk")
+                self._set_status(i18n.t("Done"), "accent", "done")
             self.copy_btn.setEnabled(True)
         else:
             # scrape missed the response — point the user at the live tab
@@ -185,12 +289,13 @@ class StageCard(BlueprintFrame):
                 if url else
                 f"<p style='color:{theme.NEUTRAL[600]}'>No response was "
                 "captured for this step.</p>")
-            self.status.set("still generating" if timed_out else "no response",
-                            "clock" if timed_out else "alert", "tagWarn")
+            self._set_status(
+                i18n.t("Still generating") if timed_out else i18n.t("No response"),
+                "warn", "running" if timed_out else "failed")
             self.copy_btn.setEnabled(False)
 
     def set_error(self, error: str, url: str = ""):
-        self.status.set("failed", "alert", "tagErr")
+        self._set_status(i18n.t("Failed"), "err", "failed")
         self._raw = error
         # A failed step can still leave a live tab behind — the tool often
         # finishes on its own after Prism loses the thread. Offer it.
@@ -270,7 +375,9 @@ class OutputPanel(QWidget):
         inner = QWidget()
         self.cards_box = QVBoxLayout(inner)
         self.cards_box.setContentsMargins(0, 2, 0, 2)
-        self.cards_box.setSpacing(6)
+        # Zero: each StageCard carries its own bottom gap so the timeline
+        # connector runs unbroken between one dot and the next.
+        self.cards_box.setSpacing(0)
         self.cards_box.addStretch(1)
         scroll.setWidget(inner)
         root.addWidget(scroll, stretch=1)
@@ -318,7 +425,14 @@ class OutputPanel(QWidget):
 
     def stage_started(self, stage: str, agent: str):
         self.empty.setVisible(False)
+        # Cards arrive one per stage as the run reaches them, so the newest is
+        # always the tail of the timeline. Un-tail the one before it, or the
+        # connector stops at the second-to-last dot and the chain looks broken.
+        for existing in self._cards.values():
+            existing.set_last(False)
         card = StageCard(stage, agent)
+        card.set_last(True)
+        card._set_status(i18n.t("Working…"), "warn", "running")
         self._cards[stage] = card
         self.cards_box.insertWidget(self.cards_box.count() - 1, card)
 
