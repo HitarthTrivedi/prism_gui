@@ -24,3 +24,10 @@ release/
 # OAuth client for the Google Drive integration — never commit
 integrations/google_client.json
 integrations/token.json
+
+# Agent skills installed with `npx skills add`. The skill BODIES are somebody
+# else's repo at a pinned commit — skills-lock.json records which one, and is
+# committed so everyone resolves the same set. Vendoring the folders as well
+# would put thousands of lines of third-party prose in our diffs for no gain.
+.agents/
+.claude/skills/
