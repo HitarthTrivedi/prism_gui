@@ -400,3 +400,58 @@ class WhenTheDesignWillNotParse(unittest.TestCase):
                     ".y{color:rgba(0,0,0,.5)}",
                     "@import url('https://fonts.googleapis.com/css2?x=1');"):
             self.assertEqual(RW._unlink_markdown(css), css, css)
+
+
+class AReelWithNoPictures(unittest.TestCase):
+    """Image generation fails for ordinary reasons — a quota, a content
+    refusal, a render that never finished. None of them should cost the
+    customer the whole reel."""
+
+    def setUp(self):
+        import core_bridge  # noqa: F401
+        from core import assets as A
+        self.A = A
+
+    def test_the_design_stage_is_told_there_are_none(self):
+        """This was the bug. An empty asset list left the prompt simply not
+        mentioning pictures, so a model asked for a premium product reel
+        assumed the usual ones existed and wrote src='asset:art1'."""
+        said = self.A.manifest({})
+        self.assertTrue(said.strip(), "an empty manifest says nothing at all")
+        self.assertIn("THERE ARE NO IMAGES", said)
+
+    def test_it_forbids_referencing_assets(self):
+        said = self.A.manifest({})
+        self.assertIn("Do NOT reference asset:", said)
+
+    def test_it_forbids_leaving_gaps_for_them(self):
+        """Half the failure: a layout designed around pictures that never
+        arrive reads as broken rather than as spare."""
+        self.assertIn("Nothing is coming", self.A.manifest({}))
+
+    def test_it_says_what_to_do_instead(self):
+        """A prohibition on its own produces a timid design. It has to be
+        told that type-led IS the design."""
+        said = self.A.manifest({}).lower()
+        for tool in ("typography", "negative space", "colour", "css"):
+            self.assertIn(tool, said, tool)
+
+    def test_it_frames_this_as_a_real_design_not_a_degraded_one(self):
+        self.assertIn("legitimate", self.A.manifest({}))
+
+    def test_a_real_asset_list_is_unchanged(self):
+        table = {"logo": {"kind": "logo", "w": 512, "h": 512,
+                          "alpha": True, "made": False}}
+        said = self.A.manifest(table)
+        self.assertIn("asset:logo — 512x512", said)
+        self.assertNotIn("THERE ARE NO IMAGES", said)
+
+    def test_the_renderer_still_strips_anything_that_slips_through(self):
+        """Belt and braces. The instruction is a prompt, and prompts are
+        advice — an unresolved src must never reach the finished video."""
+        from core import reel_web as RW
+        html = ("<div><img src='asset:art1' alt=''>"
+                "<span style='background:url(asset:art2)'>hi</span></div>")
+        out = RW._drop_missing(html)
+        self.assertNotIn("asset:", out)
+        self.assertIn("hi", out)
