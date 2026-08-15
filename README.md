@@ -236,13 +236,19 @@ python3 devtools/inbox_demo.py       # the inbox pipeline on sample mail
 IMAP and Groq are both faked, because a test that needs a mail server is a test
 nobody runs.
 
-Most of the GUI suites build a real `MainWindow`, which asks the licence server
-before it will do anything. Export `PRISM_LICENSE_OFFLINE_DEV=1` so they fall
-back to a local token instead of waiting on the network:
+**Do NOT export `PRISM_LICENSE_OFFLINE_DEV=1` to run the suite.** This file
+used to tell you to, on the grounds that the GUI suites would otherwise "wait
+on the network". That is not what the variable does: `licensing._offline_dev()`
+is read only inside `_unreachable_answer()`, i.e. *after* the HTTP call has
+already raised `Unreachable`. It changes the ANSWER, never the round trip, so
+it cannot make a hanging test finish.
 
-```bash
-PRISM_LICENSE_OFFLINE_DEV=1 python3 -m pytest tests/ -q
-```
+What it does do is open a production bypass underneath the revocation test:
+with the hatch open, a revoked licence's offline fallback is granted and
+`test_h_a_revoked_licence_gets_no_lease_and_loses_its_cache` fails on
+`True is not false`. That failure was read as known contamination for months.
+`tests/conftest.py` now strips the variable per test, so the suite is
+insulated either way — but do not put it back in the invocation.
 
 **That one deselect is not decoration.** `test_each_task_is_planned_in_turn`
 builds a real `MainWindow`, which reaches for the licence server, and it hangs

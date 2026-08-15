@@ -6,6 +6,8 @@ check-square used as a step marker. Each is painted here against the same
 tokens style.qss uses, plus the plain-QLabel helpers (kicker, heading, meta)
 that every panel repeats."""
 from __future__ import annotations
+import os
+
 from PySide6.QtCore import (
     Qt, Signal, QSize, QRect, QRectF, QPropertyAnimation, QEasingCurve, Property,
 )
@@ -67,6 +69,37 @@ def icon_label(icon_name: str, text: str, size: int = 16,
 
 
 # ── elevation ───────────────────────────────────────────────────────────────
+def shadows_enabled() -> bool:
+    """Whether to hang a QGraphicsDropShadowEffect off every card.
+
+    There is a switch here because the effect is the single least portable
+    thing in the interface. A widget with a QGraphicsEffect is painted through
+    a separate pipeline, and on some setups — software rasterisers, virtual
+    machines, remote desktop sessions, older Intel drivers — that pipeline
+    produces NOTHING. The widget reserves its space in the layout and never
+    paints, so the screen shows correctly-sized gaps where the cards should be
+    while everything without an effect (headings, the timeline dots) draws
+    normally. It looks like the app lost its content rather than like a
+    graphics problem, which is what makes it hard to report and hard to guess.
+
+    Off means the cards lose their lift and keep everything else. That is a
+    trade worth making instantly on a machine where the alternative is a blank
+    screen — and it is the first thing to try when someone reports one.
+
+        PRISM_NO_SHADOWS=1        one run, no restart of anything else
+        ~/.prism/config.json      "no_shadows": true, to make it stick
+    """
+    if os.environ.get("PRISM_NO_SHADOWS"):
+        return False
+    try:
+        import core_bridge as CB
+        if (CB.config.load() or {}).get("no_shadows"):
+            return False
+    except Exception:
+        pass                    # config unreadable is not a reason to go plain
+    return True
+
+
 def elevate(widget: QWidget, spec=None, hue: str = None) -> QWidget:
     """Give a widget the design's soft drop shadow.
 
@@ -79,7 +112,12 @@ def elevate(widget: QWidget, spec=None, hue: str = None) -> QWidget:
 
     Note the caller must leave margin around the widget for the shadow to fall
     into, or the parent layout clips it. Cards are laid out with that in mind.
+
+    Returns the widget either way, so callers never have to care whether the
+    shadow was actually applied — see shadows_enabled().
     """
+    if not shadows_enabled():
+        return widget
     blur, dy, alpha = spec or theme.SHADOW_CARD
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur)

@@ -128,9 +128,16 @@ datas = [
 # checkout and have no purpose in a bundle. requirements.txt is worth removing
 # on its own account: it is unpinned, so that launcher also pulled whatever
 # PyPI served that day into the customer's install folder.
-_ENGINE_SKIP = {"run_prism.bat", "run_prism.command", "requirements.txt"}
+_ENGINE_SKIP = {"run_prism.bat", "run_prism.command", "requirements.txt",
+                # A submodule's .git is a one-line gitlink file, so the dirs
+                # filter below never catches it. Harmless, and it has no
+                # business in a customer's install folder.
+                ".git", ".gitignore", ".gitmodules"}
+# demo/ is sample CSVs for a walkthrough that is not part of the product, and
+# nothing in the app reads it.
+_ENGINE_SKIP_DIRS = ("__pycache__", ".git", ".venv", "demo", "tests")
 for root, dirs, files in os.walk(ENGINE_DIR):
-    dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git", ".venv")]
+    dirs[:] = [d for d in dirs if d not in _ENGINE_SKIP_DIRS]
     for name in files:
         if name.endswith((".py", ".pyc", ".pyo")) or name in _ENGINE_SKIP:
             continue
