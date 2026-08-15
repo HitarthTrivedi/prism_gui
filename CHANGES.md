@@ -4,7 +4,244 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **586 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+Tests: **727 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+
+---
+
+# Round 5 — a week of real runs, and what they broke
+
+Nothing in this round came from planning. Every entry is something that went
+wrong while the product was being used to make an actual reel for an actual
+prospect, and several of them had been quietly wrong for a long time.
+
+The theme, if there is one: **Prism was losing information at the seams.** Not
+crashing — losing. The customer's own words on the way into a prompt, the
+customer's CSS on the way out of a browser, the evidence on the way into an
+error message. Every one of those failures reads as "the AI did a bad job".
+
+## The customer's own words now reach the tool doing the work
+
+The most expensive bug here, and the hardest to see.
+
+Prism expands a request into a professional task brief, and the router writes
+each stage prompt FROM that brief. The router is handed the raw request and
+told it wins on scope — but the stage prompts it produces were only as good as
+what it chose to carry across, and **the agents never saw the original at
+all.**
+
+A customer asked for a reel about *"Consiz, a mouse with a middle button that
+summarises whatever you have selected and lets you ask questions about it"*.
+The brief came back as *"showcase the mouse, demonstrate its features, explain
+its benefits"*. The button, the selecting, the summarising, the asking — every
+mechanical fact, gone. Claude then wrote a genuinely good script about a
+generic productivity mouse, because a generic productivity mouse was all it
+had ever been told about.
+
+Nothing downstream can catch that. A summary that drops the one fact the whole
+video is about still reads perfectly well, so every later stage compounds it
+confidently — and the handoff chain means stage four works from stage three's
+summary of stage two's summary.
+
+The raw request now rides at the top of every stage prompt, verbatim, before
+the attachments and before the previous stage's handoff. It is labelled as the
+human speaking, and says outright that what follows is a summary, that
+summaries lose things, and that specific facts above must survive even if the
+brief below does not repeat them. Capped at 2500 characters and marked when
+truncated — generous on purpose, because the Consiz mechanism sat in the last
+third of that sentence.
+
+*Suggested by the customer, who diagnosed it from the two briefs side by side.*
+
+## The chat window was corrupting the design on its way out
+
+Two bugs, one saved file, and the model was innocent of both.
+
+A reel's art direction is a JSON document containing a full stylesheet.
+Repeatedly it came back as **"No JSON found in the agent's reply"** while the
+customer could see JSON sitting on the ChatGPT page. Unanswerable — until the
+failed reply started being kept (below). One look at it settled both:
+
+- **A soft-wrapped URL became a real newline inside a JSON string.** The chat
+  window wrapped a very long Google Fonts `@import`, and the scrape turned that
+  visual wrap into an actual line break inside the value. JSON forbids an
+  unescaped control character in a string, so an entire design was thrown away
+  over a line break that only ever existed on screen. `_escape_control_chars()`
+  now escapes exactly those, tracking string state so ordinary
+  pretty-printing between members is untouched. Run against the real saved
+  failure, the design comes back whole — 6 scenes, both fonts, 3550 characters
+  of CSS.
+
+- **Markdown ate every asterisk, and that was our own instruction's fault.**
+  Both prompts said "no fences". Outside a code block the reply renders as
+  prose, prose is markdown, and markdown treats `*` as an emphasis marker — so
+  `*{box-sizing:border-box}` arrived as ` {box-sizing:border-box}` and the
+  whole CSS reset was silently dropped. The saved file contained **zero
+  asterisks in 17KB**. Fences are now required, and the prompt says why so a
+  model does not helpfully strip them again. The parser has always skipped
+  fences — its own docstring says scrapes carry them — so forbidding them
+  bought nothing and cost entire designs.
+
+## Evidence is kept instead of discarded
+
+The reason the above took three attempts to diagnose: the scraped text lived in
+a local variable, the run moved on, and the error said only "No JSON found".
+
+A design that will not parse is now written to
+`~/.prism/logs/design-that-would-not-parse-<ts>.txt`, and the error names the
+file. It answered a fortnight-old mystery on its first use.
+
+The same failure of nerve appeared elsewhere: **a planning failure discarded
+the customer's prompt entirely.** Planning is where runs fail most often — a
+rate limit, a dead connection, an expired key — and it fails before anything is
+written down, so their own words were the only casualty. Somebody who spent
+five minutes describing a job had to remember it and type it again. Saved now,
+error and all.
+
+## A reel with no pictures is designed on purpose
+
+Image generation fails for ordinary reasons — a quota, a content refusal, a
+render that never finished. On one run ChatGPT thought for 185 seconds and
+produced nothing.
+
+Prism noticed. The design stage did not, and **silence is not neutral**: an
+empty asset list produced an empty listing, so the prompt simply did not
+mention pictures, and a model asked for a premium product reel assumed the
+usual ones existed and wrote `src='asset:art1'`.
+
+The renderer already strips unresolved assets, so nothing showed a broken-image
+glyph. But a layout DESIGNED around pictures that never arrive is worse than
+that: the holes are stripped and what remains is a composition with gaps in it,
+which reads as broken rather than as spare.
+
+`assets.manifest({})` now says there are no images, that this is not an
+oversight, that nothing is coming later, and — the part that matters — what to
+do instead: carry it on typography, hierarchy, negative space, rules, colour
+fields and CSS shapes. A prohibition alone produces a timid design, so it also
+says outright that a spare type-led reel is a legitimate and often superior
+one.
+
+## Canva: make the picture first, then make it editable
+
+Asking for an editable Canva design and a good image in the same prompt made
+the customer choose between them. Canva COMPOSES a template — stock layouts,
+its own type — where DALL·E renders the scene described. For "da Vinci sipping
+Wagh Bakri chai" the render is the whole job.
+
+Now the two asks stop competing. The first prompt asks only for the best
+picture the tool can draw; once it exists, a second prompt goes into the same
+conversation — `@canva can you make this design editable` — pointing at the
+artwork directly above it. Best picture *and* an editable file, which was not
+previously on offer. *The customer's idea.*
+
+Four failure modes have defined answers rather than surprises: nothing
+generated → skip it entirely; Canva not connected → the fixed reply is dropped
+rather than appended; Canva silent → keep the image; wrong kind of stage →
+never asked.
+
+That last one shipped wrong and was caught on the first real run: `artwork` and
+`design` were included, and the Studio pipeline's design stage emits JSON for
+Prism's own renderer — so the follow-up asked Canva to "import the image above"
+when the message above was a CSS blob. The editable stages are now exactly the
+registry's Canva-configured ones, with a test asserting the two lists match,
+because they drifted apart once and **that drift was the bug**.
+
+## Closing the browser no longer kills Prism
+
+Reported as *"python stopped working and prism ended"*, with a real macOS crash
+report behind it: SIGABRT, `QThread::~QThread`, `_Py_Finalize`.
+
+Qt calls `qFatal()` when a thread object is destroyed while still running, and
+PySide destroys every QThread during interpreter shutdown. So closing Prism
+mid-run did not leak quietly — it killed the process. The app's own log signed
+off with an ordinary "Prism closed" and no traceback, which is why it looked
+like a mystery: the crash happens after the last thing anyone logs.
+
+Every live worker is now stopped and joined on close. Stop-all before wait-all,
+so three stuck workers cost ten seconds between them rather than thirty.
+Inquiry Automation had the same hole and more workers than anywhere else.
+
+Separately: **a closed browser window was diagnosed as a Chrome version
+problem.** Every frame of a Selenium stack trace says
+`undetected_chromedriver`, which matched the version-mismatch rule, so a closed
+tab sent the customer off to update a browser that was working perfectly. A
+confident wrong answer is worse than the generic one it replaced, because they
+act on it. And the run kept going against the dead session — every later stage
+opening it, timing out, and reporting the same error. It stops on the first one
+now and says so once.
+
+## When a tool runs out, another one finishes the job
+
+A run is twenty to forty minutes and the heaviest stage is usually the last, so
+the free tier that runs out runs out at the END — leaving a pipeline that did
+nine tenths of the work and produced nothing usable.
+
+Prism now reads the page for "you've reached your limit", "out of free
+messages", "upgrade to continue" and the rest, kept deliberately apart from the
+signed-out check because the two need opposite responses: an exhausted quota is
+something Prism can route around by itself, whereas signing in is something
+only the customer can do.
+
+The replacement comes from the same category, so it can do the same job — a
+failed image stage handed to a research tool produces an essay about pictures.
+Tools the customer already configured go first, because they are probably
+signed in to those. Capped at two attempts; each one is minutes of browser
+time.
+
+**Limitation, stated rather than left to be discovered:** the retry runs after
+the pipeline, not inside it. A stage that failed in the middle has already
+handed nothing to the stages behind it, and those are not re-run. The last
+stage is fully recovered. Doing better means restructuring a 500-line loop
+whose index-keyed maps all shift if the stage list changes underneath it.
+
+## The test suite was writing into the customer's own data
+
+Twice, found twice, and the second one was found by a customer asking a
+completely different question.
+
+- **`~/.prism/config.json`** — a test called `_checked()`, which calls
+  `_remember()`, which calls `config.save()`. It wrote a bare fixture over a
+  real config: Groq key, profile, agent choices, Chrome pin, gone. The only
+  symptom was Prism asking to be set up again on every launch, which reads like
+  a Prism bug rather than a test one.
+- **`~/.prism/runs/`** — tests proving "a broken run is still recorded" were
+  recording into the real History. **56 of 128 files** were fake "Chrome would
+  not launch" failures. Worse than clutter: they carried no query, so they
+  looked exactly like real runs whose prompt had been lost — the bug
+  manufactured evidence for a bug that did not exist.
+
+Both now refuse at module level rather than relying on the next person to
+remember. The runs one needed two doors shut, not one: `config.RUNS_DIR` is
+only the CLI's default, and the window passes its own folder. Verified by
+counting the directory before and after the suite.
+
+## Documentation
+
+- **`docs/FUTURE_INDUSTRY_TARGETS.md`** — where Prism goes after springs and
+  plastics. PCB fabricators (Fine Circuits / Fineline, Manjusar GIDC — the
+  first real prospect, with what was proven against their actual 4-layer
+  board), and EMS/assembly houses, which is the larger prize because they
+  receive a Gerber AND a BOM AND a pick-and-place file. Includes the rule that
+  matters: **the Gerber files never leave the machine** — Prism measures
+  locally and only the measurements, the template and the company details go to
+  the AI tools to be formatted. Their customers are aerospace and medical firms
+  whose board geometry arrives under NDA.
+- **`README.md`** — rewritten. It still said "v0" and described a July build,
+  and one line in it was not merely stale but wrong: it claimed a sibling
+  `../prism_terminal` checkout takes priority over the submodule. It does not,
+  and never did. The same sentence had already been removed from
+  `core_bridge.py`; this copy survived, and it cost an afternoon of editing a
+  file that is never loaded — twice.
+
+## Also in this round
+
+The licence lease and secret store, macOS codesigning, and the UI pass that
+lifted content onto cards and folded the seven CONFIGURE rows behind a
+disclosure, all by the second developer on the project.
+
+### Still open
+The send path and the PO → BOQ hand-off remain written, unit-tested, and never
+run against a real mailbox. `plans.py` feature names are still not in the
+translation catalogue.
 
 ---
 
