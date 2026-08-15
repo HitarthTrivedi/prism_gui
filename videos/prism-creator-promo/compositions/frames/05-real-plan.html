@@ -1,0 +1,661 @@
+<template>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+
+  <style>
+    /* Prism brand type — the Barlow cuts vendored with the product itself.
+       Condensed ships Regular + SemiBold only; 600-900 map to SemiBold.
+       IBM Plex Mono is pre-bundled by the renderer (no @font-face needed). */
+    @font-face {
+      font-family: "Barlow Condensed";
+      src: url("assets/fonts/BarlowCondensed-Regular.ttf") format("truetype");
+      font-weight: 100 500;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Barlow Condensed";
+      src: url("assets/fonts/BarlowCondensed-SemiBold.ttf") format("truetype");
+      font-weight: 600 900;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Barlow";
+      src: url("assets/fonts/Barlow-Regular.ttf") format("truetype");
+      font-weight: 100 400;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Barlow";
+      src: url("assets/fonts/Barlow-Medium.ttf") format("truetype");
+      font-weight: 500;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Barlow";
+      src: url("assets/fonts/Barlow-Bold.ttf") format("truetype");
+      font-weight: 600 900;
+      font-style: normal;
+      font-display: block;
+    }
+
+                
+    #root {
+      position: relative;
+      width: 1080px;
+      height: 1920px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Barlow", system-ui, sans-serif;
+      color: #f2f2f3;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── ground ──────────────────────────────────────────────────────────── */
+    .r05-ground {
+      position: absolute;
+      inset: 0;
+      background: #0b0c0e;
+    }
+
+    /* ── mono chrome ─────────────────────────────────────────────────────── */
+    .r05-chrome {
+      position: absolute;
+      left: 40px;
+      width: 1000px;
+    }
+    .r05-hairline {
+      position: absolute;
+      left: 40px;
+      width: 1000px;
+      height: 1px;
+      background: #26292c;
+      transform-origin: 0% 50%;
+    }
+    .r05-mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 26px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .r05-kicker {
+      position: absolute;
+      left: 0;
+      top: 0;
+      color: #4cd9b4;
+    }
+    .r05-count {
+      position: absolute;
+      right: 0;
+      top: 0;
+      color: #5b6166;
+      text-align: right;
+    }
+    .r05-foot {
+      position: absolute;
+      left: 0;
+      top: 0;
+      color: #5b6166;
+    }
+
+    /* ── ui-inset: real screenshot, cropped to the plan-rows column ──────── */
+    .r05-inset {
+      position: absolute;
+      left: 40px;
+      top: 200px;
+      width: 1000px;
+      height: 345px;
+      overflow: hidden;
+      border: 1px solid #26292c;
+      background: #0b0c0e;
+      transform-origin: 50% 30%;
+    }
+    .r05-strip {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1000px;
+      height: 607px;
+      overflow: hidden;
+      will-change: transform;
+    }
+    .r05-shot {
+      position: absolute;
+      left: -396.97px;
+      top: -338.81px;
+      width: 1858.4px;
+      height: 1208.6px;
+      display: block;
+    }
+    .r05-edges {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1000px;
+      height: 607px;
+      overflow: visible;
+    }
+    .r05-edges path {
+      fill: none;
+      stroke: #4cd9b4;
+      stroke-width: 4;
+      stroke-linecap: butt;
+    }
+    .r05-chipglow {
+      position: absolute;
+      height: 34.13px;
+      border: 2px solid #4cd9b4;
+      background: rgba(76, 217, 180, 0.1);
+      transform-origin: 50% 50%;
+      opacity: 0;
+    }
+
+    /* ── the display cue (one display moment) ────────────────────────────── */
+    .r05-cue {
+      position: absolute;
+      left: 40px;
+      top: 690px;
+      width: 1000px;
+      will-change: transform, filter;
+    }
+    .r05-cue-line {
+      font-family: "Barlow Condensed", system-ui, sans-serif;
+      font-weight: 900;
+      font-size: 168px;
+      line-height: 0.88;
+      letter-spacing: -0.04em;
+      text-transform: lowercase;
+      color: #f2f2f3;
+      white-space: nowrap;
+    }
+
+    /* ── tool-chip: the overridable control ──────────────────────────────── */
+    .r05-press {
+      position: absolute;
+      left: 40px;
+      top: 1040px;
+      width: 520px;
+      height: 140px;
+    }
+    .r05-bgglow {
+      position: absolute;
+      inset: -180px;
+      background: radial-gradient(closest-side, rgba(76, 217, 180, 0.55), rgba(76, 217, 180, 0));
+      opacity: 0;
+      z-index: 0;
+    }
+    .r05-burst {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(closest-side, rgba(76, 217, 180, 0.9), rgba(76, 217, 180, 0));
+      filter: blur(48px);
+      opacity: 0;
+      transform-origin: 50% 50%;
+      z-index: 1;
+    }
+    .r05-chip {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      padding-left: 34px;
+      background: #141618;
+      border: 1px solid #26292c;
+      border-left: 6px solid #a78bfa;
+      transform-origin: 50% 50%;
+      will-change: transform;
+    }
+    .r05-chip-key {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      color: #0b0c0e;
+      background: #9aa0a6;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+    }
+    .r05-chip-label {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 34px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #f2f2f3;
+      white-space: nowrap;
+    }
+
+    /* ── the honesty line ────────────────────────────────────────────────── */
+    .r05-lead {
+      position: absolute;
+      left: 40px;
+      top: 1290px;
+      width: 1000px;
+      font-family: "Barlow", system-ui, sans-serif;
+      font-weight: 400;
+      font-size: 54px;
+      line-height: 1.5;
+      color: #9aa0a6;
+      white-space: nowrap;
+      will-change: transform, filter;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="05-real-plan"
+    data-start="0"
+    data-duration="7.5"
+    data-width="1080"
+    data-height="1920"
+  >
+    <!-- full-bleed ground (never on #root) -->
+    <div
+      class="clip r05-ground"
+      data-start="0"
+      data-duration="7.5"
+      data-track-index="0"
+    ></div>
+
+    <!-- top chrome bar -->
+    <div
+      class="clip r05-chrome"
+      id="r05-topchrome"
+      data-start="0"
+      data-duration="7.5"
+      data-track-index="1"
+      style="top: 108px; height: 60px"
+    >
+      <div class="r05-hairline" id="r05-rule-top" style="left: 0; top: 0"></div>
+      <div class="r05-mono r05-kicker" id="r05-kicker" style="top: 24px">The actual app</div>
+      <div class="r05-mono r05-count" id="r05-count" style="top: 24px"></div>
+    </div>
+
+    <!-- ui-inset: the cropped plan-rows column -->
+    <div
+      class="clip r05-inset"
+      id="r05-inset"
+      data-start="0"
+      data-duration="7.5"
+      data-track-index="2"
+    >
+      <div class="r05-strip" id="r05-strip">
+        <img class="r05-shot" src="assets/app-plan-rows.png" alt="" />
+
+        <svg class="r05-edges" id="r05-edges" viewBox="0 0 1000 607" width="1000" height="607">
+          <path id="r05-edge-1" d="M 3 7.59 L 3 77.12" />
+          <path id="r05-edge-2" d="M 3 94.82 L 3 164.35" />
+          <path id="r05-edge-3" d="M 3 182.05 L 3 251.58" />
+          <path id="r05-edge-4" d="M 3 269.28 L 3 338.81" />
+        </svg>
+
+        <div
+          class="r05-chipglow"
+          data-chip="c1"
+          style="left: 847px; top: 25.28px; width: 132.7px"
+        ></div>
+        <div
+          class="r05-chipglow"
+          data-chip="c2"
+          style="left: 852.1px; top: 112.5px; width: 127.7px"
+        ></div>
+        <div
+          class="r05-chipglow"
+          data-chip="c3"
+          style="left: 862.2px; top: 199.7px; width: 117.6px"
+        ></div>
+        <div
+          class="r05-chipglow"
+          data-chip="c4"
+          style="left: 852.1px; top: 287px; width: 127.7px"
+        ></div>
+      </div>
+    </div>
+
+    <!-- the display cue -->
+    <div class="clip r05-cue" id="r05-cue" data-start="0" data-duration="7.5" data-track-index="3">
+      <div class="r05-cue-line" id="r05-cue-1"></div>
+      <div class="r05-cue-line" id="r05-cue-2"></div>
+    </div>
+
+    <!-- the tool chip -->
+    <div class="clip r05-press" id="r05-press" data-start="0" data-duration="7.5" data-track-index="4">
+      <div class="r05-bgglow" id="r05-bgglow"></div>
+      <div class="r05-burst" id="r05-burst"></div>
+      <div class="r05-chip" id="r05-chip">
+        <div class="r05-chip-key" id="r05-chip-key"></div>
+        <div class="r05-chip-label" id="r05-chip-label"></div>
+      </div>
+    </div>
+
+    <!-- the honesty line -->
+    <div class="clip r05-lead" id="r05-lead" data-start="0" data-duration="7.5" data-track-index="5">
+      don’t like a pick? change the chip.
+    </div>
+
+    <!-- bottom chrome bar -->
+    <div
+      class="clip r05-chrome"
+      id="r05-botchrome"
+      data-start="0"
+      data-duration="7.5"
+      data-track-index="6"
+      style="top: 1500px; height: 60px"
+    >
+      <div class="r05-hairline" id="r05-rule-bot" style="left: 0; top: 0"></div>
+      <div class="r05-mono r05-foot" style="top: 22px">Prism — your plan</div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.querySelector('[data-composition-id="05-real-plan"]');
+      if (!root) return;
+      var q = function (sel) {
+        return root.querySelector(sel);
+      };
+
+      var TOTAL = 7;
+      var STEP = 87.23; // one row of the cropped strip, at the inset's scale
+      var TEAL = "#4cd9b4";
+
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+      window.__timelines["05-real-plan"] = tl;
+
+      /* ── elements ───────────────────────────────────────────────────── */
+      var inset = q("#r05-inset");
+      var strip = q("#r05-strip");
+      var kicker = q("#r05-kicker");
+      var countEl = q("#r05-count");
+      var ruleTop = q("#r05-rule-top");
+      var ruleBot = q("#r05-rule-bot");
+      var botChrome = q("#r05-botchrome");
+      var cue = q("#r05-cue");
+      var cue1 = q("#r05-cue-1");
+      var cue2 = q("#r05-cue-2");
+      var press = q("#r05-press");
+      var chip = q("#r05-chip");
+      var chipKey = q("#r05-chip-key");
+      var chipLabel = q("#r05-chip-label");
+      var burst = q("#r05-burst");
+      var bgGlow = q("#r05-bgglow");
+      var lead = q("#r05-lead");
+      var edges = [q("#r05-edge-1"), q("#r05-edge-2"), q("#r05-edge-3"), q("#r05-edge-4")];
+      var glows = Array.prototype.slice.call(root.querySelectorAll(".r05-chipglow"));
+
+      /* ── discrete-text-sequence — the cue swaps whole states on hard cuts ─ */
+      var SEQUENCE = [
+        { t: 0.0, l1: "", l2: "", key: "", tool: "", band: "#a78bfa", count: "" },
+        {
+          t: 1.2,
+          l1: "look things",
+          l2: "up",
+          key: "P",
+          tool: "Perplexity",
+          band: "#a78bfa",
+          count: "01 / 07",
+        },
+        {
+          t: 2.4,
+          l1: "think it",
+          l2: "through",
+          key: "C",
+          tool: "ChatGPT",
+          band: "#60a5fa",
+          count: "02 / 07",
+        },
+        {
+          t: 3.6,
+          l1: "write it",
+          l2: "up",
+          key: "C",
+          tool: "Claude",
+          band: "#4cd9b4",
+          count: "03 / 07",
+        },
+        {
+          t: 4.8,
+          l1: "make the",
+          l2: "images",
+          key: "C",
+          tool: "ChatGPT",
+          band: "#a3e635",
+          count: "04 / 07",
+        },
+      ];
+
+      function stateAt(time) {
+        for (var i = SEQUENCE.length - 1; i >= 0; i--) {
+          if (time >= SEQUENCE[i].t) return SEQUENCE[i];
+        }
+        return SEQUENCE[0];
+      }
+
+      var lastState = null;
+      function applyState(time) {
+        var s = stateAt(time);
+        if (s === lastState) return;
+        lastState = s;
+        cue1.textContent = s.l1;
+        cue2.textContent = s.l2;
+        chipKey.textContent = s.key;
+        chipLabel.textContent = s.tool;
+        countEl.textContent = s.count;
+        chip.style.borderLeftColor = s.band;
+      }
+      applyState(0); // seed frame 0
+
+      /* ── viewport-change — one camera object, one writer ────────────────── */
+      var cam = { y: 0 };
+      function applyCamera() {
+        strip.style.transform = "translateY(" + cam.y + "px)";
+      }
+      applyCamera(); // seed frame 0
+
+      /* ── svg-path-draw — measured lengths, never guessed ────────────────── */
+      var lens = edges.map(function (p) {
+        var len = (p.getTotalLength && p.getTotalLength()) || 69.53;
+        p.style.strokeDasharray = String(len);
+        p.style.strokeDashoffset = String(len);
+        return len;
+      });
+
+      /* ── seek-safe rest states for everything that arrives later ────────── */
+      tl.set([kicker, botChrome, cue, press, lead, countEl], { opacity: 0 }, 0);
+      tl.set([ruleTop, ruleBot], { scaleX: 0 }, 0);
+
+      /* ── SCENE 1 (0.0–1.2s) · the crop lands ────────────────────────────── */
+      tl.fromTo(
+        ruleTop,
+        { scaleX: 0, opacity: 1 },
+        { scaleX: 1, duration: 0.6, ease: "power3.out" },
+        0.02
+      );
+      tl.fromTo(
+        kicker,
+        { opacity: 0, x: -26 },
+        { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" },
+        0.04
+      );
+      // spring-pop-entrance (restrained: smooth long-tail settle, no overshoot)
+      tl.fromTo(
+        inset,
+        { scale: 0.96, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.62, ease: "power3.out" },
+        0.08
+      );
+      tl.fromTo(
+        ruleBot,
+        { scaleX: 0, opacity: 1 },
+        { scaleX: 1, duration: 0.65, ease: "power3.out" },
+        0.5
+      );
+      tl.fromTo(botChrome, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, 0.62);
+
+      /* ── the cue cut — a hard state swap plus a velocity-matched entrance ── */
+      var CUTS = [1.2, 2.4, 3.6, 4.8];
+      CUTS.forEach(function (t, i) {
+        tl.fromTo(
+          cue,
+          { opacity: 0, y: 36, filter: "blur(10px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.42, ease: "power3.out" },
+          t
+        );
+        tl.fromTo(
+          press,
+          { opacity: i === 0 ? 0 : 0.35, y: i === 0 ? 34 : 16 },
+          { opacity: 1, y: 0, duration: i === 0 ? 0.46 : 0.34, ease: "power3.out" },
+          t
+        );
+        if (i === 0) {
+          tl.fromTo(countEl, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, t);
+        }
+        // the lit edge draws down the focused row's left side
+        tl.fromTo(
+          edges[i],
+          { strokeDashoffset: lens[i] },
+          { strokeDashoffset: 0, duration: 0.42, ease: "power2.out" },
+          t + 0.05
+        );
+        // …and hands off to the next row (row 4 holds a beat longer — it stays lit)
+        if (i < 3) {
+          tl.fromTo(
+            edges[i],
+            { strokeDashoffset: 0 },
+            { strokeDashoffset: lens[i], duration: 0.14, ease: "power2.in" },
+            CUTS[i + 1] - 0.1
+          );
+        }
+        // SCENES 3–5 · the panel steps exactly one row, matched on both sides
+        if (i > 0) {
+          tl.fromTo(
+            cam,
+            { y: -(i - 1) * STEP },
+            {
+              y: -i * STEP,
+              duration: 0.46,
+              ease: "power3.inOut",
+              onUpdate: applyCamera,
+            },
+            t
+          );
+        }
+      });
+
+      /* ── asr-keyword-glow — one linear driver, envelope over every chip ─── */
+      var ATTACK_DUR = 0.18;
+      var RELEASE = 0.35;
+      var REST_LEVEL = 0.15;
+      var MAX_BLUR = 24;
+      var MAX_SCALE_BOOST = 0.07;
+      var TIMINGS = {
+        c1: { start: 1.3, end: 2.3 },
+        c2: { start: 2.5, end: 3.5 },
+        c3: { start: 3.7, end: 4.7 },
+        c4: { start: 4.9, end: 6.9 },
+      };
+
+      function envelope(time, start, end) {
+        if (time < start) return 0;
+        if (time < end) return Math.min((time - start) / ATTACK_DUR, 1);
+        var releaseEnd = end + RELEASE;
+        if (time < releaseEnd) return 1 - ((time - end) / RELEASE) * (1 - REST_LEVEL);
+        return REST_LEVEL;
+      }
+
+      var driver = { t: 0 };
+      function paintGlows() {
+        for (var i = 0; i < glows.length; i++) {
+          var el = glows[i];
+          var timing = TIMINGS[el.dataset.chip];
+          if (!timing) continue;
+          var env = envelope(driver.t, timing.start, timing.end);
+          el.style.opacity = String(env);
+          el.style.boxShadow = "0 0 " + MAX_BLUR * env + "px rgba(76, 217, 180, " + 0.85 * env + ")";
+          el.style.transform = "scale(" + (1 + MAX_SCALE_BOOST * env) + ")";
+        }
+      }
+      paintGlows(); // seed frame 0
+
+      tl.to(
+        driver,
+        {
+          t: TOTAL,
+          duration: TOTAL,
+          ease: "none",
+          onUpdate: function () {
+            applyState(driver.t);
+            paintGlows();
+          },
+        },
+        0
+      );
+
+      /* ── SCENE 6 (5.8–7.0s) · stepping stops; the chip proves it's a control ─ */
+      tl.fromTo(
+        lead,
+        { opacity: 0, y: 30, filter: "blur(8px)" },
+        { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.5, ease: "power3.out" },
+        5.82
+      );
+
+      // press-release-spring — linear compression, spring recovery (adjacent)
+      var PRESS_START = 5.95;
+      var PRESS_DUR = 0.16;
+      var RELEASE_START = PRESS_START + PRESS_DUR;
+      tl.fromTo(
+        chip,
+        { scale: 1, backgroundColor: "#141618" },
+        {
+          scale: 0.93,
+          backgroundColor: "#0e1012",
+          duration: PRESS_DUR,
+          ease: "power1.in",
+        },
+        PRESS_START
+      );
+      tl.fromTo(
+        chip,
+        { scale: 0.93, backgroundColor: "#0e1012" },
+        {
+          scale: 1,
+          backgroundColor: "#141618",
+          duration: 0.55,
+          ease: "back.out(1.5)",
+        },
+        RELEASE_START
+      );
+      tl.fromTo(
+        burst,
+        { scale: 1, opacity: 0 },
+        { scale: 3.4, opacity: 0.45, duration: 0.42, ease: "power2.out" },
+        RELEASE_START
+      );
+      tl.fromTo(
+        burst,
+        { opacity: 0.45 },
+        { opacity: 0, duration: 0.38, ease: "power2.in" },
+        RELEASE_START + 0.42
+      );
+      tl.fromTo(
+        bgGlow,
+        { opacity: 0 },
+        { opacity: 0.14, duration: 0.6, ease: "power2.out" },
+        RELEASE_START
+      );
+      // …then still.
+    })();
+  </script>
+</template>

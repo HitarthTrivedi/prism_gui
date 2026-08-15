@@ -30,10 +30,15 @@ declaring the exit and entry vector. `parse_spec()` verifies the rows agree and
 sends mismatches back — exactly the loop that already exists for layout faults
 ("this text falls outside the frame, fix it"). Roughly 2–3 days.
 
-**Trigger:** the first reel that comes back with the laws plainly ignored —
-consecutive cuts in opposing directions, or elements floating in place. Until
-that happens the prompt is doing the work and the machinery would be guarding
-against nothing.
+**DONE — the trigger fired.** A reel obeyed every law in the prompt (one
+current, leftward, no wobble anywhere) and still came back looking like
+PowerPoint, because the slide-ness was not in the seams. `motion_faults()` now
+checks the two faults that were: the scene wrapper animated as one slab, and
+one animation used by 70%+ of everything that moves.
+
+**Still not checked:** one axis at a time, and keeping a recurring object. Both
+are stated in the prompt but too subjective to measure — flag them if a reel
+ever obeys the two checked rules and still reads as slides.
 
 ---
 
