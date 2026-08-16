@@ -1,0 +1,25 @@
+Prism
+Copyright (c) Alphakore
+
+This product includes software and design work developed by third parties.
+
+────────────────────────────────────────────────────────────────────────────
+HyperFrames
+https://github.com/heygen-com/hyperframes
+Copyright (c) HeyGen
+Licensed under the Apache License, Version 2.0
+
+The transition library in prism_terminal/core/reel_web.py (the `.cut-push`,
+`.cut-push-up`, `.cut-squeeze` and `.cut-zoom` rules inside _HARNESS_CSS) is
+adapted from HyperFrames' CSS transition catalogue — specifically the "Push
+Slide", "Vertical Push", "Squeeze" and "Zoom Through" entries.
+
+Adapted rather than copied: the originals are GSAP timelines, and Prism's
+renderer films a paused page by setting each frame's time by hand, so they
+were rewritten as pure functions of Prism's own `--x` and `--e` progress
+variables. The motion each one describes is theirs; the implementation is not
+shared with the original.
+
+A copy of the Apache License, Version 2.0 may be obtained at:
+    http://www.apache.org/licenses/LICENSE-2.0
+────────────────────────────────────────────────────────────────────────────
