@@ -340,3 +340,75 @@ class NothingRunsOffTheFrame(unittest.TestCase):
             {"type": "figure", "seconds": 6, "value": "1"},
             {"type": "hub", "seconds": 6, "nodes": [1, 2, 3, 4]},
             {"type": "endcard", "seconds": 5}]})))
+
+
+class FramesThatWereWrongOnScreen(unittest.TestCase):
+    """Both found by looking at a rendered frame. Neither is visible in the
+    code, and neither would fail any check that existed."""
+
+    def ink(self, fn, scene, frame=115):
+        """Where everything on the frame actually lands — measured against a
+        flat background rather than against the scene drawn empty, so the
+        parts that are always there (the mark, the grid) are included."""
+        from PIL import Image, ImageDraw, ImageChops
+        b = R.Brand()
+        img = Image.new("RGB", (R.W, R.H), b.bg)
+        fn(ImageDraw.Draw(img), b, scene, frame)
+        flat = Image.new("RGB", (R.W, R.H), b.bg)
+        return ImageChops.difference(img, flat).convert("L").point(
+            lambda p: 255 if p > 8 else 0).getbbox()
+
+    def test_the_top_point_no_longer_paints_over_the_subheading(self):
+        """Each value sits in a chip 70px above its point, filled with the
+        background so a climbing series cannot be read through its own
+        numbers. The highest point sits at the top of the chart — so with the
+        chart starting where it did, that chip landed straight through the
+        subheading. It rendered as "25 min s spent reading one folder": the
+        chip had eaten the word "Minute"."""
+        from PIL import Image, ImageDraw, ImageChops
+        b = R.Brand()
+        scene = {"heading": "What a quote costs today",
+                 "subheading": "Minutes spent reading one folder",
+                 "value_suffix": " min",
+                 "points": [{"label": "By hand", "value": 25},
+                            {"label": "Prism", "value": 1}]}
+        # The subheading alone, then the whole scene. If the chart covers it,
+        # pixels the subheading painted come back as background.
+        just_head = Image.new("RGB", (R.W, R.H), b.bg)
+        R.scene_trend(ImageDraw.Draw(just_head), b,
+                      {k: v for k, v in scene.items() if k != "points"}, 115)
+        whole = Image.new("RGB", (R.W, R.H), b.bg)
+        R.scene_trend(ImageDraw.Draw(whole), b, scene, 115)
+        band = (0, 600, R.W, 680)               # where the subheading sits
+        lost = ImageChops.subtract(just_head.crop(band).convert("L"),
+                                   whole.crop(band).convert("L"))
+        # Nothing the subheading drew may have been painted back out.
+        self.assertIsNone(
+            lost.point(lambda p: 255 if p > 24 else 0).getbbox(),
+            "the chart is painting over the subheading again")
+
+    def test_the_endcard_is_vertically_balanced(self):
+        """Every position on it was a hard-coded y chosen for one shape. Even
+        that shape was not centred — 441px of space above the block and 650
+        below, which reads as bottom-heavy on the one frame a viewer looks at
+        longest."""
+        for scene in (
+            {"name": "Prism", "tagline_lines": ["Your files never leave",
+                                                "your own machine"],
+             "contact": "alphakore.in"},
+            {"name": "Prism", "tagline_lines": ["One line"],
+             "contact": "alphakore.in"},
+            {"name": "Prism", "tagline_lines": ["No", "contact"]},
+            {"name": "Prism"},
+        ):
+            box = self.ink(R.scene_endcard, scene)
+            above, below = box[1], R.H - box[3]
+            self.assertLess(abs(above - below), 40,
+                            f"{scene} sits {above} above / {below} below")
+
+    def test_a_long_company_name_stays_inside_the_frame(self):
+        box = self.ink(R.scene_endcard, {
+            "name": "Fine Circuits and Components Pvt Ltd",
+            "tagline_lines": ["Savli GIDC"], "contact": "fccindia.com"})
+        self.assertGreaterEqual(box[0], 0)
+        self.assertLessEqual(box[2], R.W)
