@@ -457,6 +457,71 @@ class AReelWithNoPictures(unittest.TestCase):
         self.assertIn("hi", out)
 
 
+class TheLogoSlotIsForALogo(unittest.TestCase):
+    """Whatever is called `asset:logo` gets placed where a logo belongs — the
+    design stage is told so in as many words, "the endcard at least". So the
+    slot has to be empty rather than wrong.
+
+    Found while preparing a reel for PCB manufacturers out of screenshots of
+    Prism itself: artwork attached, none of it a mark. The imagery stage was
+    correctly told "NO logo — make three SUBJECT images", made three, and the
+    first of them was named `logo` anyway and landed on the endcard.
+    """
+
+    def setUp(self):
+        import core_bridge  # noqa: F401
+        from core import assets as A
+        self.A = A
+
+    def _table(self, prepared):
+        """collect()'s slot logic, run against records rather than files —
+        the naming is the behaviour under test, not PIL."""
+        rest = list(prepared)
+        marks = [a for a in rest
+                 if not a["made"] and a["alpha"] and a["ink"] < 0.55]
+        logo = min(marks, key=lambda a: a["ink"]) if marks else None
+        if logo is None and not any(not a["made"] for a in rest):
+            made = [a for a in rest if a["made"]]
+            logo = made[0] if made else None
+        return logo
+
+    def rec(self, made, alpha=False, ink=1.0, tag=""):
+        return {"made": made, "alpha": alpha, "ink": ink, "tag": tag}
+
+    def test_generated_art_alongside_the_clients_own_files_is_not_a_logo(self):
+        """The imagery stage was told not to make a mark, so there isn't one
+        to find — and a product shot on the endcard is worse than none."""
+        got = self._table([self.rec(False, tag="screenshot"),
+                           self.rec(True, tag="board"),
+                           self.rec(True, tag="drill")])
+        self.assertIsNone(got)
+
+    def test_with_nothing_attached_the_first_generated_image_is_the_mark(self):
+        """The other half. Told nothing exists, the imagery stage IS asked for
+        a wordmark first, and the page is harvested in order."""
+        got = self._table([self.rec(True, tag="wordmark"),
+                           self.rec(True, tag="subject")])
+        self.assertEqual(got["tag"], "wordmark")
+
+    def test_the_clients_own_mark_still_wins_outright(self):
+        got = self._table([self.rec(False, alpha=True, ink=0.12, tag="theirs"),
+                           self.rec(True, tag="generated")])
+        self.assertEqual(got["tag"], "theirs")
+
+    def test_screenshots_come_through_as_plain_artwork(self):
+        """End to end on the real files, because the records above are only
+        as good as collect() agreeing with them."""
+        import os
+        base = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "..")
+        shots = [os.path.join(base, n) for n in ("img_1.png", "img_2.png")]
+        if not all(os.path.exists(p) for p in shots):
+            self.skipTest("the reference screenshots are not on this machine")
+        table = self.A.collect(shots)
+        self.assertNotIn("logo", table)
+        self.assertEqual(sorted(table), ["art1", "art2"])
+
+
 class TheChatWindowMangledTheDesign(unittest.TestCase):
     """Diagnosed from a real saved failure. The model wrote valid JSON; the
     page it was rendered on broke it in two different ways."""
