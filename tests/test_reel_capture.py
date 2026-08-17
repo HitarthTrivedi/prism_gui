@@ -173,3 +173,85 @@ class TheEvidenceIsKept(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheMixOfScenes(unittest.TestCase):
+    """What separates a reel from a wall of text, measured on two real reels
+    drawn by this same renderer from this same prompt.
+
+    The one the customer called the best they had: seven scenes, ONE of them
+    text-only — statement, brand, pillar, pillar, pillar, hub, endcard. The
+    one they called the worst: six scenes, FOUR of them text-only —
+    statement, statement, list, statement, pillar, endcard.
+
+    Nothing else differed. The prompt already said "pick by what you are
+    saying, not by habit", and habit still won, because `statement` is the
+    easiest scene to write and nothing counted them.
+    """
+
+    def spec(self, *kinds):
+        secs = {"trend": 6, "hub": 5, "brand": 5, "figure": 5}
+        out = []
+        for k in kinds:
+            sc = {"type": k, "seconds": secs.get(k, 4)}
+            if k == "pillar":
+                sc["icons"] = ["server", "network", "security"]
+            if k == "hub":
+                sc["nodes"] = [{"icon": "server", "label": f"n{i}"}
+                               for i in range(4)]
+            if k == "trend":
+                sc["points"] = [{"label": "a", "value": 1},
+                                {"label": "b", "value": 2}]
+            out.append(sc)
+        return {"scenes": out}
+
+    def faults(self, *kinds):
+        return " ".join(R.lint_spec(self.spec(*kinds)))
+
+    def test_the_shape_that_worked_passes(self):
+        """The real Raj Infotech running order. If this ever fails, the rule
+        is wrong, not the reel."""
+        self.assertEqual(R.lint_spec(self.spec(
+            "statement", "brand", "pillar", "pillar", "pillar", "hub",
+            "endcard")), [])
+
+    def test_a_wall_of_text_is_sent_back(self):
+        """The real failing order, verbatim."""
+        said = self.faults("statement", "statement", "list", "statement",
+                           "pillar", "endcard")
+        self.assertIn("text-only", said)
+
+    def test_two_text_scenes_are_still_allowed(self):
+        """The rule has to leave room to make a point in words. Two is a
+        reel with an opening and a turn; four is a post."""
+        self.assertNotIn("text-only", self.faults(
+            "statement", "brand", "list", "pillar", "hub", "endcard"))
+
+    def test_two_statements_in_a_row_are_sent_back(self):
+        said = self.faults("statement", "statement", "pillar", "hub",
+                           "endcard")
+        self.assertIn("in a row", said)
+
+    def test_the_same_two_apart_are_not(self):
+        self.assertNotIn("in a row", self.faults(
+            "statement", "pillar", "statement", "hub", "brand", "endcard"))
+
+    def test_a_reel_with_nothing_drawn_is_sent_back(self):
+        """It could have been a post. That is the whole complaint."""
+        said = self.faults("statement", "list", "statement", "endcard")
+        self.assertIn("drawn as a diagram", said)
+
+    def test_the_complaint_names_what_to_use_instead(self):
+        """A rule the writer cannot act on is a rule that gets ignored on the
+        retry as well."""
+        said = self.faults("statement", "statement", "list", "statement",
+                           "pillar", "endcard")
+        for kind in ("figure", "trend", "pillar", "hub", "brand"):
+            self.assertIn(f"'{kind}'", said, kind)
+
+    def test_the_prompt_shows_the_shape_rather_than_only_listing_types(self):
+        """The list of types was already there when the wall of text was
+        written. A worked running order is the part that was missing."""
+        text = R.spec_instructions()
+        self.assertIn("THE SHAPE THAT WORKS", text)
+        self.assertIn("AT MOST TWO text-only", text)
