@@ -94,7 +94,9 @@ class ChoosingStudioRunsStudio(unittest.TestCase):
         class Fake:
             def __init__(self, *a, **kw):
                 seen["args"], seen["kwargs"] = a, kw
-                self.done = self.failed = _Sig()
+                # stage_event carries Studio's per-scene progress to the
+                # window; the Quick path never connects it.
+                self.done = self.failed = self.stage_event = _Sig()
 
             def start(self):
                 seen["started"] = True

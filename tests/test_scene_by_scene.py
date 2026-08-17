@@ -458,3 +458,98 @@ class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatMadeOneReelWorkAndAnotherNot(unittest.TestCase):
+    """Both had the same words. The one that worked put the CUSTOMER'S OWN
+    MATERIAL on screen — the real filenames out of a Gerber folder, the seven
+    real drill sizes, one dot for each of 238 holes. The flat one described
+    the same facts in a sentence.
+
+    Written into the prompt across several trades on purpose, so it does not
+    read as advice about circuit boards.
+    """
+
+    def test_it_asks_for_the_customers_own_material(self):
+        prompt = RW.scene_instructions(0, 5, {}, {"headline": "x"})
+        self.assertIn("CUSTOMER'S OWN MATERIAL", prompt)
+        self.assertIn("not from adjectives", prompt)
+
+    def test_the_examples_are_not_all_one_industry(self):
+        """A single worked example gets copied — that is exactly how the
+        template renderer's prompt went wrong."""
+        prompt = RW.scene_instructions(0, 5, {}, {})
+        for trade in ("fabricator", "seed company", "workshop"):
+            self.assertIn(trade, prompt, trade)
+
+    def test_it_asks_for_depth_rather_than_a_centred_block(self):
+        prompt = RW.scene_instructions(0, 5, {}, {})
+        self.assertIn("LAYERS", prompt)
+        self.assertIn("Three depths", prompt)
+
+    def test_a_count_may_be_drawn_rather_than_printed(self):
+        """238 dots read as 238 holes. The number alone reads as a number."""
+        self.assertIn("DRAWING that", RW.scene_instructions(0, 5, {}, {}))
+
+
+class TheLogoReachesTheSceneThatPlacesIt(unittest.TestCase):
+    """This guidance used to live in the art-direction prompt, which wrote
+    every scene. That prompt now writes none of them, and the instruction went
+    with it — so a reel with a perfectly good logo attached ended on a mark
+    drawn out of CSS boxes.
+    """
+
+    HAVE = "  asset:logo — 512x512, transparent PNG — the client's own mark"
+
+    def test_the_last_scene_is_told_to_place_it(self):
+        last = RW.scene_instructions(4, 5, {}, {}, assets=self.HAVE)
+        self.assertIn("THE CLIENT'S OWN MARK IS AVAILABLE", last)
+        self.assertIn("this is the last scene", last.lower())
+
+    def test_an_earlier_scene_is_told_not_to_need_it(self):
+        """A logo in every scene is a watermark, not a brand."""
+        early = RW.scene_instructions(1, 5, {}, {}, assets=self.HAVE)
+        self.assertNotIn("THE CLIENT'S OWN MARK IS AVAILABLE", early)
+        self.assertIn("does not need to appear in every scene", early)
+
+    def test_it_forbids_redrawing_a_mark_that_exists(self):
+        last = RW.scene_instructions(4, 5, {}, {}, assets=self.HAVE)
+        self.assertIn("Never redraw", last)
+        self.assertIn("CSS shapes", last)
+
+    def test_no_logo_means_no_mention_of_one(self):
+        """Told about a mark that does not exist, a scene leaves a hole where
+        it planned to put one."""
+        art_only = "  asset:art1 — 900x600, opaque — artwork the client supplied"
+        said = RW.scene_instructions(4, 5, {}, {}, assets=art_only)
+        self.assertNotIn("asset:logo", said)
+
+    def test_a_reel_with_no_artwork_at_all_says_nothing_about_assets(self):
+        self.assertNotIn("asset:", RW.scene_instructions(4, 5, {}, {}))
+
+
+class TheWindowSaysWhichSceneItIsOn(unittest.TestCase):
+    """This loop takes minutes — one turn per scene. A dialog that says
+    "writing the words…" for all of them is indistinguishable from one that
+    has hung, and on a customer's laptop that reads as a crash."""
+
+    def test_every_scene_is_announced_before_it_is_asked_for(self):
+        ask = Recorder([scene_reply() for _ in range(3)])
+        seen = []
+        RW.build_spec(TURN_ONE, ask, script=SCRIPT,
+                      on_scene=lambda i, n: seen.append((i, n)))
+        self.assertEqual(seen, [(0, 3), (1, 3), (2, 3)])
+
+    def test_a_listener_that_throws_does_not_fail_the_run(self):
+        """It is a progress bar. It must never be able to lose the reel."""
+        ask = Recorder([scene_reply() for _ in range(3)])
+
+        def boom(i, n):
+            raise RuntimeError("the window went away")
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, on_scene=boom)
+        self.assertEqual(len(spec["scenes"]), 3)
+
+    def test_the_run_works_with_no_listener_at_all(self):
+        ask = Recorder([scene_reply() for _ in range(3)])
+        self.assertEqual(
+            len(RW.build_spec(TURN_ONE, ask, script=SCRIPT)["scenes"]), 3)

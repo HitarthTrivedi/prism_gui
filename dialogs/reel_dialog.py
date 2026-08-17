@@ -245,9 +245,25 @@ class ReelDialog(QDialog):
             # conversation. A routed run infers this from the renderer in its
             # plan; this dialog has no renderer stage, so it says so.
             reel_design_stage="design")
+        # Studio's design stage is minutes long — one turn per scene. Without
+        # this the window says "writing the words…" for all of it, which is
+        # indistinguishable from a hang on a customer's laptop.
+        self._worker.stage_event.connect(self._on_studio_event)
         self._worker.done.connect(self._on_design)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
+
+    def _on_studio_event(self, kind: str, payload: dict):
+        if kind == "reel_scene":
+            n, total = payload.get("index", 0) + 1, payload.get("total", 0)
+            self._busy(True, f"Designing scene {n} of {total} — "
+                             "each one is written and laid out on its own.")
+            if total:
+                self.progress.setRange(0, total)
+                self.progress.setValue(n - 1)
+        elif kind == "stage_start" and payload.get("stage") == "design":
+            self._busy(True, "Choosing the look and storyboarding the "
+                             "scenes…")
 
     def _on_design(self, responses: dict, links: dict):
         studio = CB.get_studio()
