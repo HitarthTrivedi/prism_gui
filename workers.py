@@ -62,7 +62,8 @@ class AutomationWorker(QThread):
     failed = Signal(str)
 
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
-                 custom_stages=None, chatgpt_analysis: bool = True):
+                 custom_stages=None, chatgpt_analysis: bool = True,
+                 reel_design_stage: str = ""):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
@@ -71,6 +72,11 @@ class AutomationWorker(QThread):
         # accepts them directly. None = ordinary routed run, unchanged.
         self.custom_stages = custom_stages
         self.chatgpt_analysis = chatgpt_analysis
+        # Prism Studio art-directs over several turns rather than one reply —
+        # the look and a storyboard, then a scene at a time. A caller that
+        # built its own stages names the stage that does it; a routed run
+        # works it out from the renderer in its plan.
+        self.reel_design_stage = reel_design_stage
         self._stop = threading.Event()
 
     def stop(self):
@@ -97,6 +103,8 @@ class AutomationWorker(QThread):
             if self.custom_stages is not None:
                 kwargs["custom_stages"] = self.custom_stages
                 kwargs["chatgpt_analysis"] = self.chatgpt_analysis
+            if self.reel_design_stage:
+                kwargs["reel_design_stage"] = self.reel_design_stage
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
@@ -254,15 +262,19 @@ class ReelWorker(QThread):
     done = Signal(str)               # output path
     failed = Signal(str)
 
-    def __init__(self, spec: dict, out_path: str):
+    def __init__(self, spec: dict, out_path: str, studio: bool = False):
         super().__init__()
         self.spec, self.out_path = spec, out_path
+        # Two renderers, one worker. Pillow draws the frames in Python;
+        # Studio films a real web page in a paused browser. Same spec shape
+        # from here on, same progress callback, same output.
+        self.studio = studio
 
     def run(self):
         try:
-            reel = CB.get_reel()
-            reel.render(self.spec, self.out_path,
-                        on_progress=lambda d, t: self.progress.emit(d, t))
+            engine = CB.get_studio() if self.studio else CB.get_reel()
+            engine.render(self.spec, self.out_path,
+                          on_progress=lambda d, t: self.progress.emit(d, t))
             self.done.emit(self.out_path)
         except Exception as e:
             self.failed.emit(str(e))

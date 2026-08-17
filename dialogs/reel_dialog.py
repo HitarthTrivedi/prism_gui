@@ -18,7 +18,7 @@ import time
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit,
-    QMessageBox, QProgressBar,
+    QMessageBox, QProgressBar, QRadioButton, QButtonGroup,
 )
 
 import core_bridge as CB
@@ -56,6 +56,30 @@ class ReelDialog(QDialog):
         self.ask.speak_clicked.connect(self._toggle_record)
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
+
+        # The two renderers, offered rather than assumed.
+        #
+        # This shelf item has always been called "Reel / Studio" and has only
+        # ever run Reel — Studio was reachable solely by configuring it as the
+        # video agent and then typing a task on Home, which nobody found. A
+        # menu entry naming a thing it cannot do is worse than not offering it.
+        self.studio_btn = QRadioButton(
+            "Studio — designed for this client. A web page, filmed. "
+            "Takes a few minutes.")
+        self.reel_btn = QRadioButton(
+            "Quick — drawn from templates. Same look every time, ready in "
+            "under a minute.")
+        self.render_choice = QButtonGroup(self)
+        self.render_choice.addButton(self.studio_btn)
+        self.render_choice.addButton(self.reel_btn)
+        studio_ok, studio_why = CB.studio_available()
+        # Studio is the better film, so it is the default wherever it can run.
+        (self.studio_btn if studio_ok else self.reel_btn).setChecked(True)
+        if not studio_ok:
+            self.studio_btn.setEnabled(False)
+            self.studio_btn.setToolTip(studio_why)
+        for b in (self.studio_btn, self.reel_btn):
+            root.addWidget(b)
 
         self.brand_label = QLabel("")
         self.brand_label.setObjectName("emptyState")
@@ -171,6 +195,10 @@ class ReelDialog(QDialog):
             return
         self.request = request
 
+        if self.studio_btn.isChecked():
+            self._run_studio(request, agents, writer)
+            return
+
         self._busy(True, f"{agents[writer]} is writing the scenes…")
         prompt = self.reel.build_prompt(request, self.brand, bool(self.images))
         self._worker = AutomationWorker(
@@ -180,6 +208,110 @@ class ReelDialog(QDialog):
         self._worker.done.connect(self._on_script)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
+
+    # ── Studio ──────────────────────────────────────────────────────────
+    # Two writing passes, not one. A single reply asked for both the words
+    # and the look produces a design that DESCRIBES itself — "clean data
+    # card", "logo reveal" — rather than one that exists. The second pass is
+    # itself a conversation: the look and a storyboard, then a scene at a
+    # time, each laid out at 1080x1920 and corrected before the next.
+
+    def _run_studio(self, request: str, agents: dict, writer: str):
+        studio = CB.get_studio()
+        assets = CB.get_assets()
+        table = {}
+        if self.images:
+            try:
+                table = assets.collect([i["path"] for i in self.images])
+            except Exception:
+                table = {}
+        # The art director is the strongest tool available: this pass is the
+        # harder of the two by a distance.
+        director = agents.get("brains") or agents.get("content") or agents[writer]
+        self._busy(True, f"{agents[writer]} is writing the words…")
+        self._worker = AutomationWorker(
+            {}, self.cfg, self.images, f"design a reel — {request}",
+            custom_stages=[
+                ("script", agents[writer],
+                 ["Write the script for a short vertical brand reel.\n\n"
+                  f"WHAT THE CLIENT ASKED FOR:\n{request}\n\n"
+                  + studio.script_instructions()]),
+                ("design", director,
+                 [studio.design_instructions(self.brand or None, request,
+                                             assets.manifest(table))]),
+            ],
+            chatgpt_analysis=False,
+            # Names the stage whose reply is turn one of the design
+            # conversation. A routed run infers this from the renderer in its
+            # plan; this dialog has no renderer stage, so it says so.
+            reel_design_stage="design")
+        self._worker.done.connect(self._on_design)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.start()
+
+    def _on_design(self, responses: dict, links: dict):
+        studio = CB.get_studio()
+        texts = [t for t in (responses.get("design") or []) if t.strip()]
+        spec, why = None, None
+        for text in reversed(texts):
+            try:
+                spec = studio.parse_spec(text)
+                break
+            except Exception as e:                       # noqa: BLE001
+                why = why or e
+        if spec is None:
+            self._busy(False, "")
+            kept = self.reel.keep_unparsed(texts or ["(nothing was captured)"],
+                                           what="design")
+            QMessageBox.warning(
+                self, "Reel",
+                f"{why or 'The art-direction stage returned nothing.'}"
+                + (f"\n\nWhat came back was saved to:\n{kept}" if kept else "")
+                + ("\n\nIts tab: " + links["design"] if links.get("design")
+                   else ""))
+            return
+
+        if self.brand:
+            spec["brand"] = self.brand
+        if self.images:
+            try:
+                spec["_assets"] = CB.get_assets().collect(
+                    [i["path"] for i in self.images])
+            except Exception:
+                pass
+        self.spec = spec
+        self._start_render(spec, studio=True)
+
+    def _start_render(self, spec: dict, studio: bool = False):
+        lines = [f"{i + 1}. {sc.get('type') or 'scene'}  ·  "
+                 f"{sc.get('seconds', 4)}s"
+                 f"   {sc.get('heading') or sc.get('name') or ''}"
+                 for i, sc in enumerate(spec["scenes"])]
+        if spec.get("_dropped"):
+            lines.append("")
+            lines.append("skipped (this renderer can't draw them): "
+                         + ", ".join(spec["_dropped"]))
+        self.script_view.setPlainText("\n".join(lines))
+
+        secs = sum(float(sc.get("seconds", 4)) for sc in spec["scenes"])
+        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+        stamp = int(time.time())
+        self.out_path = os.path.join(CB.config.RUNS_DIR, f"reel_{stamp}.mp4")
+        # Saved beside the video and complete in itself — assets inlined —
+        # so it re-renders identically next year without an AI in the loop.
+        json.dump(spec, open(
+            os.path.join(CB.config.RUNS_DIR, f"reel_{stamp}.json"), "w"),
+            indent=2)
+
+        self.progress.setRange(0, 100)
+        self._busy(True, f"{'Filming' if studio else 'Drawing'} "
+                         f"{len(spec['scenes'])} scenes, {secs:.0f}s, "
+                         "1080x1920…")
+        self._render_worker = ReelWorker(spec, self.out_path, studio=studio)
+        self._render_worker.progress.connect(self._on_frames)
+        self._render_worker.done.connect(self._on_rendered)
+        self._render_worker.failed.connect(self._on_failed)
+        self._render_worker.start()
 
     def _on_script(self, responses: dict, links: dict):
         texts = [t for t in (responses.get("script") or []) if t.strip()]
@@ -211,31 +343,7 @@ class ReelDialog(QDialog):
         if self.brand:
             spec["brand"] = self.brand
         self.spec = spec
-
-        lines = [f"{i + 1}. {sc.get('type')}  ·  {sc.get('seconds', 4)}s"
-                 f"   {sc.get('heading') or sc.get('name') or ''}"
-                 for i, sc in enumerate(spec["scenes"])]
-        if spec.get("_dropped"):
-            lines.append("")
-            lines.append("skipped (this renderer can't draw them): "
-                         + ", ".join(spec["_dropped"]))
-        self.script_view.setPlainText("\n".join(lines))
-
-        secs = sum(float(sc.get("seconds", 4)) for sc in spec["scenes"])
-        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
-        stamp = int(time.time())
-        self.out_path = os.path.join(CB.config.RUNS_DIR, f"reel_{stamp}.mp4")
-        json.dump(spec, open(
-            os.path.join(CB.config.RUNS_DIR, f"reel_{stamp}.json"), "w"), indent=2)
-
-        self.progress.setRange(0, 100)
-        self._busy(True, f"Drawing {len(spec['scenes'])} scenes, {secs:.0f}s, "
-                         "1080x1920…")
-        self._render_worker = ReelWorker(spec, self.out_path)
-        self._render_worker.progress.connect(self._on_frames)
-        self._render_worker.done.connect(self._on_rendered)
-        self._render_worker.failed.connect(self._on_failed)
-        self._render_worker.start()
+        self._start_render(spec)
 
     def _on_frames(self, done: int, total: int):
         self.progress.setValue(int(done / max(1, total) * 100))

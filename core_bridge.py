@@ -230,6 +230,12 @@ def get_studio():
     return reel_web
 
 
+def get_assets():
+    """Brand marks and artwork, cut out of whatever the client attached."""
+    from core import assets
+    return assets
+
+
 def get_ffmpeg():
     from core import ffmpeg
     return ffmpeg
