@@ -187,11 +187,26 @@ class ReelDialog(QDialog):
             self._busy(False, "")
             QMessageBox.warning(self, "Reel", "The agent returned nothing.")
             return
-        try:
-            spec = self.reel.parse_spec(texts[0])
-        except Exception as e:
+        # NEWEST capture that actually parses — not texts[0].
+        #
+        # texts[0] is whatever is at the TOP of the chat tab, and Prism reuses
+        # its browser profile, so on a reused tab that is an older
+        # conversation entirely. The page also holds the prompt Prism just
+        # typed, which carries an example spec inside it.
+        spec, why = self.reel.first_spec(texts)
+        if spec is None:
             self._busy(False, "")
-            QMessageBox.warning(self, "Reel", str(e))
+            # Keep what came back. Without this the one piece of evidence that
+            # could explain the failure is discarded at the moment it becomes
+            # interesting — and "No JSON scene spec found in the agent's
+            # reply" is unanswerable against a tab that visibly contains JSON.
+            kept = self.reel.keep_unparsed(texts)
+            QMessageBox.warning(
+                self, "Reel",
+                f"{why or 'The agent returned nothing to render.'}"
+                + (f"\n\nWhat came back was saved to:\n{kept}" if kept else "")
+                + ("\n\nIts tab: " + links["script"] if links.get("script")
+                   else ""))
             return
         if self.brand:
             spec["brand"] = self.brand

@@ -1,0 +1,175 @@
+"""Which capture off the page is the reel script, and keeping it when none is.
+
+A real failure this could not explain, and that is the point of the file. A
+reel run came back with "no JSON scene spec found" against a Claude tab that
+visibly contained a perfect spec. The log had one line — `captured 991 chars`
+— and the text itself had already gone out of scope. Pasting the reply in by
+hand parsed first time, so the reply was never the problem; something about
+WHICH text was parsed, or what the page did to it, was. Neither could be
+checked, because the evidence was thrown away at the moment it became
+interesting.
+
+Two defects, both real regardless of which one caused that run:
+
+  · **`texts[0]` is the top of the tab, not the answer.** Prism reuses its
+    browser profile, so a reused tab opens on an older conversation entirely
+    — and the page also holds the prompt Prism just typed, which carries an
+    EXAMPLE spec inside it. The web renderer had already learned this
+    ("LAST, not longest"); the Pillow one and both of its callers had not.
+
+  · **The unparseable reply was discarded.** The web renderer keeps it. The
+    Pillow renderer, the GUI dialog and the CLI all dropped it, which is why
+    the run above is undiagnosable rather than merely broken.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import textwrap
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import core_bridge  # noqa: F401,E402
+from core import reel as R  # noqa: E402
+
+
+REPLY = json.dumps({"fps": 30, "scenes": [
+    {"type": "statement", "seconds": 5,
+     "lines": ["A Gerber folder arrives.", "Someone opens it,",
+               "reads out the specs by hand."],
+     "tail": "Before they can even quote."},
+    {"type": "list", "seconds": 6, "heading": "One real board",
+     "items": ["125.93 × 76.40 mm", "4 layers", "238 holes, 7 sizes",
+               "0.152 mm thinnest track"],
+     "tail": "Read instantly."},
+    {"type": "endcard", "seconds": 4, "name": "Prism",
+     "tagline_lines": ["Read the board.", "Skip the manual work."],
+     "contact": ""},
+]}, ensure_ascii=False)
+
+# What the chat page holds ABOVE the answer: the prompt Prism typed, whose
+# instructions quote an example spec, and — on a reused profile — whatever
+# conversation was there before.
+PRISM_OWN_PROMPT = (
+    "SCENE TYPES — pick only the ones the story needs. Shape: "
+    '{"fps": 30, "scenes": [ … ]}   '
+    '  statement  {"type":"statement","seconds":4,'
+    '"lines":["Up to 3 short lines"],"tail":"one quieter line"}   '
+    '  endcard    {"type":"endcard","seconds":4,"name":"Company Name",'
+    '"tagline_lines":["two short","lines"],"contact":"www.example.com"}')
+AN_OLDER_CHAT = "Sure — here is a summary of your quarter. Nothing JSON here."
+
+
+class TheNewestCaptureThatParses(unittest.TestCase):
+
+    def test_it_is_the_answer_and_not_the_top_of_the_tab(self):
+        spec, why = R.first_spec([AN_OLDER_CHAT, PRISM_OWN_PROMPT, REPLY])
+        self.assertIsNotNone(spec, why)
+        self.assertEqual(len(spec["scenes"]), 3)
+        self.assertEqual(spec["scenes"][0]["lines"][0],
+                         "A Gerber folder arrives.")
+
+    def test_prisms_own_example_spec_is_not_mistaken_for_the_answer(self):
+        """The prompt quotes single scenes AND a `{"scenes": [ … ]}` shape.
+        Reading the page top-down walks straight into them."""
+        spec, _ = R.first_spec([PRISM_OWN_PROMPT, REPLY])
+        self.assertEqual(len(spec["scenes"]), 3)
+
+    def test_the_longest_capture_is_not_the_answer_either(self):
+        """A guard against the other tempting rule. The prompt is far longer
+        than the reply — it is four thousand characters of instructions."""
+        long_prompt = PRISM_OWN_PROMPT + "\n" + ("filler. " * 900)
+        self.assertGreater(len(long_prompt), len(REPLY))
+        spec, _ = R.first_spec([long_prompt, REPLY])
+        self.assertEqual(len(spec["scenes"]), 3)
+
+    def test_blank_captures_are_stepped_over(self):
+        spec, _ = R.first_spec([REPLY, "", "   \n  "])
+        self.assertIsNotNone(spec)
+
+    def test_when_nothing_parses_it_says_why(self):
+        spec, why = R.first_spec(["not json", "still not json"])
+        self.assertIsNone(spec)
+        self.assertIsInstance(why, Exception)
+        self.assertTrue(str(why).strip())
+
+    def test_nothing_at_all_is_not_a_crash(self):
+        self.assertEqual(R.first_spec([]), (None, None))
+        self.assertEqual(R.first_spec(None), (None, None))
+
+
+class WhatTheChatWindowDoesToItOnTheWayOut(unittest.TestCase):
+
+    def test_a_soft_wrapped_reply_still_parses(self):
+        """The prompt forbids fences here, so the reply renders as prose and
+        the scrape gets the browser's wrapping as real newlines — illegal
+        inside a JSON string."""
+        wrapped = "\n".join(textwrap.wrap(REPLY, 72, replace_whitespace=False,
+                                          drop_whitespace=False))
+        self.assertIsNotNone(R.first_spec([wrapped])[0])
+
+    def test_a_linkified_url_no_longer_eats_the_spec(self):
+        """Fixed on the web renderer and never carried across, which is
+        obvious in hindsight — it is the same chat window. The swallowed link
+        label brings its own unbalanced braces, so the brace scan cuts the
+        spec in the wrong place."""
+        spec = json.dumps({"scenes": [
+            {"type": "endcard", "seconds": 4, "name": "Prism",
+             "contact": "https://alphakore.in"}]})
+        mangled = spec.replace(
+            '"https://alphakore.in"',
+            '"[https://alphakore.in/{a}](https://alphakore.in/%7Ba%7D)"')
+        got, why = R.first_spec([mangled])
+        self.assertIsNotNone(got, why)
+        self.assertEqual(got["scenes"][0]["contact"], "https://alphakore.in/{a}")
+
+    def test_a_thinking_chip_before_the_json_is_ignored(self):
+        self.assertIsNotNone(R.first_spec(["Thought for 21s\n\n" + REPLY])[0])
+
+
+class TheEvidenceIsKept(unittest.TestCase):
+    """"No JSON scene spec found" against a tab that visibly contains JSON is
+    unanswerable. Those two facts cannot both be investigated from a log
+    line."""
+
+    def setUp(self):
+        import tempfile
+        from core import config
+        self.tmp = tempfile.mkdtemp()
+        self._was = config.CONFIG_PATH
+        # Into a scratch directory, never the customer's own — a test suite
+        # that writes into ~/.prism has form in this repo.
+        config.CONFIG_PATH = os.path.join(self.tmp, "config.json")
+        self.config = config
+
+    def tearDown(self):
+        self.config.CONFIG_PATH = self._was
+
+    def test_every_candidate_is_written_down(self):
+        path = R.keep_unparsed(["first thing", "second thing"])
+        self.assertTrue(path and os.path.exists(path))
+        body = open(path, encoding="utf-8").read()
+        self.assertIn("first thing", body)
+        self.assertIn("second thing", body)
+
+    def test_the_length_is_recorded_beside_each(self):
+        """`captured 991 chars` in the log against a 935-character reply was
+        the thread that unpicked this. The count has to sit with the text."""
+        path = R.keep_unparsed(["abcde"])
+        self.assertIn("(5 chars)", open(path, encoding="utf-8").read())
+
+    def test_it_lands_somewhere_a_person_can_find(self):
+        path = R.keep_unparsed(["x"])
+        self.assertTrue(path.endswith(".txt"))
+        self.assertIn("logs", path)
+        self.assertIn("would-not-parse", os.path.basename(path))
+
+    def test_a_full_disk_does_not_turn_a_bad_spec_into_a_crash(self):
+        self.config.CONFIG_PATH = "/definitely/not/a/real/place/config.json"
+        self.assertEqual(R.keep_unparsed(["x"]), "")
+
+
+if __name__ == "__main__":
+    unittest.main()
