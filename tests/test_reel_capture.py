@@ -249,9 +249,94 @@ class TheMixOfScenes(unittest.TestCase):
         for kind in ("figure", "trend", "pillar", "hub", "brand"):
             self.assertIn(f"'{kind}'", said, kind)
 
-    def test_the_prompt_shows_the_shape_rather_than_only_listing_types(self):
-        """The list of types was already there when the wall of text was
-        written. A worked running order is the part that was missing."""
+    def test_the_prompt_states_the_ratio_as_a_count(self):
+        """The list of scene types was already there when the wall of text
+        was written, so something has to actually count."""
         text = R.spec_instructions()
-        self.assertIn("THE SHAPE THAT WORKS", text)
-        self.assertIn("AT MOST TWO text-only", text)
+        self.assertIn("At most TWO text-only", text)
+        self.assertIn("never two in a row", text)
+
+    def test_the_prompt_gives_no_single_running_order_to_copy(self):
+        """A worked example WAS given here — the good reel's actual order —
+        and it was copied straight onto an unrelated business the same day.
+        One template for every client is what this renderer is trying not to
+        be, so the shapes offered have to be several and contradictory."""
+        text = R.spec_instructions()
+        self.assertIn("THE RUNNING ORDER IS YOURS", text)
+        self.assertIn("examples of DIFFERENT, not a menu", text)
+        # More than one shape, and they must not all start the same way.
+        shapes = [ln for ln in text.split("\n")
+                  if "endcard" in ln and "·" in ln and "—" in ln]
+        self.assertGreaterEqual(len(shapes), 4, shapes)
+        openers = {ln.split("—")[1].strip().split(",")[0] for ln in shapes}
+        self.assertGreater(len(openers), 2, openers)
+
+
+class NothingRunsOffTheFrame(unittest.TestCase):
+    """Found by looking at a rendered frame, not by reading the code.
+
+    `scene_statement` drew its lines and its tail with raw `d.text`, which
+    Pillow will happily paint past the edge of the canvas without complaining.
+    A three-word line fits and a sentence does not — and a sentence is what a
+    model writes. The tail read "Read off every Gerber folder by hand, before
+    anyo" on screen, cut mid-word.
+
+    `scene_list` had wrapped the same field correctly all along, which is what
+    made it obvious this was an oversight rather than a design.
+    """
+
+    def edge(self, scene, frames=90, step=5):
+        """Rightmost pixel the TEXT paints. The blueprint grid is drawn edge
+        to edge by design, so it is rendered separately and subtracted."""
+        from PIL import Image, ImageDraw, ImageChops
+        blank = {"lines": [], "tail": ""}
+        out = 0
+        for f in range(0, frames, step):
+            a = Image.new("RGB", (R.W, R.H), R.Brand().bg)
+            R.scene_statement(ImageDraw.Draw(a), R.Brand(), scene, f)
+            g = Image.new("RGB", (R.W, R.H), R.Brand().bg)
+            R.scene_statement(ImageDraw.Draw(g), R.Brand(), blank, f)
+            box = ImageChops.difference(a, g).convert("L").point(
+                lambda p: 255 if p > 8 else 0).getbbox()
+            if box:
+                out = max(out, box[2])
+        return out
+
+    def test_the_tail_that_was_clipped_now_wraps(self):
+        """The exact string, off the reel that failed."""
+        self.assertLess(self.edge({
+            "lines": ["Layers.", "Holes.", "Tracks."],
+            "tail": "Read off every Gerber folder by hand, before anyone "
+                    "can quote."}), R.W)
+
+    def test_a_line_longer_than_the_examples_shrinks_to_fit(self):
+        self.assertLess(self.edge({"lines": ["Precision machined components"],
+                                   "tail": "since 2009"}), R.W)
+
+    def test_the_good_reels_own_scene_is_unchanged(self):
+        """It fitted before and must still fit, well inside the margin."""
+        self.assertLessEqual(self.edge({
+            "lines": ["Servers.", "Networks.", "Security."],
+            "tail": "The infrastructure your business runs on."}),
+            R.W - R.SAFE_X)
+
+    def test_a_line_too_long_to_shrink_is_rejected_upstream(self):
+        """Past about forty characters no floor saves it, which is why the
+        check exists before anything is drawn rather than only inside the
+        renderer."""
+        said = " ".join(R.lint_spec({"scenes": [
+            {"type": "statement", "seconds": 5,
+             "lines": ["Precision machined components for auto and pharma"]},
+            {"type": "figure", "seconds": 6, "value": "1"},
+            {"type": "hub", "seconds": 6, "nodes": [1, 2, 3, 4]},
+            {"type": "endcard", "seconds": 5}]}))
+        self.assertIn("characters", said)
+        self.assertIn("under 24", said)
+
+    def test_short_lines_are_not_complained_about(self):
+        self.assertNotIn("under 24", " ".join(R.lint_spec({"scenes": [
+            {"type": "statement", "seconds": 5,
+             "lines": ["Servers.", "Networks.", "Security."]},
+            {"type": "figure", "seconds": 6, "value": "1"},
+            {"type": "hub", "seconds": 6, "nodes": [1, 2, 3, 4]},
+            {"type": "endcard", "seconds": 5}]})))
