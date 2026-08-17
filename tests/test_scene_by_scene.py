@@ -379,5 +379,82 @@ class EachSceneIsLaidOutWhileItIsStillTheSubject(unittest.TestCase):
         self.assertIn("logo", seen[0]["_assets"])
 
 
+class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
+    """What a customer types is "make a reel, here are two screenshots" — and
+    that has to be enough, because a product that needs a 400-word brief is a
+    product for somebody else.
+
+    So the two things a careful brief would have said are now the pipeline's
+    job. One is mechanical and lives in the asset manifest: a landscape
+    picture in a portrait frame has to be CROPPED, not shrunk. The other needs
+    eyes, and the imagery stage is the only stage in a reel that has them.
+    """
+
+    def test_a_wide_picture_is_told_to_be_cropped(self):
+        from core import assets as A
+        said = A.manifest({"art1": {"kind": "art", "w": 1470, "h": 943,
+                                    "alpha": False, "made": False}})
+        self.assertIn("CROP INSTEAD OF SHRINKING", said)
+        self.assertIn("asset:art1", said.split("WIDER THAN")[1])
+
+    def test_a_portrait_picture_is_left_alone(self):
+        from core import assets as A
+        said = A.manifest({"art1": {"kind": "art", "w": 800, "h": 1200,
+                                    "alpha": False, "made": False}})
+        self.assertNotIn("CROP INSTEAD", said)
+
+    def test_a_wide_logo_is_left_alone(self):
+        """A wordmark is wider than it is tall by nature, and cropping one in
+        half is worse than any amount of shrinking."""
+        from core import assets as A
+        said = A.manifest({"logo": {"kind": "logo", "w": 900, "h": 200,
+                                    "alpha": True, "made": False}})
+        self.assertNotIn("CROP INSTEAD", said)
+
+    def test_what_the_imagery_stage_saw_is_read_back(self):
+        got = RW.read_pictures([
+            "A green circuit board.\n"
+            "PICTURE art1: a home screen — crop to the Add folder row\n"
+            "PICTURE art2: a seven-step plan — crop to the rows only\n"])
+        self.assertEqual(len(got), 2)
+        self.assertIn("Add folder", got["art1"])
+
+    def test_a_picture_it_could_not_see_is_not_invented(self):
+        """It was told to write NONE rather than guess. A wrong description is
+        worse than none — the art director builds a scene around it."""
+        got = RW.read_pictures(["PICTURE art1: NONE\nPICTURE art2: a plan"])
+        self.assertNotIn("art1", got)
+        self.assertIn("art2", got)
+
+    def test_the_example_echoed_back_is_not_a_description(self):
+        got = RW.read_pictures(
+            ["PICTURE art1: <what is in it, in a few words> — <the ONE part>"])
+        self.assertEqual(got, {})
+
+    def test_the_descriptions_reach_the_asset_list(self):
+        listing = ("  asset:logo — 512x512, transparent PNG — theirs\n"
+                   "  asset:art1 — 1470x943, opaque — artwork the client supplied")
+        out = RW.describe_pictures(listing, {"art1": "a seven-step plan"})
+        self.assertIn("↳ a seven-step plan", out)
+        # …attached to the right line, and no other.
+        self.assertEqual(out.count("↳"), 1)
+        self.assertIn("asset:logo — 512x512, transparent PNG — theirs\n  asset:",
+                      out)
+
+    def test_nothing_seen_leaves_the_list_exactly_as_it_was(self):
+        listing = "  asset:art1 — 1x1, opaque — artwork the client supplied"
+        self.assertEqual(RW.describe_pictures(listing, {}), listing)
+
+    def test_the_imagery_stage_is_asked_only_when_there_is_something_to_see(self):
+        self.assertNotIn("PICTURE", RW.imagery_instructions("x", True))
+        asked = RW.imagery_instructions("x", True, attached=["art1", "art2"])
+        self.assertIn("PICTURE art1:", asked)
+        self.assertIn("PICTURE art2:", asked)
+
+    def test_it_is_told_what_to_write_when_it_cannot_see_one(self):
+        asked = RW.imagery_instructions("x", True, attached=["art1"])
+        self.assertIn("write NONE", asked)
+
+
 if __name__ == "__main__":
     unittest.main()
