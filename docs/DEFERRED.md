@@ -42,6 +42,53 @@ ever obeys the two checked rules and still reads as slides.
 
 ---
 
+## The storyboard is advice, not a contract
+
+**Where:** `prism_terminal/core/reel_web.py`, `build_spec()`
+
+**Done so far:** turn one writes a storyboard row per scene — job, look,
+motion, cut — and each scene's own turn is handed its row. Every scene is laid
+out in the browser and corrected before the next is asked for.
+
+**Not done:** nothing checks that the scene the model wrote is the scene its
+storyboard described. A row saying "figure edge to edge, counts up" and a
+scene that is a centred headline both pass, because both are legible.
+
+**What it would be:** the same shape as the layout check that already works —
+measure something objective and send the mismatch back. The measurable ones
+are element count, how many distinct animations ran, and whether the
+composition's centre of mass moved between scenes. All three are readable off
+the page the checker already has open.
+
+**Trigger:** a reel where every scene lays out clean and the film still reads
+as a deck. That is now the only failure mode left in this stage, so it is
+worth watching for specifically.
+
+---
+
+## The design stage now takes minutes
+
+**Where:** the same conversation.
+
+**What it costs:** one turn per scene, each waiting up to 180 seconds. A
+seven-scene reel is roughly seven to fifteen minutes in the design stage
+alone, where it used to be one reply.
+
+**Why it was accepted:** the customer pays in wall-clock, not tokens — it is
+their own browser and their own subscription — and the thing being bought is a
+reel that does not look like a slide deck. Progress is reported per scene so
+the wait is legible rather than a frozen window.
+
+**What would change it:** scenes are written in sequence because they share
+one chat, and the chat is what carries the palette and the storyboard without
+re-sending them. Two or three tabs in parallel would cut the wall-clock by the
+same factor and cost a re-send of the design per tab.
+
+**Trigger:** a customer complaining about the wait, or a reel long enough
+(ten-plus scenes) that the sequence outlives the model's context.
+
+---
+
 ## Reel motion — carriers across the cut
 
 **Where:** same place.

@@ -4,7 +4,94 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **727 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+Tests: **813 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+
+---
+
+# Round 6 — the reels were slides, and it was arithmetic
+
+One change, and it came from a measurement rather than an opinion.
+
+A reel built by hand with a coding agent was compared against a reel Prism
+generated. Same renderer, same CSS, same browser. The difference was not taste:
+
+|                        | Built by hand | Prism |
+| ---------------------- | ------------- | ----- |
+| markup + motion per scene | **20,300 chars** | **278 chars** |
+| elements per scene     | 25–77         | 3–5   |
+| animations inside scenes | 150         | 0     |
+| planning written first | ~50,000 chars | none  |
+
+**278 characters is a headline and a subhead.** That is a slide. There is
+nothing in it to move, so no instruction about motion could ever have fixed it
+— which is exactly why the previous attempt, which added motion rules to the
+prompt, made the output worse rather than better.
+
+The cause was structural. The art director was asked for the whole reel in one
+JSON object, and a model writing one JSON object budgets a few thousand
+characters and divides them by seven.
+
+## The design stage is a conversation now
+
+**Was:** one prompt, one reply, the whole reel.
+
+**Is:** turn one is the LOOK and a STORYBOARD — the palette, the type, the
+shared stylesheet, and one row per scene giving it a distinct job, composition
+and motion. Then one turn per scene, in the same tab, each with a whole reply
+to spend on one scene. Each is laid out in the real browser and corrected
+before the next is asked for.
+
+Measured on the same four-scene script, rendered both ways:
+
+```
+OLD   4 scenes |   271 chars/scene |  7 elements/scene |  0 animations
+NEW   4 scenes | 2,339 chars/scene | 34 elements/scene | 30 animations
+```
+
+**Why the correction loop is better too.** A layout fault used to come back as
+"scene 3's headline is off the frame" against a reply the model had long since
+moved past. Now it is simply "this one", while the scene is still the subject.
+
+**Why more turns cost the customer nothing.** Prism drives the customer's own
+browser on their own subscription. Ten prompts in a chat window instead of two
+is slower, not more expensive — which is the opposite of the economics a
+coding agent faces, and the reason this approach was available to us and not
+to them. The design stage now takes minutes rather than seconds, and says
+which scene it is on while it works.
+
+## Per-scene CSS is confined to its scene
+
+`scope_css()` in `core/reel_web.py`. A model naming things in reply four
+cannot see what it called them in reply two — everybody writes `.title`,
+everybody writes `@keyframes rise`. Left alone they collide and whichever
+scene loses the cascade silently inherits another scene's type size and
+another scene's motion.
+
+Every selector is rewritten to that scene's layer and every `@keyframes`
+renamed, with the `animation:` declarations that point at them following the
+rename. Three details that took real care:
+
+- **`.leaving` is the scene element itself**, not something inside it.
+  Prefixed as a descendant, every hand-written cut would have silently
+  stopped working.
+- **A class may share a keyframes name.** `.rise` and `@keyframes rise` are
+  both idiomatic; only the animation references are rewritten, never the
+  class.
+- **`url()` contents are not CSS.** A brace in a path or a data: URI used to
+  be read as structure and cut the stylesheet in half.
+
+It is worth more than the collisions it prevents: because a scene *cannot*
+reach outside itself, the prompt never has to ask it to be careful. It is told
+so, in as many words — a scene free to name things clearly writes better CSS
+than one hedging against a collision it cannot see.
+
+## A failed turn costs one scene, not the reel
+
+More turns means more chances to fail. A reply that is prose rather than JSON
+is asked again, more bluntly. A scene that still will not come back is
+replaced by a plain one built from the script's own words — modest, legible by
+construction, in the design's own colours. One dull scene ships; a hole does
+not.
 
 ---
 

@@ -168,10 +168,18 @@ purchase order is accepted.
   a normal pipeline stage (editable), then confirm-and-send from *your own*
   account. First use opens the one-time SMTP setup (Gmail needs an app
   password).
-- **Reel / Studio** — short videos, drawn with Pillow and encoded with FFmpeg.
+- **Reel** — short videos, drawn with Pillow and encoded with FFmpeg.
   **FFmpeg ships inside the build** (`imageio-ffmpeg`); if it is ever missing,
   Prism downloads the same wheel and verifies it against the SHA-256 PyPI
   publishes for that exact file before unpacking it.
+- **Studio** — the same encode, but the frames are a real web page filmed in a
+  paused Chromium rather than drawn in Python, so no two clients get the same
+  film. The design stage is a **conversation**: one turn for the look and a
+  storyboard, then **one turn per scene**, each laid out at 1080×1920 and
+  corrected before the next is asked for. Asking for the whole reel in one
+  reply was what made the old output look like a slide deck — a scene got
+  about 278 characters, which is a headline and a subhead. See
+  `CHANGES.md` → Round 6.
 
 ## Licensing
 
