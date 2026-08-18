@@ -187,6 +187,31 @@ class MainWindow(QMainWindow):
         self._licence_timer.timeout.connect(self._tick_licence)
         self._licence_timer.start()
 
+        # Early repaints, because the first tick is TEN MINUTES away.
+        #
+        # The window is built from the cached token while _licence_gate's
+        # refresh is still in flight. When that token is past its offline
+        # window the banner correctly says so — and then the refresh lands a
+        # second later, makes the licence valid again, and nothing repainted.
+        # The customer sat looking at "Prism hasn't been able to reach the
+        # licence server" and an "Enter a licence key" button for up to ten
+        # minutes after it had already fixed itself, which reads as being
+        # asked to buy something they have already paid for.
+        #
+        # These cost nothing: refresh_licence_ui() reads the CACHED state and
+        # touches the network never. Spread out because a cold host can take
+        # 30-50s to answer, and the whole point is to catch the moment it does.
+        for delay_ms in (1500, 4000, 10_000, 30_000, 60_000):
+            QTimer.singleShot(delay_ms, self._repaint_licence)
+
+    def _repaint_licence(self):
+        """Re-read the cached licence and repaint. No network, never raises."""
+        try:
+            licensing.reload()
+            self.refresh_licence_ui()
+        except Exception:                          # noqa: BLE001
+            pass
+
     def _tick_licence(self):
         try:
             licensing.refresh()

@@ -269,6 +269,66 @@ class TheLicenceGateStillHolds(unittest.TestCase):
         self.assertTrue(row.property("locked"))
         self.assertTrue(row.isEnabled())
 
+    def test_the_banner_recovers_once_a_background_refresh_lands(self):
+        """The window is built from the cached token while _licence_gate's
+        refresh is still in flight. If that token is past its offline window
+        the banner correctly says so — and then the refresh lands a second
+        later and the banner has to stop saying it.
+
+        It did not. The only repaint was on a TEN MINUTE timer, so a customer
+        whose licence had already fixed itself sat looking at "Prism hasn't
+        been able to reach the licence server" and an "Enter a licence key"
+        button, which reads as being asked to buy what they have paid for.
+        """
+        import main_window
+
+        stale = LicenseState(status=licensing.STALE, plan="Growth",
+                             customer="Test", kind="team",
+                             features=frozenset({"core", "inbox"}), seats=3,
+                             license_id="7F3A", license_ends=2 ** 31 - 1,
+                             token_expires=0, grace_days=7)
+        licensing.state = lambda: stale
+        licensing.reload = lambda: stale
+        win = main_window.MainWindow()
+        win.refresh_licence_ui()
+        # isVisibleTo, not isVisible: the window is never shown in tests, so
+        # isVisible() is False regardless and would pass either way.
+        self.assertTrue(win.banner.isVisibleTo(win),
+                        "a stale licence must show the banner")
+        self.assertIn("reach the licence server", win._banner_text.text())
+
+        # ...the background refresh lands, exactly as it did on the machine
+        # that reported this.
+        self._grant({"core", "inbox"})
+        win._repaint_licence()
+        self.assertFalse(win.banner.isVisibleTo(win),
+                         "banner must go once the licence is valid again")
+
+    def test_the_repaint_is_actually_scheduled_soon_after_launch(self):
+        """The method above is only half of it. The bug was that nothing
+        CALLED it for ten minutes, so this pins the schedule rather than the
+        repaint — without it, disabling the singleShot calls leaves the other
+        test passing and the customer still staring at a stale banner."""
+        import main_window
+        from PySide6.QtCore import QTimer
+
+        self._grant({"core", "inbox"})
+        scheduled = []
+        real = QTimer.singleShot
+
+        def capture(ms, target):
+            scheduled.append((ms, getattr(target, "__name__", str(target))))
+
+        with mock.patch.object(QTimer, "singleShot", staticmethod(capture)):
+            main_window.MainWindow()
+
+        repaints = [ms for ms, name in scheduled if name == "_repaint_licence"]
+        self.assertTrue(repaints, "nothing repaints the licence after launch")
+        self.assertLessEqual(
+            min(repaints), 5_000,
+            f"first repaint is {min(repaints)}ms away — a customer whose "
+            f"licence fixes itself must not wait that long to be told")
+
     def test_an_owned_add_on_is_not_marked_locked(self):
         import main_window
         self._grant({"core", "inbox"})
