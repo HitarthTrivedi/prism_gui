@@ -146,6 +146,18 @@ different design tools and ideally one with no `.gbrjob`. The reader has been
 tested on exactly one file, a clean KiCad export, and the fallback path — the
 one that matters — has never run.
 
+**THE TRIGGER FIRED — 2026-08-19.** Two real jobs arrived, five years apart and
+agreeing on almost nothing: an Altium 4-layer export in inches with an Excellon
+drill, and a 2013 single-sided job in millimetres whose drill is a *Gerber* of
+flashed pads and whose copper is `G36` regions. The fallback path ran, and it
+was wrong twice — modal D-codes and sequential polarity, both found by measuring
+the same boards with an unrelated library rather than by reading the code.
+
+The reader is now `prism_terminal/core/gerber.py` with `/gerber` in `prism.py`
+(commit `7cef5c4`) and 26 tests (`d3263e1`). **The window is still not built** —
+that, and the verification ladder, moved to `docs/AFTER_THE_MERGE.md`, because
+they are no longer waiting on a trigger. They are waiting on a merge.
+
 ---
 
 ## The test that hangs
