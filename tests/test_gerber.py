@@ -407,6 +407,187 @@ class ModalCodesAndPolarityOrder(unittest.TestCase):
         self.assertAlmostEqual(G.layer_copper(layer).area, 100.0, places=1)
 
 
+class LetteringInCopperIsNotATrack(unittest.TestCase):
+    """Boards carry text: part numbers, revision marks, a logo, etched into
+    the copper beside the tracks. It is copper. It is not a conductor.
+
+    Measuring it reported a 2013 board's minimum track width as 10 mil when
+    every real conductor on it is 118, and its clearance as 5 mil when the
+    tightest real gap is 81. The customer's own hand-filled check sheet said
+    118 and 81.9 — which is how we found out. Neither the test suite nor an
+    independent Gerber library could see it: the file was being read
+    correctly, and the wrong thing was being measured.
+
+    A conductor connects to something. Lettering connects to nothing. So an
+    island counts only if it carries a flashed pad."""
+
+    LETTERED = """
+        %FSLAX34Y34*%
+        %MOMM*%
+        %ADD10C,2.000*%
+        %ADD11C,0.100*%
+        %ADD12C,1.500*%
+        D10*
+        X50000Y50000D02*
+        X250000Y50000D01*
+        X50000Y150000D02*
+        X250000Y150000D01*
+        D12*
+        X50000Y50000D03*
+        X250000Y50000D03*
+        X50000Y150000D03*
+        X250000Y150000D03*
+        D11*
+        X100000Y250000D02*
+        X100000Y280000D01*
+        X104000Y250000D02*
+        X104000Y280000D01*
+        M02*
+        """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        _write(self.dir, "job.gtl", self.LETTERED)
+        self.job = G.analyse(G.gather([self.dir]))
+        self.row = self.job["copper"][0]
+
+    def test_the_thin_lettering_does_not_become_the_minimum_width(self):
+        """Two 2 mm bars with pads, and two 0.1 mm strokes with none. The
+        answer is 2 mm."""
+        self.assertAlmostEqual(
+            self.job["answers"]["min_track_width_mm"], 2.0, places=3)
+
+    def test_the_gap_between_letters_does_not_become_the_clearance(self):
+        """The strokes are 0.4 mm apart centre to centre — 0.3 mm of copper
+        gap, tighter than anything between the real conductors."""
+        self.assertGreater(self.job["answers"]["min_track_spacing_mm"], 1.0)
+
+    def test_it_says_how_much_it_set_aside(self):
+        """Silently dropping copper is how you get a number nobody can
+        argue with. The count is reported and warned about."""
+        self.assertEqual(self.row["markings"], 2)
+        self.assertEqual(self.row["conductors"], 2)
+        self.assertTrue(any("carry no pad" in w for w in self.job["warnings"]))
+
+    def test_the_everything_included_figure_is_still_available(self):
+        """A customer who asks "what about the printing?" gets an answer.
+        Etched lettering IS an etching constraint — just not track spacing."""
+        self.assertLess(self.row["spacing"]["with_markings_mm"], 1.0)
+
+    def test_a_layer_with_no_pads_at_all_is_measured_whole(self):
+        """The test needs something to test against. With no flashes there
+        is nothing, so measure everything rather than report nothing."""
+        d = tempfile.mkdtemp()
+        _write(d, "job.gtl", """
+            %FSLAX34Y34*%
+            %MOMM*%
+            %ADD10C,0.200*%
+            D10*
+            X50000Y50000D02*
+            X250000Y50000D01*
+            X50000Y100000D02*
+            X250000Y100000D01*
+            M02*
+            """)
+        job = G.analyse(G.gather([d]))
+        self.assertAlmostEqual(
+            job["answers"]["min_track_width_mm"], 0.2, places=3)
+        self.assertEqual(job["copper"][0]["markings"], 0)
+
+
+class APlaneHasNoTracks(unittest.TestCase):
+    """An internal ground or power plane is a solid copper sheet. The only
+    thing in its Gerber is the clearance punched around each hole, so
+    "minimum track width" on one is a category error, not a small number.
+
+    On the 2018 job the two plane layers reported 3 mil on a board routed to
+    10, and dragged the whole job's answer down with them. They still count
+    toward the layer total — a 4-layer board is priced as a 4-layer board."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        _write(self.dir, "job.gtl", COPPER)
+        _write(self.dir, "job.gko", OUTLINE_50x30)
+        # A plane: nothing but anti-pads, two of them very close together.
+        _write(self.dir, "job.gp1", """
+            %FSLAX34Y34*%
+            %MOMM*%
+            %ADD10C,1.000*%
+            D10*
+            X100000Y100000D03*
+            X110500Y100000D03*
+            M02*
+            """)
+        self.job = G.analyse(G.gather([self.dir]))
+
+    def test_the_plane_is_not_measured_for_tracks(self):
+        measured = [r["name"] for r in self.job["copper"]]
+        self.assertNotIn("job.gp1", measured)
+
+    def test_the_plane_still_counts_as_a_layer(self):
+        self.assertEqual(self.job["answers"]["layers"], 2)
+        self.assertEqual(self.job["answers"]["routed_layers"], 1)
+        self.assertEqual(self.job["answers"]["plane_layers"], 1)
+
+    def test_it_says_the_plane_was_set_aside_and_why(self):
+        self.assertTrue(any("internal plane" in w for w in self.job["warnings"]))
+
+
+class AgainstTheCustomersOwnCheckSheet(unittest.TestCase):
+    """The strongest witness we have: Fine Circuits filled in both jobs by
+    hand, in their own spreadsheet, in mil. Every figure below is theirs.
+
+    Four of the six matched on the day it arrived. The two that did not —
+    track width and track spacing, on BOTH boards — are what taught us that
+    lettering in copper was being measured as track."""
+
+    SHEET = {
+        "layer 1.zip": dict(layers=1, x_in=2.3622, y_in=2.8740,
+                            width_mil=118, spacing_mil=81.9,
+                            drill_mil=39.37, holes=80),
+        "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar":
+                       dict(layers=2, x_in=3.5500, y_in=3.5500,
+                            width_mil=10, spacing_mil=10,
+                            drill_mil=18, holes=218),
+    }
+
+    def _job(self, name):
+        if not os.path.isdir(REAL):
+            self.skipTest("sample jobs not on this machine")
+        src = os.path.join(REAL, name)
+        if not os.path.exists(src):
+            self.skipTest("sample missing")
+        try:
+            return G.analyse(G.gather([src]))
+        except G.GerberError as e:
+            self.skipTest(str(e))
+
+    def _check(self, name):
+        want = self.SHEET[name]
+        a = self._job(name)["answers"]
+        mil = G.mm_to_mil
+        self.assertAlmostEqual(a["pcb_size_mm"][0] / 25.4, want["x_in"], places=3)
+        self.assertAlmostEqual(a["pcb_size_mm"][1] / 25.4, want["y_in"], places=3)
+        self.assertAlmostEqual(mil(a["min_drill_mm"]), want["drill_mil"], places=1)
+        self.assertEqual(a["drill_count"], want["holes"])
+        # Track width is exact. Spacing is his measurement of a specific
+        # pair against our global minimum, so 2 mil of daylight is agreement,
+        # not a pass mark set low: 5 vs 81 is what failure looked like.
+        self.assertAlmostEqual(mil(a["min_track_width_mm"]), want["width_mil"],
+                               delta=0.2)
+        self.assertAlmostEqual(mil(a["min_track_spacing_mm"]),
+                               want["spacing_mil"], delta=2.0)
+        # He counts ROUTED layers — the 2018 board's two planes are not in
+        # his "2", and that is the reading his own CAM report supports.
+        self.assertEqual(a["routed_layers"], want["layers"])
+
+    def test_the_2013_single_sided_job(self):
+        self._check("layer 1.zip")
+
+    def test_the_2018_four_layer_job(self):
+        self._check("CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
+
+
 class AgainstAnIndependentImplementation(unittest.TestCase):
     """gerbonara is an unrelated Gerber library. Where it is installed, the
     object counts and aperture sizes it reads must match ours exactly —
@@ -417,6 +598,10 @@ class AgainstAnIndependentImplementation(unittest.TestCase):
             import gerbonara            # noqa: F401
         except ImportError:
             self.skipTest("gerbonara not installed")
+        import warnings
+        # gerbonara warns on every modal coordinate line — 4500 of them on
+        # this job, and the exact construct Prism was fixed to handle.
+        warnings.filterwarnings("ignore", category=SyntaxWarning)
         if not os.path.isdir(REAL):
             self.skipTest("sample jobs not on this machine")
 
@@ -527,36 +712,17 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
 
 
-class AgainstTwoRealCustomerJobs(unittest.TestCase):
-    """Five years apart, and they agree on almost nothing: Excellon vs
-    Gerber drill, apertures vs G36 regions, inch 2:3 leading-zero vs mm 4:4
-    trailing-zero, outline on a mechanical layer vs implied by a drill
-    guide. Both sets of answers are known independently — one from the CAM
-    tool's own report, one from the customer's filled-in check list."""
+class TheJobsOwnCamReportIsAWitness(unittest.TestCase):
+    """Altium wrote a .DRR in 2018 stating 218 holes across ten tools. It is
+    the only figure this job carries that nobody here produced, so it is the
+    check that cannot be argued with.
 
-    def setUp(self):
-        if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
-
-    def test_the_2018_altium_job(self):
-        src = os.path.join(REAL, "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
-        if not os.path.exists(src):
-            self.skipTest("sample missing")
-        try:
-            job = G.analyse(G.gather([src]))
-        except G.GerberError as e:
-            self.skipTest(str(e))
-        a = job["answers"]
-        self.assertAlmostEqual(a["pcb_size_mm"][0], 90.17, places=1)
-        self.assertAlmostEqual(a["pcb_size_mm"][1], 90.17, places=1)
-        self.assertAlmostEqual(a["min_track_width_mm"], 0.2032, places=3)
-        self.assertAlmostEqual(a["min_drill_mm"], 0.4572, places=3)
-        self.assertEqual(a["drill_count"], 218)
+    The five measured numbers are pinned separately, against the customer's
+    own check sheet — see AgainstTheCustomersOwnCheckSheet."""
 
     def test_the_2018_job_reproduces_its_own_cam_report(self):
-        """Altium wrote a .DRR stating 218 holes across ten tools. It is the
-        only independent check this job comes with, so it is the one that
-        matters most."""
+        if not os.path.isdir(REAL):
+            self.skipTest("sample jobs not on this machine")
         src = os.path.join(REAL, "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
         if not os.path.exists(src):
             self.skipTest("sample missing")
@@ -568,21 +734,6 @@ class AgainstTwoRealCustomerJobs(unittest.TestCase):
         self.assertTrue(checks)
         for c in checks:
             self.assertTrue(c["agrees"], f"{c['what']}: {c}")
-
-    def test_the_2013_single_sided_job(self):
-        """The customer's own check list says "60mmX73mm, Single Sided".
-        The copper bounding box says 66.05 x 73.00, because the legend hangs
-        6 mm off the left edge."""
-        src = os.path.join(REAL, "layer 1.zip")
-        if not os.path.exists(src):
-            self.skipTest("sample missing")
-        job = G.analyse(G.gather([src]))
-        a = job["answers"]
-        self.assertAlmostEqual(a["pcb_size_mm"][0], 60.0, places=1)
-        self.assertAlmostEqual(a["pcb_size_mm"][1], 73.0, places=1)
-        self.assertAlmostEqual(a["min_drill_mm"], 1.0, places=2)
-        self.assertEqual(a["drill_count"], 80)
-        self.assertEqual(len(job["copper"]), 1)      # single-sided
 
 
 if __name__ == "__main__":
