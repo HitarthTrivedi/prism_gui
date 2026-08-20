@@ -136,6 +136,30 @@ convenience.
 
 ---
 
+## 6. Validated by the customer — and what they said next
+
+**2026-08-20.** Fine Circuits sent back their own filled-in check sheet for
+both sample jobs and Prism reconciles with it: size, track width, min drill
+and hole count exact on both boards, spacing within a mil. Asked about the
+one-mil difference their reply was *"if its 9 or 10 it means its working"* —
+so the reader is confirmed against a real customer's own figures.
+
+Two things that reply told us, both worth acting on:
+
+- **The sheet was filled in by someone else** while the contact was busy. It
+  is a good witness, not a precise one. Prism's figure is arguably tighter
+  than theirs, and the one-mil gap is design rule versus measured worst case
+  (102 places on the 2018 board sit at 9 mil).
+
+- **"We just do DRC."** They run a Design Rule Check, which means a tool
+  already produces these numbers and the hand measuring is a side task. ASK
+  FOR A DRC OUTPUT: it is machine-generated, free, and a far better witness
+  than a spreadsheet — the same role the `.DRR` played. It may also mean the
+  five numbers are not the product and the DRC is. Worth finding out before
+  building the window.
+
+---
+
 ## Sales questions open
 
 - **Agencies or their clients?** Undecided — see the reasoning in the
