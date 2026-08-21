@@ -8,46 +8,70 @@
     "",
     "Two tiers, and the difference matters.",
     "",
-    "  witnessed  — a human or a machine outside Prism says so. The",
+    "  witnessed  \u2014 a human or a machine outside Prism says so. The",
     "               customer's own check sheet, or the CAM report shipped",
     "               inside the job. These are CORRECTNESS: if one breaks,",
     "               Prism is wrong.",
     "",
-    "  locked     — no outside witness, so this is only what Prism reads",
+    "  locked     \u2014 no outside witness, so this is only what Prism reads",
     "               today. These are REGRESSION: if one moves, something",
     "               changed and somebody has to say whether it improved.",
     "",
-    "Never promote a locked value to witnessed without an actual witness."
+    "Never promote a locked value to witnessed without an actual witness.",
+    "",
+    "A job marked `slow` is skipped unless PRISM_SLOW_TESTS=1 is set. The",
+    "twelve-layer board takes five minutes to measure, which is fine for a",
+    "customer waiting on an answer and not fine on every test run. Run the",
+    "slow ones before shipping a change to the geometry."
   ],
-
   "layer 1.zip": {
     "what": "2013 single-sided, job 101942. Drill arrives as a Gerber of flashed pads; copper is G36 regions; four-digit D-codes.",
     "witness": "the customer's own hand-filled check sheet (photographed 2026-08-20), and 101942 (2).xlsx which states 60mm x 73mm",
     "witnessed": {
-      "pcb_size_mm": [60.0, 73.0],
+      "pcb_size_mm": [
+        60.0,
+        73.0
+      ],
       "min_track_width_mm": 3.0,
       "min_drill_mm": 1.0,
       "drill_count": 80,
       "routed_layers": 1
     },
-    "witnessed_tolerance": {"min_track_spacing_mm": [2.0803, 0.06]},
-    "locked": {"layers": 1, "plane_layers": 0}
+    "witnessed_tolerance": {
+      "min_track_spacing_mm": [
+        2.0803,
+        0.06
+      ]
+    },
+    "locked": {
+      "layers": 1,
+      "plane_layers": 0
+    }
   },
-
   "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar": {
     "what": "2018 Altium four-layer, inches, Excellon drill, two internal planes, an octagonal outline.",
     "witness": "the customer's check sheet, plus the job's own .DRR report stating 218 holes across ten tools",
     "witnessed": {
-      "pcb_size_mm": [90.17, 90.17],
+      "pcb_size_mm": [
+        90.17,
+        90.17
+      ],
       "min_track_width_mm": 0.254,
       "min_drill_mm": 0.4572,
       "drill_count": 218,
       "routed_layers": 2
     },
-    "witnessed_tolerance": {"min_track_spacing_mm": [0.254, 0.06]},
-    "locked": {"layers": 4, "plane_layers": 2}
+    "witnessed_tolerance": {
+      "min_track_spacing_mm": [
+        0.254,
+        0.06
+      ]
+    },
+    "locked": {
+      "layers": 4,
+      "plane_layers": 2
+    }
   },
-
   "2-547-161A_Gerber.zip": {
     "what": "Eight copper layers, four planes, three drill files (plated, non-plated, board-edge rout), pads drawn as %AM rotated-rectangle macros.",
     "witness": "the job's own .DRR report: eight tools, 592 holes, smallest 0.15mm",
@@ -56,12 +80,74 @@
       "drill_count": 592
     },
     "locked": {
-      "pcb_size_mm": [53.195, 53.198],
+      "pcb_size_mm": [
+        53.195,
+        53.198
+      ],
       "min_track_width_mm": 0.127,
       "min_track_spacing_mm": 0.0937,
       "layers": 8,
       "routed_layers": 4,
       "plane_layers": 4
+    }
+  },
+  "CT-TT-CAP12-V1.1-FAB (1).zip": {
+    "what": "A PANEL, not a board \u2014 196x195mm carrying many copies. 4 routed layers, 2855 holes. Read clean on the first attempt, the only job so far that did.",
+    "witness": "the job's own .DRR report: 2855 holes",
+    "witnessed": {
+      "min_drill_mm": 0.508,
+      "drill_count": 2855
+    },
+    "locked": {
+      "pcb_size_mm": [
+        196.0,
+        195.0
+      ],
+      "min_track_width_mm": 1.016,
+      "min_track_spacing_mm": 1.0159,
+      "layers": 4,
+      "routed_layers": 4,
+      "plane_layers": 0
+    }
+  },
+  "MIE V2.2 GERBER with STACKUP 250502 1701.rar": {
+    "what": "PADS export, 10 copper layers, every file named art001.pho. Two drill files with tool selects written as T1C.01969F095S3.",
+    "witness": "two Drill Sizes Reports: 8 non-plated + 1169 plated = 1177 holes",
+    "slow": true,
+    "witnessed": {
+      "min_drill_mm": 0.5,
+      "drill_count": 1177
+    },
+    "locked": {
+      "pcb_size_mm": [
+        220.0,
+        100.0
+      ],
+      "min_track_width_mm": 0.0762,
+      "min_track_spacing_mm": 0.1245,
+      "layers": 10,
+      "routed_layers": 10,
+      "plane_layers": 0
+    }
+  },
+  "PCB-219920263564-00 PCB FAB PKG.zip": {
+    "what": "PADS export, 12 copper layers, 187,674 traces on one of them \u2014 the job that made speed matter. Drill file has no M48 header at all.",
+    "witness": "its Drill Sizes Report: 3501 holes across 11 tools",
+    "slow": true,
+    "witnessed": {
+      "min_drill_mm": 0.2032,
+      "drill_count": 3501
+    },
+    "locked": {
+      "pcb_size_mm": [
+        383.54,
+        274.32
+      ],
+      "min_track_width_mm": 0.0254,
+      "min_track_spacing_mm": 0.012,
+      "layers": 12,
+      "routed_layers": 12,
+      "plane_layers": 0
     }
   }
 }

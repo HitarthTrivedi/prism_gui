@@ -863,6 +863,12 @@ class EveryJobWeHaveStillReadsRight(unittest.TestCase):
     def _measure(self, name):
         if not os.path.isdir(REAL):
             self.skipTest("sample jobs not on this machine")
+        if (self.samples[name].get("slow")
+                and not os.environ.get("PRISM_SLOW_TESTS")):
+            # The twelve-layer board takes five minutes. That is fine for a
+            # customer waiting on an answer and not fine on every run, so it
+            # is opt-in — and named here rather than quietly dropped.
+            self.skipTest(f"{name} is slow; set PRISM_SLOW_TESTS=1 to include it")
         src = os.path.join(REAL, name)
         if not os.path.exists(src):
             self.skipTest(f"{name} not on this machine")
