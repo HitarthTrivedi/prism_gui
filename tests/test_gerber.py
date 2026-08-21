@@ -713,6 +713,60 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
 
 
+class TheOneSheetForEveryJob(unittest.TestCase):
+    """The customer's last request: "make excel sheet for data of all gerber
+    file" — a row per BOARD across every job, in the column order and the
+    units his own spreadsheet already uses, so he can paste rather than
+    re-key.
+
+    Pinned because it went missing once. An edit that rewrote the two
+    functions on either side of it took this one with it, and nothing failed
+    until a live run reached for it by name — the report had already been
+    written and saved, so it looked like the run had worked."""
+
+    def _jobs(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", COPPER)
+        _write(d, "a.drl", DRILL_EXCELLON)
+        return [("board-a", G.analyse(G.gather([d])))]
+
+    def test_it_exists_and_writes_a_file(self):
+        self.assertTrue(callable(getattr(G, "write_summary_csv", None)))
+        out = os.path.join(tempfile.mkdtemp(), "summary.csv")
+        G.write_summary_csv(self._jobs(), out)
+        self.assertTrue(os.path.getsize(out) > 0)
+
+    def test_the_columns_are_the_ones_his_sheet_uses(self):
+        """His sheet reads LAYER, PCB SIZE, TRACK WIDTH, TRACK SPACING, MIN
+        DRILL SIZE, TOTAL DRILL — and it is in mil. Matching that is the
+        whole value; a better layout he has to re-key is worth less."""
+        out = os.path.join(tempfile.mkdtemp(), "summary.csv")
+        G.write_summary_csv(self._jobs(), out)
+        header = open(out).readline()
+        for column in ("LAYERS", "PCB SIZE", "TRACK WIDTH (mil)",
+                       "TRACK SPACING (mil)", "MIN DRILL SIZE (mil)",
+                       "TOTAL DRILL"):
+            self.assertIn(column, header)
+
+    def test_every_job_gets_a_row_and_the_files_are_named_underneath(self):
+        out = os.path.join(tempfile.mkdtemp(), "summary.csv")
+        G.write_summary_csv(self._jobs(), out)
+        body = open(out).read()
+        self.assertIn("board-a", body)
+        self.assertIn("IDENTIFIED AS", body)      # layer identification
+        self.assertIn("a.gtl", body)
+
+    def test_the_row_says_what_it_was_checked_against(self):
+        """A row reproducing the job's own CAM report is worth more than one
+        that only reproduces itself, and the difference should be visible
+        without having to ask."""
+        out = os.path.join(tempfile.mkdtemp(), "summary.csv")
+        G.write_summary_csv(self._jobs(), out)
+        self.assertIn("CHECKED AGAINST", open(out).readline())
+        self.assertIn("geometry only", open(out).read())
+
+
 class EveryJobWeHaveStillReadsRight(unittest.TestCase):
     """The standing rule: a fix found on one job must not move another.
 
