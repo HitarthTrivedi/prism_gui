@@ -217,6 +217,90 @@ three are inputs we do not have.
 
 ---
 
+## 8. What the customer has to hand over before any of this runs
+
+Everything past the measurement needs something only the fab can give us, and
+the amount asked for is the thing most likely to kill the sale. A fabricator
+will type in one page. He will not type in eight, and he will not hand over
+his mail password on day one to a supplier he met last month.
+
+So the setup is staged, and **each stage has to be worth something on its
+own** — if he stops after stage one he must still have got value.
+
+### Stage 1 — one page, and the product works
+
+| What | Why | Risk |
+|---|---|---|
+| **Capability sheet** — thinnest track, tightest gap, smallest drill, layer count, finishes, panel sizes | Turns five measured numbers into "yes we can make this, and the 0.15 mm drill is at our limit" | Low. He has this already; it is what he quotes against. |
+
+That is the whole of stage 1. One document, and the output goes from a
+measurement to a decision.
+
+### Stage 2 — the quote, once stage 1 has earned trust
+
+| What | Why | Risk |
+|---|---|---|
+| **How he prices** — per layer, per area, per hole, per finish, setup charge, minimum order | Nothing can cost a job without it | Medium. This is his margin. He will not share it until stage 1 has proved useful. |
+| **A sample quote he has sent** | Format, wording, terms, his own voice | Low, and it is worth more than any template we could write |
+| **Company details** — letterhead, GST, bank, terms | Goes on the document | Low |
+
+### Stage 3 — sending, only if he wants it
+
+| What | Why | Risk |
+|---|---|---|
+| **Sending account** (SMTP or whatever he uses) | To send and to chase | **High.** Credentials. Last thing asked for, never the first. |
+
+### The assumption to NOT make
+
+**Not every job arrives by email.** The window fabricators showed this: WhatsApp
+photos, a phone call, a worker's notebook. A PCB fab may take jobs through a
+customer portal, a shared drive, a WhatsApp group, or an ERP nobody outside
+the company has heard of.
+
+So the add-on must work from **a folder on his machine**, full stop. If a zip
+lands there by any means, it is measured. Email ingestion is one route in, not
+the route in — Inquiry Automation already reads mail for the fabs that use it,
+and everyone else drops a folder.
+
+---
+
+## 9. The realistic first build — and what NOT to build
+
+Trying for the whole eight-step pipeline gets none of it right. The three
+unbuilt steps are not equal, and only one of them is safe to do now.
+
+### Build: the capability check (step 3)
+
+**Input:** the measured numbers + his one-page capability sheet.
+**Output:** can we make it, what is at our limit, what needs a decision.
+**Why it is the right first move:** one document from him, no pricing, no
+credentials, no assumption about how the job arrived. And it is the step that
+turns Prism from "a thing that reads Gerbers" into "a thing that answers the
+question I actually have".
+
+### Do NOT build yet: panel utilisation (step 4)
+
+Needs his panel sizes, his edge rails, his scoring rules and his tooling
+margins. It is real geometry — CODE, not an AI, the same argument as
+measuring — but it is a week of work and it is wrong in a way he will spot
+instantly if any of those inputs are guessed. **Wait until he asks for it.**
+
+### Do NOT build yet: costing (step 5)
+
+Needs his entire rate structure, which is his margin. Asking for it early
+reads as asking for his books. **Wait until stage 1 has earned it.**
+
+### Do NOT build yet: sending
+
+He has not said he wants Prism touching his mail, and credentials are the
+highest-friction thing on the list.
+
+**The rule:** each move must be finishable, checkable against a real job, and
+useful on its own. One step at a time, in the order he will actually say yes
+to.
+
+---
+
 ## Sales questions open
 
 - **Agencies or their clients?** Undecided — see the reasoning in the
