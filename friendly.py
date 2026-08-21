@@ -38,7 +38,7 @@ class Problem:
     # case where the dialog offers to save the diagnostics file.
     ask_support: bool = False
     # Something Prism can do for them, named so the dialog can offer a button:
-    # "settings:chrome", "settings:key", "login", "guide".
+    # "settings:chrome", "settings:key", "login", "guide", "support".
     action: str = ""
     action_label: str = ""
 
@@ -318,10 +318,14 @@ _GENERIC = Problem(
     "Prism hit a problem it doesn't recognise. Nothing you have already "
     "produced has been lost.",
     ("Try the same thing once more — many problems are momentary.",
-     "If it happens again, save the diagnostics file below and email it to "
-     "us. It tells us exactly what happened.",
+     "Open Help & support if it happens again — it has a written answer for "
+     "most things, and opens the way to us when none of them fits.",
      "Everything already finished is still in History."),
-    ask_support=True)
+    ask_support=True,
+    # The one entry where we genuinely do not know what went wrong, so it is
+    # the one that most needs a route onwards rather than a shrug. Saving the
+    # diagnostics file is still offered beside it; this is the faster half.
+    action="support", action_label="Open Help & support")
 
 
 def explain(error: object, context: str = "") -> Problem:

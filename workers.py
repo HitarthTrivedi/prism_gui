@@ -280,7 +280,7 @@ class ReelWorker(QThread):
             self.failed.emit(str(e))
 
 
-# ── Inquiry automation ────────────────────────────────────────────────────────
+# ── Email automation ──────────────────────────────────────────────────────────
 
 class InboxVerifyWorker(QThread):
     """Find the mail server and check the password, off the UI thread.
@@ -336,6 +336,69 @@ class InboxCheckWorker(QThread):
                 followup_days=self.followup_days,
                 max_reminders=self.max_reminders)
             self.done.emit(result)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class POReadWorker(QThread):
+    """Read one purchase order into fields, off the UI thread.
+
+    Seconds rather than minutes — one direct Groq call — but a frozen window
+    while money is being read is the wrong feeling entirely. The model only
+    FINDS the fields: every derived figure is Decimal arithmetic inside
+    core/po.py, because a language model does arithmetic approximately and
+    an approximately-right order value is a dispute.
+    """
+    done = Signal(object)          # po.PurchaseOrder
+    failed = Signal(str)           # POError text carries what to do next
+
+    def __init__(self, cfg: dict, text: str, source: str = ""):
+        super().__init__()
+        self.cfg, self.text, self.source = cfg, text, source
+
+    def run(self):
+        try:
+            po = CB.get_po()
+            order = po.extract(self.text, self.cfg.get("api_key", ""),
+                               self.cfg.get("model", "") or "",
+                               source=self.source)
+            self.done.emit(order)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+# ── Help & support ────────────────────────────────────────────────────────────
+
+class SupportWorker(QThread):
+    """One answer from the support assistant, off the UI thread.
+
+    Uses the customer's own Groq key — the same one that plans their work —
+    because a support chat that needed a key of ours would be a bill that
+    grows with every confused customer, which is the wrong incentive to build
+    into a help desk.
+
+    Seconds, not minutes: this is a single question and answer, not a browser
+    pipeline, so there is no progress to report and nothing to stop.
+    """
+    done = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, prompt: str, parent=None):
+        super().__init__(parent)
+        self.cfg, self.prompt = cfg, prompt
+
+    def run(self):
+        try:
+            reply = CB.router.groq_chat(
+                self.cfg.get("api_key", ""), self.cfg.get("model", "") or "",
+                self.prompt,
+                # Low, on purpose. Support answers are quotations from the
+                # manual, and a model feeling creative about which menu an
+                # option lives in is the one failure this whole tier cannot
+                # afford — a confidently invented step wastes more of the
+                # customer's time than no answer at all.
+                temperature=0.15, timeout=45, retries=1)
+            self.done.emit((reply or "").strip())
         except Exception as e:
             self.failed.emit(str(e))
 

@@ -33,7 +33,7 @@ STEPS = [
      "Every job begins here — describe it in plain words and Prism works out "
      "the rest."),
     ("sidebar", "Your everyday tools",
-     "Inquiry Automation, BOQ and Email are ready-made for jobs you do all "
+     "Email automation, BOQ and Email are ready-made for jobs you do all "
      "the time — no plan needed, just your files."),
     ("home_panel", "Describe or pick a quick-start",
      "Type your own task, or tap a quick-start chip to jump straight into an "

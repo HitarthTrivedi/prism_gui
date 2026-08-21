@@ -160,10 +160,9 @@ TOPICS: tuple[Topic, ...] = (
         "Prism tells you what happened and what to do about it. Follow the "
         "numbered steps in the message — they are in order of what usually "
         "fixes it.\n\n"
-        "If a message asks you to send us details, press the button on it. "
-        "That writes a file describing what happened, with your passwords and "
-        "keys removed, which you can email to us.",
-        action="config", action_label="Open Settings",
+        "If that isn't enough, Help & support has a written answer for most "
+        "things, and opens the way to our team when none of them fits.",
+        action="support", action_label="Open Help & support",
     ),
 )
 

@@ -57,6 +57,7 @@ ARG_SLOTS = {
     "icon_label": (1,),     # (icon_name, text, size, colour)
     "nav_button": (0, 3),   # (label, icon_name, small, tip)
     "_action": (0, 2),      # (label, icon_name, tip, slot)
+    "_section": (0,),       # (text, faint) — the rail's group headers
 }
 
 # Words that look like copy but must never be translated. The product name is
@@ -74,6 +75,12 @@ NEVER = {
     # A QFileDialog name filter is a syntax, not a sentence — Qt parses the
     # parentheses. Translating it breaks the filter.
     "Text (*.txt)",
+    # A date-format hint is read literally — the customer types digits into
+    # exactly those positions. Translated, it stops matching what the code
+    # parses.
+    "DD-MM-YYYY",
+    # The IMAP folder name is protocol, not prose.
+    "INBOX",
 }
 
 # Calls whose string arguments end up on screen.
@@ -92,17 +99,22 @@ TEXT_CALLS = {
     "QAction", "QListWidgetItem", "QToolButton", "QTreeWidgetItem",
     # Prism's own text helpers (widgets/controls.py) and local factories
     "heading", "meta", "kicker", "icon_label", "nav_button", "Section",
-    "_action", "_tag", "_mini", "pill", "chip",
+    "_action", "_tag", "_mini", "_section", "pill", "chip",
     # the hand-written escape hatch
     "t", "_t", "tr",
 }
 
 # Module-level tables whose strings reach the screen through a variable.
 # Matched on the assignment target's name, anywhere in the GUI package.
+# The redesign moved most rail and screen copy into tables like these
+# (sidebar.MORE, settings_panel.SECTIONS, GuidePanel.CARDS), so a table
+# missing from this set silently ships its labels untranslatable.
 COPY_TABLES = {
     "PRIMARY", "SECONDARY", "STAGE_COPY", "FEATURE_NAMES", "FEATURE_BLURB",
     "STATUS_COPY", "STATES", "STEP_COPY", "COPY", "LABELS", "TIPS",
     "PLACEHOLDERS", "SKIP", "SOON",
+    "MORE", "ADDONS", "DIRECT", "SECTIONS", "CARDS", "TABS", "STEPS",
+    "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's
@@ -203,7 +215,10 @@ def collect() -> dict[str, list[str]]:
             if not filename.endswith(".py"):
                 continue
             path = os.path.join(dirpath, filename)
-            rel = os.path.relpath(path, ROOT)
+            # Forward slashes even on Windows: these paths are catalogue KEYS'
+            # provenance, diffed in git, and a regeneration must not rewrite
+            # every entry just because it ran on a different OS.
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
             try:
                 tree = ast.parse(open(path, encoding="utf-8").read())
             except SyntaxError as exc:

@@ -480,7 +480,7 @@ class HomePanel(QScrollArea):
         stats = DATA.inquiry_stats(self.cfg, self._rows)
         waiting = f"{stats['waiting']} waiting" if stats and stats["waiting"] else ""
         for key, label, desc, icon_name, hue, badge in (
-            ("inquiry", i18n.t("Inquiry Automation"), i18n.t("Register, quote, chase"),
+            ("inquiry", i18n.t("Email automation"), i18n.t("Register, quote, chase"),
              "inbox", theme.OK, waiting),
             ("boq", i18n.t("BOQ"), i18n.t("Quantities off a drawing"),
              "file", theme.ACCENT, ""),

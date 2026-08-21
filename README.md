@@ -89,7 +89,7 @@ out, closed, or lost behind a tab, so there is no View menu either.
 - **Rail** (left) — brand, then the primary destinations (Home, How to use
   Prism, AI tools, History, Settings), the wake-word switch, and three grouped
   shelves:
-  - **ADD-ONS** — Inquiry Automation, BOQ, Email, and BOM & Stock (visibly
+  - **ADD-ONS** — Email automation, BOQ, Email, and BOM & Stock (visibly
     *coming soon*, disabled on purpose: a shelf that looks like a product line
     is worth more in a demo than an empty gap). Anything not in your licence
     shows a padlock and opens the pitch rather than failing.
@@ -124,17 +124,21 @@ out, closed, or lost behind a tab, so there is no View menu either.
 
 ## The add-ons
 
-### Inquiry Automation (`inbox`)
+### Email automation (`inbox`)
 
-The one used every day, and the reason the app gets opened at all. Built with a
-spring manufacturer at GIDC, Vadodara.
+The one used every day, and the reason the app gets opened at all. Built with
+a spring manufacturer at GIDC, Vadodara; grown to office scale — several
+mailboxes, one shared register — after a second firm described exactly that
+(`docs/EMAIL_AUTOMATION.md`).
 
-Four tabs, in the order the work happens: **What arrived → Inquiries → What
-they said back → Waiting on a reply.**
+Five tabs, in the order the work happens: **What arrived → Inquiries → What
+they said back → Waiting on a reply → The order came.**
 
-- **Reads the mailbox, never writes to it.** `readonly=True` select and
+- **Reads the mailboxes, never writes to them.** `readonly=True` select and
   `BODY.PEEK[]`, so nothing is marked read, moved or deleted and the owner
-  keeps using Outlook on the same account.
+  keeps using Outlook on the same account. Any number of accounts, walked one
+  at a time, each with its own read bookmark; a **Mailbox** column in the
+  register says which address each inquiry came to.
 - **Sorts on local rules first.** `List-Unsubscribe`, auto-replies, known
   senders and a few narrow keyword rules settle most mail without any AI call
   at all. Only genuinely unknown senders reach the model, in one batched call.
@@ -151,6 +155,10 @@ they said back → Waiting on a reply.**
   proposes the register change. It never applies itself.
 - **Chases the quiet ones** every two days, three times, then stops. Each
   reminder is worded differently.
+- **Puts the PO against the quotation actually sent** — read back from the
+  CSV written at send time, refused on any mismatch — and lists every
+  difference with rate gaps multiplied out by quantity. Accepting is a
+  button; scanned POs get typed-in boxes and an honest sentence.
 - **Wins back a no**: drafts the reply through the AI tools in your own Chrome,
   using bargaining limits you supply in a file. With no such file it is
   instructed to offer nothing on price at all.
@@ -225,7 +233,7 @@ each their own folders on a shared drive.
 - File-mention resolution on a **typed** query is intentionally not automatic
   (only spoken input runs the interpreter) — a GUI has real Attach buttons, and
   prose-scanning a typed sentence adds risk for no benefit.
-- **Inquiry Automation's send path and the PO → BOQ hand-off** are written and
+- **Email automation's send path and the PO screen** are written and
   unit-tested but have never run against a real mailbox. Reading is the
   well-covered half.
 - `plans.py` feature names and blurbs are not in the translation catalogue.
@@ -311,7 +319,7 @@ dialogs/
   license_dialog.py     activation, expiry, licence problems
   paywall.py            what a locked add-on is, and what it costs
   inquiry_setup_dialog.py  mailbox, files, terms, who's who — asked once
-  inquiry_dialog.py     the four-tab Inquiry Automation screen
+  inquiry_dialog.py     the five-tab Email automation screen
   boq_dialog.py reel_dialog.py email_dialog.py
   history_dialog.py     past runs, re-rendered out of their stored JSON
   completion_dialog.py  what each step produced, once a run ends

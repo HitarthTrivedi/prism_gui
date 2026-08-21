@@ -1,8 +1,8 @@
-"""Inquiry automation — the settings that stay the same every day.
+"""Email automation — the settings that stay the same every day.
 
 Asked once, at the start, and then never again. Everything here is a constant
-of the business rather than of a particular inquiry: which mailbox, which rate
-list, what your terms are, who your customers are.
+of the business rather than of a particular inquiry: which mailboxes, which
+rate list, what your terms are, who your customers are.
 
 Laid out as four steps rather than one long form because the person filling it
 in has never set up software before, and a screen with twenty boxes on it is
@@ -11,6 +11,24 @@ where they stop and telephone somebody.
 The password is the one thing worth saying out loud: it goes into
 ~/.prism/config.json on this computer, the same file the sending account
 already uses, and nowhere else. Prism has no server to send it to.
+
+────────────────────────────────────────────────────────────────────────────
+Several mailboxes, one register
+────────────────────────────────────────────────────────────────────────────
+The firms this is sold to do not have one inbox. Inquiries land on sales@,
+info@ and the owner's own address, and today somebody copies all three into
+one Excel sheet by hand. So the mailbox step takes a LIST, and every mailbox
+feeds the same register in the same folder — point that folder at a shared
+drive and the whole office reads one file, which is the system they already
+run, minus the typing.
+
+The config grew a shape for it: `cfg["inquiry"]["accounts"]` is the list,
+and each entry carries its own `state` (the read bookmark), because two
+mailboxes sharing one bookmark would skip or re-import each other's mail.
+The old single-mailbox keys — `account` and `state` — are still written,
+mirroring the first entry, so a config saved by this version opens cleanly
+in the previous one and everything that still reads the old shape keeps
+working. `accounts_of()` is the one reader that understands both.
 """
 from __future__ import annotations
 
@@ -19,8 +37,9 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-    QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -36,14 +55,39 @@ def settings_of(cfg: dict) -> dict:
     return dict(cfg.get("inquiry") or {})
 
 
+def accounts_of(cfg: dict) -> list[dict]:
+    """Every configured mailbox, in the order they were added.
+
+    Reads the list form first; a config from before mailboxes were a list is
+    wrapped on the way out — the legacy `account` becomes entry one and
+    brings the legacy `state` bookmark with it, so an existing customer's
+    first multi-mailbox check carries on from where their last single-mailbox
+    check stopped instead of re-importing a month of mail.
+
+    Copies, not references: callers edit these freely and save what they
+    mean to save.
+    """
+    s = settings_of(cfg)
+    accounts = [dict(a) for a in (s.get("accounts") or []) if a]
+    if not accounts and s.get("account"):
+        legacy = dict(s["account"])
+        legacy["state"] = dict(s.get("state") or {})
+        accounts = [legacy]
+    return accounts
+
+
+def _complete(account: dict) -> bool:
+    return bool(account.get("address") and account.get("password")
+                and account.get("host"))
+
+
 def is_ready(cfg: dict) -> bool:
-    """Enough set up to run a check. Deliberately only the mailbox and the
+    """Enough set up to run a check. Deliberately only a mailbox and the
     folder — a rate list matters at quoting time, not at reading time, and
     demanding one up front would stop somebody trying the read-only half."""
     s = settings_of(cfg)
-    account = s.get("account") or {}
-    return bool(account.get("address") and account.get("password")
-                and account.get("host") and s.get("folder"))
+    return bool(any(_complete(a) for a in accounts_of(cfg))
+                and s.get("folder"))
 
 
 class _Picker(QWidget):
@@ -158,14 +202,18 @@ class InquirySetupDialog(QDialog):
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(i18n.t("Inquiry automation — setup"))
+        self.setWindowTitle(i18n.t("Email automation — setup"))
         self.resize(680, 620)
         self.cfg = dict(cfg)
         self._verify = None
 
-        saved = settings_of(cfg)
-        self._account = dict(saved.get("account") or {})
-        self._saved_password = self._account.get("password", "")
+        # Working copies of every configured mailbox, each carrying its own
+        # read bookmark. One blank entry when nothing is configured yet, so
+        # the first-run flow is still "type the address, type the password,
+        # Save" with no list to understand first.
+        self._accounts = accounts_of(cfg) or [{}]
+        self._current = 0
+        self._saved_password = self._accounts[0].get("password", "")
 
         root = QVBoxLayout(self)
         intro = QLabel(i18n.t(
@@ -214,7 +262,8 @@ class InquirySetupDialog(QDialog):
         as one more instruction competing with the fields.
         """
         self.step_hint.setText({
-            0: i18n.t("Required. The mailbox your customers send inquiries to."),
+            0: i18n.t("Required. Every mailbox your customers write to — "
+                      "they all feed the same register."),
             1: i18n.t("Required. One folder holds the register and a folder "
                       "per inquiry — ordinary files that stay yours."),
             2: i18n.t("Optional for now. These go on quotations, so they are "
@@ -223,19 +272,42 @@ class InquirySetupDialog(QDialog):
                       "tell an inquiry from a supplier's mail on day one."),
         }.get(index, ""))
 
-    # ── 1. the mailbox ────────────────────────────────────────────────────
+    # ── 1. the mailboxes ──────────────────────────────────────────────────
     def _mail_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
 
         note = QLabel(i18n.t(
-            "Prism only READS this mailbox. It never marks anything as read, "
-            "never moves anything and never deletes anything — you can keep "
-            "using Outlook or your phone exactly as before.\n\n"
-            "Your password is saved on this computer only. Prism has no "
-            "server to send it to."))
+            "Prism only READS these mailboxes. It never marks anything as "
+            "read, never moves anything and never deletes anything — "
+            "everyone keeps using Outlook or their phone exactly as before."
+            "\n\nPasswords are saved on this computer only. Prism has no "
+            "server to send them to."))
         note.setWordWrap(True)
         layout.addWidget(note)
+
+        # The list. Hidden while there is only the one mailbox: a list of one,
+        # above a form asking for that same one, reads as two steps where the
+        # customer has only one thing to do — and one mailbox is every
+        # existing customer on the day they update.
+        self.mailboxes = QListWidget()
+        self.mailboxes.setFixedHeight(84)
+        self.mailboxes.currentRowChanged.connect(self._mailbox_picked)
+        layout.addWidget(self.mailboxes)
+
+        list_row = QHBoxLayout()
+        list_row.setSpacing(10)
+        self.add_mailbox_btn = QPushButton(i18n.t("Add another mailbox"))
+        self.add_mailbox_btn.setToolTip(i18n.t(
+            "sales@, info@, the owner's own — inquiries from every one land "
+            "in the same register"))
+        self.add_mailbox_btn.clicked.connect(self._add_mailbox)
+        list_row.addWidget(self.add_mailbox_btn)
+        self.remove_mailbox_btn = QPushButton(i18n.t("Remove this mailbox"))
+        self.remove_mailbox_btn.clicked.connect(self._remove_mailbox)
+        list_row.addWidget(self.remove_mailbox_btn)
+        list_row.addStretch(1)
+        layout.addLayout(list_row)
 
         # Two questions, both of which the owner can answer without asking
         # anyone. Everything technical moved behind the disclosure below —
@@ -244,7 +316,7 @@ class InquirySetupDialog(QDialog):
         # jargon reaches the screen.
         form = QFormLayout()
         form.setSpacing(10)
-        self.addr = QLineEdit(self._account.get("address", ""))
+        self.addr = QLineEdit(self._accounts[0].get("address", ""))
         self.addr.setPlaceholderText("sales@yourcompany.co.in")
         self.addr.textChanged.connect(self._mail_input_changed)
         form.addRow(i18n.t("Email address:"), self.addr)
@@ -306,10 +378,11 @@ class InquirySetupDialog(QDialog):
         self.advanced = QWidget()
         adv = QFormLayout(self.advanced)
         adv.setContentsMargins(0, 6, 0, 0)
-        self.host = QLineEdit(self._account.get("host", ""))
+        self.host = QLineEdit(self._accounts[0].get("host", ""))
         self.host.setPlaceholderText(i18n.t("found automatically — leave blank"))
         adv.addRow(i18n.t("Mail server:"), self.host)
-        self.folder_name = QLineEdit(self._account.get("folder", "") or "INBOX")
+        self.folder_name = QLineEdit(
+            self._accounts[0].get("folder", "") or "INBOX")
         adv.addRow(i18n.t("Folder to read:"), self.folder_name)
         self.advanced.setVisible(False)
         layout.addWidget(self.advanced)
@@ -322,12 +395,116 @@ class InquirySetupDialog(QDialog):
         self.advanced_btn.toggled.connect(_toggle)
         # Opened on arrival when a server was set by hand, so a setting that
         # is in force is never hidden from the person who set it.
-        if self._account.get("host"):
+        if self._accounts[0].get("host"):
             self.advanced_btn.setChecked(True)
 
         layout.addStretch(1)
         self._set_test_state("")
+        self._loading = False
+        self._refresh_mailboxes()
         return page
+
+    # ── the mailbox list ──────────────────────────────────────────────────
+    def _refresh_mailboxes(self):
+        """Redraw the list to match the working copies, without re-entering
+        the selection handler on the way past."""
+        self._loading = True
+        self.mailboxes.clear()
+        for account in self._accounts:
+            address = account.get("address", "").strip()
+            host = account.get("host", "").strip()
+            label = (f"{address}   ·   {host}" if address and host
+                     else address or i18n.t("(new mailbox — type the address "
+                                            "below)"))
+            self.mailboxes.addItem(QListWidgetItem(label))
+        self.mailboxes.setCurrentRow(self._current)
+        # A list of one, above a form asking for that same one, reads as two
+        # steps where there is only one thing to do.
+        several = len(self._accounts) > 1
+        self.mailboxes.setVisible(several)
+        self.remove_mailbox_btn.setVisible(several)
+        self._loading = False
+
+    def _commit_form(self):
+        """Fold whatever is typed into the mailbox being edited.
+
+        Lenient on purpose: an entry can sit half-filled while another is
+        edited — Save is where completeness is checked, with the same message
+        it has always shown. The bookmark (`state`) is never touched here, so
+        editing an address cannot cost the account its place in the mailbox;
+        a genuinely different mailbox behind the same entry is caught by the
+        server's own UIDVALIDITY and starts over safely.
+        """
+        account = self._accounts[self._current]
+        account["address"] = self.addr.text().strip()
+        password = self.password.text() or self._saved_password
+        if password:
+            account["password"] = password
+        account["host"] = self.host.text().strip() or account.get("host", "")
+        account["folder"] = self.folder_name.text().strip() or "INBOX"
+        account.setdefault("port", 993)
+
+    def _load_form(self, index: int):
+        """Show one mailbox in the form. The password box is always cleared —
+        a saved password is kept by leaving it blank, never displayed."""
+        self._loading = True
+        account = self._accounts[index]
+        self._saved_password = account.get("password", "")
+        self.addr.setText(account.get("address", ""))
+        self.password.clear()
+        self.password.setPlaceholderText(i18n.t(
+            "leave blank to keep the saved password") if self._saved_password
+            else i18n.t("your mail password"))
+        self.host.setText(account.get("host", ""))
+        self.folder_name.setText(account.get("folder", "") or "INBOX")
+        self._tested_ok = False
+        self._set_test_state("")
+        if account.get("host"):
+            self.advanced_btn.setChecked(True)
+        self._loading = False
+
+    def _mailbox_picked(self, row: int):
+        if self._loading or row < 0 or row == self._current:
+            return
+        self._commit_form()
+        self._current = row
+        self._load_form(row)
+        self._refresh_mailboxes()
+
+    def _add_mailbox(self):
+        self._commit_form()
+        current = self._accounts[self._current]
+        if not current.get("address"):
+            # Two blank entries help nobody — finish this one first.
+            self.addr.setFocus()
+            self._set_test_state(i18n.t(
+                "Type this mailbox's address first, then add the next one."))
+            return
+        self._accounts.append({})
+        self._current = len(self._accounts) - 1
+        self._load_form(self._current)
+        self._refresh_mailboxes()
+        self.addr.setFocus()
+
+    def _remove_mailbox(self):
+        account = self._accounts[self._current]
+        address = account.get("address", "").strip()
+        if address:
+            answer = QMessageBox.question(
+                self, i18n.t("Email automation"),
+                i18n.t("Stop reading {who}?\n\nPrism simply stops checking "
+                       "that mailbox. Nothing already in the register is "
+                       "touched.").replace("{who}", address),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        if len(self._accounts) == 1:
+            self._accounts[0] = {}
+        else:
+            self._accounts.pop(self._current)
+            self._current = max(0, self._current - 1)
+        self._load_form(self._current)
+        self._refresh_mailboxes()
 
     # ── the connection check ──────────────────────────────────────────────
     def _mail_input_changed(self):
@@ -379,7 +556,7 @@ class InquirySetupDialog(QDialog):
                 return
             self._tested_ok = True
             self.host.setText(settings.get("host", ""))
-            self._account.update(settings)
+            self._accounts[self._current].update(settings)
             self._set_test_state(
                 i18n.t("Connected to {host}. You can Save.").replace(
                     "{host}", settings.get("host", "")), "ok")
@@ -409,6 +586,34 @@ class InquirySetupDialog(QDialog):
         self.work_folder = _Picker(saved.get("folder", "") or DEFAULT_FOLDER,
                                    directory=True)
         need_form.addRow(i18n.t("Keep everything in:"), self.work_folder)
+
+        # The centralised half of the feature, said where the folder is
+        # chosen: the register is one file, so putting the folder on the
+        # shared drive IS the whole team seeing the same sheet. When a team
+        # workspace is already set up, offer it in one click rather than a
+        # sentence of directions.
+        import workspace
+        if workspace.is_shared(self.cfg):
+            shared_row = QHBoxLayout()
+            shared_note = QLabel(i18n.t(
+                "Your team workspace is set up — keep this folder in it and "
+                "every member sees the same register."))
+            shared_note.setWordWrap(True)
+            shared_note.setProperty("class", "muted")
+            shared_row.addWidget(shared_note, stretch=1)
+            use_shared = QPushButton(i18n.t("Use the team folder"))
+            use_shared.clicked.connect(lambda: self.work_folder.edit.setText(
+                os.path.join(workspace.company_dir(self.cfg), "inquiries")))
+            shared_row.addWidget(use_shared)
+            need_form.addRow(shared_row)
+        else:
+            shared_note = QLabel(i18n.t(
+                "Several people? Choose a folder on your shared drive and "
+                "everyone opens the same register — the same sheet you keep "
+                "by hand today, kept by Prism instead."))
+            shared_note.setWordWrap(True)
+            shared_note.setProperty("class", "muted")
+            need_form.addRow(shared_note)
         layout.addWidget(need)
 
         # Everything below is for QUOTING. Reading the inbox and building the
@@ -706,20 +911,27 @@ class InquirySetupDialog(QDialog):
                 for line in edit.toPlainText().splitlines() if line.strip()]
 
     def _save(self):
-        address = self.addr.text().strip()
-        password = self.password.text() or self._saved_password
+        self._commit_form()
         folder = self.work_folder.value()
 
-        if not address or not password:
+        # Blank entries are scaffolding, not mistakes — somebody pressed "Add
+        # another" and changed their mind. Dropped without comment.
+        accounts = [dict(a) for a in self._accounts if a.get("address")]
+
+        incomplete = next((a for a in accounts if not a.get("password")),
+                          None)
+        if not accounts or incomplete is not None:
+            who = (incomplete or {}).get("address", "")
             QMessageBox.information(
-                self, i18n.t("Inquiry automation"),
-                i18n.t("Prism needs the email address and password of the "
-                       "mailbox to read. Nothing else can start without it."))
+                self, i18n.t("Email automation"),
+                i18n.t("Prism needs the email address and password of every "
+                       "mailbox to read. Nothing else can start without "
+                       "them.") + (f"\n\n{who}" if who else ""))
             self.tabs.setCurrentIndex(0)
             return
         if not folder:
             QMessageBox.information(
-                self, i18n.t("Inquiry automation"),
+                self, i18n.t("Email automation"),
                 i18n.t("Choose a folder for the inquiry register and the "
                        "files that come with each inquiry."))
             self.tabs.setCurrentIndex(1)
@@ -727,23 +939,32 @@ class InquirySetupDialog(QDialog):
         try:
             os.makedirs(folder, exist_ok=True)
         except OSError as e:
-            QMessageBox.warning(self, i18n.t("Inquiry automation"), str(e))
+            QMessageBox.warning(self, i18n.t("Email automation"), str(e))
             self.tabs.setCurrentIndex(1)
             return
 
-        host = self.host.text().strip() or self._account.get("host", "")
-        if not host:
-            # No Test run and no saved host — work it out now rather than
-            # failing on the first check with a message about a server the
-            # customer never typed.
-            inbox = CB.get_inbox()
-            guesses = inbox.guess_hosts(address)
-            host = guesses[0] if guesses else ""
+        inbox = CB.get_inbox()
+        for account in accounts:
+            if not account.get("host"):
+                # No Test run and no saved host — work it out now rather than
+                # failing on the first check with a message about a server the
+                # customer never typed.
+                guesses = inbox.guess_hosts(account["address"])
+                account["host"] = guesses[0] if guesses else ""
+            account["port"] = int(account.get("port") or 993)
+            account["folder"] = account.get("folder") or "INBOX"
+            # Each mailbox keeps its own read bookmark. Two mailboxes sharing
+            # one would skip or re-import each other's mail — see accounts_of.
+            account["state"] = dict(account.get("state") or {})
 
+        first = accounts[0]
         self.cfg["inquiry"] = {
-            "account": {"address": address, "password": password,
-                        "host": host, "port": 993,
-                        "folder": self.folder_name.text().strip() or "INBOX"},
+            "accounts": accounts,
+            # The single-mailbox keys, mirroring the first entry. Everything
+            # that predates the list — including a Prism from before this
+            # version reading the same config — keeps working; accounts_of()
+            # prefers the list and never reads these when it is present.
+            "account": {k: v for k, v in first.items() if k != "state"},
             "folder": folder,
             "rate_list": self.rate_file.value(),
             "cost_sheet": self.cost_file.value(),
@@ -765,9 +986,13 @@ class InquirySetupDialog(QDialog):
                           # Corrections the customer makes as they go. Kept
                           # across saves so re-opening setup never forgets
                           # what Prism has learned about their senders.
+                          # Shared across every mailbox on purpose: a sender
+                          # is the same sender whichever address they wrote
+                          # to, and teaching Prism twice would be a chore.
                           "learned": ((settings_of(self.cfg).get("knowledge")
                                        or {}).get("learned") or {})},
-            "state": settings_of(self.cfg).get("state") or {},
+            # The first mailbox's bookmark, mirrored — see "account" above.
+            "state": dict(first.get("state") or {}),
         }
         CB.config.save(self.cfg)
 

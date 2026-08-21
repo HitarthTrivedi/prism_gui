@@ -104,10 +104,16 @@ class InquiryPanel(QScrollArea):
 
         head = QVBoxLayout()
         head.setSpacing(2)
-        head.addWidget(_label(i18n.t("Inquiry Automation"), "h2"))
+        head.addWidget(_label(i18n.t("Email automation"), "h2"))
+        # The blurb carries the mailbox count once there is more than one —
+        # "several inboxes, one register" is the whole reason a firm with
+        # three addresses bought this, and the screen should say it is true.
+        watching = self._watching()
         head.addWidget(_label(
-            i18n.t("Read the inbox, register every inquiry, quote it and "
-                   "chase it."), size=13, colour=theme.NEUTRAL[600]))
+            watching or
+            i18n.t("Read the inbox, register every inquiry, quote it, chase "
+                   "it, and check the PO."),
+            size=13, colour=theme.NEUTRAL[600]))
         self._col.addLayout(head)
 
         if reread or self._rows is None:
@@ -147,12 +153,28 @@ class InquiryPanel(QScrollArea):
             size=13, colour=theme.NEUTRAL[500], wrap=True),
             alignment=Qt.AlignHCenter)
         col.addSpacing(20)
-        btn = QPushButton(i18n.t("Set up Inquiry Automation"))
+        btn = QPushButton(i18n.t("Set up Email automation"))
         btn.setObjectName("primaryBtn")
         btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(self.set_up.emit)
         col.addWidget(btn, alignment=Qt.AlignHCenter)
         return card
+
+    def _watching(self) -> str:
+        """"Watching sales@… and 2 more — one register." — or "" for one
+        mailbox, where the standing blurb says everything already."""
+        try:
+            from dialogs.inquiry_setup_dialog import accounts_of
+            addresses = [a.get("address", "") for a in accounts_of(self.cfg)
+                         if a.get("address")]
+        except Exception:                   # noqa: BLE001
+            return ""
+        if len(addresses) < 2:
+            return ""
+        return (i18n.t("Watching {first} and {n} more — every inquiry lands "
+                       "in one register.")
+                .replace("{first}", addresses[0])
+                .replace("{n}", str(len(addresses) - 1)))
 
     def _leads(self, stats: dict) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -408,7 +430,7 @@ class InquiryPanel(QScrollArea):
         chase = QPushButton(i18n.t("Chase again"))
         chase.setObjectName("smallBtn")
         chase.setCursor(Qt.PointingHandCursor)
-        chase.setToolTip(i18n.t("Opens Inquiry Automation to send the chase"))
+        chase.setToolTip(i18n.t("Opens Email automation to send the chase"))
         chase.clicked.connect(self.open_dialog.emit)
         line.addWidget(chase)
         return wrap
