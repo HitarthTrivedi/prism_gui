@@ -27,6 +27,9 @@ this document.
 | **EI-500DT** (`.rar`) | 2018 Altium, 4 layers, 218 holes | 1 bug |
 | **2-547-161A** (`.zip`) | 8 layers, 592 holes, 3 drill files | 4 bugs |
 | **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL` | 2 bugs |
+| **CT-TT-CAP12** (`.zip`) | a PANEL — 196x195mm, 2855 holes | clean first time |
+| **MIE V2.2** (`.rar`) | PADS export, 10 copper layers, `art001.pho` names | 2 bugs |
+| **PCB-2199…** (`.zip`) | PADS export, 12 copper layers, 187k traces a layer | 3 bugs |
 
 ---
 
@@ -243,6 +246,70 @@ correctly marked the file as rules, and then the content sniffer — which
 reads plain prose as "other" — overwrote it. A one-line fix, and a reminder
 that a recogniser saying "unknown" must never outrank one that already said
 "known".
+
+---
+
+## 16. Twelve copper layers read as none
+
+**Found by:** MIE V2.2 **and** PCB-2199 · **Severity:** Silent · **Fixed:** `c87ad4d`
+
+Two jobs arrived from PADS, where every file is called `art001.pho`,
+`art002.pho` … `art012.pho`. The extension says only "a photoplot" and every
+file has it, so nothing was identified and **both jobs measured nothing at
+all** — no size, no track width, no drills, no error.
+
+The role and the layer number are in the NAME, and it is a real convention:
+
+```
+art001 … art012   copper, layer 1 to 12
+sm001121          solder mask on layer 1 (top)
+sm010128          solder mask on layer 10 (bottom)
+sst / ssb         silkscreen top / bottom
+smd               paste
+dd                drill drawing
+drl_pt / drl_np   drill, plated / non-plated
+adt / adb         assembly drawing top / bottom
+```
+
+Which side a layer is on is only knowable from its position in the run — the
+lowest number is the component side, the highest the solder side. So that is
+resolved across the whole job, not per file.
+
+---
+
+## 17. A drill file with no header
+
+**Found by:** PCB-2199 · **Severity:** Silent · **Fixed:** `c87ad4d`
+
+`drl001.drl` has no `M48` and no `METRIC`/`INCH` line — it opens with `%` and
+then `T1C.008F0S0`. The sniffer read the header, found nothing, and called it
+"not a fabrication file" on a board with thousands of holes.
+
+---
+
+## 18. Slow enough to look broken
+
+**Found by:** PCB-2199 · **Severity:** Loud · **Fixed:** `c87ad4d`
+
+The first job big enough to matter: **187,674 segments on a single copper
+layer**, twelve of them. Measuring took minutes per layer with nothing
+printed, which reads as a hang — the user kills it and reports the tool as
+broken.
+
+Three changes, none of which move a number:
+
+- **Chain traces before unioning.** Those 187,674 segments are 69,885 actual
+  traces. Buffering the polyline instead of each segment took a layer from 22
+  seconds to 9 — and is more correct, because separately buffered segments
+  can fail to overlap at a joint by a rounding error and split one trace into
+  two islands.
+- **One bulk neighbour query** instead of a Python loop, over islands
+  simplified to two microns first. Same minimum, a quarter of the time. Two
+  microns is two orders below any fabrication tolerance.
+- **Progress per layer**, so a long run looks like work rather than a hang.
+
+**All six earlier jobs still return their pinned answers** — that is the
+regression harness doing exactly what it was built for.
 
 ---
 
