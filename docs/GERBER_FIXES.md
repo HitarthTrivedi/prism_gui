@@ -26,7 +26,7 @@ this document.
 | **101942** (`layer 1.zip`) | 2013, single-sided, 60x73mm, 80 holes | 4 bugs |
 | **EI-500DT** (`.rar`) | 2018 Altium, 4 layers, 218 holes | 1 bug |
 | **2-547-161A** (`.zip`) | 8 layers, 592 holes, 3 drill files | 4 bugs |
-| **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL` | 1 open issue |
+| **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL` | 2 bugs |
 
 ---
 
@@ -200,12 +200,10 @@ written and saved — so the run looked like it worked. Now pinned by tests.
 
 ---
 
-# Open — not fixed
-
-## A. Design rules vs measured reality
+## 14. The designer's rulebook was ignored
 
 **Found by:** 2580043B · **Severity:** Low for correctness, **HIGH for
-arguments**
+arguments** · **Fixed:** `dae4f2b`
 
 This job carries a `.RUL` file — the designer's own rulebook — which the
 earlier three did not. It states:
@@ -217,15 +215,40 @@ Clearance  Minimum = 7.87 mil
 
 Prism measures **11.8 mil** and **8.1 mil**.
 
-Both are true and they answer different questions. The rules say *"you may go
-as thin as 3.94"*; Prism says *"the thinnest actually drawn is 11.8"*. But if
-the customer reads the `.RUL` and Prism reads the copper, the two disagree by
-three times and it looks broken.
+Both are true and they answer different questions — a speed limit and a radar
+reading. The rules say *"tracks may go as thin as 3.94"*; the copper says
+*"the thinnest actually drawn is 11.8"*. But a fabricator who opens the `.RUL`
+and quotes 3.94 against our 11.8 sees a number three times out and concludes
+the software is broken.
 
-**Fix:** read the `.RUL` and print both side by side, so there is nothing to
-argue about.
+Both now print side by side, and both go in the CSV:
 
-## B. Still never tested
+```
+2. Min track width    0.300 mm (11.8 mil)   (design rule allows 3.94 mil)
+3. Min track spacing  0.205 mm (8.1 mil)    (design rule allows 7.87 mil)
+```
+
+The measured figure never moves — it is what limits manufacture. Only the
+board-wide rules are taken: a `.RUL` carries dozens of local exceptions, and
+the tightest of those is not what the board was routed to.
+
+---
+
+## 15. "I do not recognise this" threw away a role the extension had settled
+
+**Found by:** 2580043B · **Severity:** Silent · **Fixed:** `dae4f2b`
+
+The `.RUL` reader was written and returned nothing. The extension had
+correctly marked the file as rules, and then the content sniffer — which
+reads plain prose as "other" — overwrote it. A one-line fix, and a reminder
+that a recogniser saying "unknown" must never outrank one that already said
+"known".
+
+---
+
+# Open — not fixed
+
+## A. Still never tested
 
 - **Curved tracks.** No job so far has a single arc.
 - **Panelised jobs** — one file holding many copies of a board.

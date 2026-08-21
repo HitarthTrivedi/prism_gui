@@ -713,6 +713,73 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
 
 
+class TheRulebookIsNotTheBoard(unittest.TestCase):
+    """A .RUL file is the designer's rulebook: what the board was ALLOWED to
+    use. The copper is what it actually uses. A speed limit and a radar
+    reading — both true, different questions.
+
+    It matters commercially rather than academically. A real job states a
+    width minimum of 3.94 mil where the thinnest track actually drawn is
+    11.8. A fabricator who opens the .RUL and quotes 3.94 sees a number three
+    times out from ours and concludes the software is broken. Showing both
+    removes the argument before it starts."""
+
+    RUL = """
+        DRC Rules Export File for PCB: BOARD.PcbDoc
+        RuleKind=Width|RuleName=Width|Scope=Board|Minimum=3.94
+        RuleKind=Clearance|RuleName=Clearance|Scope=Board|Minimum=7.87
+        RuleKind=MinimumAnnularRing|RuleName=MinimumAnnularRing|Scope=Board|Minimum=4.92
+        RuleKind=Clearance|RuleName=Abstand Pads am ASIC|Scope=Board|Minimum=1.00
+        RuleKind=Clearance|RuleName=Clearance KeepOut|Scope=Board|Minimum=0.00
+        """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        _write(self.dir, "job.gko", OUTLINE_50x30)
+        _write(self.dir, "job.gtl", COPPER)
+        _write(self.dir, "job.rul", self.RUL)
+        self.job = G.analyse(G.gather([self.dir]))
+
+    def test_the_rules_are_read(self):
+        r = self.job["rules"]
+        self.assertAlmostEqual(r["min_track_width_mm"], 0.1001, places=3)
+        self.assertAlmostEqual(r["min_track_spacing_mm"], 0.1999, places=3)
+
+    def test_a_local_exception_is_not_the_board_rule(self):
+        """A .RUL carries dozens of local exceptions — clearance to one ASIC,
+        via to one plane. The tightest of those is not what the board was
+        routed to, and taking it would report 1.00 mil here."""
+        self.assertGreater(self.job["rules"]["min_track_spacing_mm"], 0.15)
+
+    def test_the_rules_never_replace_the_measurement(self):
+        """The measured figure is what limits manufacture. If the rulebook
+        ever overwrote it, a board allowed 3.94 would be quoted at 3.94 no
+        matter what it actually contains."""
+        a = self.job["answers"]
+        self.assertAlmostEqual(a["min_track_width_mm"], 0.2, places=3)
+        self.assertAlmostEqual(a["min_track_spacing_mm"], 1.0, places=2)
+
+    def test_both_appear_side_by_side(self):
+        text = G.answers_text(self.job)
+        self.assertIn("design rule allows 3.94 mil", text)
+        self.assertIn("design rule allows 7.87 mil", text)
+
+    def test_the_csv_carries_them_and_says_which_is_which(self):
+        out = os.path.join(tempfile.mkdtemp(), "r.csv")
+        G.write_report_csv(self.job, out)
+        body = open(out).read()
+        self.assertIn("rule_allows_track_width", body)
+        self.assertIn("not what it actually uses", body)
+
+    def test_a_job_with_no_rules_file_is_unaffected(self):
+        d = tempfile.mkdtemp()
+        _write(d, "job.gko", OUTLINE_50x30)
+        _write(d, "job.gtl", COPPER)
+        job = G.analyse(G.gather([d]))
+        self.assertEqual(job["rules"], {})
+        self.assertNotIn("design rule", G.answers_text(job))
+
+
 class TheOneSheetForEveryJob(unittest.TestCase):
     """The customer's last request: "make excel sheet for data of all gerber
     file" — a row per BOARD across every job, in the column order and the
