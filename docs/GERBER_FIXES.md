@@ -344,11 +344,78 @@ witness in its own right: machine-written and independent, the same role the
 
 # Open — not fixed
 
-## A. Still never tested
+## A. What will break next — predicted from the pattern
 
-- **Curved tracks.** No job so far has a single arc.
-- **Panelised jobs** — one file holding many copies of a board.
-- **Negative inner planes** drawn inverted.
+Every bug so far came from one of four places: a **format variant** not yet
+seen, a **domain concept** not modelled, **scale**, or **an edit of mine**.
+Below is those four applied to what the seven jobs do NOT contain, ranked by
+likelihood x damage.
+
+### Verified fine — no longer a risk
+
+- **Arcs.** They were listed here as never tested. They are in fact
+  everywhere — 16,775 on one measured copper layer — and instrumenting the
+  real parser found **108,413 flattened with exactly one landing wrong, by
+  1.3 microns**, because that file's own start and end radii disagree by that
+  much. (My first check said 285 were wrong. The checker reimplemented the
+  parse loop and reproduced the modal D-code bug inside itself. A test that
+  reimplements the thing it tests will inherit its bugs and invent new ones.)
+- **Aperture macros** (60 files), **G36 regions** (15), **modal codes**.
+
+### 1. Negative image `%IPNEG` — SILENT, catastrophic
+
+Zero occurrences in seven jobs, and **not handled at all**. The layer's image
+is inverted: what is drawn is what is REMOVED. Read as positive, every number
+on that layer is not merely wrong but inside-out, with no error. Common on
+older inner planes. Worth fixing before it arrives — it is one check.
+
+### 2. Step-and-repeat `%SR` — SILENT
+
+Zero occurrences. Detected and reported, never expanded. A panelised job would
+have its holes counted once instead of N times.
+
+### 3. RS-274-D — no aperture definitions at all — SILENT
+
+**Already here.** Six files across two jobs carry `%FS` and no `%ADD`: the
+apertures live in a separate `.apr` list we do not read. Every one so far is
+silkscreen, paste or mechanical — layers we do not measure — so it has cost
+nothing yet. **A copper layer in that form would produce no geometry and no
+error.** Three jobs ship a `.apr` we ignore.
+
+### 4. Panel vs board — SILENT, and arguably live now
+
+`CT-TT-CAP12-V1.1-PANEL` reports 196 x 195 mm. That is the PANEL, carrying
+many copies. A fab quoting per board needs the board. Nothing distinguishes
+them, and the answer looks perfectly reasonable either way.
+
+### 5. Excellon slots `G85` — SILENT
+
+A slot is a routed cut written as two coordinates. Counted as one hole it
+under-reports the work.
+
+### 6. Blind and buried vias — SILENT
+
+Such a job ships one drill file per LAYER PAIR. We would merge them into one
+total — right for a hole count, wrong for a price, since layer pairs are
+drilled and plated separately and it is among the most expensive things a
+board can ask for.
+
+### 7. Scale — LOUD
+
+Twelve layers and 187,674 traces takes five minutes; twenty layers or a
+backplane could be fifteen. It all sits in memory, too.
+
+### 8. Archive and folder shapes — LOUD
+
+Untried: 7-zip, tar.gz, a password-protected archive, an archive nested three
+deep, two different boards sharing a filename stem in one folder, non-ASCII
+filenames.
+
+### 9. `.gbrjob` — a missed opportunity rather than a bug
+
+Modern KiCad and Altium ship a JSON job file naming every layer and the
+stackup outright. None of the seven have one; when one arrives it is a better
+witness than any of our guessing.
 
 ---
 
