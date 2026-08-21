@@ -160,6 +160,63 @@ Two things that reply told us, both worth acting on:
 
 ---
 
+## 7. Where the Gerber add-on actually goes — the whole enquiry
+
+**The gap, stated plainly.** Genesis 2000, InCAM, CAM350 and UcamX are real,
+mature, and our contact almost certainly runs one — his DRC comes from
+somewhere. They do more than Prism does and always will. What they do NOT do
+is anything either side of the measurement, and they need a trained CAM
+engineer sitting at them. Asked what takes longest, he said "actually whole
+process".
+
+**An incoming job, end to end:**
+
+```
+1. Email/WhatsApp lands with a zip        Prism — Inquiry Automation (built)
+2. Identify layers, measure the board     Prism — core/gerber.py    (built)
+3. Can we make it? What is at our limit?  NOT BUILT
+4. How many boards fit our panel?         NOT BUILT
+5. Cost it — laminate, layers, finish     NOT BUILT
+6. Write the quote                        Prism — drafting          (built)
+7. Send it                                Prism — mailer            (built)
+8. Chase it at 2 days                     Prism — mailflow          (built)
+```
+
+**CAM software owns step 2 alone.** We now own 1, 2, 6, 7, 8. Steps 3-5 are
+the whole remaining product, and none of them need to touch a Gerber.
+
+**Each step goes to the tool that is best at it — that is the Prism part.**
+
+- **3 — the thinking tool.** Measured numbers plus the fab's own capability
+  sheet: "you quote to 4 mil, this needs 5, fine; the 0.15 mm drill is at
+  your limit, flag it." It sees numbers, never the design.
+- **4 — code, not an AI.** Panel utilisation is geometry, the same argument
+  as measuring. An LLM estimating how many boards fit a 18x24 panel is the
+  BOQ mistake again.
+- **5 — the research tool.** Laminate and finish prices THIS WEEK, from the
+  web, not a rate card from two years ago.
+- **6 — the writing tool**, in his format and his voice.
+
+One tool doing all four would be worse at all four, and that is exactly what
+every competing automation is.
+
+**Why a fabricator can say yes at all:** it runs on his own logged-in
+accounts — his ChatGPT, his Claude, his Chrome — so no API bills and no new
+subscriptions, and the customer's design never leaves his machine. That is
+not a feature bolted on; it is the precondition for letting any of this near
+his clients' work. See [[gerber-addon-security-constraint]].
+
+**The sentence:** *CAM tells you what the board is. Prism tells you what to
+charge for it, writes the quote, sends it, and chases it — using the AI
+subscriptions you already pay for, without your customer's design ever
+leaving your computer.*
+
+**Ask him before building 3-5:** what does his capability sheet look like,
+what panel sizes does he run, and what does he actually cost a job on. All
+three are inputs we do not have.
+
+---
+
 ## Sales questions open
 
 - **Agencies or their clients?** Undecided — see the reasoning in the
