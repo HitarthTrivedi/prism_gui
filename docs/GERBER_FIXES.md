@@ -28,7 +28,7 @@ this document.
 | **2-547-161A** (`.zip`) | 8 layers, 592 holes, 3 drill files | 4 bugs |
 | **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL` | 2 bugs |
 | **CT-TT-CAP12** (`.zip`) | a PANEL — 196x195mm, 2855 holes | clean first time |
-| **MIE V2.2** (`.rar`) | PADS export, 10 copper layers, `art001.pho` names | 2 bugs |
+| **MIE V2.2** (`.rar`) | PADS export, 10 copper layers, `art001.pho` names | 4 bugs |
 | **PCB-2199…** (`.zip`) | PADS export, 12 copper layers, 187k traces a layer | 3 bugs |
 
 ---
@@ -310,6 +310,35 @@ Three changes, none of which move a number:
 
 **All six earlier jobs still return their pinned answers** — that is the
 regression harness doing exactly what it was built for.
+
+---
+
+## 19. A tool select is not always a bare `T1`
+
+**Found by:** MIE V2.2 · **Severity:** Silent · **Fixed:** `8e0d9e6`
+
+This job writes every tool select as `T1C.01969F095S3` — the diameter and the
+feed and speed repeated on each one. Only a bare `T1` was matched, so every
+hole was attributed to no tool at all and **a 1,177-hole board reported
+zero**.
+
+No error, and this is why it is worth writing down: the tool TABLE at the top
+of the file parsed perfectly. Everything about the file looked read.
+
+---
+
+## 20. One report is not the job
+
+**Found by:** MIE V2.2 · **Severity:** Loud · **Fixed:** `8e0d9e6`
+
+The check that should have caught #19 made the same mistake in reverse. This
+job ships a **Drill Sizes Report per drill file** — 8 holes non-plated, 1,169
+plated — and each was compared against the job total. A perfect
+`8 + 1169 = 1177` was reported as two failures.
+
+They are summed and compared once now. That report format is also a new
+witness in its own right: machine-written and independent, the same role the
+`.DRR` plays on the Altium jobs.
 
 ---
 
