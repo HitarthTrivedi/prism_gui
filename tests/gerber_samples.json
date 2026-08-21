@@ -1,0 +1,67 @@
+{
+  "_comment": [
+    "Known answers for every real customer job we hold. A new job goes in",
+    "here the day it arrives, and from then on every future change has to",
+    "keep every earlier job right. That is the whole point: the last three",
+    "fixes each came from ONE job breaking, and a fix that quietly moves a",
+    "different board's number is not a fix.",
+    "",
+    "Two tiers, and the difference matters.",
+    "",
+    "  witnessed  — a human or a machine outside Prism says so. The",
+    "               customer's own check sheet, or the CAM report shipped",
+    "               inside the job. These are CORRECTNESS: if one breaks,",
+    "               Prism is wrong.",
+    "",
+    "  locked     — no outside witness, so this is only what Prism reads",
+    "               today. These are REGRESSION: if one moves, something",
+    "               changed and somebody has to say whether it improved.",
+    "",
+    "Never promote a locked value to witnessed without an actual witness."
+  ],
+
+  "layer 1.zip": {
+    "what": "2013 single-sided, job 101942. Drill arrives as a Gerber of flashed pads; copper is G36 regions; four-digit D-codes.",
+    "witness": "the customer's own hand-filled check sheet (photographed 2026-08-20), and 101942 (2).xlsx which states 60mm x 73mm",
+    "witnessed": {
+      "pcb_size_mm": [60.0, 73.0],
+      "min_track_width_mm": 3.0,
+      "min_drill_mm": 1.0,
+      "drill_count": 80,
+      "routed_layers": 1
+    },
+    "witnessed_tolerance": {"min_track_spacing_mm": [2.0803, 0.06]},
+    "locked": {"layers": 1, "plane_layers": 0}
+  },
+
+  "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar": {
+    "what": "2018 Altium four-layer, inches, Excellon drill, two internal planes, an octagonal outline.",
+    "witness": "the customer's check sheet, plus the job's own .DRR report stating 218 holes across ten tools",
+    "witnessed": {
+      "pcb_size_mm": [90.17, 90.17],
+      "min_track_width_mm": 0.254,
+      "min_drill_mm": 0.4572,
+      "drill_count": 218,
+      "routed_layers": 2
+    },
+    "witnessed_tolerance": {"min_track_spacing_mm": [0.254, 0.06]},
+    "locked": {"layers": 4, "plane_layers": 2}
+  },
+
+  "2-547-161A_Gerber.zip": {
+    "what": "Eight copper layers, four planes, three drill files (plated, non-plated, board-edge rout), pads drawn as %AM rotated-rectangle macros.",
+    "witness": "the job's own .DRR report: eight tools, 592 holes, smallest 0.15mm",
+    "witnessed": {
+      "min_drill_mm": 0.15,
+      "drill_count": 592
+    },
+    "locked": {
+      "pcb_size_mm": [53.195, 53.198],
+      "min_track_width_mm": 0.127,
+      "min_track_spacing_mm": 0.0937,
+      "layers": 8,
+      "routed_layers": 4,
+      "plane_layers": 4
+    }
+  }
+}

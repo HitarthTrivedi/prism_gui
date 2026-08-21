@@ -30,6 +30,7 @@ is absent, which is how CI sees them.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -710,6 +711,86 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
 
 
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
+
+
+class EveryJobWeHaveStillReadsRight(unittest.TestCase):
+    """The standing rule: a fix found on one job must not move another.
+
+    Every real customer job has its answers in tests/gerber_samples.json,
+    and a new job goes in the day it arrives. This is not belt and braces —
+    each of the last four fixes came from exactly ONE job failing, and three
+    of them touched code every other job goes through. Modal D-codes, the
+    lettering test, merging three drill files, aperture macros: any of those
+    could have quietly moved a board that was already right.
+
+    Two tiers, and the distinction is the point. A WITNESSED value has a
+    source outside Prism — the customer's own check sheet, or the CAM report
+    shipped inside the job — so breaking one means Prism is wrong. A LOCKED
+    value is only what Prism reads today, so breaking one means something
+    changed and a human has to say whether it improved. Never promote a
+    locked value without an actual witness.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "gerber_samples.json")
+        with open(path) as fh:
+            cls.samples = {k: v for k, v in json.load(fh).items()
+                           if not k.startswith("_")}
+
+    def _measure(self, name):
+        if not os.path.isdir(REAL):
+            self.skipTest("sample jobs not on this machine")
+        src = os.path.join(REAL, name)
+        if not os.path.exists(src):
+            self.skipTest(f"{name} not on this machine")
+        try:
+            return G.analyse(G.gather([src]))["answers"]
+        except G.GerberError as e:
+            self.skipTest(str(e))
+
+    def _compare(self, got, want, name, tier, tol=0.002):
+        for key, expected in want.items():
+            actual = got.get(key)
+            msg = f"{name} [{tier}] {key}: expected {expected}, got {actual}"
+            if isinstance(expected, list):
+                self.assertIsNotNone(actual, msg)
+                for e, a in zip(expected, actual):
+                    self.assertAlmostEqual(e, a, delta=tol, msg=msg)
+            elif isinstance(expected, float):
+                self.assertIsNotNone(actual, msg)
+                self.assertAlmostEqual(expected, actual, delta=tol, msg=msg)
+            else:
+                self.assertEqual(expected, actual, msg)
+
+    def test_every_sample_job(self):
+        """One subTest per job, so a break names the job and the figure
+        rather than stopping at the first one."""
+        for name, spec in self.samples.items():
+            with self.subTest(job=name):
+                got = self._measure(name)
+                self._compare(got, spec.get("witnessed", {}), name, "witnessed")
+                for key, (expected, tol) in spec.get(
+                        "witnessed_tolerance", {}).items():
+                    actual = got.get(key)
+                    self.assertIsNotNone(actual, f"{name}: {key} not measured")
+                    self.assertAlmostEqual(
+                        expected, actual, delta=tol,
+                        msg=f"{name} [witnessed±{tol}] {key}: "
+                            f"expected ~{expected}, got {actual}")
+                self._compare(got, spec.get("locked", {}), name, "locked")
+
+    def test_the_file_says_where_each_number_came_from(self):
+        """A pinned number with no stated source is a number nobody can
+        re-check, and in six weeks nobody will remember whether it was
+        measured or merely observed."""
+        for name, spec in self.samples.items():
+            with self.subTest(job=name):
+                self.assertTrue(spec.get("what"), f"{name}: no description")
+                if spec.get("witnessed") or spec.get("witnessed_tolerance"):
+                    self.assertTrue(spec.get("witness"),
+                                    f"{name}: witnessed values with no witness named")
 
 
 class TheJobsOwnCamReportIsAWitness(unittest.TestCase):
