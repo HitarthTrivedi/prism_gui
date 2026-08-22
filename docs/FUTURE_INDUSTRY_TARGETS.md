@@ -200,3 +200,134 @@ own reader, its own vocabulary, its own demo.
 identical in a meeting and they are completely different businesses. That
 answer should decide the order of this list, not the technical interest of the
 file format.
+
+---
+
+## 6. Healthcare — two ideas, and they are not equally good
+
+**Where they came from:** a doctor Hitarth spoke to, 2026-08-22. Both are his
+observations of his own working day, which is the right provenance — the same
+kind that produced the PCB work.
+
+They are recorded together and rated separately, because one belongs in Prism
+and one probably does not.
+
+---
+
+### 6a. Insurance claim packets — RECOMMENDED, fits Prism
+
+**The problem in his words:** when a patient has insurance, someone has to
+combine many bills and invoices and send them to the insurance company.
+
+**What that actually is.** An Indian claim goes one of two ways: *cashless*
+(the hospital gets pre-authorisation and bills the insurer) or
+*reimbursement* (the patient pays and claims it back). Either way a packet
+has to be assembled:
+
+```
+Claim form                     Diagnostic reports + their bills
+Discharge summary              Doctor's consultation notes
+Itemised final bill            Implant invoices / stickers
+Pharmacy bills                 Indoor case papers
+  + matching prescriptions     Policy copy, ID, cancelled cheque
+```
+
+Those live at different desks — billing, pharmacy, lab, the ward — and a
+person walks around collecting, photocopying, ordering and couriering them.
+
+**The cost is not the walking; it is the rejections.** The published split of
+why reimbursement claims are delayed or cut: missing itemised bills ~25%,
+missing prescriptions or reports ~20%, unclear diagnosis or inconsistent
+dates ~15%, plus late submission. A claim takes 45-60 days to settle and
+every query restarts that clock, so a hospital carries a large balance of
+unpaid claims because a pharmacy bill had no prescription stapled to it.
+
+**Sell "you will stop being queried", not "you will save time."**
+
+**Why it fits Prism.** It is the same spine as everything already built —
+read messy documents, check them against rules, produce a structured
+document, then track and chase it. Inquiry Automation is the chase.
+`core/boq.py` and `core/gerber.py` are the read-and-check. Nothing new is
+needed in kind, only in domain.
+
+**Three things that must be settled first:**
+
+- **The data is far more sensitive than a Gerber.** A patient's diagnosis is
+  protected under the DPDP Act 2023, and the hospital is a data fiduciary.
+  Sending it to a consumer ChatGPT or Claude account is not a risk to be
+  managed, it is not allowed. Our existing rule — measure locally, hand an
+  AI only derived data — is **not sufficient here**, because a derived
+  summary can still identify a person. This may force a fully offline
+  deployment, which is a real architectural fork from how Prism runs today.
+  See [[gerber-addon-security-constraint]] for the weaker version of this
+  rule that PCB work runs on.
+
+- **NHCX may make the problem smaller.** The National Health Claims Exchange,
+  built by the National Health Authority under ABDM, went live June 2024 and
+  is meant to move structured claims data instead of PDF bundles. Hospitals
+  are paid ₹500 per claim (or 10%, whichever is lower) to use it. Adoption is
+  uneven — around twelve insurers and one TPA integrated — so a window
+  exists, but **build the thing that FEEDS NHCX, never a rival to it.** Same
+  lesson as WindowMaker: do not compete with the system the machines are
+  already wired into.
+
+- **The doctor is probably not the buyer.** In a hospital this pain belongs
+  to the TPA desk or the billing department. A single clinic has a smaller
+  version. Find out which he means before scoping anything.
+
+**Ask him:** is this you or your hospital's insurance desk · how many claims
+a month and how many come back queried · is your hospital on NHCX · **and can
+I see one real claim packet with the patient details blacked out.** That last
+one is the move that made the PCB work; one real artefact beat every hour of
+research.
+
+---
+
+### 6b. The consultation summary to the patient's phone — INTERESTING, probably its own product
+
+**The idea:** the program listens while the doctor explains the condition,
+the medicines and the do's and don'ts; the doctor types the patient's number
+and a summary goes to their phone.
+
+**The category is real and already crowded.** Eka Care's EkaScribe does
+ambient scribing in India today, ABDM-compliant, users reporting an hour a
+day saved; globally it is Abridge, Nuance DAX and Suki. Over 60% of urban
+Indian clinics are forecast to adopt documentation tools by end of 2026. So
+"an AI listens to the consultation" is not the opportunity.
+
+**His angle IS different, and it is the good part.** Every one of those tools
+produces the DOCTOR'S paperwork — the clinical note, the EMR entry. He is
+describing the PATIENT'S copy: what to take, when, what to avoid, on their
+phone. Different output, different beneficiary.
+
+And in India it carries an advantage the American products never needed:
+**language.** The doctor speaks Gujarati with English drug names mixed in and
+the patient needs it back in Gujarati on WhatsApp. Prism already does the
+hard half of that — `core/voice.py` runs multilingual Whisper with
+per-take language detection.
+
+**One word in the design has to change.** "Immediately goes to the patient's
+phone" means unreviewed. If the transcript hears *one tablet* as *two*, a
+patient takes a double dose and **the doctor is liable, not the software**.
+The fix costs five seconds: the summary appears on the doctor's screen, he
+glances, one tap sends. Same speed in practice, no liability, and a better
+product — no doctor wants a machine giving medical advice in his name
+unseen. **One tap, never automatic. Not negotiable.**
+
+**Where it will break technically:** drug names. Whisper handles conversation
+well and Indian brand names badly — Pan-D, Shelcal, Zerodol, Augmentin — and
+that is precisely the part that matters most. It needs the transcript
+corrected against a real Indian formulary, which is a build in itself.
+
+**Also required:** consent before recording, obtained and itself recorded.
+
+**Why it probably is NOT a Prism add-on.** Prism is "one prompt, several AI
+tools, through your own browser". This is "always listening in a room →
+structured output → WhatsApp". The voice piece exists; the shape does not
+match. 6a fits Prism; this one would be its own thing.
+
+**The question that decides it:** ask him whether he cares more about his
+NOTES being written for him, or the PATIENT getting clear instructions. If he
+says notes, Eka Care already sells that and we would be third. If he says the
+patient, that is the gap.
+
