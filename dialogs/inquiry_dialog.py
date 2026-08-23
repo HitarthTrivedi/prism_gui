@@ -1,24 +1,35 @@
-"""Inquiry automation — the screen.
+"""Email automation — the working screen.
 
 The three phases the customer described, in the order they happen and visibly
 separated, because the difference between them is the difference between
 software you leave running and software you supervise:
 
-    READ      fetch, sort, file the drawings, write the register.
-              Runs on its own. Nothing here can cost anybody money.
+    READ      fetch every mailbox, sort, file the drawings, write the one
+              register. Runs on its own. Nothing here can cost anybody money.
 
     ANSWER    price it, draft the covering mail, send it, read the reply,
               update the register. Prism prepares; a person presses Send.
 
-    MAKE      the order is in — hand the drawing to BOQ and get the
-              quantities out.
+    MAKE      the order is in — put the PO against the quotation, accept it,
+              hand the drawing to BOQ and get the quantities out.
 
-Only the first is automatic, and the tabs say so. Two of the steps in ANSWER
-move money — a price going to a customer, and accepting a purchase order — and
+Only the first is automatic, and the tabs say so. Two of the steps move
+money — a price going to a customer, and accepting a purchase order — and
 those are the two places a human is required. Everything else runs unattended.
+
+Several mailboxes, one register: the check walks the configured accounts one
+at a time — never in parallel, because every account's rows land in the same
+CSV and two writers racing on one order book is how a row is lost — and each
+account carries its own read bookmark. One dead mail server skips to the next
+account; one locked register stops the walk, because the same lock would
+refuse every account after it and none of their bookmarks have moved.
+Several MACHINES writing one register is deliberately not built — the office
+PC that stays on does the writing, everyone else reads. docs/DEFERRED.md has
+the trigger that would change that.
 """
 from __future__ import annotations
 
+import csv
 import os
 import subprocess
 import sys
@@ -37,8 +48,10 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import i18n
-from dialogs.inquiry_setup_dialog import InquirySetupDialog, is_ready, settings_of
-from workers import DraftWorker, InboxCheckWorker, SendWorker
+from dialogs.inquiry_setup_dialog import (
+    InquirySetupDialog, accounts_of, is_ready, settings_of,
+)
+from workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
 
 # What each sorted category is called on screen. The engine's keys are English
 # identifiers; these are the words a customer reads.
@@ -143,18 +156,26 @@ class InquiryDialog(QDialog):
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(i18n.t("Inquiry automation"))
+        self.setWindowTitle(i18n.t("Email automation"))
         self.resize(980, 700)
         self.cfg = dict(cfg)
         self._worker = None
         self._send_worker = None
         self._draft_worker = None
+        self._po_worker = None
         self._draft_row = None
         self._result = None
         self._sorted_mail = []
         self._register_rows = []
         self._replies = []
+        self._orders = []
+        self._po_row = None
         self._followup_rows = []
+        # The walk across the configured mailboxes: the accounts still to
+        # check, how far along it is, and every account's result so far.
+        self._queue = []
+        self._queue_pos = 0
+        self._partial = []
         # True only for the duration of a timer-driven check. Reset the moment
         # that check ends, so a later failure the owner DID ask for still gets
         # a dialog rather than disappearing into the status line.
@@ -173,6 +194,7 @@ class InquiryDialog(QDialog):
         self.tabs.addTab(self._register_tab(), i18n.t("2 · Inquiries"))
         self.tabs.addTab(self._replies_tab(), i18n.t("3 · What they said back"))
         self.tabs.addTab(self._followup_tab(), i18n.t("4 · Waiting on a reply"))
+        self.tabs.addTab(self._orders_tab(), i18n.t("5 · The order came"))
         root.addWidget(self.tabs, stretch=1)
 
         footer = QHBoxLayout()
@@ -193,7 +215,9 @@ class InquiryDialog(QDialog):
         # Checking on a timer is what makes this "runs by itself" rather than
         # "a button somebody remembers". Started here rather than in the
         # constructor of the timer so a saved interval of 0 leaves it stopped.
-        self._auth_failures = 0     # consecutive rejected sign-ins; see _note_failure
+        # Rejected sign-ins are counted PER ADDRESS: one mailbox's dead
+        # password must not stop the others being read — see _note_failure.
+        self._auth_failures: dict[str, int] = {}
         self._auto = QTimer(self)
         self._auto.timeout.connect(self._auto_check)
         self._apply_auto_interval()
@@ -213,7 +237,12 @@ class InquiryDialog(QDialog):
         running and start a fresh check on a dialog that is closing.
         """
         self._auto.stop()
-        for worker in (self._worker, self._send_worker, self._draft_worker):
+        # Stop the mailbox walk as well as the workers: a queue with accounts
+        # left in it would otherwise start a fresh worker from the done-signal
+        # of the one being waited on.
+        self._queue = []
+        for worker in (self._worker, self._send_worker, self._draft_worker,
+                       self._po_worker):
             if worker is None:
                 continue
             try:
@@ -235,7 +264,7 @@ class InquiryDialog(QDialog):
     # ── chrome ────────────────────────────────────────────────────────────
     def _header(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        title = QLabel(i18n.t("Read the inbox, register the inquiries"))
+        title = QLabel(i18n.t("Read every inbox, keep one register"))
         title.setProperty("class", "h2")
         row.addWidget(title)
         row.addStretch(1)
@@ -312,7 +341,11 @@ class InquiryDialog(QDialog):
             return
         if not is_ready(self.cfg):
             return
+        # Fetching underneath an open money dialog would refresh the register
+        # out from under the row being priced — or accepted.
         if self.findChild(QuotationDialog) is not None:
+            return
+        if self.findChild(_POReviewDialog) is not None:
             return
         self.check_now(quiet=True)
 
@@ -504,7 +537,7 @@ class InquiryDialog(QDialog):
         item = self._selected_reply()
         if item is None:
             QMessageBox.information(
-                self, i18n.t("Inquiry automation"),
+                self, i18n.t("Email automation"),
                 i18n.t("Pick a reply from the list first."))
             return
         intent = self.intent_picker.currentData()
@@ -516,7 +549,7 @@ class InquiryDialog(QDialog):
                                (item.row or {}).get("Inquiry no", ""))
         if target is None:
             QMessageBox.information(
-                self, i18n.t("Inquiry automation"),
+                self, i18n.t("Email automation"),
                 i18n.t("That inquiry is no longer in the register."))
             return
         register.mark_reply(target, intent)
@@ -560,11 +593,235 @@ class InquiryDialog(QDialog):
         layout.addLayout(row)
         return page
 
+    # ── tab 5: the purchase order ─────────────────────────────────────────
+    def _orders_tab(self) -> QWidget:
+        """Purchase orders, against the quotations they answer.
+
+        The second of the two places money moves, and the last stop of the
+        whole workflow: Prism reads the PO into fields, puts it next to the
+        quotation that was actually sent, and points at every difference — a
+        rate quietly reduced between quote and PO is the classic dispute, and
+        this check costs two seconds now or an argument in three weeks.
+        Accepting is a button a person presses; nothing here accepts itself.
+        """
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        note = QLabel(i18n.t(
+            "Purchase orders that arrived by mail. Prism reads the PO, puts "
+            "it against the quotation you sent, and shows every difference — "
+            "accepting it is yours to press. The PO file itself is already "
+            "saved in the inquiry's folder, so nothing is lost if this list "
+            "empties when the screen closes."))
+        note.setWordWrap(True)
+        note.setProperty("class", "muted")
+        layout.addWidget(note)
+
+        self.orders_table = QTableWidget(0, 4)
+        self.orders_table.setHorizontalHeaderLabels(
+            [i18n.t("Inquiry no"), i18n.t("Customer"), i18n.t("Subject"),
+             i18n.t("What Prism noticed")])
+        self.orders_table.verticalHeader().setVisible(False)
+        self.orders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.orders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        head = self.orders_table.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(2, QHeaderView.Stretch)
+        head.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        layout.addWidget(self.orders_table, stretch=1)
+
+        row = QHBoxLayout()
+        self.po_btn = QPushButton(i18n.t("Read the PO and compare"))
+        self.po_btn.setProperty("class", "primary")
+        self.po_btn.clicked.connect(self._review_po)
+        row.addWidget(self.po_btn)
+        folder = QPushButton(i18n.t("Open this inquiry's folder"))
+        folder.clicked.connect(self._open_order_folder)
+        row.addWidget(folder)
+        row.addStretch(1)
+        layout.addLayout(row)
+        return page
+
+    def _fill_orders(self, result):
+        rows = list(getattr(result, "orders", None) or [])
+        self._orders = rows
+        self.orders_table.setRowCount(len(rows))
+        for index, item in enumerate(rows):
+            row = item.row or {}
+            cells = [row.get("Inquiry no", ""),
+                     row.get("Customer", "") or row.get("Email", "")
+                     or getattr(item.message, "from_addr", ""),
+                     getattr(item.message, "subject", ""),
+                     i18n.t(item.note) if item.note else ""]
+            for column, value in enumerate(cells):
+                self.orders_table.setItem(index, column,
+                                          QTableWidgetItem(str(value)))
+        if rows:
+            self.orders_table.setCurrentCell(0, 0)
+
+    def _selected_order(self):
+        index = self.orders_table.currentRow()
+        rows = getattr(self, "_orders", [])
+        return rows[index] if 0 <= index < len(rows) else None
+
+    def _open_order_folder(self):
+        item = self._selected_order()
+        if item is not None:
+            open_in_file_manager(item.folder
+                                 or (item.row or {}).get("Folder", "")
+                                 or self._root())
+
+    def _po_file(self, item) -> str:
+        """The file most likely to be the order, out of what the check filed.
+
+        The engine's own name heuristic picks the attachment ("PO 4471.pdf"
+        is not a guess); the saved copy is matched back by name because
+        save_attachments de-collides filenames rather than overwriting. Two
+        unnamed PDFs is genuinely ambiguous and returns nothing — the mail
+        body, or the typed-in form, is the honest fallback.
+        """
+        po = CB.get_po()
+        readable = (".pdf", ".docx", ".docm", ".txt", ".csv")
+        candidates = [f for f in (item.files or [])
+                      if f.lower().endswith(readable) and os.path.exists(f)]
+        if not candidates and item.folder and os.path.isdir(item.folder):
+            candidates = [os.path.join(item.folder, name)
+                          for name in sorted(os.listdir(item.folder))
+                          if name.lower().endswith((".pdf", ".docx", ".docm"))]
+        wanted = po.find_attachment(item.message) if item.message else None
+        if wanted:
+            stem = os.path.splitext(wanted)[0].lower()
+            for path in candidates:
+                base = os.path.splitext(os.path.basename(path))[0].lower()
+                if base == stem or base.startswith(stem) or stem.startswith(base):
+                    return path
+        return candidates[0] if len(candidates) == 1 else ""
+
+    def _review_po(self):
+        item = self._selected_order()
+        if item is None:
+            QMessageBox.information(
+                self, i18n.t("Purchase order"),
+                i18n.t("Pick an order from the list first."))
+            return
+        register = CB.get_register()
+        row = register.find(self._register_rows, item.inquiry_no) or item.row
+        if not row:
+            QMessageBox.information(
+                self, i18n.t("Purchase order"),
+                i18n.t("That inquiry is no longer in the register."))
+            return
+
+        settings = self._settings()
+        po = CB.get_po()
+        text, source, advice = "", "", ""
+        path = self._po_file(item)
+        if path:
+            try:
+                text = po.text_from(path)
+                source = os.path.basename(path)
+            except Exception as e:          # noqa: BLE001 — POError carries advice
+                advice = str(e)
+        elif getattr(item.message, "body", "").strip():
+            # Occasionally the order is simply typed into the mail.
+            text = item.message.body
+            source = i18n.t("the email itself")
+        else:
+            advice = i18n.t(
+                "No readable file came with this mail — type the fields from "
+                "the printed order and everything else carries on as normal.")
+
+        # The privacy switch means every AI call on mail content, and a PO is
+        # mail content. With it on — or with no key — the reading is done by
+        # the person instead, never silently ignored.
+        if text and settings.get("local_only"):
+            text = ""
+            advice = i18n.t(
+                "Keep everything on this computer is switched on, so the "
+                "order is not sent out to be read. Type the fields from the "
+                "printed order and everything else carries on as normal.")
+        elif text and not self.cfg.get("api_key"):
+            text = ""
+            advice = i18n.t(
+                "Reading a PO needs the free key Prism plans with, and there "
+                "isn't one saved. Type the fields in, or add the key under "
+                "Settings.")
+
+        self._po_row = row
+        if not text:
+            self._show_po(None, row, advice=advice)
+            return
+        self.po_btn.setEnabled(False)
+        self.progress.setVisible(True)
+        self.status.setText(i18n.t("Reading the purchase order…"))
+        self._po_worker = POReadWorker(self.cfg, text, source)
+        self._po_worker.done.connect(lambda order: self._po_read(order, row))
+        self._po_worker.failed.connect(
+            lambda message: self._po_read_failed(message, row))
+        self._po_worker.start()
+
+    def _po_read(self, order, row: dict):
+        self.po_btn.setEnabled(True)
+        self.progress.setVisible(False)
+        self.status.setText("")
+        po = CB.get_po()
+        quote = _read_sent_quotation(row)
+        differences = po.compare(order, quote) if quote is not None else []
+        advice = "" if quote is not None else i18n.t(
+            "The quotation that was sent couldn't be read back from the "
+            "inquiry's folder, so there is no line-by-line comparison — the "
+            "copy in the folder is the record to check against.")
+        self._show_po(order, row, advice=advice, differences=differences)
+
+    def _po_read_failed(self, message: str, row: dict):
+        """Extraction failed — a scan, a dead key, a rate limit. The POError
+        text already says what to do, and the typed-in form is always the way
+        through: an unreadable file must never block accepting a real order.
+        (OCR for scanned POs is deliberately not built — docs/DEFERRED.md has
+        the trigger.)"""
+        self.po_btn.setEnabled(True)
+        self.progress.setVisible(False)
+        self.status.setText("")
+        self._show_po(None, row, advice=message)
+
+    def _show_po(self, order, row: dict, advice: str = "",
+                 differences: list | None = None):
+        dialog = _POReviewDialog(row, order, differences or [], advice, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        self._po_accepted(row, dialog.number(), dialog.value_text(),
+                          dialog.date_text())
+
+    def _po_accepted(self, row: dict, number: str, value_text: str,
+                     po_date: str):
+        register = CB.get_register()
+        target = register.find(self._register_rows,
+                               row.get("Inquiry no", "")) or row
+        register.mark_converted(target, number, register.money(value_text))
+        if po_date:
+            target["PO date"] = po_date
+        try:
+            register.save(self._register_rows, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        self._refresh_register()
+        # Dealt with — leaving it in the list invites accepting it twice.
+        index = self.orders_table.currentRow()
+        if 0 <= index < len(self._orders):
+            self.orders_table.removeRow(index)
+            self._orders.pop(index)
+        self.status.setText(
+            i18n.t("{no} is converted — PO {po}, ₹{value}.")
+            .replace("{no}", target.get("Inquiry no", ""))
+            .replace("{po}", number)
+            .replace("{value}", target.get("Order value", "") or value_text))
+
     # ── running a check ───────────────────────────────────────────────────
     def _first_look(self):
         if not is_ready(self.cfg):
             answer = QMessageBox.question(
-                self, i18n.t("Inquiry automation"),
+                self, i18n.t("Email automation"),
                 i18n.t("This needs your mailbox set up first — it takes about "
                        "two minutes and only happens once.\n\nSet it up now?"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
@@ -584,45 +841,240 @@ class InquiryDialog(QDialog):
             self.status.setText(i18n.t("Saved. Press Check my mail now."))
 
     def check_now(self, quiet: bool = False):
-        """Fetch and sort. `quiet` is a timer tick rather than a button press.
+        """Fetch and sort every mailbox. `quiet` is a timer tick rather than
+        a button press.
 
         The only difference a quiet run makes is that failures land in the
         status line instead of a dialog. Somebody running a factory should not
-        have a modal appear over their work every ten minutes because the mail
+        have a modal appear over their work every ten minutes because a mail
         server had a bad afternoon.
+
+        The mailboxes are walked ONE AT A TIME, never in parallel: every
+        account's rows land in the same register, and the engine's own rule —
+        one check at a time, because two fetches racing on one bookmark
+        registers the same inquiry twice — becomes "N fetches racing on one
+        order book" the moment there are N accounts.
         """
         if not is_ready(self.cfg):
             if not quiet:
                 self._first_look()
             return
         self._quiet = quiet
+        if not quiet:
+            # A person pressing the button is asserting the credentials are
+            # right — every mailbox gets to try again, which is also how the
+            # user gets going after fixing a password.
+            self._auth_failures = {}
+
+        accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
+        if quiet:
+            # A mailbox whose password keeps being refused is skipped by the
+            # timer rather than hammered — the provider will throttle and then
+            # lock the account, and the customer's report is "Prism locked me
+            # out of my email". The others carry on being read.
+            accounts = [a for a in accounts
+                        if self._auth_failures.get(a["address"], 0)
+                        < self.AUTH_FAILURES_BEFORE_STOP]
+        if not accounts:
+            return
+
+        self._queue = accounts
+        self._queue_pos = 0
+        self._partial = []
+        self.check_btn.setEnabled(False)
+        self.progress.setVisible(True)
+        self._check_account()
+
+    def _check_account(self):
+        """Start the check for the account the walk is standing on."""
+        account = self._queue[self._queue_pos]
+        if len(self._queue) > 1:
+            self.status.setText(
+                i18n.t("Reading {who}… ({i} of {n})")
+                .replace("{who}", account.get("address", ""))
+                .replace("{i}", str(self._queue_pos + 1))
+                .replace("{n}", str(len(self._queue))))
+        else:
+            self.status.setText(i18n.t("Reading your inbox…"))
+
         settings = self._settings()
         engine_cfg = dict(self.cfg)
         # The engine's inbox module reads cfg["inbox"]; the GUI keeps its
-        # account under cfg["inquiry"]["account"] so this feature's settings
-        # travel together and cannot be half-configured by the Email add-on.
-        engine_cfg["inbox"] = settings.get("account") or {}
+        # accounts under cfg["inquiry"] so this feature's settings travel
+        # together and cannot be half-configured by the Email add-on.
+        engine_cfg["inbox"] = {k: v for k, v in account.items()
+                               if k != "state"}
 
         inbox = CB.get_inbox()
         triage = CB.get_triage()
-        state = inbox.State.from_dict(settings.get("state"))
+        # Each mailbox reads its own bookmark; the sorter's knowledge is
+        # shared — a sender is the same sender whichever address they wrote
+        # to, and what account one's check learned is saved before account
+        # two's check reads it.
+        state = inbox.State.from_dict(account.get("state"))
         knowledge = triage.Knowledge.from_dict(settings.get("knowledge"))
-
-        self.check_btn.setEnabled(False)
-        self.progress.setVisible(True)
-        self.status.setText(i18n.t("Reading your inbox…"))
 
         self._worker = InboxCheckWorker(
             engine_cfg, self._root(), state=state, knowledge=knowledge,
             local_only=bool(settings.get("local_only")),
             followup_days=int(settings.get("followup_days", 2) or 2),
             max_reminders=int(settings.get("max_reminders", 3) or 3))
-        self._worker.done.connect(self._checked)
-        self._worker.failed.connect(self._check_failed)
+        self._worker.done.connect(self._account_checked)
+        self._worker.failed.connect(self._account_failed)
         self._worker.start()
 
-    #: Consecutive rejected sign-ins before the timer gives up. Three, because
-    #: one can be a provider hiccup and two can be a password mid-rotation.
+    def _account_failed(self, message: str):
+        """mailflow.check() promises never to raise; this is the seatbelt for
+        the promise breaking. Treated exactly like a check that returned an
+        error, so the walk carries on to the next mailbox."""
+        mailflow = CB.get_mailflow()
+        self._account_checked(mailflow.Result(error=message))
+
+    def _account_checked(self, result):
+        """One mailbox is done — bank it, then walk on or finish."""
+        account = (self._queue[self._queue_pos]
+                   if self._queue_pos < len(self._queue) else {})
+        address = account.get("address", "")
+        self._partial.append((address, result))
+
+        if result.error and self._quiet \
+                and CB.get_inbox().is_auth_failure(result.error):
+            self._auth_failures[address] = \
+                self._auth_failures.get(address, 0) + 1
+        elif result.fetched or not result.error:
+            # Got into the mailbox, so the credentials are good — clear any
+            # run of rejections against this address.
+            self._auth_failures.pop(address, None)
+
+        # Persist this account's bookmark and what the sorter learned before
+        # the next account runs — the learning chains through the config, and
+        # a crash mid-walk must not cost the accounts already checked their
+        # place. On a locked register the engine hands back the OLD state, so
+        # saving it is exactly right: the same mail comes back next time.
+        self._remember_account(address, result)
+
+        register_locked = bool(result.error) and "Excel" in result.error
+        self._queue_pos += 1
+        if register_locked:
+            # The same locked file would refuse every account after this one,
+            # and none of their bookmarks have moved — stopping loses nothing
+            # and spares the owner N copies of the same sentence.
+            self._finish_check()
+            return
+        if self._queue_pos < len(self._queue):
+            self._check_account()
+            return
+        self._finish_check()
+
+    def _finish_check(self):
+        self._stamp_mailboxes(self._partial)
+        merged = self._merge_results(self._partial)
+        self._checked(merged, remember=False)
+        self._maybe_stop_timer()
+
+    def _merge_results(self, partial) -> object:
+        """Every mailbox's result as one, in the shape _checked() renders.
+
+        Errors are prefixed with the address that had them once there is more
+        than one mailbox — "the mail server didn't answer" is only half a
+        sentence when there are three servers it could mean.
+        """
+        mailflow = CB.get_mailflow()
+        merged = mailflow.Result()
+        counts: dict = {}
+        errors = []
+        for address, result in partial:
+            merged.fetched += int(getattr(result, "fetched", 0) or 0)
+            merged.sorted_mail.extend(result.sorted_mail)
+            merged.new_inquiries.extend(result.new_inquiries)
+            merged.replies.extend(result.replies)
+            merged.orders.extend(result.orders)
+            for key, value in (result.counts or {}).items():
+                counts[key] = counts.get(key, 0) + value
+            # The follow-up and SOP lists are computed over the WHOLE register
+            # on every check, so the latest successful one is already complete
+            # — extending would list the same quiet quotation once per mailbox.
+            if not result.error:
+                merged.followups = result.followups
+                merged.sops = result.sops
+            merged.state = result.state
+            merged.knowledge = result.knowledge
+            if result.error:
+                errors.append(f"{address} — {result.error}"
+                              if address and len(partial) > 1
+                              else result.error)
+        merged.counts = counts
+        merged.error = "\n\n".join(errors)
+        return merged
+
+    def _stamp_mailboxes(self, partial):
+        """Write which mailbox each new inquiry arrived at into the register.
+
+        One more column — "Mailbox" — because with sales@, info@ and the
+        owner's own address feeding one file, "who is this customer talking
+        to" is the first question the sheet gets asked. Stamped only where
+        the column is empty: a purchase order landing on a different address
+        later must not rewrite where the inquiry originally arrived.
+
+        Best-effort on purpose. The rows themselves were saved by the engine
+        moments ago; if Excel took the file in the meantime the stamp waits —
+        the register's own lock message has already told the owner what to do,
+        and attribution is not worth a second error on top of it.
+        """
+        stamps: dict[str, str] = {}
+        for address, result in partial:
+            if not address:
+                continue
+            for item in list(result.new_inquiries) + list(result.orders):
+                if item.inquiry_no:
+                    stamps.setdefault(item.inquiry_no, address)
+        if not stamps:
+            return
+        register = CB.get_register()
+        try:
+            rows = register.load(self._paths().register_csv)
+            changed = False
+            for row in rows:
+                number = row.get("Inquiry no", "")
+                if number in stamps and not (row.get("Mailbox") or "").strip():
+                    row["Mailbox"] = stamps[number]
+                    changed = True
+            if changed:
+                register.save(rows, self._paths().register_csv)
+        except Exception:                   # noqa: BLE001
+            pass
+
+    def _maybe_stop_timer(self):
+        """Give up the timer only when EVERY mailbox has settled into refusing
+        its password — while one still answers, checking carries on and the
+        status line names the ones being skipped."""
+        locked = [address for address, count in self._auth_failures.items()
+                  if count >= self.AUTH_FAILURES_BEFORE_STOP]
+        if not locked:
+            return
+        addresses = ", ".join(locked)
+        every = all(
+            self._auth_failures.get(a.get("address", ""), 0)
+            >= self.AUTH_FAILURES_BEFORE_STOP
+            for a in accounts_of(self.cfg) if a.get("address"))
+        if every:
+            self._auto.stop()
+            # Loud, unlike every other quiet-run failure: automatic checking
+            # has stopped and will not restart on its own, so saying nothing
+            # would leave the register silently going stale.
+            self.status.setText(i18n.t(
+                "Automatic checking is off — {who} kept refusing the "
+                "password. Update it in Setup, then press Check now."
+            ).replace("{who}", addresses or i18n.t("the mail server")))
+        else:
+            self.status.setText(i18n.t(
+                "Skipping {who} — the password keeps being refused. Update "
+                "it in Setup, then press Check now."
+            ).replace("{who}", addresses))
+
+    #: Consecutive rejected sign-ins before a mailbox is given up on. Three,
+    #: because one can be a provider hiccup and two can be a password
+    #: mid-rotation.
     AUTH_FAILURES_BEFORE_STOP = 3
 
     def _check_failed(self, message: str):
@@ -634,12 +1086,11 @@ class InquiryDialog(QDialog):
         self._quiet = False
 
     def _note_failure(self, message: str):
-        """Count rejected sign-ins, and stop the timer once they are settled.
+        """Count a rejected sign-in against the first mailbox.
 
-        Only automatic checks are counted. Pressing "Check now" is a person
-        asserting the credentials are right — that resets the count and is
-        allowed to try, which is also how the user gets going again after
-        fixing the password.
+        The single-mailbox path — kept because tests and simple callers hand
+        a result straight to _checked(); the account walk counts per address
+        in _account_checked() instead, where it knows which mailbox it was.
 
         A network failure never counts: retrying is exactly what the timer is
         for. A rejected password does, because the provider will throttle and
@@ -647,24 +1098,14 @@ class InquiryDialog(QDialog):
         out of my email".
         """
         if not getattr(self, "_quiet", False):
-            self._auth_failures = 0
+            self._auth_failures = {}
             return
         if not CB.get_inbox().is_auth_failure(message):
             return                          # transport, not credentials
-
-        self._auth_failures = getattr(self, "_auth_failures", 0) + 1
-        if self._auth_failures < self.AUTH_FAILURES_BEFORE_STOP:
-            return
-
-        self._auto.stop()
-        address = ((self._settings().get("account") or {}).get("address") or "")
-        # Loud, unlike every other quiet-run failure: automatic checking has
-        # stopped and will not restart on its own, so saying nothing would
-        # leave the register silently going stale.
-        self.status.setText(i18n.t(
-            "Automatic checking is off — {who} kept refusing the password. "
-            "Update it in Settings, then press Check now."
-        ).replace("{who}", address or i18n.t("the mail server")))
+        accounts = accounts_of(self.cfg)
+        address = accounts[0].get("address", "") if accounts else ""
+        self._auth_failures[address] = self._auth_failures.get(address, 0) + 1
+        self._maybe_stop_timer()
 
     def _explain(self, message: str):
         """Plain-English failure, through the same translator as the rest."""
@@ -675,39 +1116,50 @@ class InquiryDialog(QDialog):
             from dialogs.problem_dialog import show_problem
             show_problem(self, message)
         except Exception:
-            QMessageBox.warning(self, i18n.t("Inquiry automation"), message)
+            QMessageBox.warning(self, i18n.t("Email automation"), message)
 
-    def _checked(self, result):
+    def _checked(self, result, remember: bool = True):
+        """Render one result — a single mailbox's, or the whole walk's merge.
+
+        `remember` is True on the direct path (one result, persist its
+        bookmark here); the account walk passes False because it has already
+        banked every account's bookmark as it went.
+        """
         self.check_btn.setEnabled(True)
         self.progress.setVisible(False)
         self._result = result
 
         if result.error:
             self.status.setText("")
-            self._note_failure(result.error)
+            if remember:
+                self._note_failure(result.error)
             self._explain(result.error)
             # A locked register still leaves the bookmark alone, so the same
             # mail comes back next time. Nothing to save.
             if not result.fetched:
                 self._quiet = False
                 return
+        elif remember:
+            # Got in, so the credentials are good — clear any rejections.
+            self._auth_failures = {}
 
-        # Got in, so the credentials are good — clear any run of rejections.
-        self._auth_failures = 0
-
-        self._remember(result)
+        if remember:
+            self._remember(result)
         self.status.setText(result.headline())
         self._fill_arrived(result)
         self._fill_replies(result)
+        self._fill_orders(result)
         self._refresh_register()
         # Never move the tab out from under somebody on a timer tick. A screen
         # that rearranges itself every ten minutes while you are reading it is
         # the reason people switch automatic checking off.
         if not self._quiet:
-            # A reply on a live quotation is the most perishable thing in the
-            # run — somebody is waiting on an answer — so it wins the opening
-            # tab over a new inquiry, which will still be there this afternoon.
+            # A purchase order is money confirmed and waiting on an
+            # acceptance, so it wins the opening tab; a reply on a live
+            # quotation — somebody waiting on an answer — beats a new
+            # inquiry, which will still be there this afternoon.
             self.tabs.setCurrentIndex(
+                4 if result.orders else
                 2 if result.replies else (0 if result.fetched else 1))
         self._quiet = False
         # Last, and only after the register has been written: a reminder must
@@ -716,9 +1168,26 @@ class InquiryDialog(QDialog):
         self._chase_automatically()
 
     def _remember(self, result):
-        """Persist the bookmark and anything the sorter learned."""
+        """Persist the bookmark and anything the sorter learned — the direct
+        single-result path; the walk banks each account itself."""
+        accounts = accounts_of(self.cfg)
+        address = accounts[0].get("address", "") if accounts else ""
+        self._remember_account(address, result)
+
+    def _remember_account(self, address: str, result):
+        """Bank one mailbox's bookmark, and what the sorter learned, into the
+        account list — mirroring the first account into the legacy keys so a
+        config written here still opens in a Prism from before the list."""
         settings = self._settings()
-        settings["state"] = result.state.to_dict()
+        accounts = accounts_of(self.cfg)
+        for account in accounts:
+            if account.get("address", "") == address:
+                account["state"] = result.state.to_dict()
+                break
+        settings["accounts"] = accounts
+        first = accounts[0] if accounts else {}
+        settings["account"] = {k: v for k, v in first.items() if k != "state"}
+        settings["state"] = dict(first.get("state") or {})
         knowledge = settings.get("knowledge") or {}
         knowledge["learned"] = dict(result.knowledge.learned)
         settings["knowledge"] = knowledge
@@ -827,7 +1296,7 @@ class InquiryDialog(QDialog):
         rows = getattr(self, "_register_rows", [])
         if index < 0 or index >= len(rows):
             QMessageBox.information(
-                self, i18n.t("Inquiry automation"),
+                self, i18n.t("Email automation"),
                 i18n.t("Pick an inquiry from the list first."))
             return None
         return rows[index]
@@ -1338,6 +1807,221 @@ class _ReminderDialog(QDialog):
 
     def body(self) -> str:
         return self._body.toPlainText()
+
+
+def _read_sent_quotation(row: dict):
+    """The quotation actually sent, rebuilt from the CSV written at send time.
+
+    That CSV is the only record of the figures as the customer saw them —
+    rebuilding from today's rate list could compare their PO against a price
+    they were never quoted. This mirrors quoting.write_csv column for column
+    (a reader belongs beside that writer in the engine eventually; until the
+    engine grows one, it lives here where its only caller is).
+
+    The reconstruction is checked against the file's own Total row and
+    refused on any mismatch: comparing a PO against a misparsed quotation
+    would flag differences the customer never made, and a confidently wrong
+    comparison is worse than saying there is none.
+    """
+    quoting = CB.get_quoting()
+    register = CB.get_register()
+    folder = row.get("Folder", "")
+    number = (row.get("Quotation no", "") or "").replace("/", "-")
+    if not folder or not number:
+        return None
+    path = os.path.join(folder, f"{number}.csv")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            records = list(csv.reader(f))
+    except OSError:
+        return None
+
+    head: dict = {}
+    lines = []
+    gst = None
+    freight = Decimal(0)
+    discount = Decimal(0)
+    total = None
+    section = "head"
+    try:
+        for record in records:
+            cells = [c.strip() for c in record]
+            if not any(cells):
+                continue
+            first = cells[0]
+            if section == "head":
+                if first == "Sr":
+                    section = "lines"
+                elif len(cells) >= 2:
+                    head[first] = cells[1]
+                continue
+            if first:
+                # A numbered line: Sr, Description, HSN, Qty, Unit, Rate,
+                # Amount, Rate source — the order write_csv puts them in.
+                lines.append(quoting.QuoteLine(
+                    cells[1], quoting.to_decimal(cells[3]), cells[4],
+                    quoting.to_decimal(cells[5]), cells[2],
+                    basis=cells[7] if len(cells) > 7 else ""))
+                continue
+            label = cells[5] if len(cells) > 5 else ""
+            value = cells[6] if len(cells) > 6 else ""
+            if label.startswith("GST"):
+                gst = quoting.to_decimal(label[4:].rstrip("%"))
+            elif label.startswith("Discount"):
+                discount = quoting.to_decimal(label[9:].rstrip("%"))
+            elif label == "Freight":
+                freight = quoting.to_decimal(value)
+            elif label == "Total":
+                total = quoting.to_decimal(value)
+    except Exception:                       # noqa: BLE001 — hand-edited file
+        return None
+
+    if not lines or gst is None or total is None:
+        return None
+    quote = quoting.Quotation(
+        number=head.get("Quotation no", ""),
+        date=register.parse_date(head.get("Date", "")) or date.today(),
+        customer=head.get("Customer", ""),
+        inquiry_no=head.get("Inquiry no", ""),
+        lines=lines,
+        terms=quoting.Terms(gst_percent=gst, freight=freight,
+                            discount_percent=discount))
+    if quote.total != total:
+        return None
+    return quote
+
+
+class _POReviewDialog(QDialog):
+    """The purchase order against the quotation — the second stop.
+
+    The screen the runtime plan always named as the missing one. Everything
+    on it is either read off the order or typed by the owner; accepting
+    writes the register and nothing else — no mail moves, nothing is sent.
+
+    The typed-in boxes are not a fallback that appears on failure: they are
+    always there, pre-filled when reading worked. Half of real POs are scans
+    with no text in them, and the owner holding a printed order must never be
+    blocked by Prism's inability to read it.
+    """
+
+    def __init__(self, row: dict, order=None, differences: list | None = None,
+                 advice: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(i18n.t("The order, against the quotation"))
+        self.resize(640, 560)
+        layout = QVBoxLayout(self)
+
+        who = QLabel("   ·   ".join(part for part in (
+            row.get("Inquiry no", ""),
+            row.get("Customer", "") or row.get("Email", ""),
+            (i18n.t("quoted ₹{value} on {when}")
+             .replace("{value}", row.get("Quotation value", ""))
+             .replace("{when}", row.get("Quotation date", ""))
+             if row.get("Quotation value") else "")) if part))
+        who.setWordWrap(True)
+        who.setProperty("class", "h2")
+        layout.addWidget(who)
+
+        if advice:
+            note = QLabel(advice)
+            note.setWordWrap(True)
+            note.setProperty("class", "warning")
+            layout.addWidget(note)
+
+        if order is not None:
+            po = CB.get_po()
+            summary = QLabel(po.summary(order, differences or []))
+            summary.setWordWrap(True)
+            layout.addWidget(summary)
+
+        if differences:
+            table = QTableWidget(len(differences), 3)
+            table.setHorizontalHeaderLabels(
+                [i18n.t("What"), i18n.t("We quoted"),
+                 i18n.t("The order says")])
+            table.verticalHeader().setVisible(False)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.Stretch)
+            # The money columns get their full width — "₹1,38,000.…" with the
+            # thousands clipped off is the one truncation this dialog exists
+            # to prevent.
+            table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeToContents)
+            table.horizontalHeader().setSectionResizeMode(
+                2, QHeaderView.ResizeToContents)
+            po = CB.get_po()
+            for index, diff in enumerate(differences):
+                for column, value in enumerate(
+                        (diff.field, diff.quoted, diff.ordered)):
+                    cell = QTableWidgetItem(str(value))
+                    if diff.kind == po.MONEY:
+                        # The word is in the cells; the tint says "money"
+                        # at arm's length, same palette as everywhere else.
+                        cell.setBackground(QColor("#fde8d4"))
+                        cell.setForeground(QColor("#7c3a06"))
+                    table.setItem(index, column, cell)
+            layout.addWidget(table, stretch=1)
+        elif order is not None and not advice:
+            matches = QLabel(i18n.t(
+                "Nothing differs from the quotation — the numbers are the "
+                "numbers you sent."))
+            matches.setWordWrap(True)
+            matches.setProperty("class", "muted")
+            layout.addWidget(matches)
+
+        form = QFormLayout()
+        self._number = QLineEdit(getattr(order, "number", "") or "")
+        self._number.setPlaceholderText(i18n.t("as printed on the order"))
+        form.addRow(i18n.t("PO number:"), self._number)
+        when = getattr(order, "date", None)
+        self._date = QLineEdit(when.strftime("%d-%m-%Y") if when else "")
+        self._date.setPlaceholderText("DD-MM-YYYY")
+        form.addRow(i18n.t("PO date:"), self._date)
+        value = getattr(order, "value", None)
+        self._value = QLineEdit(str(value) if value else "")
+        self._value.setPlaceholderText(
+            i18n.t("order value — digits only, as printed"))
+        form.addRow(i18n.t("Order value:"), self._value)
+        layout.addLayout(form)
+
+        note = QLabel(i18n.t(
+            "Accepting only writes the register — nothing is sent. The "
+            "production sheet comes from the BOQ button on the Inquiries "
+            "tab."))
+        note.setWordWrap(True)
+        note.setProperty("class", "muted")
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Cancel).setText(i18n.t("Not now"))
+        accept = buttons.addButton(i18n.t("Accept — mark converted"),
+                                   QDialogButtonBox.AcceptRole)
+        accept.setProperty("class", "primary")
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _accept(self):
+        if not self.number() or not self.value_text():
+            QMessageBox.information(
+                self, i18n.t("Purchase order"),
+                i18n.t("The PO number and the order value are the two things "
+                       "the register cannot do without — they are what the "
+                       "month-end figures are made of."))
+            return
+        self.accept()
+
+    def number(self) -> str:
+        return self._number.text().strip()
+
+    def date_text(self) -> str:
+        return self._date.text().strip()
+
+    def value_text(self) -> str:
+        return self._value.text().strip()
 
 
 class _EditRowDialog(QDialog):

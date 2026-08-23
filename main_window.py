@@ -37,6 +37,7 @@ from widgets.tour import TourOverlay
 from widgets.simple_panels import (
     BoqPanel, CatalogPanel, EmailPanel, GuidePanel, HistoryPanel,
 )
+from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
 from widgets.input_panel import InputPanel
 from widgets.files_panel import FilesPanel
@@ -59,7 +60,7 @@ from dialogs.history_dialog import HistoryDialog
 COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 # screens of the body stack the rail switches between
 HOME, WORKBENCH, INQUIRY, SETTINGS = 0, 1, 2, 3
-GUIDE, CATALOG, HISTORY, BOQ, EMAIL = 4, 5, 6, 7, 8
+GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT = 4, 5, 6, 7, 8, 9
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -186,6 +187,31 @@ class MainWindow(QMainWindow):
         self._licence_timer.timeout.connect(self._tick_licence)
         self._licence_timer.start()
 
+        # Early repaints, because the first tick is TEN MINUTES away.
+        #
+        # The window is built from the cached token while _licence_gate's
+        # refresh is still in flight. When that token is past its offline
+        # window the banner correctly says so — and then the refresh lands a
+        # second later, makes the licence valid again, and nothing repainted.
+        # The customer sat looking at "Prism hasn't been able to reach the
+        # licence server" and an "Enter a licence key" button for up to ten
+        # minutes after it had already fixed itself, which reads as being
+        # asked to buy something they have already paid for.
+        #
+        # These cost nothing: refresh_licence_ui() reads the CACHED state and
+        # touches the network never. Spread out because a cold host can take
+        # 30-50s to answer, and the whole point is to catch the moment it does.
+        for delay_ms in (1500, 4000, 10_000, 30_000, 60_000):
+            QTimer.singleShot(delay_ms, self._repaint_licence)
+
+    def _repaint_licence(self):
+        """Re-read the cached licence and repaint. No network, never raises."""
+        try:
+            licensing.reload()
+            self.refresh_licence_ui()
+        except Exception:                          # noqa: BLE001
+            pass
+
     def _tick_licence(self):
         try:
             licensing.refresh()
@@ -257,6 +283,8 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.boq_panel)            # BOQ
         self.email_panel = EmailPanel(self.cfg)
         self.screens.addWidget(self.email_panel)          # EMAIL
+        self.support_panel = SupportPanel(self.cfg)
+        self.screens.addWidget(self.support_panel)        # SUPPORT
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -275,6 +303,10 @@ class MainWindow(QMainWindow):
         # "Open →" on an active-run card goes to the run itself, not a blank
         # bench — the run is already on the workbench's RUNNING page.
         self.home_panel.open_run.connect(lambda: self._show_screen("workbench"))
+        # An answer's button opens the thing it talks about — the same wiring
+        # the guide uses, so reading about a setting and reaching it are one
+        # gesture.
+        self.support_panel.command_requested.connect(self._handle_command)
 
     def _workbench_screen(self) -> QWidget:
         wrap = QWidget()
@@ -290,7 +322,7 @@ class MainWindow(QMainWindow):
         index = {"home": HOME, "workbench": WORKBENCH,
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
-                 "email": EMAIL}.get(name, HOME)
+                 "email": EMAIL, "support": SUPPORT}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -307,6 +339,11 @@ class MainWindow(QMainWindow):
         elif index == CATALOG:
             self.catalog_panel.cfg = self.cfg
             self.catalog_panel.refresh()
+        elif index == SUPPORT:
+            # The assistant runs on the customer's own planning key, and a
+            # copy taken at launch would miss a key they saved thirty seconds
+            # ago — which is exactly when somebody opens the help screen.
+            self.support_panel.cfg = self.cfg
         self.sidebar.set_current("home" if index == HOME else "")
 
     # ── licence ─────────────────────────────────────────────────────────────
@@ -735,6 +772,8 @@ class MainWindow(QMainWindow):
             self._open_reel()
         elif key == "guide":
             self._show_screen("guide")
+        elif key == "support":
+            self._show_screen("support")
         elif key in ("agents", "profile", "key", "chrome", "licence",
                      "language", "team", "config", "status"):
             # All nine land on the Settings screen now. The three that have no
@@ -866,7 +905,7 @@ class MainWindow(QMainWindow):
         """Straight into setup from the screen's empty state.
 
         It used to route through the working dialog, which then opened setup
-        itself — so "Set up Inquiry Automation" put three stacked windows on
+        itself — so "Set up Email automation" put three stacked windows on
         screen (the app, the inbox screen, and the setup sheet on top). The
         empty state's whole point is that there is nothing to work on yet, so
         the working screen in the middle has nothing to show.
@@ -1048,6 +1087,8 @@ class MainWindow(QMainWindow):
             self._open_login_tabs()
         elif action == "guide":
             self._open_guide()
+        elif action == "support":
+            self._show_screen("support")
 
     def _attach_path(self, path: str):
         """Take one file or folder into the run.
@@ -1861,6 +1902,9 @@ class MainWindow(QMainWindow):
         # `caffeinate` alive after Prism has gone, and the machine would never
         # sleep again until reboot.
         awake.release_all()
+        # The support assistant keeps its own worker — wound up here beside
+        # everything else, or its thread aborts the teardown the same way.
+        self.support_panel.shutdown()
         # Every worker still running has to be stopped and JOINED before the
         # process is allowed to tear down.
         #

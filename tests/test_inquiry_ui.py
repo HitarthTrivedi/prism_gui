@@ -321,12 +321,15 @@ class TheScreen(unittest.TestCase):
         self.cfg = ready_cfg(self.folder)
         self.dialog = UI.InquiryDialog(self.cfg)
 
-    def test_four_tabs_in_the_order_the_work_happens(self):
-        """Arrived → registered → answered → chased. The tab order IS the
-        explanation of the feature, so it is worth a test of its own."""
-        self.assertEqual(self.dialog.tabs.count(), 4)
+    def test_five_tabs_in_the_order_the_work_happens(self):
+        """Arrived → registered → answered → chased → ordered. The tab order
+        IS the explanation of the feature, so it is worth a test of its own —
+        and the fifth tab is the end the whole workflow was sold on: the
+        purchase order arriving is the last step of "inquiry to order"."""
+        self.assertEqual(self.dialog.tabs.count(), 5)
         self.assertTrue(self.dialog.tabs.tabText(0).startswith("1"))
         self.assertTrue(self.dialog.tabs.tabText(3).startswith("4"))
+        self.assertTrue(self.dialog.tabs.tabText(4).startswith("5"))
 
     def test_it_opens_with_an_empty_register_rather_than_an_error(self):
         self.assertEqual(self.dialog.register_table.rowCount(), 0)

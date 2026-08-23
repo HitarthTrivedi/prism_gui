@@ -118,7 +118,7 @@ class GuidePanel(_Page):
          "Every stage is shown as a plain-English step. Drop any you don't "
          "want, or send a step to a different tool."),
         ("The add-ons are purpose-built",
-         "Inquiry Automation, BOQ and Email are dedicated tools for recurring "
+         "Email automation, BOQ and Email are dedicated tools for recurring "
          "jobs — they don't need a plan, just your files."),
         ("Prism's own language, and the AI's, are separate",
          "Set them independently in Settings — a Gujarati-speaking owner may "

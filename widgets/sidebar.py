@@ -52,8 +52,15 @@ SOON = "__soon__"
 ADDONS = [
     # First on purpose: it is the only add-on used every day. BOQ is occasional
     # and Email is a task; this one is the reason the app gets opened at all.
-    ("inquiry", "Inquiry Automation", "inbox",
-     "Read the inbox, register every inquiry, quote it and chase it",
+    #
+    # "Email automation", because that is the phrase the customer says when
+    # they describe what they want ("majority of our work is done over
+    # email"). The licence feature underneath is still "inbox" and the rail
+    # key is still "inquiry" — the SKU and the wiring did not move, only the
+    # name on the shelf.
+    ("inquiry", "Email automation", "inbox",
+     "Read every mailbox, register the inquiries in one shared file, quote, "
+     "chase, and check the PO",
      "inbox", theme.OK),
     ("boq", "BOQ", "file",
      "Bill of Quantities — from a CAD drawing, or from a written spec",
@@ -72,11 +79,20 @@ ADDONS = [
 ]
 
 # Everything that is neither Home nor an add-on.
+#
+# "How to use Prism" and "Help & support" sit next to each other and are not
+# the same thing: the first is for somebody who does not yet know what Prism
+# does, the second for somebody who knows exactly what they wanted and did
+# not get it. Rolling them together would bury sixty written answers inside a
+# tutorial that a stuck customer has no reason to open. Different icons for
+# the same reason — a question mark and a lamp, not two question marks.
 MORE = [
     ("catalog", "AI tools", "grid", "Every tool Prism can drive, and whether "
      "you're signed in to it"),
     ("guide", "How to use Prism", "help",
      "What Prism can do and what to type"),
+    ("support", "Help & support", "bulb",
+     "Answers to the common questions, then our team"),
     ("runs", "History", "clock", "Every past run, re-rendered"),
     ("config", "Settings", "sliders", "Licence, agents, profile and language"),
 ]

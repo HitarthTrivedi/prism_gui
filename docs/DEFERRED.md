@@ -14,6 +14,55 @@ comment in the code should point here; this file should point back at the code.
 
 ---
 
+## One register, one writer — several machines is deferred
+
+**Where:** `dialogs/inquiry_dialog.py`, `check_now()` and the module
+docstring; `docs/EMAIL_AUTOMATION.md` §2 and §5.
+
+**Done so far:** several MAILBOXES feed one register — the check walks the
+configured accounts one at a time, each with its own bookmark, and the
+register can sit on a shared drive where every member (and Excel) reads it.
+That is the workflow the customer described: many inboxes, one sheet.
+
+**Not done:** two or more machines each running checks into the same
+register. `register.save()` rewrites the whole file atomically; the only
+concurrency handling is the Excel-lock message. Two writers on an SMB share
+means last-writer-wins row loss with no error — a lock file over SMB is the
+kind of code that corrupts a twenty-year order book on a bad Tuesday, and
+the one-watcher rule ("the office PC that stays on") delivers the ask
+without it.
+
+**What it would be:** per-machine append journals under the register's
+folder, merged by whichever Prism reads next — the same forgiveness rules
+as the CSV (unknown columns survive, numbering scans all journals). Days,
+not hours, and the migration must be invisible.
+
+**Trigger:** a customer whose salespeople refuse to put their mailbox
+passwords on the shared office PC — heard from two firms, not one.
+
+---
+
+## Scanned purchase orders — typed-in boxes, not OCR
+
+**Where:** `dialogs/inquiry_dialog.py`, `_po_read_failed()` and
+`_POReviewDialog`; the engine's honest refusal is `po.looks_scanned()` /
+`po.SCANNED_ADVICE`.
+
+**Done so far:** a scanned PO is detected and said plainly, and the review
+sheet's PO-number / date / value boxes are always there — pre-filled when
+reading worked, empty and ready when it did not. Half of real POs are
+photographs of printouts; none of them can block accepting a real order.
+
+**Not done:** OCR. An OCR misread of a rate is worse than typing four
+fields, because it arrives with confidence — and the comparison against the
+quotation is only worth having when its inputs are exact.
+
+**Trigger:** scanned POs above roughly half of a real customer's measured
+volume — counted from their own register, not guessed in a meeting — AND
+the customer saying the typing is what stops them using the tab.
+
+---
+
 ## Reel motion — check the seams, don't only ask
 
 **Where:** `prism_terminal/core/reel_web.py`, `design_instructions()`

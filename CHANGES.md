@@ -8,6 +8,247 @@ Tests: **813 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
 
 ---
 
+# Round 9 — the help screen learns to talk, and the way to a person is real
+
+Round 7 shipped Help & support with tiers two and three as placeholders, on
+instruction. The instruction changed after a day of real use, and so did a
+verdict on the first version's feel: a chat screen that posted every menu
+into the thread and left it there read as a form that kept growing.
+
+## The transcript behaves like a conversation now
+
+**Was:** ten full-width topic cards in the thread, then ten question rows,
+then ten more topic cards when somebody went back — all of them still
+pressable for ever, which is both a wall to scroll and a fork waiting to be
+clicked.
+
+**Is:** three rules. Topics are CHIPS — their names are two words, so ten of
+them take three short rows and the whole opening fits above the fold
+(questions stay full-width rows, because a truncated question cannot be
+chosen). A menu is RETIRED the moment the conversation moves past it — the
+pick already survives as the customer's own bubble, so nothing readable is
+lost. And Prism's messages carry its mark, because two voices in one column
+need telling apart faster than reading them. Plus a Start over button — the
+screen keeps its thread across visits by design, which made "begin again"
+impossible without one.
+
+## The assistant is real — the customer's own Groq key, on a leash
+
+The button now starts a conversation with a model, and everything about the
+wiring is about keeping it honest:
+
+* It answers **from the written help, not from its imagination**: every
+  question heading (so it knows the true shape of the product), the full
+  text of the answers matching this question, and the ones already read —
+  marked *do not repeat these*. The first rule of its instructions is to say
+  "I don't have that one, press Contact the team" rather than guess, because
+  a made-up menu item costs the customer more than an admitted unknown.
+* It starts knowing the four facts half of every support call is spent
+  establishing: version, whether a key is saved, the platform, the licence
+  state.
+* Temperature 0.15 — support answers are quotations from the manual, and a
+  model feeling creative about which menu an option lives in is the one
+  failure this tier cannot afford. A test pins it.
+* Its failures go through `friendly.explain()`, so the assistant breaking
+  reads exactly like the rest of the app breaking — a sentence and steps,
+  never a code. No key saved: it says so and offers the Settings button,
+  because the customer least likely to have a key is the one who has not
+  finished setting up.
+* An animated Thinking bubble while it works, and the window's own shutdown
+  now winds the assistant's thread up — a running QThread destroyed with its
+  owner aborts the process, and Prism vanishing mid-question is a memorably
+  bad way to end a support session.
+
+## Contact the team hands the whole story to a person
+
+The sheet arrives pre-filled with what a support thread spends its first
+three replies asking for: version, platform, licence state, the device code
+(seat problems are unanswerable without it), and the full conversation —
+editable, with the promise printed on it that keys and passwords are never
+included (true by construction, and tested). Three ways out, because
+`mailto:` silently does nothing on a machine with no mail client: open the
+email app (with the full text put on the clipboard FIRST, so a truncating
+mail client cannot lose it), copy it all, or save it as a file that also
+carries the redacted diagnostics report.
+
+## Tests
+
+52 in `tests/test_support.py` now: the retire-the-menus rules, Start over
+forgetting everything including the gate, the assistant's grounding (whole
+product shape, full answers for the question at hand, already-read marked),
+the refuse-don't-guess instruction pinned by string, the no-key path, the
+cautious temperature, failure-through-friendly, and the contact draft's
+contents and its no-secrets guarantee.
+
+---
+
+# Round 8 — Email automation: every inbox, one register, and the order's own screen
+
+A second firm described their whole operation in one sentence: everything —
+inquiries, quotations, follow-ups, purchase orders — arrives by email, on
+several addresses, and several people retype it all into one shared Excel
+sheet. That is the workflow the engine has run since Round 3, asked for at
+the scale of an office instead of a desk. `docs/EMAIL_AUTOMATION.md` is the
+full design and the business case, with sources; this is what changed.
+
+## The mailbox step takes a list now
+
+**Was:** one account under `cfg["inquiry"]["account"]`, one read bookmark
+beside it.
+
+**Is:** `cfg["inquiry"]["accounts"]` — each entry with its own bookmark,
+because two mailboxes sharing one last-UID would skip or re-import each
+other's mail, and either failure is indistinguishable from a quiet week.
+The old keys are still written, mirroring the first entry, so a config saved
+by this version opens in the previous one; `accounts_of()` is the one reader
+that understands both, and an existing customer's first check after updating
+carries on from exactly where their last one stopped.
+
+**The walk is one account at a time, never parallel.** The engine's own rule
+— two fetches racing on one bookmark registers the same inquiry twice — is
+"N fetches racing on one order book" the moment there are N accounts. One
+dead mail server is skipped and named ("sales@… — the mail server didn't
+answer" is a whole sentence; without the address it is half of one); one
+locked register stops the walk, because the same lock would refuse every
+account after it and none of their bookmarks have moved. A password being
+refused three times sidelines that mailbox — the provider would throttle and
+then lock it, and "Prism locked me out of my email" is the support call that
+ends a deployment — while the healthy ones keep being read.
+
+**The register says where each inquiry arrived.** One new column, `Mailbox`,
+stamped when the row is born and never rewritten — a PO landing on a
+different address later is not the inquiry moving. With sales@, info@ and
+the owner's own address feeding one file, "who is this customer talking to"
+is the first question the sheet gets asked.
+
+**The centralised sheet was always one file; Setup now says so.** The
+register lives in one folder, so the folder picker now carries the sentence
+("choose a folder on your shared drive and everyone opens the same
+register") and a one-click **Use the team folder** when the Prism workspace
+is set up. One machine does the writing — the office PC that stays on;
+everyone else reads. Several machines writing one register is deliberately
+deferred, with its trigger, in `docs/DEFERRED.md`.
+
+## The purchase order finally has its screen
+
+`core/po.py` — read the PO, compare it to the quotation, flag every
+difference — has been built and tested since Round 3, and no screen ever
+called it. The runtime doc has named "the PO confirmation" as the missing
+screen the whole time. Tab **5 · The order came** is that screen:
+
+* The comparison is against the quotation **actually sent**, read back from
+  the CSV written at send time — today's rate list could quote something the
+  customer never saw. The reader mirrors `quoting.write_csv` and is checked
+  against the file's own Total row to the paisa; a file that does not add up
+  produces NO comparison rather than a wrong one.
+* Accepting is a button, and it only writes the register — `Converted`, the
+  PO number, the order value. The second of the two money stops, exactly
+  where every doc has always promised it.
+* The typed-in boxes are not a failure mode, they are the design: half of
+  real POs are scans with no text in them, and the privacy switch means a PO
+  — which is mail content — is never sent out to be read when *Keep
+  everything on this computer* is on. Reading by machine is the convenience;
+  the person holding the printed order is never blocked. (OCR: deferred,
+  with a measured trigger, in `docs/DEFERRED.md`.)
+
+## The shelf says "Email automation" now
+
+Both prospect firms said "email", not "inquiries", when they described what
+they wanted — so the shelf item, the screen and the setup say **Email
+automation**. The rail key (`inquiry`), the licence feature (`inbox`), the
+register format and every file on disk are unchanged: the SKU and the wiring
+did not move, only the name on the shelf. The support screen's answers grew
+three questions to match (several mailboxes, the shared register, what
+happens when the PO arrives).
+
+## Tests
+
+27 new (`tests/test_email_automation.py`): per-mailbox bookmarks banked
+against the right account, the dead-server skip and the locked-register
+stop, learned senders chaining from one mailbox's check to the next, the
+Mailbox stamp (and that it never rewrites), per-address password back-off,
+the quotation round-trip to the paisa with the tampered-file refusal, the
+₹4,500-on-ninety-paise comparison catch, the privacy switch keeping a PO's
+text on the machine, and the review sheet refusing an empty accept. The
+five-tab order test in `test_inquiry_ui.py` was updated deliberately: the
+tab order is still the explanation of the feature, and the fifth tab is the
+end the workflow was sold on.
+
+---
+
+# Round 7 — Help & support: the written answer first, then us
+
+`friendly.py` speaks when Prism itself notices a problem. Nobody was there
+for the larger half — the customer who is not looking at an error at all:
+does one licence cover two computers, will the inbox add-on touch my real
+mail, what do I type in the box. Nothing is broken, so no dialog ever
+appears, and every one of those questions was a phone call.
+
+## A new rail destination, and the shape of it
+
+**Help & support** sits in the rail next to How to use Prism — they are not
+the same thing: the guide is for somebody who does not yet know what Prism
+does, this is for somebody who knew exactly what they wanted and did not get
+it. It is a screen, not a dialog, like every other destination the rail
+switches to, and it keeps its conversation for the life of the window — you
+can follow an answer's button to Settings and come back to the thread.
+
+Three tiers, in an order that is the whole design:
+
+1. **The written answers** (`support_kb.py`) — 61 questions in 10 topics,
+   the ones actually asked down a phone, phrased the way the customer says
+   them. Same writing rules `friendly.py` is held to: plain English, then
+   numbered steps that start with a verb, never a problem without a next
+   action. Every button and menu an answer names was checked against this
+   build — the redesign moved several (Login tabs sits behind More settings
+   now; "Back to the plan" became "Back to the steps"; Export diagnostics
+   lives on the sheet Settings' Change buttons open) and an instruction that
+   names a control that is not there sends the customer hunting.
+   A typed box searches them; the scoring deliberately returns NOTHING
+   rather than a weak guess, because the empty result is what opens the
+   route to a person.
+2. **The assistant** and 3. **Contact the team** — placeholders, by
+   decision, not omission. The plan is an assistant that talks the problem
+   through, and a direct line that has us call the customer; both are their
+   own change. The buttons are already in place so the screen's shape does
+   not shift under people later, and each one, pressed today, answers
+   honestly in the transcript — the contact one hands over the address that
+   is read today. A placeholder may postpone the feature, never the person.
+
+**The gate.** Tiers 2 and 3 stay shut until a written answer has actually
+been tried — the pattern every government service site uses, because a
+button marked contact-us gets pressed instead of the four-line answer that
+was faster. But it opens on the FIRST honest miss: one answer marked "No,
+still stuck", or one typed question with no match. Nobody is made to read
+six irrelevant answers to earn a person, and the shut buttons carry the
+sentence that says what opens them.
+
+**The ways in.** friendly's catch-all — the one entry where we genuinely do
+not know what went wrong — now carries an "Open Help & support" button, and
+the guide's "when something goes wrong" topic points the same way.
+
+## What it took elsewhere
+
+* `devtools/extract_strings.py` had not learned the redesign's copy tables
+  (`sidebar.MORE`, `settings_panel.SECTIONS`, `GuidePanel.CARDS`, …), so the
+  new screens' labels were quietly untranslatable; registered them, and
+  normalised catalogue paths to forward slashes so a regeneration on Windows
+  stops rewriting every entry. Catalogue regenerated: 373 → 768 strings.
+  Sixteen keys whose English no longer exists anywhere were pruned from the
+  Hindi and Gujarati packs.
+* Two transcript bugs found by measuring rather than looking: the scroll
+  range ran hundreds of pixels past the last message (a word-wrapped label's
+  *minimum* size is its height when wrapped at its widest word, and the
+  layout sums those width-blind), and the scroll-to-newest landed one layout
+  pass short every time. The column now sizes by height-for-width and rides
+  the range while a message settles.
+* 36 tests (`tests/test_support.py`): the jargon and verbs-first rules the
+  answers are held to, every action key against the window's dispatcher,
+  the search phrasings, both halves of the gate, and that the placeholders
+  answer honestly and end somewhere real.
+
+---
+
 # Round 6 — the reels were slides, and it was arithmetic
 
 One change, and it came from a measurement rather than an opinion.
