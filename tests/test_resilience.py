@@ -40,20 +40,52 @@ class GroqSurvival(unittest.TestCase):
     """F-07 and F-08. A retired model or a rate limit must not end the day."""
 
     def test_a_retired_model_falls_through_to_the_next(self):
+        """Named after the CHAIN, not after two model names.
+
+        This asserted 'llama-3.1-8b-instant' literally, and by August 2026
+        three of the four models it was written against had been retired — so
+        the test had to be edited to update a list that exists precisely so it
+        can be updated. What matters is that a dead first choice costs one
+        wasted request and the next one answers.
+        """
+        dead, expected_next = "dead-model", R.MODEL_FALLBACKS[0]
         tried = []
 
         def answer(url, headers=None, json=None, timeout=None):
             tried.append(json["model"])
-            if json["model"] == "llama-3.3-70b-versatile":
+            if json["model"] == dead:
                 return _Resp(400, {"error": {"message":
-                             "model `llama-3.3-70b-versatile` decommissioned"}})
+                             f"model `{dead}` decommissioned"}})
             return _ok(json["model"])
 
         with mock.patch.object(R.requests, "post", answer), \
              mock.patch.object(R, "_remember_model"):
-            out = R.groq_chat("k", "llama-3.3-70b-versatile", "hi")
-        self.assertEqual(out, "ok:llama-3.1-8b-instant")
-        self.assertEqual(len(tried), 2)
+            out = R.groq_chat("k", dead, "hi")
+        self.assertEqual(out, f"ok:{expected_next}")
+        self.assertEqual(tried, [dead, expected_next])
+
+    def test_every_shipped_fallback_is_a_plausible_model_name(self):
+        """Cheap guard on the list itself. It cannot check Groq still serves
+        them — that needs the network and a key — but it catches the blank
+        entry or stray comma that would send a request for model ""."""
+        self.assertTrue(R.MODEL_FALLBACKS, "the chain must never be empty")
+        for name in R.MODEL_FALLBACKS:
+            self.assertIsInstance(name, str)
+            self.assertTrue(name.strip(), "a blank model name would 404")
+            self.assertEqual(name, name.strip())
+
+    def test_a_published_chain_is_tried_before_the_built_in_one(self):
+        """The whole point of carrying models in the payload: when the shipped
+        list dies, the fix reaches customers without a release."""
+        try:
+            R.apply_model_chain(["served/first"])
+            self.assertEqual(R.model_chain()[0], "served/first")
+            self.assertIn(R.MODEL_FALLBACKS[0], R.model_chain(),
+                          "the built-in list stays as a backstop")
+            # ...but a customer's own choice still wins over ours.
+            self.assertEqual(R.model_chain("mine")[0], "mine")
+        finally:
+            R.apply_model_chain([])
 
     def test_the_working_model_is_saved_so_it_costs_one_request_once(self):
         def answer(url, headers=None, json=None, timeout=None):

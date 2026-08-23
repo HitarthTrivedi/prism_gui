@@ -141,6 +141,28 @@ def _older(version: str, minimum: str) -> bool:
     return parts(version) < parts(minimum)
 
 
+def models_for(claims: dict[str, Any]) -> list[str]:
+    """The Groq model chain in a verified payload.
+
+    Here for the same reason selectors are: a hosted model gets retired on a
+    few weeks' notice and every install carries the same list, so the day it
+    goes, every customer stops being able to plan anything at the same hour.
+    That already happened — three of the four models shipped in the built-in
+    chain were dead, leaving one, in third place.
+
+    Shipping a new chain used to mean a release everybody installs. Now it is
+    a row, and it reaches them on their next check-in.
+
+    Plain strings only, capped. A payload may add models; it can never make
+    Prism call something that is not a model name.
+    """
+    models = claims.get("content", {}).get("models")
+    if not isinstance(models, list):
+        return []
+    return [m.strip() for m in models[:12]
+            if isinstance(m, str) and 0 < len(m.strip()) <= 80]
+
+
 def selectors_for(claims: dict[str, Any]) -> dict[str, dict[str, str]]:
     """The per-agent overrides in a verified payload, filtered to what we allow.
 
