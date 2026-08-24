@@ -354,6 +354,73 @@ class WhenTheAIFails(unittest.TestCase):
         self.assertEqual(triage.parse_answers("1) order", 1), {1: "order"})
 
 
+class ARetiredModelIsNotRetriedEveryBatch(unittest.TestCase):
+    """Confirmed live: FAST_MODEL was retired by Groq, and every one of eight
+    batches in a single real check paid for that same dead model failing
+    before falling through to the one that actually works — doubling every
+    real API call and rate-limiting the key inside a couple of check runs.
+
+    router._remember_model already writes the fallback that worked to
+    ~/.prism/config.json the moment it is found. The bug was that nothing in
+    the batch loop ever looked — `current` started at the caller's default
+    and stayed there for every remaining batch, no matter what had just been
+    learned two lines above."""
+
+    def setUp(self):
+        from core import config as C
+        self._real_path = C.CONFIG_PATH
+        self._tmp = tempfile.mkdtemp(prefix="prism-test-triage-model-")
+        # A fresh config, isolated from whoever is running this test — see
+        # test_email_automation.py's _refuse for why this matters.
+        C.CONFIG_PATH = os.path.join(self._tmp, "config.json")
+        C.save({})
+
+    def tearDown(self):
+        from core import config as C
+        C.CONFIG_PATH = self._real_path
+
+    def test_batch_two_uses_what_batch_one_just_learned(self):
+        from core import config as C
+        calls = []
+
+        def fake(api_key, model, prompt, **kw):
+            calls.append(model)
+            if model == triage.FAST_MODEL:
+                # What the real router does the instant the retired model
+                # 404s and a survivor answers: persist it before returning.
+                C.save({"model": "openai/gpt-oss-120b"})
+            return "1: inquiry\n2: inquiry\n3: inquiry\n4: inquiry\n5: inquiry\n" \
+                   "6: inquiry\n7: inquiry\n8: inquiry\n9: inquiry\n10: inquiry"
+
+        messages = [message(sender=f"stranger{i}@nobody.example")
+                   for i in range(20)]
+        with _patched_groq(fake):
+            triage.classify(messages, api_key="k", batch_size=10)
+
+        self.assertEqual(calls, [triage.FAST_MODEL, "openai/gpt-oss-120b"],
+                         "batch 2 restarted from the dead default instead of "
+                         "the model batch 1 had just proven works")
+
+    def test_a_model_already_learned_before_this_call_is_used_from_batch_one(self):
+        """mailflow.check reads cfg["model"] and passes it in — the fix at the
+        call site, not just inside the loop. Confirms it end to end rather
+        than only the within-call repetition."""
+        from core import config as C
+        C.save({"model": "openai/gpt-oss-120b"})
+        calls = []
+
+        def fake(api_key, model, prompt, **kw):
+            calls.append(model)
+            return "1: inquiry"
+
+        with _patched_groq(fake):
+            triage.classify([message(sender="stranger@nobody.example")],
+                            api_key="k",
+                            model=C.load().get("model") or triage.FAST_MODEL)
+
+        self.assertEqual(calls, ["openai/gpt-oss-120b"])
+
+
 # ── 3. the register ───────────────────────────────────────────────────────────
 
 class Numbering(unittest.TestCase):
