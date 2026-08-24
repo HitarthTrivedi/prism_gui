@@ -46,7 +46,7 @@ import core_bridge as CB  # noqa: E402
 import dashboard_data as DATA  # noqa: E402
 import licensing  # noqa: E402
 from licensing.status import LicenseState  # noqa: E402
-from widgets.inquiry_panel import InquiryPanel  # noqa: E402
+from widgets.inquiry_panel import TABS, InquiryPanel  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -205,6 +205,61 @@ class TheFiguresComeFromTheRegister(unittest.TestCase):
             with self.subTest(tab=tab):
                 panel = InquiryPanel(self.cfg)
                 panel._pick(tab)
+
+
+class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
+    """Reading a mail, editing a register field, and preparing a quotation
+    all happen in the working dialog behind this screen — this screen is a
+    report. The only place that ever fired open_dialog was "Chase again",
+    which exists solely on the "gone quiet" tab, and only once something is
+    actually overdue for a follow-up.
+
+    Two brand-new inquiries — Status New, received today, nothing quoted
+    yet — is a real customer's first day using this, and awaiting_followup()
+    only ever considers QUOTED / FOLLOWING_UP / NEGOTIATING rows. A New row
+    is never overdue, so "Chase again" never renders, and the whole screen
+    was left with no door into the dialog at all."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        today = date.today().strftime("%Y-%m-%d")
+        rows = [
+            blank(**{"Inquiry no": "INQ/1", "Customer": "Shreeji Auto",
+                     "Status": REG.NEW, "Date received": today}),
+            blank(**{"Inquiry no": "INQ/2", "Customer": "Konkan Precision",
+                     "Status": REG.NEW, "Date received": today}),
+        ]
+        self.cfg = written(rows, self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_the_fixture_actually_has_nothing_overdue(self):
+        """If this fails, the rest of the class proves nothing — it would
+        mean the fixture drifted and stopped matching the real bug."""
+        self.assertEqual(DATA.inquiry_stats(self.cfg)["waiting"], 0)
+
+    def test_the_working_dialog_is_still_reachable(self):
+        panel = InquiryPanel(self.cfg)
+        fired = []
+        panel.open_dialog.connect(lambda: fired.append(True))
+        opener = next((b for b in panel.findChildren(QPushButton)
+                      if b.text() == "Check my mail now"), None)
+        self.assertIsNotNone(
+            opener,
+            "no button anywhere on the populated screen opens the working "
+            "dialog — reading mail, editing the register and preparing a "
+            "quotation are all unreachable")
+        opener.click()
+        self.assertEqual(fired, [True])
+
+    def test_it_is_still_there_on_every_tab(self):
+        for _key, label in TABS:
+            with self.subTest(tab=label):
+                panel = InquiryPanel(self.cfg)
+                panel._pick(_key)
+                labels = [b.text() for b in panel.findChildren(QPushButton)]
+                self.assertIn("Check my mail now", labels)
 
 
 class AHostileRegister(unittest.TestCase):
