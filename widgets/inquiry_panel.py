@@ -138,26 +138,54 @@ class InquiryPanel(QScrollArea):
                 self._drop(item.layout())
 
     def _not_set_up(self) -> QWidget:
+        """The empty register, told apart from "never configured".
+
+        A mailbox can be fully set up and tested and still have an empty
+        register — nobody has pressed Check yet, or the first check has not
+        run. Offering "Set up Email automation" here as the ONLY way forward
+        sent a working setup back into the setup sheet in a loop: that
+        button reopens Setup, Setup saves and returns here, the register is
+        still empty because nothing has actually gone and read the inbox, so
+        the same screen greets it again. The way out is Check, not Setup —
+        this card now offers whichever one is actually missing.
+        """
+        from dialogs.inquiry_setup_dialog import accounts_of
+        configured = any(a.get("address") for a in accounts_of(self.cfg))
+
         card = Card(radius=theme.R_HERO)
         col = card.body((30, 40, 30, 44), spacing=0)
         col.setAlignment(Qt.AlignHCenter)
         col.addWidget(IconPad("inbox", theme.OK, 56, 14, 26),
                       alignment=Qt.AlignHCenter)
         col.addSpacing(16)
-        col.addWidget(_label(i18n.t("Point Prism at a mailbox to begin"),
-                             size=15, weight=500), alignment=Qt.AlignHCenter)
+        col.addWidget(_label(
+            i18n.t("Nothing in the register yet") if configured else
+            i18n.t("Point Prism at a mailbox to begin"),
+            size=15, weight=500), alignment=Qt.AlignHCenter)
         col.addSpacing(6)
         col.addWidget(_label(
+            i18n.t("Your mailbox is set up. Run a check and anything "
+                   "waiting there gets a number, a quote and a chase.")
+            if configured else
             i18n.t("Once it can read the inbox, every inquiry gets a number, "
                    "a quote and a chase — and shows up here."),
             size=13, colour=theme.NEUTRAL[500], wrap=True),
             alignment=Qt.AlignHCenter)
         col.addSpacing(20)
-        btn = QPushButton(i18n.t("Set up Email automation"))
+        btn = QPushButton(i18n.t("Check my mail now") if configured else
+                          i18n.t("Set up Email automation"))
         btn.setObjectName("primaryBtn")
         btn.setCursor(Qt.PointingHandCursor)
-        btn.clicked.connect(self.set_up.emit)
+        btn.clicked.connect(self.open_dialog.emit if configured else
+                            self.set_up.emit)
         col.addWidget(btn, alignment=Qt.AlignHCenter)
+        if configured:
+            edit = QPushButton(i18n.t("Edit setup"))
+            edit.setObjectName("linkBtn")
+            edit.setCursor(Qt.PointingHandCursor)
+            edit.clicked.connect(self.set_up.emit)
+            col.addSpacing(8)
+            col.addWidget(edit, alignment=Qt.AlignHCenter)
         return card
 
     def _watching(self) -> str:

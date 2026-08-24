@@ -28,6 +28,7 @@ import os
 import sys
 import tempfile
 import unittest
+
 from datetime import date, timedelta
 from unittest import mock
 
@@ -39,7 +40,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # revoked-licence test in test_authorization.py. See tests/conftest.py.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
 import dashboard_data as DATA  # noqa: E402
@@ -114,6 +115,35 @@ class NoRegisterYet(unittest.TestCase):
         # set_up is what the empty state's button fires. If it ever stops
         # existing the empty state becomes a dead end.
         self.assertTrue(hasattr(panel, "set_up"))
+
+    def test_a_configured_mailbox_offers_check_not_setup_again(self):
+        """The real bug this class exists to describe, finally covered: a
+        mailbox that connects and saves still has an empty register until
+        somebody actually checks it. Offering only "Set up Email automation"
+        here sent a working setup back into the setup sheet forever — Setup
+        saves, returns to this same empty screen, nothing has read the
+        inbox, the screen greets it again. The way out of THIS empty state
+        is Check, not Setup."""
+        cfg = {"inquiry": {"accounts": [{"address": "het@example.com",
+                                        "password": "x"}]}}
+        panel = InquiryPanel(cfg)
+        card = panel._not_set_up()
+        buttons = [w for w in card.findChildren(QPushButton)]
+        labels = [b.text() for b in buttons]
+        self.assertIn("Check my mail now", labels)
+        self.assertNotIn("Set up Email automation", labels)
+        check_btn = next(b for b in buttons if b.text() == "Check my mail now")
+        fired = []
+        panel.open_dialog.connect(lambda: fired.append(True))
+        check_btn.click()
+        self.assertEqual(fired, [True])
+
+    def test_an_unconfigured_mailbox_still_offers_setup(self):
+        panel = InquiryPanel({})
+        card = panel._not_set_up()
+        labels = [b.text() for b in card.findChildren(QPushButton)]
+        self.assertIn("Set up Email automation", labels)
+        self.assertNotIn("Check my mail now", labels)
 
 
 class TheFiguresComeFromTheRegister(unittest.TestCase):
