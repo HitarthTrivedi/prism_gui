@@ -65,6 +65,16 @@ ADDONS = [
     ("boq", "BOQ", "file",
      "Bill of Quantities — from a CAD drawing, or from a written spec",
      "boq", theme.ACCENT),
+    # Licence feature is "boq" for now, not a dedicated "gerber" key — this
+    # add-on has one prospective customer and nothing registered on the
+    # licence server yet. Swap it the day a real "gerber" feature exists
+    # there; until then this rides on the same entitlement BOQ already has,
+    # rather than gating behind a key that would deny everyone, including
+    # the one account actually testing it.
+    ("gerber", "Gerber", "file",
+     "PCB size, track width & spacing, drill size and count — measured "
+     "from the Gerber files, never seen by an AI",
+     "boq", theme.ACCENT),
     ("email", "Email", "mail",
      "Draft & send an email from attached files", "email", theme.WARN),
     ("reel", "Reel / Studio", "video",

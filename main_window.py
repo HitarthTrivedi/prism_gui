@@ -35,7 +35,7 @@ from widgets.inquiry_panel import InquiryPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.tour import TourOverlay
 from widgets.simple_panels import (
-    BoqPanel, CatalogPanel, EmailPanel, GuidePanel, HistoryPanel,
+    BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel, HistoryPanel,
 )
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
@@ -53,6 +53,7 @@ from dialogs.setup_dialog import SetupDialog
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
 from dialogs.boq_dialog import BoqDialog
+from dialogs.gerber_dialog import GerberDialog
 from dialogs.reel_dialog import ReelDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
@@ -60,7 +61,7 @@ from dialogs.history_dialog import HistoryDialog
 COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 # screens of the body stack the rail switches between
 HOME, WORKBENCH, INQUIRY, SETTINGS = 0, 1, 2, 3
-GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT = 4, 5, 6, 7, 8, 9
+GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT, GERBER = 4, 5, 6, 7, 8, 9, 10
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -285,6 +286,8 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.email_panel)          # EMAIL
         self.support_panel = SupportPanel(self.cfg)
         self.screens.addWidget(self.support_panel)        # SUPPORT
+        self.gerber_panel = GerberPanel(self.cfg)
+        self.screens.addWidget(self.gerber_panel)          # GERBER
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -299,6 +302,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
         self.history_panel.open_run.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(self._open_email_dialog)
         # "Open →" on an active-run card goes to the run itself, not a blank
         # bench — the run is already on the workbench's RUNNING page.
@@ -322,7 +326,8 @@ class MainWindow(QMainWindow):
         index = {"home": HOME, "workbench": WORKBENCH,
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
-                 "email": EMAIL, "support": SUPPORT}.get(name, HOME)
+                 "email": EMAIL, "support": SUPPORT,
+                 "gerber": GERBER}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -793,6 +798,8 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
+        elif key == "gerber":
+            self._open_gerber()
         elif key == "inquiry":
             self._open_inquiry()
 
@@ -955,6 +962,25 @@ class MainWindow(QMainWindow):
                 f"macOS.\n\nDetail: {err}")
             return
         BoqDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_gerber(self):
+        # Licence feature is "boq" for now — see the comment in
+        # widgets/sidebar.py's Gerber entry for why, and swap it the day a
+        # dedicated "gerber" feature exists on the licence server.
+        self._authorized_then("boq", "addon", lambda: self._show_screen("gerber"))
+
+    def _open_gerber_dialog(self):
+        # gerber_available() always succeeds — core.gerber has no hard
+        # dependency, only an optional one (shapely, for track spacing) — so
+        # unlike BOQ this is a defensive check rather than an expected
+        # customer-facing message, and stays quiet on the happy path.
+        ok, err = CB.gerber_available()
+        if not ok:
+            QMessageBox.information(
+                self, "Gerber",
+                f"The Gerber add-on could not load: {err}")
+            return
+        GerberDialog(self.cfg, self.attachments, self).exec()
 
     def _open_email(self):
         self._authorized_then("email", "addon",

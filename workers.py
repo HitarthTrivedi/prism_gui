@@ -251,6 +251,42 @@ class MeasureWorker(QThread):
             self.failed.emit(str(e))
 
 
+class GerberWorker(QThread):
+    """Measure a PCB job (or several) off the UI thread.
+
+    A twelve-layer board with 187,674 traces on one layer takes minutes —
+    real, on a real customer job — so this cannot run inline any more than a
+    13 MB DWG can in MeasureWorker. `progress` carries the same per-layer
+    lines the terminal prints to its log file, so the window has something
+    to show for the wait instead of a frozen dialog.
+    """
+    progress = Signal(str)
+    done = Signal(list)              # [(job_name, job_dict), ...]
+    failed = Signal(str)
+
+    def __init__(self, paths: list[str]):
+        super().__init__()
+        self.paths = paths
+
+    def run(self):
+        try:
+            gerber = CB.get_gerber()
+            gathered = gerber.gather(self.paths)
+            if not gathered:
+                self.failed.emit("Nothing readable in that — check the path.")
+                return
+            jobs = gerber.split_jobs(gathered)
+            results = []
+            for name, group in jobs:
+                if len(jobs) > 1:
+                    self.progress.emit(f"── {name} ──")
+                job = gerber.analyse(group, on_progress=self.progress.emit)
+                results.append((name, job))
+            self.done.emit(results)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class ReelWorker(QThread):
     """Render the reel off the UI thread.
 

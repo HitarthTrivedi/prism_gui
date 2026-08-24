@@ -144,6 +144,23 @@ def get_boq():
     return boq
 
 
+def gerber_available() -> tuple[bool, str]:
+    """core.gerber has no hard dependency of its own — shapely is optional,
+    same as ezdxf is for BOQ, and the module degrades rather than fails
+    without it (four of the five numbers still come out; only track spacing
+    needs it). So this only needs to confirm the module itself imports."""
+    try:
+        from core import gerber  # noqa: F401
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+def get_gerber():
+    from core import gerber
+    return gerber
+
+
 # ── Inquiry automation ───────────────────────────────────────────────────────
 # Imported on demand like the rest: the engine's mail modules pull in imaplib
 # and the CSV machinery, and a customer who never buys this add-on should not

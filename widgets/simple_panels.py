@@ -294,6 +294,21 @@ class BoqPanel(_AddonFrontDoor):
         super().build()
 
 
+class GerberPanel(_AddonFrontDoor):
+    TITLE = "Gerber"
+    BLURB = ("PCB size, track width & spacing, drill size and count — "
+             "measured from the Gerber files, not guessed.")
+    ICON = "file"
+    HEADLINE = "Drop a Gerber job to begin"
+    DETAIL = ("A .zip or .rar exactly as the customer sent it — the design "
+              "is measured here and never leaves this machine.")
+    ACTION = "Attach a job"
+
+    def build(self):
+        self.HUE = theme.ACCENT
+        super().build()
+
+
 class EmailPanel(_AddonFrontDoor):
     TITLE = "Email"
     BLURB = ("Draft & send from your own account — recipients from a CSV, or "
