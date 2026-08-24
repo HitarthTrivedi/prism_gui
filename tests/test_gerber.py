@@ -709,6 +709,32 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
         self.assertIn("attachments=[]", src)
         self.assertIn("no AI sees a Gerber", src)
 
+    def test_the_shared_brief_names_no_path_and_says_the_files_are_not_attached(self):
+        """agent_brief() is the one place this text is built now — the
+        terminal and the GUI dialog both call it, so the confidentiality
+        sentence cannot say something different, or go missing, in one of
+        the two surfaces that hand an agent a job's numbers."""
+        d = tempfile.mkdtemp()
+        _write(d, "job.gko", OUTLINE_50x30)
+        _write(d, "job.gtl", COPPER)
+        _write(d, "job.drl", DRILL_EXCELLON)
+        job = G.analyse(G.gather([d]))
+        brief = G.agent_brief(job, "reply with our price")
+        self.assertIn("reply with our price", brief)
+        self.assertIn("NOT\nattached".replace("\n", " "), brief)
+        self.assertIn("confidential", brief)
+        self.assertNotIn(d, brief)           # no path to the real files
+        self.assertNotIn(".gtl", brief)
+        self.assertIn(job["answers"]["pcb_size"], brief)
+
+    def test_the_brief_stands_on_its_own_with_no_instruction(self):
+        d = tempfile.mkdtemp()
+        _write(d, "job.gko", OUTLINE_50x30)
+        _write(d, "job.gtl", COPPER)
+        job = G.analyse(G.gather([d]))
+        brief = G.agent_brief(job)
+        self.assertIn("Reply with the measured figures below", brief)
+
 
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
 
