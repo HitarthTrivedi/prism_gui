@@ -5,22 +5,33 @@ import html
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QLineEdit
 
 import core_bridge as CB
+import i18n
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 
 
-class AIDirectoryDialog(QDialog):
+class AIDirectoryDialog(PrismDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("AI directory"),
+            i18n.t("Every tool Prism can drive, what it is picked for, and "
+                   "what it costs."),
+            icon="grid", parent=parent, closable=False)
         self.setWindowTitle("AI Directory")
-        self.resize(720, 560)
-        root = QVBoxLayout(self)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter by name or specialty…")
+        self.resize(780, 600)
+        self.setMinimumSize(560, 440)
+        root = self.body
+        # The one search box, so filtering a catalogue looks the same here as
+        # it does on the screens that already use it.
+        self.search = C.SearchField(i18n.t("Filter by name or specialty…"))
         self.search.textChanged.connect(self._render)
         root.addWidget(self.search)
         self.view = QTextEdit()
         self.view.setReadOnly(True)
-        root.addWidget(self.view)
+        root.addWidget(self.view, stretch=1)
+        self.footer.set_primary(
+            self.button(i18n.t("Close"), "primary", on_click=self.accept))
         self._render("")
 
     def _render(self, query: str):
@@ -33,7 +44,10 @@ class AIDirectoryDialog(QDialog):
                 c = A.AGENT_REGISTRY[name]
                 if q and q not in name.lower() and q not in c["specialty"].lower():
                     continue
-                bg = theme.NEUTRAL[200] if i % 2 else theme.BG
+                # WELL / CARD, the two surfaces this system has for a striped
+                # table. NEUTRAL[200] is a border grey and was heavy enough
+                # that every other row read as disabled.
+                bg = theme.WELL if i % 2 else theme.CARD
                 rows.append(
                     f"<tr style='background:{bg}'>"
                     f"<td style='padding:5px 10px'><b style='color:{theme.ACCENT_RAMP[800]}'>{html.escape(name)}</b></td>"

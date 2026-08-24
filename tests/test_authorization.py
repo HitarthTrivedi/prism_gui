@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -52,6 +53,21 @@ from licensing import (authorization as A, client, device, keys,  # noqa: E402
                        lease as L, store, token as T)
 
 DAY = 86400
+
+
+def join_licence_threads(timeout: float = 10.0) -> None:
+    """Wait for licensing's fire-and-forget daemon threads to finish.
+
+    licensing.refresh() and licensing.report_usage() are deliberately
+    unjoinable in the product — nothing the customer does waits on them. A
+    test that starts one and does not wait for it has handed the next test a
+    thread that re-reads licensing.user_dir() and keys.public_keys() long
+    after the patches that set them have been undone. See
+    test_k_refresh_returns_immediately_and_never_raises for what that cost.
+    """
+    for t in threading.enumerate():
+        if t.name.startswith("prism-") and t.is_alive():
+            t.join(timeout)
 
 
 class LeaseHarness(unittest.TestCase):
@@ -640,13 +656,42 @@ class LocalFirstStartup(LeaseHarness):
         refresh() hands the work to a daemon thread; the assertion is that the
         CALL returns without waiting on it, so the window is built while the
         request is still in flight.
+
+        The thread is then joined INSIDE the patch, and that is not tidiness.
+        Left running it outlived both the patch and this test, and this file's
+        promise that "nothing in here can touch a network even by accident"
+        was false for exactly one thread: by the time it reached client._post
+        the patch had been undone, so it called the real licence server —
+        /v1/refresh, then /v1/activate with the developer's own licence key,
+        then /v1/lease.
+
+        Worse than the traffic is where the answer lands. The thread re-reads
+        licensing.user_dir() and keys.public_keys() at every step, and those
+        are mock.patch globals belonging to whichever test is running when it
+        gets there — eight modules and several seconds later, in practice
+        test_gates.py::WindowGates. A successful refresh takes _apply(), which
+        writes the server's real token into that test's temp ~/.prism and then
+        reload()s. Verified against test_gates' throwaway public key the real
+        token cannot verify, the licence reads TAMPERED, features go empty,
+        and every add-on in the rail padlocks.
+
+        That is the whole of the intermittent failure of
+        WindowGates::test_sidebar_padlocks_what_is_not_owned and
+        WindowGates::test_owned_addon_still_blocked_when_the_server_is_unreachable
+        — about twice in ten full runs, never in isolation, and 2-in-10 only
+        because the server's own rate limiter ("Too many attempts") turned
+        most of those activations away.
         """
         self.install_token()
         started = time.monotonic()
         with mock.patch.object(client, "_post",
                                side_effect=client.Unreachable("down")):
             self.assertIsNone(licensing.refresh())
-        self.assertLess(time.monotonic() - started, 0.5)
+            elapsed = time.monotonic() - started
+            # Inside the patch, so the thread answers from the stub, finishes
+            # here, and never sees a socket or another test's user_dir.
+            join_licence_threads()
+        self.assertLess(elapsed, 0.5)
 
     def test_startup_survives_a_hostile_cache(self):
         """Every file the customer can edit, edited. The app must still reach

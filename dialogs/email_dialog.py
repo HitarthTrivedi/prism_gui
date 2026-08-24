@@ -6,6 +6,7 @@ the CLI uses). Drafting reuses automation.run() through a normal
 AutomationWorker so it's a real pipeline stage, not a special code path."""
 from __future__ import annotations
 import re
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
     QPushButton, QTextEdit, QListWidget, QListWidgetItem, QMessageBox,
@@ -16,26 +17,41 @@ import core_bridge as CB
 import i18n
 import wakeword
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from workers import AutomationWorker, SendWorker, VerifyWorker, RecordWorker
 from widgets.ask_panel import AskPanel, MoreOptions
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
-class EmailSetupDialog(QDialog):
+class EmailSetupDialog(PrismDialog):
     """One-time sending-account setup (mirrors CLI's /email setup)."""
 
     def __init__(self, cfg: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Email account"),
+            i18n.t("Send from your own account, one copy per recipient."),
+            icon="mail", parent=parent, closable=False)
         self.setWindowTitle("Email account setup")
+        self.setMinimumWidth(560)
         self.cfg = dict(cfg)
         self._verify_worker = None
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel(
+        root = self.body
+        # Kept verbatim. Rewording it would orphan the Hindi and Gujarati
+        # translations of this exact sentence — the packs key off the English
+        # string — so the chrome around it moved and the words did not.
+        note = QLabel(
             "Prism sends through YOUR account via SMTP — nothing is stored "
             "anywhere but ~/.prism/config.json.\n\nGmail: this needs an APP "
             "PASSWORD, not your real one — create one at "
-            "myaccount.google.com/apppasswords"))
+            "myaccount.google.com/apppasswords")
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            f"color: {theme.INFO_INK}; background: {theme.INFO_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
+        root.addWidget(note)
         form = QFormLayout()
         existing = cfg.get("email") or {}
         self._saved_password = existing.get("password", "")
@@ -63,15 +79,20 @@ class EmailSetupDialog(QDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        root.addStretch(1)
         # Better to find out the password is wrong here than half way through a
-        # blast to fifty people.
-        self.test_btn = buttons.addButton("Test connection",
-                                          QDialogButtonBox.ActionRole)
-        self.test_btn.clicked.connect(self._test)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        # blast to fifty people — so Test is a real, findable utility rather
+        # than an ActionRole button Qt lays out wherever the platform prefers.
+        self.test_btn = self.button(i18n.t("Test connection"), "secondary",
+                                    icon_name="check", small=True,
+                                    on_click=self._test)
+        self.footer.add_utility(self.test_btn)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Save"), "primary", on_click=self._save))
+        self.tab_chain(self.addr_edit, self.pass_edit, self.host_edit,
+                       self.port_edit)
 
     def _autofill_server(self, address: str):
         """Fill host/port the moment the domain is recognisable, so the two
@@ -134,11 +155,16 @@ class EmailSetupDialog(QDialog):
         self.accept()
 
 
-class EmailComposeDialog(QDialog):
+class EmailComposeDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Email"),
+            i18n.t("Say what to send and who to. Prism writes the draft; you "
+                   "edit it and press Send."),
+            icon="mail", parent=parent, closable=False)
         self.setWindowTitle("Compose Email")
-        self.resize(640, 700)
+        self.resize(760, 760)
+        self.setMinimumSize(620, 660)
         self.cfg = cfg
         self.attachments = attachments
         self.recipients: list[dict] = []
@@ -156,10 +182,15 @@ class EmailComposeDialog(QDialog):
         self._subject = self._body = ""
         self._rec = None
 
-        root = QVBoxLayout(self)
+        # The base class owns the header and footer; `root` is its body column.
+        root = self.body
+        # A stacked form, not a grid of cards: the 16px card gutter
+        # between every row of a single column is what turns a short
+        # form into a tall one with bands of canvas through it.
+        root.setSpacing(theme.ROW_GAP)
 
         title = QLabel("What email do you want to send?")
-        title.setObjectName("h2")
+        title.setObjectName("h4")
         root.addWidget(title)
 
         # One box, the same as the home screen. Everything the old form asked
@@ -173,17 +204,31 @@ class EmailComposeDialog(QDialog):
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
 
+        # "Write the email" is a step, not the point of the window — Send is.
+        # It sits beside the prompt it acts on as a secondary, so the dialog
+        # keeps exactly one primary and it is the irreversible one.
         go_row = QHBoxLayout()
-        self.go_btn = QPushButton("Write the email")
-        self.go_btn.setObjectName("primaryBtn")
-        self.go_btn.clicked.connect(self._one_press)
+        go_row.setContentsMargins(0, 0, 0, 0)
+        go_row.setSpacing(theme.SPACE_2)
+        self.go_btn = C.button("Write the email", "secondary", "pencil",
+                               on_click=self._one_press)
         go_row.addWidget(self.go_btn)
         go_row.addStretch(1)
         root.addLayout(go_row)
 
+        # Who this is going to. A standing fact about the draft, so it reads
+        # as an inset well rather than as a dashed "nothing here yet" box.
         self.who_label = QLabel("")
-        self.who_label.setObjectName("emptyState")
         self.who_label.setWordWrap(True)
+        self.who_label.setStyleSheet(
+            f"color: {theme.NEUTRAL[700]}; background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
+        # Hidden while it has nothing to say. An empty inset strip under the
+        # prompt is a box waiting to be filled, which is not what "who this is
+        # going to" means before anybody has said anything.
+        self.who_label.setVisible(False)
         root.addWidget(self.who_label)
 
         # The old recipient controls still exist, for the rare user who wants
@@ -228,9 +273,17 @@ class EmailComposeDialog(QDialog):
         files_note.setObjectName("dim")
         files_note.setWordWrap(True)
         draft_layout.addWidget(files_note)
-        draft_btn = QPushButton("Rewrite the draft")
-        draft_btn.clicked.connect(self._generate_draft)
-        draft_layout.addWidget(draft_btn)
+        # A secondary in its own row rather than a full-width bar: rewriting
+        # is an in-place action on the draft below it, and a button as wide as
+        # the card competes with Send for the eye.
+        draft_row = QHBoxLayout()
+        draft_row.setContentsMargins(0, 0, 0, 0)
+        draft_row.setSpacing(theme.SPACE_2)
+        draft_btn = C.button("Rewrite the draft", "secondary", "pencil",
+                             small=True, on_click=self._generate_draft)
+        draft_row.addWidget(draft_btn)
+        draft_row.addStretch(1)
+        draft_layout.addLayout(draft_row)
         form = QFormLayout()
         self.subject_edit = QLineEdit()
         form.addRow("Subject:", self.subject_edit)
@@ -251,13 +304,11 @@ class EmailComposeDialog(QDialog):
         self.status.setOpenExternalLinks(True)
         root.addWidget(self.status)
 
-        send_row = QHBoxLayout()
-        send_row.addStretch(1)
-        self.send_btn = QPushButton("Send to everyone")
-        self.send_btn.setObjectName("primaryBtn")
-        self.send_btn.clicked.connect(self._send)
-        send_row.addWidget(self.send_btn)
-        root.addLayout(send_row)
+        self.footer.add_secondary(
+            self.button(i18n.t("Close"), on_click=self.reject))
+        self.send_btn = self.button("Send to everyone", "primary",
+                                    icon_name="mail", on_click=self._send)
+        self.footer.set_primary(self.send_btn)
 
     # ── recipients ────────────────────────────────────────────────────────
     def _one_press(self):
@@ -289,7 +340,7 @@ class EmailComposeDialog(QDialog):
             csvs, others = CB.mailer.split_attachments([att])
             self._csvs += csvs
             self.source_files += others
-        self.who_label.setText(self._files_note())
+        self._set_who(self._files_note())
 
     def _toggle_record(self):
         if getattr(self, "_rec", None):
@@ -323,6 +374,11 @@ class EmailComposeDialog(QDialog):
         self.ask.set_recording(False)
         self.status.setText("")
         QMessageBox.information(self, "Speak", error)
+
+    def _set_who(self, text: str):
+        """Show the recipient summary only once there is one."""
+        self.who_label.setText(text)
+        self.who_label.setVisible(bool((text or "").strip()))
 
     def _files_note(self) -> str:
         names = ", ".join(f["name"] for f in self.source_files)
@@ -390,11 +446,11 @@ class EmailComposeDialog(QDialog):
         # Say who this is going to in plain words, on the main screen — the
         # user should never have to open a panel to find that out.
         if not self.recipients:
-            self.who_label.setText(self._files_note())
+            self._set_who(self._files_note())
             return
         shown = ", ".join(r["email"] for r in self.recipients[:3])
         more = f" and {len(self.recipients) - 3} more" if len(self.recipients) > 3 else ""
-        self.who_label.setText(
+        self._set_who(
             f"Going to {len(self.recipients)} people — {shown}{more}."
             f"  ·  {self._files_note()}")
 

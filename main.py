@@ -125,7 +125,7 @@ def _selftest(app) -> int:
                 for y in range(img.height() // 2) for x in range(img.width()))
             and any(img.pixelColor(x, y).alpha() > 10
                     for y in range(img.height() // 2, img.height()) for x in range(img.width()))
-         ))(icons.pixmap("sliders", 24, "#5980a6").toImage())),
+         ))(icons.pixmap("sliders", 24, theme.ACCENT).toImage())),
         ("engine", hasattr(CB.agents, "AGENT_REGISTRY")
                    and len(CB.agents.AGENT_REGISTRY) > 0),
         ("engine notes", bool(CB.router._tool_notes())),

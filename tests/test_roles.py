@@ -303,17 +303,20 @@ class RoleTable(unittest.TestCase):
     def test_the_stylesheet_swap_leaves_the_neutrals_alone(self):
         """Roles change the accent, not the whole design. The canvas, the
         greys and the error red are shared and must not move."""
+        # theme.ACCENT, not a literal: hardcoding the brand hex here meant
+        # that changing the accent broke this test rather than the thing it
+        # guards, which is the swap leaving NEUTRALS alone.
         qss = ("QWidget { background: #f2f2f3; color: #1d1f20; }"
-               "#primaryBtn { background: #5980a6; }"
+               f"#primaryBtn {{ background: {theme.ACCENT}; }}"
                "#err { color: #fdeeee; }")
         out = theme.role_stylesheet(qss, 142)
         self.assertIn("#f2f2f3", out)
         self.assertIn("#1d1f20", out)
         self.assertIn("#fdeeee", out)
-        self.assertNotIn("#5980a6", out)
+        self.assertNotIn(theme.ACCENT, out)
 
     def test_prisms_own_hue_is_a_no_op(self):
-        qss = "#primaryBtn { background: #5980a6; }"
+        qss = f"#primaryBtn {{ background: {theme.ACCENT}; }}"
         self.assertEqual(theme.role_stylesheet(qss, R.GENERAL_HUE), qss)
 
     def test_default_agents_only_covers_the_roles_stages(self):

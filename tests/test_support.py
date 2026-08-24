@@ -143,9 +143,19 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
         for action in pointers:
             self.assertIn(f'"{action}"', src, action)
 
-    def test_support_itself_is_reachable_from_the_rail(self):
-        from widgets.sidebar import MORE
-        self.assertIn("support", [key for key, _l, _i, _t in MORE])
+    def test_support_itself_is_reachable_without_knowing_where_it_went(self):
+        """It left the rail for Settings when the rail was cut back to Home,
+        the add-ons and Settings. What matters is that a stuck customer can
+        still get to it, so this asserts reachability rather than a location:
+        it is in the rail, or it is in the Settings screen the rail still has.
+        """
+        from widgets.sidebar import MORE, SECONDARY
+        from widgets.settings_panel import MORE_LINKS
+        rail = [key for key, _l, _i, _t in MORE]
+        settings = [key for key, _l, _b in MORE_LINKS]
+        self.assertIn("config", rail, "Settings must stay in the rail")
+        self.assertIn("support", settings + [k for k, _l, _i, _t in SECONDARY])
+        self.assertIn("support", settings, "and be listed on that screen")
 
     def test_the_window_has_a_screen_for_it(self):
         import main_window

@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import i18n
+from dialogs.base import PrismDialog
 import theme
 from widgets import icons
 from workers import InboxVerifyWorker
@@ -186,7 +187,7 @@ class _Disclosure(QWidget):
 
         self.body = QLabel(i18n.t(body))
         self.body.setWordWrap(True)
-        self.body.setProperty("class", "muted")
+        self.body.setObjectName("meta")
         self.body.setVisible(False)
         column.addWidget(self.body)
 
@@ -198,12 +199,18 @@ class _Disclosure(QWidget):
         self.button.toggled.connect(toggle)
 
 
-class InquirySetupDialog(QDialog):
+class InquirySetupDialog(PrismDialog):
 
     def __init__(self, cfg: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Email automation — setup"),
+            i18n.t("Set this up once. Prism then reads your inbox, sorts it, "
+                   "and keeps your inquiry register without being asked "
+                   "again."),
+            icon="inbox", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Email automation — setup"))
-        self.resize(680, 620)
+        self.resize(760, 680)
+        self.setMinimumSize(620, 520)
         self.cfg = dict(cfg)
         self._verify = None
 
@@ -215,14 +222,10 @@ class InquirySetupDialog(QDialog):
         self._current = 0
         self._saved_password = self._accounts[0].get("password", "")
 
-        root = QVBoxLayout(self)
-        intro = QLabel(i18n.t(
-            "Set this up once. Prism then reads your inbox, sorts it, and "
-            "keeps your inquiry register — without being asked again."))
-        intro.setWordWrap(True)
-        intro.setProperty("class", "muted")
-        root.addWidget(intro)
-
+        # The intro moved into the header's subtitle — it is the sentence that
+        # says what the whole window is for, which is exactly what a subtitle
+        # is, and it was competing with the first tab for the top of the page.
+        root = self.body
         self.tabs = QTabWidget()
         self.tabs.addTab(_scrolled(self._mail_tab()), i18n.t("1 · Mailbox"))
         self.tabs.addTab(_scrolled(self._folder_tab()), i18n.t("2 · Files"))
@@ -244,15 +247,16 @@ class InquirySetupDialog(QDialog):
 
         self.step_hint = QLabel("")
         self.step_hint.setWordWrap(True)
-        self.step_hint.setProperty("class", "muted")
+        self.step_hint.setObjectName("meta")
         root.addWidget(self.step_hint)
         self.tabs.currentChanged.connect(self._describe_step)
         self._describe_step(0)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Save"), "primary", icon_name="check",
+                        on_click=self._save))
 
     def _describe_step(self, index: int):
         """Say what this step is for, and whether it can be skipped.
@@ -337,9 +341,13 @@ class InquirySetupDialog(QDialog):
         layout.addSpacing(4)
         row = QHBoxLayout()
         row.setSpacing(10)
+        # Secondary, not primary. Save is this window's one solid accent
+        # button and it sits in the footer; a second one inside the first tab
+        # meant two competing calls to action were on screen at once, and the
+        # louder of the two was the one that only checks a password.
         self.test_btn = QPushButton(i18n.t("Check this works"))
-        self.test_btn.setObjectName("primaryBtn")
         self.test_btn.setCursor(Qt.PointingHandCursor)
+        self.test_btn.setMinimumHeight(28)
         self.test_btn.clicked.connect(self._test)
         row.addWidget(self.test_btn)
         self.test_result = QLabel("")
@@ -352,7 +360,7 @@ class InquirySetupDialog(QDialog):
             "one. A mailbox on your own company domain usually takes the "
             "normal password."))
         gmail.setWordWrap(True)
-        gmail.setProperty("class", "muted")
+        gmail.setObjectName("meta")
         layout.addWidget(gmail)
 
         # ── behind the disclosure ────────────────────────────────────────
@@ -599,7 +607,7 @@ class InquirySetupDialog(QDialog):
                 "Your team workspace is set up — keep this folder in it and "
                 "every member sees the same register."))
             shared_note.setWordWrap(True)
-            shared_note.setProperty("class", "muted")
+            shared_note.setObjectName("meta")
             shared_row.addWidget(shared_note, stretch=1)
             use_shared = QPushButton(i18n.t("Use the team folder"))
             use_shared.clicked.connect(lambda: self.work_folder.edit.setText(
@@ -612,7 +620,7 @@ class InquirySetupDialog(QDialog):
                 "everyone opens the same register — the same sheet you keep "
                 "by hand today, kept by Prism instead."))
             shared_note.setWordWrap(True)
-            shared_note.setProperty("class", "muted")
+            shared_note.setObjectName("meta")
             need_form.addRow(shared_note)
         layout.addWidget(need)
 
@@ -675,7 +683,7 @@ class InquirySetupDialog(QDialog):
         already_form.addRow(i18n.t("Import it once:"), self.existing_register)
         self.import_note = QLabel("")
         self.import_note.setWordWrap(True)
-        self.import_note.setProperty("class", "muted")
+        self.import_note.setObjectName("meta")
         already_form.addRow(self.import_note)
         layout.addWidget(already)
 
@@ -755,7 +763,7 @@ class InquirySetupDialog(QDialog):
             "most offices; below five is more often than any mail server "
             "expects to be asked."))
         auto_note.setWordWrap(True)
-        auto_note.setProperty("class", "muted")
+        auto_note.setObjectName("meta")
         layout.addWidget(auto_note)
 
         self.auto_followup = QCheckBox(i18n.t(
@@ -773,7 +781,7 @@ class InquirySetupDialog(QDialog):
             "your name. Leave it off for the first week, watch what the "
             "reminders say, then turn it on once you trust them."))
         chase_note.setWordWrap(True)
-        chase_note.setProperty("class", "muted")
+        chase_note.setObjectName("meta")
         layout.addWidget(chase_note)
         layout.addStretch(1)
         return page
@@ -832,7 +840,7 @@ class InquirySetupDialog(QDialog):
             "few messages from senders Prism does not recognise are sent to "
             "be labelled."))
         explain.setWordWrap(True)
-        explain.setProperty("class", "muted")
+        explain.setObjectName("meta")
         privacy_box.addWidget(explain)
         layout.addWidget(privacy)
         layout.addStretch(1)

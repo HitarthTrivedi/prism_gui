@@ -23,8 +23,11 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
+import i18n
 import theme
+from dialogs.base import PrismDialog
 from integrations import gdrive
+from widgets import controls as C
 from widgets import icons
 from widgets.controls import heading, kicker, meta
 
@@ -48,14 +51,17 @@ class _Job(QThread):
             self.failed.emit(str(e))
 
 
-class DriveDialog(QDialog):
+class DriveDialog(PrismDialog):
     """Returns the local path of the downloaded file in `self.path`."""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Google Drive"),
+            i18n.t("Pick a file and Prism downloads a copy to work from."),
+            icon="globe", parent=parent, closable=False)
         self.setWindowTitle("Google Drive")
-        self.resize(720, 560)
-        self.setMinimumSize(520, 420)
+        self.resize(760, 580)
+        self.setMinimumSize(560, 440)
         self.path = ""
         self._folder = MY_DRIVE
         self._trail: list[dict] = []
@@ -64,40 +70,24 @@ class DriveDialog(QDialog):
         # the wake-word listener had.
         self._job: _Job | None = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 16)
-        root.setSpacing(12)
-
-        head = QHBoxLayout()
-        head.setSpacing(9)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("globe", 20, theme.ACCENT))
-        head.addWidget(glyph)
-        head.addWidget(heading("Google Drive"), stretch=1)
+        # Which Google account is being browsed — a header fact, not a footer
+        # one, because it qualifies everything in the list below it.
         self.account = meta("")
-        head.addWidget(self.account)
-        root.addLayout(head)
+        self.header.add_action(self.account)
 
-        self.body = QVBoxLayout()
-        self.body.setSpacing(9)
-        root.addLayout(self.body, stretch=1)
+        # `self.body` is the base class's body column; _clear_body() empties it
+        # between the three states this dialog moves through.
+        self.body.setSpacing(theme.SPACE_3)
 
-        footer = QHBoxLayout()
-        footer.setSpacing(9)
         self.status = meta("")
-        footer.addWidget(self.status, stretch=1)
-        cancel = QPushButton("Cancel")
-        cancel.setCursor(Qt.PointingHandCursor)
-        cancel.clicked.connect(self.reject)
-        footer.addWidget(cancel)
-        self.attach_btn = QPushButton(" Attach")
-        self.attach_btn.setObjectName("primaryBtn")
-        self.attach_btn.setCursor(Qt.PointingHandCursor)
+        self.footer.add_note(self.status)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.attach_btn = self.button(i18n.t("Attach"), "primary",
+                                      icon_name="paperclip",
+                                      on_click=self._attach)
         self.attach_btn.setEnabled(False)
-        icons.button_icon(self.attach_btn, "paperclip", 15, theme.BG)
-        self.attach_btn.clicked.connect(self._attach)
-        footer.addWidget(self.attach_btn)
-        root.addLayout(footer)
+        self.footer.set_primary(self.attach_btn)
 
         self._build()
 
@@ -122,33 +112,37 @@ class DriveDialog(QDialog):
         self._clear_body()
         ok, why = gdrive.configured()
         if not ok:
-            self._show_message(why, connect=False)
+            self._show_message(i18n.t("Drive isn't switched on here"), why,
+                               connect=False)
             return
         if not gdrive.connected():
             self._show_message(
-                "Connect your Google account and Prism can attach files "
-                "straight from your Drive.\n\nPrism asks for read-only "
-                "access — it can open the files you pick and nothing else. "
-                "You sign in with your own account, so you'll see exactly "
-                "the files your company already shares with you.",
+                i18n.t("Attach straight from your Drive"),
+                "Prism asks for read-only access — it can open the files you "
+                "pick and nothing else. You sign in with your own account, so "
+                "you'll see exactly the files your company already shares "
+                "with you.",
                 connect=True)
             return
         self._show_browser()
 
-    def _show_message(self, text: str, *, connect: bool):
-        note = QLabel(text)
-        note.setWordWrap(True)
-        note.setObjectName("meta")
-        self.body.addWidget(note)
+    def _show_message(self, title: str, text: str, *, connect: bool):
+        """Two of this dialog's three states have no list to show, and both
+        used to render as two grey paragraphs pinned to the top of a 560px
+        window — 67% of it bare canvas.
+
+        EmptyState centres itself in whatever height it is given, so the same
+        two sentences now sit in the middle of the window with a glyph over
+        them and, where there is one, the action underneath. Same words, same
+        button, same signal; the difference is that it reads as a state rather
+        than as a page that failed to load.
+        """
+        empty = C.EmptyState(
+            "globe", title, text,
+            i18n.t("Connect Google Drive") if connect else None)
         if connect:
-            button = QPushButton(" Connect Google Drive")
-            button.setObjectName("primaryBtn")
-            button.setCursor(Qt.PointingHandCursor)
-            button.setMinimumHeight(40)
-            icons.button_icon(button, "lock", 15, theme.BG)
-            button.clicked.connect(self._connect)
-            self.body.addWidget(button, alignment=Qt.AlignLeft)
-        self.body.addStretch(1)
+            empty.clicked.connect(self._connect)
+        self.body.addWidget(empty, stretch=1)
 
     def _show_browser(self):
         search_row = QHBoxLayout()

@@ -17,8 +17,11 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout)
 
 import app_meta
+import i18n
 import licensing
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from widgets import icons
 from widgets.controls import heading, kicker, meta
 
@@ -40,44 +43,56 @@ PITCH = {key: (f.label, _ICONS.get(key, "grid"), f.pitch or f.blurb)
          for key, f in plans.FEATURES.items()}
 
 
-class PaywallDialog(QDialog):
+class PaywallDialog(PrismDialog):
     def __init__(self, feature: str, parent=None, state=None):
-        super().__init__(parent)
         name, icon_name, pitch = PITCH.get(
             feature, (feature.upper(), "grid", ""))
         self.feature = feature
         self.state = state or licensing.state()
         self.relaunch_license = False
 
+        super().__init__(name, parent=parent, icon=icon_name,
+                         eyebrow=i18n.t("Add-on"), closable=False)
         self.setWindowTitle(f"{name} — {app_meta.NAME}")
         self.setModal(True)
-        self.setMinimumWidth(460)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(26, 24, 26, 20)
-        outer.setSpacing(15)
-
-        head = QHBoxLayout()
-        head.setSpacing(12)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap(icon_name, 26, theme.ACCENT))
-        glyph.setAlignment(Qt.AlignTop)
-        head.addWidget(glyph)
-        title = QVBoxLayout()
-        title.setSpacing(2)
-        title.addWidget(kicker("Add-on", muted=True))
-        title.addWidget(heading(name))
-        head.addLayout(title, stretch=1)
-        outer.addLayout(head)
+        self.setMinimumWidth(520)
+        # Stacked sheet, not a card grid — see the licence dialog.
+        self.body.setSpacing(theme.ROW_GAP)
 
         if pitch:
             blurb = QLabel(pitch)
             blurb.setObjectName("body")
             blurb.setWordWrap(True)
-            outer.addWidget(blurb)
+            self.body.addWidget(blurb)
 
-        outer.addWidget(self._status())
-        outer.addLayout(self._buttons())
+        self.body.addWidget(self._status())
+        already = self._already_have()
+        if already is not None:
+            self.body.addWidget(already)
+        self.body.addStretch(1)
+        self._build_footer()
+
+    def _already_have(self) -> QFrame | None:
+        """What this licence DOES cover, under the thing it does not.
+
+        The one fact worth adding to a locked screen: somebody who has already
+        paid for three of five add-ons is a very different conversation from
+        somebody who has bought nothing, and both are looking at this window.
+        Real data only — the signed token's own feature list — so a licence
+        with nothing on it draws nothing.
+        """
+        have = sorted(f for f in (self.state.features or [])
+                      if f != self.feature)
+        if not have or not self.state.usable:
+            return None
+        wrap = QFrame()
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(theme.SPACE_2)
+        from dialogs.license_dialog import feature_chips
+        col.addWidget(kicker(i18n.t("Already on your licence"), muted=True))
+        col.addWidget(feature_chips(have, "ok"))
+        return wrap
 
     def _status(self) -> QFrame:
         """Why it is locked. The wording has to distinguish 'you never bought
@@ -89,12 +104,19 @@ class PaywallDialog(QDialog):
         # QFrame rule draws this border around the text inside the box too and
         # the explanation ends up looking like an input field.
         box.setObjectName("paywallStatus")
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        # WELL and a hairline, not NEUTRAL[100] and a DIVIDER: this is an inset
+        # panel inside a card surface, and the census found three near-
+        # identical greys doing that job across the dialogs. One well, one
+        # hairline, one radius.
         box.setStyleSheet(
-            f"QFrame#paywallStatus {{ background: {theme.NEUTRAL[100]};"
-            f"border: 1px solid {theme.DIVIDER}; }}")
+            f"QFrame#paywallStatus {{ background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
         row = QHBoxLayout(box)
-        row.setContentsMargins(14, 12, 14, 12)
-        row.setSpacing(10)
+        row.setContentsMargins(theme.SPACE_3, theme.SPACE_3,
+                               theme.SPACE_3, theme.SPACE_3)
+        row.setSpacing(theme.SPACE_3)
         glyph = QLabel()
         glyph.setPixmap(icons.pixmap("lock", 16, theme.NEUTRAL[600]))
         glyph.setAlignment(Qt.AlignTop)
@@ -118,31 +140,21 @@ class PaywallDialog(QDialog):
         row.addWidget(label, stretch=1)
         return box
 
-    def _buttons(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(9)
-        row.addWidget(meta("Licence " + (self.state.license_id or "—")), stretch=1)
-
-        key_btn = QPushButton(" Enter a key")
-        key_btn.setObjectName("smallBtn")
-        key_btn.setCursor(Qt.PointingHandCursor)
-        icons.button_icon(key_btn, "key", 14, theme.TEXT)
-        key_btn.clicked.connect(self._enter_key)
-        row.addWidget(key_btn)
-
-        close = QPushButton("Not now")
-        close.setCursor(Qt.PointingHandCursor)
-        close.clicked.connect(self.reject)
-        row.addWidget(close)
-
-        ask = QPushButton(" Ask us about it")
-        ask.setObjectName("primaryBtn")
-        ask.setCursor(Qt.PointingHandCursor)
-        ask.setDefault(True)
-        icons.button_icon(ask, "mail", 15, theme.BG)
-        ask.clicked.connect(self._email_us)
-        row.addWidget(ask)
-        return row
+    def _build_footer(self):
+        licence = meta("Licence " + (self.state.license_id or "—"))
+        licence.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.footer.add_note(licence)
+        self.footer.add_utility(
+            self.button(i18n.t("Enter a key"), "secondary", icon_name="key",
+                        small=True, on_click=self._enter_key))
+        self.footer.add_secondary(
+            self.button(i18n.t("Not now"), on_click=self.reject))
+        # The one primary, and it is deliberately the sales action rather than
+        # "Enter a key": somebody who lands here has just told us they want
+        # this add-on, which is the most useful thing they can tell us.
+        self.footer.set_primary(
+            self.button(i18n.t("Ask us about it"), "primary", icon_name="mail",
+                        on_click=self._email_us))
 
     def _enter_key(self):
         # Handled by the caller so the licence dialog is parented to the window

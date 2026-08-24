@@ -575,11 +575,16 @@ class Attachments(GateTest):
         win = self._window()
         win._attach_path(loose)
         win._attach_path(folder)
-        rows = [win.files_panel.attached_list.item(i).text()
-                for i in range(win.files_panel.attached_list.count())]
+        # The tray is a column of controls.FileItem rows now rather than a
+        # QListWidget, so a row's name and its "Folder · 3 files" line are two
+        # fields instead of one string. Same assertion, read off both.
+        rows = win.files_panel.attached_labels()
+        details = win.files_panel.attached_details()
         self.assertIn("spec.png", rows)
-        self.assertTrue(any("brand assets" in r and "3 files" in r
-                            for r in rows), rows)
+        self.assertTrue(
+            any("brand assets" in name and "3 files" in detail
+                for name, detail in zip(rows, details)),
+            list(zip(rows, details)))
         # The engine still receives the flat file list.
         self.assertEqual(len(win.attachments), 4)
 
@@ -609,7 +614,7 @@ class Attachments(GateTest):
         win._attach_path(folder)
         win._detach_all()
         self.assertEqual(win.attachments, [])
-        self.assertEqual(win.files_panel.attached_list.count(), 0)
+        self.assertEqual(win.files_panel.attached_count_value(), 0)
 
     def test_the_same_file_is_not_queued_twice(self):
         """Attaching a folder and then a file inside it used to send that file

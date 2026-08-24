@@ -13,6 +13,8 @@ from __future__ import annotations
 import html
 import re
 
+import theme
+
 _MONO = "'JetBrains Mono','DejaVu Sans Mono',Consolas,monospace"
 
 _H_RE = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -28,12 +30,14 @@ def _inline(text: str) -> str:
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
     s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
     s = re.sub(r"`([^`]+?)`",
-               rf"<span style='font-family:{_MONO};color:#2c455d'>\1</span>", s)
+               rf"<span style='font-family:{_MONO};"
+               rf"color:{theme.ACCENT_RAMP[800]}'>\1</span>", s)
     return s
 
 
 def _label(text: str) -> str:
-    return (f"<p style='color:#416180;font-weight:600;font-size:11px;"
+    return (f"<p style='color:{theme.ACCENT_RAMP[700]};font-weight:600;"
+            f"font-size:11px;"
             f"letter-spacing:0.8px;margin:12px 0 4px 0'>"
             f"{html.escape(text.rstrip(':'))}</p>")
 

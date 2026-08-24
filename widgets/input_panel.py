@@ -1,16 +1,28 @@
-"""The task card — top of the workbench column.
+"""The task card — step 1 of the workbench, and the front door to the product.
 
-A white card with the accent stripe, holding the kicker, a live state pill, the
-task itself as plain 16px text you can edit in place, and the row of things you
-can do to it. The design shows the task as settled text with an [Edit] button;
-here the text *is* the editor, so the button disappears and the affordance is
-just a caret.
+An orchestration command centre, not a chat box. Everything an operator needs
+to hand Prism a job is on this one card:
+
+    the task itself, as an obvious input rather than a line of grey placeholder
+    the things it should work from  — files, folders, spoken words
+    the things it could be          — the tasks you have run before
+    the things it can be            — a few worked examples
+    one, and exactly one, primary action
+
+The three regions below the composer (attached context, recent tasks,
+examples) are the answer to the screen being 69.5% empty grey: they are all
+real, they are all one click from starting work, and they disappear the moment
+a plan exists — at which point the composer collapses to a one-line recap and
+the plan takes the screen.
 
 The blueprint frame this used to sit in is gone — see style.qss's header for
 why the registration marks were retired in favour of the stripe.
 """
 from __future__ import annotations
+import os
+
 from PySide6.QtCore import Signal, QTimer, Qt
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QTextEdit, QPushButton,
     QSizePolicy,
@@ -19,10 +31,16 @@ from PySide6.QtWidgets import (
 import i18n
 import theme
 from widgets import icons
-from widgets.controls import Card, Pill, elevate, kicker
+from widgets import controls as C
+from widgets.controls import Card, Pill, kicker
+from widgets.files_panel import kind_label, size_label
 
 # state key -> (pill text, tone)
-_STATES = {
+# Named STATES, not _STATES: devtools/extract_strings.py scans module-level
+# copy tables by exact name, and the underscored version was invisible to it —
+# so "Waiting on you" and "Ready to plan", the two words on this card a
+# first-time user reads first, have never reached a translator.
+STATES = {
     "empty":   ("Waiting on you", "neutral"),
     "ready":   ("Ready to plan",  "accent"),
     "routing": ("Planning…",      "warn"),
@@ -31,10 +49,41 @@ _STATES = {
     "done":    ("Finished",       "ok"),
 }
 
+def examples() -> list[tuple[str, str]]:
+    """Worked examples. UI copy, not data.
+
+    They are on the card as suggestions of the SHAPE a good task takes — a
+    deliverable, an audience, a source — which is the single thing a
+    first-time user gets wrong. Clicking one fills the composer so it can be
+    edited rather than run blind.
+
+    A function with the literals inside t() rather than a module-level table:
+    devtools/extract_strings.py scans tables only by exact name, and a
+    sentence that reaches the screen without reaching a translator is what the
+    catalogue exists to prevent. It also means these follow a language change
+    mid-session, which a table read once at import does not.
+    """
+    return [
+        (i18n.t("Research and write"),
+         i18n.t("Research the top five competitors in our region, work out "
+                "where we win, and draft a one-page positioning note.")),
+        (i18n.t("Find and reach out"),
+         i18n.t("Find ten manufacturing companies near Ahmedabad, get the "
+                "name and email of whoever runs purchasing, and draft an "
+                "introduction email to each.")),
+        (i18n.t("Turn a file into a deck"),
+         i18n.t("Read the attached specification and build a ten-slide deck "
+                "a customer could sit through.")),
+        (i18n.t("Make the campaign"),
+         i18n.t("Write three social posts for our new product and generate "
+                "an image to go with each one.")),
+    ]
+
 
 def _action(label: str, icon_name: str, tip: str = "") -> QPushButton:
     btn = QPushButton(f" {label}")
     btn.setCursor(Qt.PointingHandCursor)
+    btn.setMinimumHeight(C.MIN_TARGET + 4)
     icons.button_icon(btn, icon_name, 15, theme.NEUTRAL[600])
     if tip:
         btn.setToolTip(tip)
@@ -67,11 +116,74 @@ class _QueuedTaskRow(QFrame):
         drop = QPushButton()
         drop.setObjectName("smallBtn")
         drop.setCursor(Qt.PointingHandCursor)
-        drop.setToolTip("Remove this task")
+        drop.setToolTip(i18n.t("Remove this task"))
         drop.setFixedWidth(28)
         icons.button_icon(drop, "x", 13, theme.TEXT)
         drop.clicked.connect(on_remove)
         row.addWidget(drop)
+
+
+class _StarterRow(QFrame):
+    """A task you have run before, offered back as a starting point.
+
+    Real, and only real: title, the tools that ran it and when, straight out
+    of the saved run records under the member's runs folder. If the folder is
+    empty the whole region is not drawn — there is no placeholder version of
+    this."""
+
+    chosen = Signal(str)
+
+    def __init__(self, record: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("listRow")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._text = (record.get("title") or "").strip()
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_3, theme.SPACE_2 + 1,
+                               theme.SPACE_3, theme.SPACE_2 + 1)
+        row.setSpacing(theme.SPACE_3)
+        row.addWidget(C.IconPad("clock", theme.ACCENT, 28, theme.R_CONTROL, 14))
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        one_line = " ".join(self._text.split())
+        title = QLabel(one_line if len(one_line) <= 62 else one_line[:61] + "…")
+        title.setStyleSheet(theme.type_css("SUPPORT", theme.TEXT))
+        title.setToolTip(self._text)
+        col.addWidget(title)
+        detail = " · ".join([b for b in (
+            ", ".join(record.get("tools") or []), record.get("when") or "") if b])
+        sub = QLabel(detail)
+        sub.setObjectName("meta")
+        sub.setVisible(bool(detail))
+        col.addWidget(sub)
+        row.addLayout(col, stretch=1)
+
+        use = QPushButton(i18n.t("Use again"))
+        use.setObjectName("ghostBtn")
+        use.setCursor(Qt.PointingHandCursor)
+        use.setMinimumHeight(C.MIN_TARGET)
+        use.clicked.connect(self._emit)
+        row.addWidget(use)
+        self.setAccessibleName(f"{one_line}. {detail}")
+
+    def _emit(self):
+        self.chosen.emit(self._text)
+
+    def mousePressEvent(self, event):
+        self._emit()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self._emit()
+            return
+        super().keyPressEvent(event)
 
 
 class InputPanel(Card):
@@ -80,37 +192,79 @@ class InputPanel(Card):
     attach_file_clicked = Signal()
     attach_folder_clicked = Signal()
     queue_changed = Signal(int)     # how many tasks are queued behind this one
+    attachment_activated = Signal(str)   # a path the user asked to open
 
-    _MIN_H, _MAX_H = 46, 150
+    _MIN_H, _MAX_H = 108, 240
+
+    # style.qss draws #taskEdit as a transparent, borderless box with a 2px
+    # underline. That is precisely the complaint the redesign starts from —
+    # the most important input in the product does not look like an input.
+    # The stylesheet belongs to the design system agent, so the composer
+    # carries its own drawn well here instead: an inset field with a real
+    # border that lifts to white and an accent edge on focus.
+    @staticmethod
+    def _EDITOR_QSS() -> str:
+        return (f"#taskEdit {{ background: {theme.WELL};"
+                f" border: 1px solid {theme.BORDER};"
+                f" border-radius: {theme.R_CONTROL}px;"
+                f" padding: {theme.SPACE_3}px; }}"
+                f"#taskEdit:focus {{ background: {theme.CARD};"
+                f" border: 1px solid {theme.ACCENT}; }}")
+
+    @staticmethod
+    def _RECAP_QSS() -> str:
+        """Settled text, not a field: no border, no fill, nothing to type into."""
+        return (f"#taskEdit {{ background: transparent; border: none;"
+                f" padding: 0; "
+                + theme.type_css("BODY", theme.NEUTRAL[800]) + " }")
 
     def __init__(self, parent=None):
         super().__init__(stripe=True, radius=theme.R_HERO, raised=True,
                          parent=parent)
-        self.content = self.body((24, 22, 24, 22), spacing=0)
+        self.content = self.body((theme.CARD_PAD, theme.CARD_PAD,
+                                  theme.CARD_PAD, theme.CARD_PAD), spacing=0)
 
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(theme.SPACE_2)
         head.addWidget(kicker(i18n.t("Your task")), stretch=1)
         self.state_pill = Pill()
         head.addWidget(self.state_pill)
         self.content.addLayout(head)
-        self.content.addSpacing(10)
+        self.content.addSpacing(theme.SPACE_3 - 2)
 
+        # ── the composer ─────────────────────────────────────────────────
+        # A drawn, focusable well rather than a line of placeholder text on a
+        # white card. The complaint the redesign starts from is that the most
+        # important input in the product did not look like an input at all.
         self.text = QTextEdit()
         self.text.setObjectName("taskEdit")
         self.text.setFrameShape(QTextEdit.NoFrame)
-        self.text.setPlaceholderText(
-            "Describe what you want done — name any file or folder in plain "
-            "words and Prism will go find it.")
+        self.text.setPlaceholderText(i18n.t(
+            "Describe the job in your own words — what you want, who it is "
+            "for, and anything Prism should work from."))
         self.text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.text.textChanged.connect(self._on_text_changed)
         # Grow with the task instead of reserving a fixed block: a one-line
         # task shouldn't leave a hole between it and the buttons.
         self.text.document().documentLayout().documentSizeChanged.connect(
             self._autosize)
+        self.text.setStyleSheet(self._EDITOR_QSS())
         self.text.setFixedHeight(self._MIN_H)
         self.content.addWidget(self.text)
-        self.content.addSpacing(10)
+
+        # Naming a file out loud is Prism's least discoverable feature and one
+        # of its best — the router resolves the description against the disk
+        # and offers the match for confirmation. Saying so under the field is
+        # the whole of the teaching.
+        self.hint = C.icon_label(
+            "paperclip",
+            i18n.t("Name a file or folder in plain English — “the tender in "
+                   "my Documents folder” — and Prism will go and find it."),
+            14, theme.NEUTRAL[500])
+        self.hint.layout().itemAt(1).widget().setObjectName("meta")
+        self.hint.layout().itemAt(1).widget().setWordWrap(True)
+        self.content.addWidget(self.hint)
+        self.content.addSpacing(theme.SPACE_3)
 
         # ── the queue ────────────────────────────────────────────────────────
         # Tasks the user lined up before starting. Prism plans and runs them in
@@ -134,25 +288,26 @@ class InputPanel(Card):
         self.actions_row = QWidget()
         row = QHBoxLayout(self.actions_row)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
+        row.setSpacing(theme.SPACE_2)
         self.mic_btn = _action(i18n.t("Speak"), "mic",
-                               "Dictate the task instead of typing")
+                               i18n.t("Dictate the task instead of typing"))
         self.mic_btn.setObjectName("micBtn")
         self.mic_btn.setCheckable(True)
         self.mic_btn.clicked.connect(self.mic_toggle_clicked.emit)
         row.addWidget(self.mic_btn)
 
-        file_btn = _action(i18n.t("Add file"), "paperclip", "Attach a file")
+        file_btn = _action(i18n.t("Add file"), "paperclip", i18n.t("Attach a file"))
         file_btn.clicked.connect(self.attach_file_clicked.emit)
         row.addWidget(file_btn)
 
-        folder_btn = _action(i18n.t("Add folder"), "folder", "Attach a whole folder")
+        folder_btn = _action(i18n.t("Add folder"), "folder",
+                             i18n.t("Attach a whole folder"))
         folder_btn.clicked.connect(self.attach_folder_clicked.emit)
         row.addWidget(folder_btn)
 
         self.add_task_btn = _action(
             i18n.t("Add task"), "plus",
-            "Queue this one and type another — Prism runs them in order")
+            i18n.t("Queue this one and type another — Prism runs them in order"))
         self.add_task_btn.clicked.connect(self._queue_current)
         row.addWidget(self.add_task_btn)
         row.addStretch(1)
@@ -160,8 +315,9 @@ class InputPanel(Card):
         self.route_btn = QPushButton(f"{i18n.t('Make a plan')}  ")
         self.route_btn.setObjectName("primaryBtn")
         self.route_btn.setCursor(Qt.PointingHandCursor)
+        self.route_btn.setMinimumHeight(C.MIN_TARGET + 10)
         self.route_btn.setLayoutDirection(Qt.RightToLeft)   # arrow trails
-        icons.button_icon(self.route_btn, "arrow-right", 15, "#ffffff")
+        icons.button_icon(self.route_btn, "arrow-right", 15, theme.CARD)
         self.route_btn.clicked.connect(
             lambda: self.route_clicked.emit(self.text.toPlainText()))
         row.addWidget(self.route_btn)
@@ -176,6 +332,62 @@ class InputPanel(Card):
         self.status.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.content.addWidget(self.status)
 
+        # ── context: what Prism is holding for this task ─────────────────
+        self.context_box = QWidget()
+        ctx = QVBoxLayout(self.context_box)
+        ctx.setContentsMargins(0, theme.SPACE_4, 0, 0)
+        ctx.setSpacing(theme.SPACE_2)
+        ctx.addWidget(C.hairline())
+        ctx_head = QHBoxLayout()
+        ctx_head.setSpacing(theme.SPACE_2)
+        ctx_head.addWidget(kicker(i18n.t("Working from"), muted=True), stretch=1)
+        self.context_count = C.Pill("", "quiet")
+        ctx_head.addWidget(self.context_count)
+        ctx.addLayout(ctx_head)
+        self.context_rows = QWidget()
+        self._context_layout = QVBoxLayout(self.context_rows)
+        self._context_layout.setContentsMargins(0, 0, 0, 0)
+        self._context_layout.setSpacing(theme.SPACE_1 + 2)
+        ctx.addWidget(self.context_rows)
+        self.context_box.setVisible(False)
+        self.content.addWidget(self.context_box)
+
+        # ── starters: real recent tasks, and worked examples ─────────────
+        self.starters = QWidget()
+        st = QVBoxLayout(self.starters)
+        st.setContentsMargins(0, theme.SPACE_4, 0, 0)
+        st.setSpacing(theme.SPACE_3)
+        st.addWidget(C.hairline())
+
+        cols = QHBoxLayout()
+        cols.setSpacing(theme.SPACE_6)
+
+        self.recent_box = QWidget()
+        rc = QVBoxLayout(self.recent_box)
+        rc.setContentsMargins(0, 0, 0, 0)
+        rc.setSpacing(theme.SPACE_2)
+        rc.addWidget(kicker(i18n.t("Pick up where you left off"), muted=True))
+        self.recent_rows = QWidget()
+        self._recent_layout = QVBoxLayout(self.recent_rows)
+        self._recent_layout.setContentsMargins(0, 0, 0, 0)
+        self._recent_layout.setSpacing(theme.SPACE_1 + 2)
+        rc.addWidget(self.recent_rows)
+        rc.addStretch(1)
+        self.recent_box.setVisible(False)
+        cols.addWidget(self.recent_box, stretch=3)
+
+        example_box = QWidget()
+        ex = QVBoxLayout(example_box)
+        ex.setContentsMargins(0, 0, 0, 0)
+        ex.setSpacing(theme.SPACE_2)
+        ex.addWidget(kicker(i18n.t("Or start from one of these"), muted=True))
+        for title, body in examples():
+            ex.addWidget(self._example(title, body))
+        ex.addStretch(1)
+        cols.addWidget(example_box, stretch=2)
+        st.addLayout(cols)
+        self.content.addWidget(self.starters)
+
         self._blink = QTimer(self)
         self._blink.setInterval(600)
         self._blink.timeout.connect(self._pulse_mic)
@@ -183,6 +395,99 @@ class InputPanel(Card):
         self._state = "empty"
         self._compact = False
         self.set_state("empty")
+        # Deferred one event loop turn so building the window never waits on
+        # the disk. A workspace with no runs simply draws nothing here.
+        QTimer.singleShot(0, self.refresh_recent)
+
+    # ── starters ──────────────────────────────────────────────────────────
+    def refresh_recent(self):
+        """Re-read the member's own saved runs.
+
+        Called once on construction and again by the window after a run
+        finishes, so "pick up where you left off" is never stale. Guarded
+        end-to-end: an unreadable runs folder must cost the region, not the
+        screen."""
+        try:
+            import core_bridge as CB
+            import dashboard_data
+            # Ask for more than we show, then drop the runs that never got a
+            # task out of the user. `recent_runs` titles those "Untitled task",
+            # and this workspace has 86 of them in a row (all one Chrome
+            # failure), so unfiltered this region offered three identical
+            # "Untitled task — Use again" rows. Pressing one would have put
+            # nothing in the box, because there is no text to bring back.
+            # History still lists them; they are just not something to resume.
+            runs = dashboard_data.recent_runs(CB.config.load() or {}, 30)
+            resumable = [r for r in runs if (r.get("title") or "").strip()
+                         and r.get("title") != "Untitled task"]
+            self.set_recent(resumable[:3])
+        except Exception:
+            self.set_recent([])
+
+    def _example(self, title: str, body: str) -> QPushButton:
+        btn = QPushButton(f"  {title}")
+        btn.setObjectName("linkBtn")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setMinimumHeight(C.MIN_TARGET)
+        btn.setToolTip(body)
+        icons.button_icon(btn, "arrow-right", 14, theme.ACCENT_RAMP[700])
+        btn.clicked.connect(lambda _=False, b=body: self._use_starter(b))
+        return btn
+
+    def _use_starter(self, text: str):
+        self.text.setPlainText(text)
+        self.text.setFocus()
+        cursor = self.text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.text.setTextCursor(cursor)
+
+    def set_recent(self, records: list):
+        """The last few saved runs, offered as starting points.
+
+        Fed from dashboard_data.recent_runs(), which reads the member's own
+        run folder. An empty folder draws nothing at all — there is no
+        placeholder recent task, because a fabricated one is the first thing
+        a customer would spot."""
+        while self._recent_layout.count():
+            item = self._recent_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        rows = [r for r in (records or []) if (r.get("title") or "").strip()][:3]
+        for record in rows:
+            row = _StarterRow(record)
+            row.chosen.connect(self._use_starter)
+            self._recent_layout.addWidget(row)
+        self.recent_box.setVisible(bool(rows))
+
+    # ── attached context ──────────────────────────────────────────────────
+    def set_context(self, attachments: list):
+        """The files this task will be run against, on the Describe surface
+        itself rather than only inside a 44px collapsed rail."""
+        while self._context_layout.count():
+            item = self._context_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        items = list(attachments or [])
+        for att in items[:4]:
+            name = att.get("name") or os.path.basename(att.get("path") or "")
+            bits = [b for b in (kind_label(att), size_label(att.get("path"))) if b]
+            if att.get("truncated"):
+                bits.append(i18n.t("first part only"))
+            row = C.FileItem(name, " · ".join(bits),
+                             "folder" if att.get("kind") == "folder" else "file")
+            row.setToolTip(att.get("path") or name)
+            row.activated.connect(
+                lambda p=att.get("path") or "": self.attachment_activated.emit(p))
+            self._context_layout.addWidget(row)
+        extra = len(items) - 4
+        if extra > 0:
+            more = QLabel(i18n.t("and {n} more").format(n=extra))
+            more.setObjectName("meta")
+            self._context_layout.addWidget(more)
+        self.context_count.setText(
+            (i18n.t("{n} file") if len(items) == 1
+             else i18n.t("{n} files")).format(n=len(items)))
+        self.context_box.setVisible(bool(items) and not self._compact)
 
     # ── the task queue ────────────────────────────────────────────────────
     def _queue_current(self):
@@ -192,7 +497,7 @@ class InputPanel(Card):
         nothing."""
         text = self.text.toPlainText().strip()
         if not text:
-            self.append_status("Type the task first, then Add task.")
+            self.append_status(i18n.t("Type the task first, then Add task."))
             return
         if self._state in ("routing", "running"):
             return
@@ -216,8 +521,10 @@ class InputPanel(Card):
         n = len(self._queue)
         self.queue_head.setText(
             "" if not n else
-            f"{n} task{'s' if n != 1 else ''} queued — they run in this order, "
-            "and the box below is the last one.")
+            (i18n.t("{n} task queued — it runs first, and the box below is "
+                    "the last one.") if n == 1 else
+             i18n.t("{n} tasks queued — they run in this order, and the box "
+                    "below is the last one.")).format(n=n))
         self.queue_box.setVisible(bool(n))
 
     def _remove_task(self, index: int):
@@ -258,24 +565,28 @@ class InputPanel(Card):
             return
         self._compact = on
         self.actions_row.setVisible(not on)
+        self.hint.setVisible(not on)
+        self._sync_starters()
         self.text.setReadOnly(on)
         self.text.setFixedHeight(
             self._recap_height() if on else max(self._MIN_H, self.text.height()))
-        self.text.setStyleSheet(
-            f"font-size: 14.5px; color: {theme.NEUTRAL[800]};" if on else "")
+        self.text.setStyleSheet(self._RECAP_QSS() if on else self._EDITOR_QSS())
         # With the button row hidden, the composer's generous bottom padding
         # became a band of empty card under a single line of text.
         left, top, right, _bottom = self.content.getContentsMargins()
-        self.content.setContentsMargins(left, top, right, 16 if on else 22)
+        self.content.setContentsMargins(left, top, right,
+                                        theme.SPACE_4 if on else theme.CARD_PAD)
         if on:
             self.queue_box.setVisible(False)
             self.status.setVisible(False)
+            self.context_box.setVisible(False)
         else:
             # Visibility only. Calling _render_queue() here tore down and
             # rebuilt every queued-task row — and since _on_text_changed drives
             # set_state on each keystroke, that meant deleteLater() churn on the
             # whole queue for every character typed.
             self.queue_box.setVisible(bool(self._queue))
+            self.context_box.setVisible(self._context_layout.count() > 0)
             self._autosize()
 
     def _recap_height(self) -> int:
@@ -284,10 +595,10 @@ class InputPanel(Card):
     def set_state(self, key: str):
         """Drive the chip. Also gates the CTA: there's nothing to plan until
         the box has words in it."""
-        if key not in _STATES:
+        if key not in STATES:
             return
         self._state = key
-        label, tone = _STATES[key]
+        label, tone = STATES[key]
         self.state_pill.setText(i18n.t(label))
         self.state_pill.set_tone(tone)
         # "planned" is the only state where the composer is on screen with a
@@ -304,9 +615,9 @@ class InputPanel(Card):
     def _autosize(self):
         height = int(self.text.document().size().height()) + 4
         if getattr(self, "_compact", False):
-            # Hug the text exactly while it is a recap — the composer's 46px
-            # floor exists to give you somewhere to type, and there is nowhere
-            # to type here.
+            # Hug the text exactly while it is a recap — the composer's floor
+            # exists to give you somewhere to type, and there is nowhere to
+            # type here.
             self.text.setFixedHeight(self._recap_height())
             return
         self.text.setFixedHeight(max(self._MIN_H, min(self._MAX_H, height)))
@@ -314,6 +625,18 @@ class InputPanel(Card):
     def _on_text_changed(self):
         if self._state in ("empty", "ready"):
             self.set_state("ready" if self.text.toPlainText().strip() else "empty")
+        self._sync_starters()
+
+    def _sync_starters(self):
+        """Recent tasks and examples are for an EMPTY box.
+
+        They exist to answer "what do I even type here"; the moment there are
+        words in the field that question is answered, and leaving 200px of
+        suggestions between the task and its plan pushes the plan below the
+        fold. So they retire as soon as you start writing, and come back if
+        you clear it."""
+        self.starters.setVisible(
+            not self._compact and not self.text.toPlainText().strip())
 
     def reset(self):
         """Empty the card for a fresh task. set_state comes last: clear()
@@ -350,8 +673,7 @@ class InputPanel(Card):
         the pulse cannot drift away from the stylesheet's red."""
         self._blink_on = not self._blink_on
         self.mic_btn.setStyleSheet(
-            f"background: {theme.ERR_BG if self._blink_on else '#ffffff'};"
-            if self._blink_on else "")
+            f"background: {theme.ERR_BG};" if self._blink_on else "")
 
     def set_busy(self, busy: bool):
         self.route_btn.setEnabled(not busy)

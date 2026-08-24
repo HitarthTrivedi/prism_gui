@@ -24,6 +24,8 @@ import favorites
 import i18n
 import theme
 from widgets import icons
+from widgets import controls as C
+from widgets.files_panel import kind_label, size_label
 
 
 def small_button(label: str, icon_name: str, tip: str = "") -> QPushButton:
@@ -73,9 +75,17 @@ class AskPanel(QWidget):
         row.addStretch(1)
         root.addLayout(row)
 
-        self.chips = QLabel("")
-        self.chips.setObjectName("emptyState")
-        self.chips.setWordWrap(True)
+        # Attachments as real rows, not "📎 name   📎 name" in one label.
+        # The emoji prefix was the last one left in the widget package: it
+        # arrives pre-coloured and pre-weighted from the platform font vendor,
+        # so it cannot match the 1.6px line icons beside it — and a run of
+        # names in a single wrapped label is unreadable at four files and
+        # offers nothing to click. Same controls.FileItem the context rail
+        # uses, so an attachment reads identically wherever it appears.
+        self.chips = QWidget()
+        self._chip_layout = QVBoxLayout(self.chips)
+        self._chip_layout.setContentsMargins(0, 0, 0, 0)
+        self._chip_layout.setSpacing(theme.SPACE_1 + 2)
         self.chips.setVisible(False)
         root.addWidget(self.chips)
 
@@ -140,12 +150,34 @@ class AskPanel(QWidget):
         self._paths = []
         self._refresh_chips()
 
+    def remove_path(self, path: str):
+        """Take one file back out. There was no way to do this at all — the
+        only correction available for a mis-picked file was to close the
+        dialog and start again."""
+        if path in self._paths:
+            self._paths.remove(path)
+            self._refresh_chips()
+
     def _refresh_chips(self):
+        while self._chip_layout.count():
+            item = self._chip_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         if not self._paths:
             self.chips.setVisible(False)
             return
-        names = "   ".join(f"📎 {os.path.basename(p)}" for p in self._paths)
-        self.chips.setText(names)
+        for path in self._paths:
+            att = {"name": os.path.basename(path), "path": path,
+                   "kind": "folder" if os.path.isdir(path) else ""}
+            drop = C.icon_button("x", i18n.t("Remove this file"),
+                                 lambda _=False, p=path: self.remove_path(p))
+            drop.setFixedSize(28, 28)
+            bits = [b for b in (kind_label(att), size_label(path)) if b]
+            row = C.FileItem(att["name"], " · ".join(bits),
+                             "folder" if att["kind"] == "folder" else "file",
+                             [drop])
+            row.setToolTip(path)
+            self._chip_layout.addWidget(row)
         self.chips.setVisible(True)
 
 

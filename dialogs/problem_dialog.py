@@ -24,56 +24,48 @@ from PySide6.QtWidgets import (
 import friendly
 import i18n
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from widgets import icons
 from widgets.controls import heading, meta
 
 
-class ProblemDialog(QDialog):
+class ProblemDialog(PrismDialog):
     """Shows a friendly.Problem. `chosen_action` is the action key the user
     pressed, or "" — the caller decides what to do with it, because only the
     window knows how to open its own Settings."""
 
     def __init__(self, problem: friendly.Problem, detail: str = "", parent=None):
-        super().__init__(parent)
+        # The alert glyph used to be #8a5a2f — one digit off theme.WARN_INK,
+        # so it was a colour the palette did not contain and the accent
+        # rotation could not see. It is the warn tone now, on the warn tint,
+        # which is also what every other "a person is needed here" cue in the
+        # app wears.
+        pad = C.IconPad("alert", theme.WARN, 38, theme.R_CONTROL, 19)
+        super().__init__(problem.title, problem.what, parent=parent,
+                         leading=pad, closable=False)
         self.problem = problem
         self.chosen_action = ""
         self._detail = detail or ""
         self.setWindowTitle(i18n.t("Prism"))
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(26, 24, 26, 20)
-        root.setSpacing(16)
-
-        # ── what happened ──────────────────────────────────────────────
-        head = QHBoxLayout()
-        head.setSpacing(13)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("alert", 24, "#8a5a2f"))
-        glyph.setAlignment(Qt.AlignTop)
-        head.addWidget(glyph)
-
-        titles = QVBoxLayout()
-        titles.setSpacing(6)
-        titles.addWidget(heading(problem.title))
-        what = QLabel(problem.what)
-        what.setWordWrap(True)
-        what.setStyleSheet(f"color: {theme.NEUTRAL[700]}; font-size: 14px;")
-        titles.addWidget(what)
-        head.addLayout(titles, stretch=1)
-        root.addLayout(head)
+        root = self.body
 
         # ── what to do ─────────────────────────────────────────────────
         if problem.steps:
             box = QFrame()
             box.setObjectName("stepsBox")
+            box.setAttribute(Qt.WA_StyledBackground, True)
             box.setStyleSheet(
-                f"QFrame#stepsBox {{ background: {theme.ACCENT_RAMP[100]};"
-                f"border: 1px solid {theme.DIVIDER}; border-radius: 4px; }}")
+                f"QFrame#stepsBox {{ background: {theme.INFO_BG};"
+                f" border: 1px solid {theme.HAIRLINE};"
+                f" border-radius: {theme.R_CARD}px; }}")
             inner = QVBoxLayout(box)
-            inner.setContentsMargins(18, 15, 18, 15)
-            inner.setSpacing(9)
-            inner.addWidget(_kicker(i18n.t("Try this")))
+            inner.setContentsMargins(theme.CARD_PAD, theme.SPACE_4,
+                                     theme.CARD_PAD, theme.SPACE_4)
+            inner.setSpacing(theme.SPACE_2 + 1)
+            inner.addWidget(C.kicker(i18n.t("Try this")))
             for index, step in enumerate(problem.steps, 1):
                 inner.addWidget(_Step(index, step))
             root.addWidget(box)
@@ -99,36 +91,28 @@ class ProblemDialog(QDialog):
             root.addWidget(self._detail_label)
 
         # ── the way out ────────────────────────────────────────────────
-        buttons = QHBoxLayout()
-        buttons.setSpacing(9)
+        root.addStretch(1)
         if problem.ask_support:
-            save = QPushButton(i18n.t(" Save details to send us"))
-            save.setObjectName("smallBtn")
-            save.setCursor(Qt.PointingHandCursor)
-            save.setToolTip(i18n.t(
-                "Writes a file describing what happened. Your API key, "
-                "passwords and licence key are not in it."))
-            icons.button_icon(save, "file", 14, theme.TEXT)
-            save.clicked.connect(self._save_diagnostics)
-            buttons.addWidget(save)
-        buttons.addStretch(1)
+            self.footer.add_utility(self.button(
+                i18n.t("Save details to send us"), "secondary",
+                icon_name="file", small=True,
+                on_click=self._save_diagnostics,
+                tooltip=i18n.t("Writes a file describing what happened. Your "
+                               "API key, passwords and licence key are not "
+                               "in it.")))
 
+        # Exactly one primary either way. When Prism can DO something about
+        # the problem, that is the primary and dismissing is the secondary;
+        # when it cannot, the only button there is becomes the primary.
         if problem.action:
-            go = QPushButton(i18n.t(problem.action_label or "Fix this"))
-            go.setObjectName("primaryBtn")
-            go.setCursor(Qt.PointingHandCursor)
-            go.setMinimumHeight(38)
-            go.clicked.connect(self._take_action)
-            buttons.addWidget(go)
-            close = QPushButton(i18n.t("Not now"))
+            self.footer.add_secondary(
+                self.button(i18n.t("Not now"), on_click=self.accept))
+            self.footer.set_primary(self.button(
+                i18n.t(problem.action_label or "Fix this"), "primary",
+                on_click=self._take_action))
         else:
-            close = QPushButton(i18n.t("OK"))
-            close.setObjectName("primaryBtn")
-            close.setMinimumHeight(38)
-        close.setCursor(Qt.PointingHandCursor)
-        close.clicked.connect(self.accept)
-        buttons.addWidget(close)
-        root.addLayout(buttons)
+            self.footer.set_primary(
+                self.button(i18n.t("OK"), "primary", on_click=self.accept))
 
     # ── behaviour ──────────────────────────────────────────────────────
     def _toggle_detail(self):
@@ -183,22 +167,17 @@ class _Step(QWidget):
         number = QLabel(str(index))
         number.setFixedWidth(18)
         number.setAlignment(Qt.AlignTop | Qt.AlignRight)
+        # 13.5px was one of nine shipped sizes inside a single 4px band. Both
+        # halves of the row are on the scale now — SUPPORT — so a step reads
+        # as the same size as every other explanatory line in the app.
         number.setStyleSheet(
-            f"color: {theme.ACCENT_RAMP[700]}; font-weight: 700; "
-            f"font-size: 13.5px;")
+            theme.type_css("SUPPORT", theme.ACCENT_RAMP[700])
+            + " font-weight: 700;")
         row.addWidget(number)
         body = QLabel(text)
         body.setWordWrap(True)
-        body.setStyleSheet(f"color: {theme.NEUTRAL[800]}; font-size: 13.5px;")
+        body.setStyleSheet(theme.type_css("SUPPORT", theme.NEUTRAL[800]))
         row.addWidget(body, stretch=1)
-
-
-def _kicker(text: str) -> QLabel:
-    label = QLabel(text.upper())
-    label.setStyleSheet(
-        f"color: {theme.ACCENT_RAMP[800]}; font-size: 10.5px; "
-        f"font-weight: 700; letter-spacing: 1.2px;")
-    return label
 
 
 def show_problem(parent, error: object, context: str = "") -> str:

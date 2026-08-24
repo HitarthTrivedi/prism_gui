@@ -20,16 +20,25 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import i18n
+import theme
 import wakeword
+from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
+from widgets import controls as C
 from widgets.ask_panel import AskPanel, MoreOptions
 
 
-class BoqDialog(QDialog):
+class BoqDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Bill of Quantities"),
+            i18n.t("Attach a drawing and it is measured here, on this "
+                   "machine. Nothing is measured by an AI."),
+            icon="file", parent=parent, closable=False)
         self.setWindowTitle("Bill of Quantities")
-        self.resize(720, 660)
+        self.resize(780, 700)
+        self.setMinimumSize(620, 600)
         self.cfg = cfg
         self.boq = CB.get_boq()
 
@@ -46,10 +55,16 @@ class BoqDialog(QDialog):
         self._brief = ""        # the interpreter's legend & scope brief
         self._links: dict = {}
 
-        root = QVBoxLayout(self)
+        # The base class owns the header and the footer; `root` is its body
+        # column, which already carries the page padding and the card gutter.
+        root = self.body
+        # A stacked form, not a grid of cards: the 16px card gutter
+        # between every row of a single column is what turns a short
+        # form into a tall one with bands of canvas through it.
+        root.setSpacing(theme.ROW_GAP)
 
         title = QLabel("What do you need a BOQ for?")
-        title.setObjectName("h2")
+        title.setObjectName("h4")
         root.addWidget(title)
 
         self.ask = AskPanel(
@@ -67,9 +82,17 @@ class BoqDialog(QDialog):
         self.meas_view.setReadOnly(True)
         self.meas_view.setFixedHeight(120)
         meas_l.addWidget(self.meas_view)
+        # Not the dashed #emptyState box it used to be: this line says "your
+        # numbers are saved, here is where", which is a result and not the
+        # absence of one. A dashed placeholder box around a success message
+        # reads as a slot still waiting to be filled.
         self.csv_label = QLabel("")
-        self.csv_label.setObjectName("emptyState")
         self.csv_label.setWordWrap(True)
+        self.csv_label.setStyleSheet(
+            f"color: {theme.OK_INK}; background: {theme.OK_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px;"
+            f" font-size: 13px;")
         meas_l.addWidget(self.csv_label)
         self.meas_box.setVisible(False)
         root.addWidget(self.meas_box)
@@ -109,21 +132,15 @@ class BoqDialog(QDialog):
         self.result.setMinimumHeight(120)
         root.addWidget(self.result, stretch=1)
 
-        btns = QHBoxLayout()
-        self.open_btn = QPushButton("Open in browser")
+        self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
+                                    icon_name="external", small=True,
+                                    on_click=self._open_link)
         self.open_btn.setEnabled(False)
-        self.open_btn.clicked.connect(self._open_link)
-        btns.addWidget(self.open_btn)
-        btns.addStretch(1)
-        close = QPushButton("Close")
-        close.clicked.connect(self.reject)
-        btns.addWidget(close)
-        self.run_btn = QPushButton("Make my BOQ")
-        self.run_btn.setObjectName("primary")
-        self.run_btn.setDefault(True)
-        self.run_btn.clicked.connect(self._run)
-        btns.addWidget(self.run_btn)
-        root.addLayout(btns)
+        self.footer.add_utility(self.open_btn)
+        self.footer.add_secondary(self.button(i18n.t("Close"), on_click=self.reject))
+        self.run_btn = self.button(i18n.t("Make my BOQ"), "primary", icon_name="check",
+                                   on_click=self._run)
+        self.footer.set_primary(self.run_btn)
 
         # Files already attached on the home screen come along automatically.
         if attachments:

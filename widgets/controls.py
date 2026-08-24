@@ -1,26 +1,53 @@
-"""Custom-painted controls the stylesheet can't produce.
+"""The shared component module. Everything a screen is built out of lives here.
 
-Three shapes in the design have no Qt equivalent to style: the square sliding
-switch, the tool chip with its filled initial-badge, and the small filled
-check-square used as a step marker. Each is painted here against the same
-tokens style.qss uses, plus the plain-QLabel helpers (kicker, heading, meta)
-that every panel repeats."""
+Two jobs, and the second one is now the bigger of the two.
+
+The first is the original: three shapes in the design have no Qt equivalent to
+style — the sliding switch, the tool chip with its filled initial-badge, and
+the small filled check-square used as a step marker — so they are painted here
+against the same tokens style.qss uses.
+
+The second is consolidation. The component census found six recipes for a white
+rounded panel, four mechanisms for a status tag, six empty states and the same
+`_label` helper defined identically in four separate panels. None of that was
+anyone reinventing things for fun: the shared version either did not exist, or
+existed somewhere a panel could not reach it. So the rule for this module is
+that if two screens need the same thing, the thing belongs here — and if you
+are about to write a fifth `_label`, use `label()` below instead.
+
+A component here is expected to earn its place by being obviously easier than
+hand-rolling one. That means: a docstring saying what it is for and which
+screen needs it, sane defaults, every interactive part keyboard-reachable with
+a visible focus ring, and a minimum target height of 28px. COMPONENTS.md in the
+redesign scratchpad is the index.
+
+Tokens come from theme.py — never a literal hex, never a bare pixel size. The
+accent rotation is a blunt string replace over eleven fixed hexes, so an
+off-palette blue written here will not rotate and will strand one permanently
+blue element in an otherwise green copy."""
 from __future__ import annotations
 import os
 
 from PySide6.QtCore import (
     Qt, Signal, QSize, QRect, QRectF, QPropertyAnimation, QEasingCurve, Property,
+    QTimer,
 )
 from PySide6.QtGui import (
     QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
 )
 from PySide6.QtWidgets import (
-    QAbstractButton, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel,
-    QMenu, QSizePolicy, QVBoxLayout, QWidget,
+    QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import theme
 from widgets import icons
+
+# The smallest a thing you can click is allowed to be. Every interactive
+# component in this module asserts it, because a 24px row is reachable with a
+# mouse on a desk and is not reachable with a trackpad on a train.
+MIN_TARGET = 28
 
 
 # ── text helpers ────────────────────────────────────────────────────────────
@@ -51,6 +78,90 @@ def meta(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setObjectName("meta")
     return lbl
+
+
+# The eight levels, smallest first, for snapping a legacy `size=` argument onto
+# the scale. See label() — this is how twenty shipped font sizes are absorbed
+# without hunting down every call site by hand.
+_LEVELS_BY_PX = (
+    (11, "LABEL"), (12, "META"), (13, "SUPPORT"), (14, "BODY"),
+    (15, "CARD_TITLE"), (18, "SECTION"), (24, "PAGE_TITLE"),
+)
+
+
+def _level_for_px(px: float) -> str:
+    """The scale level nearest a raw pixel size."""
+    return min(_LEVELS_BY_PX, key=lambda pair: abs(pair[0] - px))[1]
+
+
+def label(text: str, role: str = "", level: str = "", colour: str = "",
+          weight: int = 0, wrap: bool = False, size: float = 0,
+          tooltip: str = "") -> QLabel:
+    """One text label, on the type scale. The single label helper.
+
+    This function is the shared version of the `_label` that four panels
+    (simple_panels, home_panel, settings_panel, inquiry_panel) each defined
+    byte-for-byte identically, and it exists because that duplication is what
+    produced the sprawl: twenty distinct font sizes, nine of them inside one
+    4px band, almost all introduced by an ad-hoc `size=` argument rather than
+    by any named role. Half a pixel is not a decision anyone can see.
+
+    So `size=` is still accepted — a call site that passes 12.5 keeps working —
+    but it is SNAPPED to the nearest of the eight levels rather than honoured
+    literally. That is deliberate: it lets a panel be converted by search and
+    replace and still come out on the scale.
+
+    Prefer, in this order:
+        label("Runs this week", level="SECTION")   the scale, by name
+        label("3 minutes ago", role="meta")        an existing qss type role
+        label(text, colour=theme.OK_INK)           an override, when the
+                                                   colour carries meaning
+
+    `role` sets the object name, so every type role style.qss already defines
+    (h1-h6, kick, meta, dim, faint, body, lead, stat, statSm, mono, emptyState)
+    keeps working untouched.
+    """
+    lbl = QLabel(text)
+    if role:
+        lbl.setObjectName(role)
+    if not level and size:
+        level = _level_for_px(size)
+    if level or colour or weight:
+        family, px, css_weight, ink = theme.TYPE.get(level or "BODY",
+                                                     theme.T_BODY)
+        stack = (theme.FONT_MONO_STACK if (level or "") == "MONO"
+                 else f"'{family}'")
+        # An explicit colour beats the level's own ink; a level with no colour
+        # override keeps the ink the scale assigns it, which is what makes
+        # SUPPORT reliably muted and BODY reliably not.
+        parts = [f"font-weight: {weight or css_weight};",
+                 f"color: {colour or ink};"]
+        if level:
+            parts.insert(0, f"font-family: {stack}; font-size: {px}px;")
+        lbl.setStyleSheet(" ".join(parts))
+    if wrap:
+        lbl.setWordWrap(True)
+    if tooltip:
+        lbl.setToolTip(tooltip)
+    return lbl
+
+
+def hairline(vertical: bool = False) -> QFrame:
+    """The 1px rule between two rows, or between two columns.
+
+    Defined three times across the panels with three slightly different
+    recipes; this is the one. It carries the `cardLine` object name, so its
+    colour comes from style.qss and moves with the palette rather than being
+    baked into whichever panel drew it.
+    """
+    line = QFrame()
+    line.setObjectName("cardLine")
+    if vertical:
+        line.setObjectName("railLine")
+        line.setFixedWidth(1)
+    else:
+        line.setFixedHeight(1)
+    return line
 
 
 def icon_label(icon_name: str, text: str, size: int = 16,
@@ -97,6 +208,51 @@ def shadows_enabled() -> bool:
     try:
         import core_bridge as CB
         if (CB.config.load() or {}).get("shadows"):
+            return True
+    except Exception:
+        pass                    # unreadable config must not turn them back on
+    return False
+
+
+def effects_enabled() -> bool:
+    """Whether an entrance animation may run through a QGraphicsEffect. OFF by
+    default, for the same reason shadows_enabled() is — and this one is worse.
+
+    A widget carrying a QGraphicsEffect is painted through a separate pipeline
+    that draws the whole widget, background and children included. On software
+    rasterisers, virtual machines, remote desktop and older drivers that
+    pipeline produces nothing at all.
+
+    A drop shadow that fails to render costs you a shadow. A
+    QGraphicsOpacityEffect that fails to render costs you the widget: the
+    animation starts at opacity 0.0 and drives it to 1.0, so if the effect
+    never paints, the card is present, correctly sized, laid out, and
+    completely invisible — permanently. That is live in the app today. Every
+    StageCard on the run screen fades in from a QGraphicsOpacityEffect, so on
+    such a machine a customer watching a nine-stage run sees nine
+    correctly-sized blank gaps and concludes the app lost their work.
+
+    Use this to gate the animation, not to gate the widget:
+
+        if controls.effects_enabled():
+            card.setGraphicsEffect(fade)
+            anim.start()
+        # …and nothing else. The card is already visible and already correct.
+
+    The important half is that the else branch is empty. An entrance animation
+    is a nicety; the content is the product. Never make the final state depend
+    on the animation having run.
+
+    Opt back in per machine if you want the motion and know it works there:
+
+        PRISM_EFFECTS=1           one run
+        ~/.prism/config.json      "effects": true, to make it stick
+    """
+    if os.environ.get("PRISM_EFFECTS"):
+        return True
+    try:
+        import core_bridge as CB
+        if (CB.config.load() or {}).get("effects"):
             return True
     except Exception:
         pass                    # unreadable config must not turn them back on
@@ -183,16 +339,44 @@ class Card(QFrame):
 class Pill(QLabel):
     """The rounded status tag the design uses everywhere — "Done", "Quoted",
     "3 waiting". Tone names map to the semantic roles, not the accent, so a
-    "Won" pill stays green in every role."""
+    "Won" pill stays green in every role.
 
+    Every tone below clears WCAG AA (4.5:1) against its own tint. Two did not
+    before this pass: `neutral` was NEUTRAL[700] on NEUTRAL[100] at 3.9:1 and
+    `quiet` was NEUTRAL[500] on the same at 2.6:1 — the pill that says "Queued"
+    was the least readable thing on the run screen. Both inks moved one step
+    down the ramp; the tints are unchanged, and the two tones are still a
+    visible three steps apart.
+    """
+
+    # The shipped defaults, kept as a class attribute because callers read it.
+    # _tones() below is what set_tone actually uses — see why there.
     TONES = {
         "accent": (theme.ACCENT_RAMP[100], theme.ACCENT_RAMP[800]),
-        "neutral": (theme.NEUTRAL[100], theme.NEUTRAL[700]),
+        "info": (theme.INFO_BG, theme.INFO_INK),
+        # NEUTRAL[200], not [100]: step 100 is one unit off the canvas, so a
+        # neutral pill on the page rather than on a card had no fill at all.
+        "neutral": (theme.NEUTRAL[200], theme.NEUTRAL[800]),
         "ok": (theme.OK_BG, theme.OK_INK),
         "warn": (theme.WARN_BG, theme.WARN_INK),
-        "err": (theme.ERR_BG, theme.ERR),
-        "quiet": (theme.NEUTRAL[100], theme.NEUTRAL[500]),
+        "err": (theme.ERR_BG, theme.ERR_INK),
+        "quiet": (theme.NEUTRAL[100], theme.NEUTRAL[700]),
     }
+
+    @classmethod
+    def _tones(cls) -> dict:
+        """The tone table, rebuilt against theme's *current* accent.
+
+        TONES is evaluated when this module is imported, and this module is
+        imported before theme.apply_role() runs. So the two accent tones in the
+        frozen copy are always Prism blue — in a green profile every other
+        surface rotates and the accent pill does not. Reading them live is the
+        fix, and it costs one dict build per pill.
+        """
+        live = dict(cls.TONES)
+        live["accent"] = (theme.ACCENT_RAMP[100], theme.ACCENT_RAMP[800])
+        live["info"] = (theme.INFO_BG, theme.INFO_INK)
+        return live
 
     def __init__(self, text: str = "", tone: str = "neutral", parent=None):
         super().__init__(text, parent)
@@ -201,16 +385,20 @@ class Pill(QLabel):
         self.set_tone(tone)
 
     def set_tone(self, tone: str):
-        bg, ink = self.TONES.get(tone, self.TONES["neutral"])
+        tones = self._tones()
+        bg, ink = tones.get(tone, tones["neutral"])
+        family, px, weight, _ink = theme.T_LABEL
         self.setStyleSheet(
             f"background: {bg}; color: {ink}; border-radius: {theme.R_PILL}px;"
-            f" font-size: 11px; padding: 3px 11px;")
+            f" font-size: {px}px; font-weight: {weight};"
+            f" padding: 3px {theme.SPACE_3 - 1}px;")
 
 
 class ToolBadge(QLabel):
     """The rounded square carrying a tool's initial in its own brand colour."""
 
-    def __init__(self, tool: str, size: int = 28, radius: int = 7, parent=None):
+    def __init__(self, tool: str, size: int = 28, radius: int = theme.R_CHIP,
+                 parent=None):
         super().__init__(theme.badge_initial(tool), parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(size, size)
@@ -226,7 +414,7 @@ class IconPad(QLabel):
     for a stat card, an add-on row or a timeline dot."""
 
     def __init__(self, icon_name: str, hue: str = None, size: int = 30,
-                 radius: int = 8, glyph: int = 15, parent=None):
+                 radius: int = theme.R_CONTROL, glyph: int = 15, parent=None):
         super().__init__(parent)
         hue = hue or theme.ACCENT
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -317,14 +505,25 @@ class ProgressBar(QWidget):
 
 class Chip(QFrame):
     """A small status tag with a leading line icon. A QLabel can show a pixmap
-    or text but never both, so the pair needs its own two-label box."""
+    or text but never both, so the pair needs its own two-label box.
+
+    The ink comes from theme.TAG_TONES, which is the same table style.qss uses
+    for the #tagXxx rules this class also applies. That is the fix for a real
+    bug: the two used to be separate, and they disagreed for two of the five
+    tones. A `tagWarn` chip painted its text NEUTRAL[600] grey while the
+    stylesheet gave the frame an amber fill, and a `tagOk` chip painted its
+    text accent blue on a green fill — so the one class built specifically to
+    show a status rendered the wrong ink for its own tone, while the plain
+    QLabel it duplicates got the right one. One table now, read at paint time,
+    so it cannot drift again.
+    """
 
     def __init__(self, text: str = "", icon_name: str = "", style: str = "tagOk",
                  parent=None):
         super().__init__(parent)
         row = QHBoxLayout(self)
         row.setContentsMargins(9, 3, 9, 3)
-        row.setSpacing(5)
+        row.setSpacing(theme.SPACE_1 + 1)
         self._icon = QLabel()
         row.addWidget(self._icon)
         self._text = QLabel()
@@ -332,15 +531,12 @@ class Chip(QFrame):
         self.set(text, icon_name, style)
 
     def set(self, text: str, icon_name: str = "", style: str = "tagOk"):
-        color = {
-            "tagOk": theme.ACCENT_RAMP[700],
-            "tagWarn": theme.NEUTRAL[600],
-            "tagErr": "#8a2f2f",
-            "tagAccent": theme.ACCENT_RAMP[800],
-            "tagOutline": theme.ACCENT_RAMP[700],
-        }.get(style, theme.NEUTRAL[600])
+        _bg, color = theme.TAG_TONES.get(
+            style, theme.TAG_TONES["tagNeutral"])
+        _family, px, weight, _ink = theme.T_LABEL
         self._text.setText(text)
-        self._text.setStyleSheet(f"font-size: 11.5px; color: {color};")
+        self._text.setStyleSheet(
+            f"font-size: {px}px; font-weight: {weight}; color: {color};")
         if icon_name:
             self._icon.setPixmap(icons.pixmap(icon_name, 13, color))
         self._icon.setVisible(bool(icon_name))
@@ -517,12 +713,13 @@ class ToolChip(QAbstractButton):
         hovered = self.underMouse()
         painter.setPen(Qt.NoPen)
         painter.setBrush(theme.c(theme.NEUTRAL[200] if hovered else theme.WELL))
-        painter.drawRoundedRect(QRectF(rect), 8, 8)
+        painter.drawRoundedRect(QRectF(rect), theme.R_CONTROL,
+                                theme.R_CONTROL)
 
         badge = QRectF(self._PAD_L, (rect.height() - self.BADGE) / 2,
                        self.BADGE, self.BADGE)
         painter.setBrush(theme.c(theme.badge_color(self._current)))
-        painter.drawRoundedRect(badge, 4, 4)
+        painter.drawRoundedRect(badge, theme.R_MICRO, theme.R_MICRO)
         painter.setPen(theme.c("#ffffff"))
         painter.setFont(self._badge_font)
         painter.drawText(badge, Qt.AlignCenter,
@@ -546,3 +743,1025 @@ class ToolChip(QAbstractButton):
     def leaveEvent(self, event):
         self.update()
         super().leaveEvent(event)
+
+
+# ── buttons ─────────────────────────────────────────────────────────────────
+# Four variants and no more. style.qss carries the colour model for each; these
+# two factories exist so a panel picks a variant by name instead of guessing an
+# object name, which is how the app ended up with eleven of them — including
+# `primary`, which had no rule at all, so three add-on "run" buttons rendered
+# as plain hairline boxes.
+_VARIANTS = {
+    "primary": "primaryBtn",        # solid accent — exactly one per surface
+    "secondary": "",                # outlined neutral — the default, the workhorse
+    "tertiary": "ghostBtn",         # text/ghost — in-place actions
+    "destructive": "dangerBtn",     # outlined red — irreversible only
+    "link": "linkBtn",              # tertiary, left-aligned, for a column of them
+}
+
+
+def button(text: str, variant: str = "secondary", icon_name: str = "",
+           small: bool = False, on_click=None) -> QPushButton:
+    """One button, in one of the four variants.
+
+    Which to reach for:
+        primary      the single thing this surface is for. One per screen.
+        secondary    everything else with a box. The default, and correct
+                     far more often than primary is.
+        tertiary     an action inside a row or card that must not compete
+                     with the surface's primary.
+        destructive  delete, discard, revoke. Nothing that can be undone.
+
+    `small` is a size modifier on the secondary variant, not a fifth variant.
+    Qt style sheets have one object name per widget, so a small primary is not
+    expressible without a second rule — and a primary action that wants to be
+    small is usually a secondary action that has not admitted it yet.
+    """
+    btn = QPushButton(text)
+    name = _VARIANTS.get(variant, "")
+    if small and variant == "secondary":
+        name = "smallBtn"
+    if name:
+        btn.setObjectName(name)
+    btn.setCursor(Qt.PointingHandCursor)
+    # Even the small step clears the minimum target: 28px is the floor for
+    # anything you can click, not a suggestion that shrinks with the label.
+    btn.setMinimumHeight(MIN_TARGET)
+    if icon_name:
+        ink = {"primary": theme.CARD, "destructive": theme.ERR_INK}.get(
+            variant, theme.ACCENT_RAMP[700] if variant in ("tertiary", "link")
+            else theme.NEUTRAL[800])
+        icons.button_icon(btn, icon_name, 15, ink)
+    if on_click is not None:
+        btn.clicked.connect(on_click)
+    return btn
+
+
+def icon_button(icon_name: str, tooltip: str = "", on_click=None,
+                colour: str = "") -> QPushButton:
+    """A square glyph-only button. 34px, so it clears the 28px minimum target
+    with room for its focus ring.
+
+    Always give it a tooltip: a button whose only label is a picture is
+    unlabelled to a screen reader and ambiguous to everyone else, and the
+    tooltip is what fills both gaps.
+    """
+    btn = QPushButton()
+    btn.setObjectName("iconBtn")
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.setFixedSize(34, 34)
+    icons.button_icon(btn, icon_name, 17, colour or theme.NEUTRAL[700])
+    if tooltip:
+        btn.setToolTip(tooltip)
+        btn.setAccessibleName(tooltip)
+    if on_click is not None:
+        btn.clicked.connect(on_click)
+    return btn
+
+
+# ── status ──────────────────────────────────────────────────────────────────
+class _StatusDot(QWidget):
+    """The glyph half of a StatusBadge. Painted, because a dot that pulses and
+    a dot that spins are two frames of the same 12px circle and neither is
+    something QSS can draw.
+
+    Motion here is a QTimer repaint, deliberately NOT a QGraphicsEffect. An
+    effect-driven fade can render the whole widget as nothing on a software
+    rasteriser (see effects_enabled()); a repaint cannot, so the worst case for
+    this dot on a bad renderer is that it holds still.
+    """
+
+    SIZE = 12
+
+    def __init__(self, state: str = "idle", parent=None):
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(90)
+        self._timer.timeout.connect(self._tick)
+        self.set_state(state)
+
+    def set_state(self, state: str):
+        self._label, self._ink, self._bg, self._dot = theme.status(state)
+        self._sync_timer()
+        self.update()
+
+    def _sync_timer(self):
+        wants = self._dot in ("pulse", "spinner") and self.isVisible()
+        if wants and not self._timer.isActive():
+            self._timer.start()
+        elif not wants and self._timer.isActive():
+            self._timer.stop()
+
+    def _tick(self):
+        self._phase = (self._phase + 0.08) % 1.0
+        self.update()
+
+    # A timer running behind a hidden widget is a repaint nobody sees and a
+    # wakeup the machine pays for anyway — a nine-stage run leaves nine of them
+    # behind when you navigate away.
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_timer()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._timer.stop()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        ink = theme.c(self._ink)
+        box = QRectF(1, 1, self.SIZE - 2, self.SIZE - 2)
+        kind = self._dot
+
+        if kind == "hollow":
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(theme.c(self._ink, 0.55), 1.6))
+            painter.drawEllipse(box)
+        elif kind == "dashed":
+            pen = QPen(theme.c(self._ink, 0.75), 1.6, Qt.DashLine)
+            pen.setDashPattern([2.0, 1.6])
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(pen)
+            painter.drawEllipse(box)
+        elif kind == "solid":
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            painter.drawEllipse(box)
+        elif kind == "pulse":
+            # A ring expanding out of a solid core. This is the one cue on the
+            # run screen that says "Prism is here now, this is the live step" —
+            # the previous static ring was a 45% accent on a near-white fill,
+            # which the design's own notes admitted was the worst contrast in
+            # the system.
+            grow = self._phase
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(theme.c(self._ink, max(0.0, 0.5 * (1 - grow))),
+                                1.6))
+            spread = box.adjusted(-2.5 * grow, -2.5 * grow, 2.5 * grow,
+                                  2.5 * grow)
+            painter.drawEllipse(spread)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            painter.drawEllipse(box.adjusted(2, 2, -2, -2))
+        elif kind == "spinner":
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(theme.c(self._ink, 0.22), 1.8))
+            painter.drawEllipse(box)
+            painter.setPen(QPen(ink, 1.8, Qt.SolidLine, Qt.RoundCap))
+            start = int(-self._phase * 360 * 16) + 90 * 16
+            painter.drawArc(box, start, -100 * 16)
+        elif kind == "square":
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            painter.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), 2, 2)
+        elif kind == "dash":
+            painter.setPen(QPen(ink, 2.0, Qt.SolidLine, Qt.RoundCap))
+            mid = self.SIZE / 2
+            painter.drawLine(QRectF(2, mid, 0, 0).topLeft(),
+                             QRectF(self.SIZE - 2, mid, 0, 0).topLeft())
+        else:                                   # check / cross
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            painter.drawEllipse(box)
+            painter.setPen(QPen(theme.c(self._bg), 1.7, Qt.SolidLine,
+                                Qt.RoundCap, Qt.RoundJoin))
+            path = QPainterPath()
+            if kind == "check":
+                path.moveTo(3.4, 6.2)
+                path.lineTo(5.2, 8.0)
+                path.lineTo(8.8, 4.2)
+            else:                               # cross
+                path.moveTo(4.0, 4.0)
+                path.lineTo(8.0, 8.0)
+                path.moveTo(8.0, 4.0)
+                path.lineTo(4.0, 8.0)
+            painter.drawPath(path)
+
+
+class StatusBadge(QFrame):
+    """Dot + LABEL + optional detail. The single status implementation.
+
+    Used by: the run screen (every StageCard), Home's active-run card, History,
+    the plan rows, and anywhere else a thing has a state. Before this there
+    were four separate mechanisms and no two of them agreed on what "done"
+    looked like.
+
+    Everything it renders comes from theme.STATUS, so a state has one label,
+    one ink, one tint and one dot everywhere it appears. The state name is
+    forgiving — "Done", "done" and "completed" are the same row (theme.status)
+    — because the engine, the run screen and History each grew their own
+    spelling and no call site should have to know which.
+
+    Two states you might expect are deliberately absent: `paused` and
+    `waiting-for-user`. The engine cannot produce either — there is no pause
+    primitive and no mid-run callback that can block on a human — so there is
+    no badge for them. See theme.STATUS.
+
+        StatusBadge("running", "Perplexity · 12s")
+        badge.set_state("completed", "1m 40s")
+    """
+
+    def __init__(self, state: str = "idle", detail: str = "",
+                 focusable: bool = True, parent=None):
+        super().__init__(parent)
+        self.setObjectName("statusBadge")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setMinimumHeight(MIN_TARGET)
+        # Reachable by keyboard and named for assistive tech. A timeline with
+        # nine of these should pass focusable=False on all but the live one —
+        # nine extra tab stops between the Back button and Stop is worse for a
+        # keyboard user than no stop at all.
+        self.setFocusPolicy(Qt.TabFocus if focusable else Qt.NoFocus)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_2 + 2, theme.SPACE_1,
+                               theme.SPACE_3 - 1, theme.SPACE_1)
+        row.setSpacing(theme.SPACE_2 - 1)
+        self._dot = _StatusDot(state)
+        row.addWidget(self._dot)
+        self._label = QLabel()
+        track(self._label, 0.06)
+        row.addWidget(self._label)
+        self._detail = QLabel()
+        row.addWidget(self._detail)
+
+        self._state = "idle"
+        self.set_state(state, detail)
+
+    def state(self) -> str:
+        """The canonical STATUS key currently shown."""
+        return self._state
+
+    def set_state(self, state: str, detail: str = None):
+        self._state = theme.status_key(state)
+        text, ink, bg, _dot = theme.status(state)
+        self._dot.set_state(state)
+        family, px, weight, _ink = theme.T_LABEL
+        self._label.setText(text)
+        self._label.setStyleSheet(
+            f"font-family: '{family}'; font-size: {px}px;"
+            f" font-weight: {weight}; color: {ink}; background: transparent;")
+        if detail is not None:
+            self._detail.setText(detail)
+        self._detail.setVisible(bool(self._detail.text()))
+        self._detail.setStyleSheet(theme.type_css("META", theme.c(ink).name())
+                                   + " background: transparent;")
+        self.setStyleSheet(
+            f"#statusBadge {{ background: {bg}; border: 2px solid {bg};"
+            f" border-radius: {theme.R_PILL}px; }}"
+            f"#statusBadge:focus {{ border-color: {ink}; }}")
+        # What a screen reader says. The visual is a coloured dot; without
+        # this, that is all it is.
+        spoken = f"{text.title()}. {self._detail.text()}".strip()
+        self.setAccessibleName(spoken)
+        self.setToolTip(spoken)
+
+
+# ── page scaffold ───────────────────────────────────────────────────────────
+class PageHeader(QFrame):
+    """The fixed band at the top of every screen: title, optional subtitle,
+    optional actions on the right. Never scrolls.
+
+    Used by: every screen. This is the top half of the page scaffold the
+    redesign is built on — a header that stays put, then a scrolling content
+    region with 28px padding underneath it. The screens that read as "a small
+    card floating over a grey field" are the ones with no fixed header at all,
+    so the whole page slides as one lump.
+
+    `actions` is a list of already-built widgets, usually one primary button
+    and one or two secondary ones. Exactly one primary per surface.
+    """
+
+    def __init__(self, title: str, subtitle: str = "", actions: list = None,
+                 parent=None):
+        super().__init__(parent)
+        self.setObjectName("pageHeader")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
+                               theme.PAGE_PAD, theme.SPACE_4)
+        row.setSpacing(theme.SPACE_4)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        self.title = QLabel(title)
+        self.title.setObjectName("pageTitle")
+        track(self.title, -0.015)
+        col.addWidget(self.title)
+        self.subtitle = QLabel(subtitle)
+        self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setVisible(bool(subtitle))
+        col.addWidget(self.subtitle)
+        row.addLayout(col, stretch=1)
+
+        self.actions_row = QHBoxLayout()
+        self.actions_row.setContentsMargins(0, 0, 0, 0)
+        self.actions_row.setSpacing(theme.SPACE_2)
+        row.addLayout(self.actions_row)
+        for widget in actions or []:
+            self.actions_row.addWidget(widget)
+
+    def set_subtitle(self, text: str):
+        self.subtitle.setText(text)
+        self.subtitle.setVisible(bool(text))
+
+    def add_action(self, widget: QWidget):
+        self.actions_row.addWidget(widget)
+
+
+class SectionHeader(QWidget):
+    """The standard band above a group of cards, inside the scrolling region.
+
+    Used by: Home (each dashboard group), Settings (each section), AI tools
+    (each category), History (each date group). One step down from PageHeader
+    in every way — smaller type, no bottom rule, no page padding of its own,
+    because it sits inside content that already has some.
+    """
+
+    def __init__(self, title: str, subtitle: str = "", actions: list = None,
+                 parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_3)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(1)
+        self.title = QLabel(title)
+        self.title.setObjectName("sectionTitle")
+        track(self.title, -0.015)
+        col.addWidget(self.title)
+        self.subtitle = QLabel(subtitle)
+        self.subtitle.setObjectName("sectionSubtitle")
+        # Wrapping, and not as a nicety. A non-wrapping QLabel reports its
+        # whole sentence as its minimum width, so a two-clause subtitle pushes
+        # the page wider than the viewport — and with the horizontal scrollbar
+        # off, that silently clips whatever sits at the right edge of every row
+        # below it (status pills, in the case that found this). Two screens had
+        # already worked around it locally before it was fixed here.
+        self.subtitle.setWordWrap(True)
+        self.subtitle.setVisible(bool(subtitle))
+        col.addWidget(self.subtitle)
+        row.addLayout(col, stretch=1)
+
+        self.actions_row = QHBoxLayout()
+        self.actions_row.setContentsMargins(0, 0, 0, 0)
+        self.actions_row.setSpacing(theme.SPACE_2)
+        row.addLayout(self.actions_row)
+        for widget in actions or []:
+            self.actions_row.addWidget(widget)
+
+    def set_subtitle(self, text: str):
+        self.subtitle.setText(text)
+        self.subtitle.setVisible(bool(text))
+
+    def add_action(self, widget: QWidget):
+        self.actions_row.addWidget(widget)
+
+
+class Toolbar(QFrame):
+    """A strip of search / filter / actions above a long list.
+
+    Used by: History, AI tools, the inquiry register. A bare list with no
+    toolbar is the thing that makes a hundred rows unusable — there is nowhere
+    to put "find one" and nowhere to put "show me only the failed ones", so
+    both end up not existing.
+
+    Built as a card-shaped frame so it can be pinned above a scroll area and
+    still read as part of the content rather than as chrome.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("toolbar")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                                     theme.SPACE_3, theme.SPACE_2)
+        self._row.setSpacing(theme.SPACE_2)
+
+    def add(self, widget: QWidget, stretch: int = 0) -> QWidget:
+        self._row.addWidget(widget, stretch)
+        return widget
+
+    def add_stretch(self, factor: int = 1):
+        self._row.addStretch(factor)
+
+    def add_separator(self):
+        rule = QFrame()
+        rule.setObjectName("cardLine")
+        rule.setFixedWidth(1)
+        rule.setFixedHeight(MIN_TARGET - 8)
+        rule.setStyleSheet(f"background: {theme.HAIRLINE};")
+        self._row.addWidget(rule)
+
+
+class SearchField(QLineEdit):
+    """The one search box. A capsule QLineEdit with a leading glyph and a
+    clear button.
+
+    Used by: History, AI tools, the inquiry register — everywhere a list can
+    get long enough that scanning it stops working.
+
+    Emits `changed` on every keystroke. It is a real QLineEdit, so it inherits
+    the stylesheet's hover, focus and disabled states rather than reinventing
+    them, and Escape clears it the way every search box on the machine does.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, placeholder: str = "Search", parent=None):
+        super().__init__(parent)
+        self.setObjectName("searchField")
+        self.setPlaceholderText(placeholder)
+        self.setClearButtonEnabled(True)
+        self.setMinimumHeight(MIN_TARGET + 4)
+        self.setAccessibleName(placeholder)
+        self.addAction(icons.icon("search", 16, theme.NEUTRAL[500]),
+                       QLineEdit.LeadingPosition)
+        self.textChanged.connect(self.changed.emit)
+        self._name_the_clear_button()
+
+    def _name_the_clear_button(self):
+        """Give Qt's built-in clear button a name and a tab stop.
+
+        setClearButtonEnabled() quietly inserts an 18px QToolButton with no
+        accessible name and NoFocus. It was the last thing left in the app's
+        click-target and unnamed-control audit, on three screens at once, and
+        it is not ours to redraw — but it is ours to label. Named and
+        focusable it stops being a mystery to a screen reader; the 18px hit
+        area stays Qt's, which is why Escape also clears (see keyPressEvent)
+        and is the route we actually document.
+
+        There are TWO QToolButtons in here, not one: setClearButtonEnabled()
+        makes the trailing X, and the leading search glyph is a QAction with a
+        button of its own. Qt tags the real clear button's action
+        `_q_qlineeditclearaction`, which is the only reliable way to tell them
+        apart — naming by position or by order labelled the decorative glyph
+        "Clear the search" too, so a screen reader announced a non-functional
+        icon as an action.
+
+        Bare literals rather than i18n.t(): this module deliberately does not
+        import i18n (i18n patches Qt's own text methods, so importing it here
+        would invert the dependency), and setToolTip is both patched at
+        runtime and scanned by extract_strings — so the string is translated
+        and catalogued anyway.
+        """
+        from PySide6.QtWidgets import QToolButton
+        for btn in self.findChildren(QToolButton):
+            action = btn.defaultAction()
+            is_clear = (action is not None
+                        and action.objectName() == "_q_qlineeditclearaction")
+            if is_clear:
+                btn.setToolTip("Clear the search")
+                btn.setAccessibleName("Clear the search")
+                btn.setFocusPolicy(Qt.TabFocus)
+            else:
+                # Decorative. Named honestly so it is not an anonymous button
+                # to a screen reader, and kept out of the tab order because
+                # there is nothing behind the click — a tab stop that does
+                # nothing is worse than no tab stop.
+                #
+                # The property says that out loud. An accessibility sweep
+                # cannot otherwise tell a deliberately inert glyph from a
+                # control someone forgot to make reachable, and those two want
+                # opposite fixes.
+                btn.setAccessibleName("Search")
+                btn.setFocusPolicy(Qt.NoFocus)
+                btn.setProperty("decorative", True)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape and self.text():
+            self.clear()
+            return
+        super().keyPressEvent(event)
+
+
+class FilterChips(QWidget):
+    """A row of exclusive filter chips — "All · Completed · Failed".
+
+    Used by: History (filter runs by outcome), AI tools (filter by category).
+    A chip row rather than a combo box on purpose: with six or fewer options
+    the whole choice is visible at once and costs one click, and the current
+    selection is readable without opening anything.
+
+    `options` takes either plain strings, or (value, label) pairs when the
+    value the code wants is not the words the user should read, or
+    (value, label, count) when there is a real number to show. Never invent
+    the count — pass None and it is simply not drawn.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, options: list, current: str = "", parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_2 - 2)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        self._buttons: dict[str, QPushButton] = {}
+
+        for option in options:
+            if isinstance(option, (tuple, list)):
+                value, text = option[0], option[1]
+                count = option[2] if len(option) > 2 else None
+            else:
+                value = text = option
+                count = None
+            btn = QPushButton(f"{text}  {count}" if count is not None else text)
+            btn.setObjectName("chipBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumHeight(MIN_TARGET)
+            btn.setAccessibleName(text)
+            btn.clicked.connect(lambda _=False, v=value: self._pick(v))
+            self._group.addButton(btn)
+            row.addWidget(btn)
+            self._buttons[value] = btn
+        row.addStretch(1)
+
+        self._current = ""
+        first = current or (next(iter(self._buttons), ""))
+        if first:
+            self.set_current(first)
+
+    def current(self) -> str:
+        return self._current
+
+    def set_current(self, value: str):
+        btn = self._buttons.get(value)
+        if btn is None:
+            return
+        self._current = value
+        btn.setChecked(True)
+
+    def _pick(self, value: str):
+        if value != self._current:
+            self._current = value
+            self.changed.emit(value)
+
+
+class EmptyState(QWidget):
+    """Icon pad, title, one line of body, optional primary button — CENTRED in
+    the full height it is given.
+
+    Used by: Settings, the BOQ / Gerber / Email front doors, AI tools, History,
+    the plan stub on the workbench. Six screens, and the centring is the point
+    of all six.
+
+    Those screens measured 45-70% empty grey. The mechanical cause was always
+    the same: a small card top-anchored inside a scroll area with a trailing
+    addStretch(), so every pixel of leftover window height piled up in one
+    contiguous band underneath it. This widget has an expanding size policy and
+    a stretch above AND below its content, so handed that same slack it sits in
+    the middle of it instead of on top of it — which is the difference between
+    a screen that is quiet and a screen that looks broken.
+
+    Put it in the layout with a stretch factor and nothing after it:
+
+        layout.addWidget(EmptyState("inbox", "No runs yet",
+                                    "Runs you start will be listed here.",
+                                    "Start a task"), stretch=1)
+
+    Never pad the body out to look fuller. If a surface is thin the answer is
+    more of what is real, not more words.
+    """
+
+    clicked = Signal()
+
+    def __init__(self, icon: str = "inbox", title: str = "",
+                 body: str = "", action_text: str = None, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(theme.SPACE_5, theme.SPACE_5,
+                                 theme.SPACE_5, theme.SPACE_5)
+        outer.setSpacing(0)
+        outer.addStretch(1)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(theme.SPACE_3)
+        col.setAlignment(Qt.AlignHCenter)
+
+        self.pad = IconPad(icon, theme.ACCENT, 56, theme.R_CARD, 26)
+        pad_row = QHBoxLayout()
+        pad_row.setContentsMargins(0, 0, 0, 0)
+        pad_row.addStretch(1)
+        pad_row.addWidget(self.pad)
+        pad_row.addStretch(1)
+        col.addLayout(pad_row)
+
+        self.title = QLabel(title)
+        self.title.setObjectName("emptyTitle")
+        self.title.setAlignment(Qt.AlignCenter)
+        track(self.title, -0.015)
+        col.addWidget(self.title)
+
+        self.body = QLabel(body)
+        self.body.setObjectName("emptyBody")
+        self.body.setAlignment(Qt.AlignCenter)
+        self.body.setWordWrap(True)
+        self.body.setMaximumWidth(420)
+        self.body.setVisible(bool(body))
+        body_row = QHBoxLayout()
+        body_row.setContentsMargins(0, 0, 0, 0)
+        body_row.addStretch(1)
+        body_row.addWidget(self.body)
+        body_row.addStretch(1)
+        col.addLayout(body_row)
+
+        self.action = None
+        if action_text:
+            self.action = button(action_text, "primary")
+            self.action.clicked.connect(self.clicked.emit)
+            act_row = QHBoxLayout()
+            act_row.setContentsMargins(0, theme.SPACE_1, 0, 0)
+            act_row.addStretch(1)
+            act_row.addWidget(self.action)
+            act_row.addStretch(1)
+            col.addLayout(act_row)
+
+        outer.addLayout(col)
+        outer.addStretch(1)
+
+    def set_text(self, title: str = None, body: str = None):
+        if title is not None:
+            self.title.setText(title)
+        if body is not None:
+            self.body.setText(body)
+            self.body.setVisible(bool(body))
+
+
+# ── list and grid items ─────────────────────────────────────────────────────
+class MetricCard(Card):
+    """A number with a name under it, and optionally a trend and an icon.
+
+    Used by: Home's dashboard row, the inquiry register summary, the run
+    summary strip. A Card subclass rather than a seventh card recipe.
+
+    `value` is a string on purpose — the caller has already formatted it as
+    "₹8.4L" or "58%" or "12", and this must not guess. Pass `trend` only when
+    a real series exists; a sparkline drawn from invented numbers is worse than
+    no sparkline, because it looks like data.
+    """
+
+    def __init__(self, label_text: str, value: str, detail: str = "",
+                 icon: str = "", trend: list = None, hue: str = None,
+                 parent=None):
+        super().__init__(parent=parent)
+        hue = hue or theme.ACCENT
+        col = self.body((theme.CARD_PAD, theme.CARD_PAD,
+                         theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(theme.SPACE_2)
+        self.kicker = kicker(label_text)
+        top.addWidget(self.kicker, stretch=1)
+        if icon:
+            top.addWidget(IconPad(icon, hue, 30, theme.R_CONTROL, 15))
+        col.addLayout(top)
+
+        self.value = QLabel(value)
+        self.value.setObjectName("stat")
+        track(self.value, -0.02)
+        col.addWidget(self.value)
+
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.setSpacing(theme.SPACE_2)
+        self.detail = QLabel(detail)
+        self.detail.setObjectName("meta")
+        self.detail.setVisible(bool(detail))
+        bottom.addWidget(self.detail, stretch=1)
+        self.spark = None
+        if trend:
+            self.spark = Sparkline(trend, hue)
+            bottom.addWidget(self.spark)
+        col.addLayout(bottom)
+
+    def set_value(self, value: str, detail: str = None):
+        self.value.setText(value)
+        if detail is not None:
+            self.detail.setText(detail)
+            self.detail.setVisible(bool(detail))
+
+
+class FileItem(QFrame):
+    """One attachment or one produced file: glyph, name, size/kind, actions.
+
+    Used by: the context rail's attachment list, the run screen's local-result
+    cards, BOQ and Gerber output. Every one of those grew its own row; this is
+    the shared one.
+
+    The name elides from the middle rather than the end, because a path's last
+    twenty characters are the part that identifies it and a run of files from
+    the same folder is identical for the first forty.
+    """
+
+    activated = Signal()
+
+    def __init__(self, name: str, detail: str = "", icon: str = "file",
+                 actions: list = None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("listRow")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMinimumHeight(MIN_TARGET + 14)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                               theme.SPACE_2, theme.SPACE_2)
+        row.setSpacing(theme.SPACE_3)
+        row.addWidget(IconPad(icon, theme.ACCENT, 30, theme.R_CONTROL, 15))
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        self._name = name
+        self.name = QLabel(name)
+        self.name.setStyleSheet(theme.type_css("SUPPORT", theme.TEXT))
+        self.name.setToolTip(name)
+        col.addWidget(self.name)
+        self.detail = QLabel(detail)
+        self.detail.setObjectName("meta")
+        self.detail.setVisible(bool(detail))
+        col.addWidget(self.detail)
+        row.addLayout(col, stretch=1)
+
+        for widget in actions or []:
+            row.addWidget(widget)
+
+        self.setAccessibleName(f"{name}. {detail}".strip())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        metrics = QFontMetrics(self.name.font())
+        self.name.setText(metrics.elidedText(
+            self._name, Qt.ElideMiddle, max(60, self.name.width())))
+
+    def mouseDoubleClickEvent(self, event):
+        self.activated.emit()
+        super().mouseDoubleClickEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.activated.emit()
+            return
+        super().keyPressEvent(event)
+
+
+class StepRow(QFrame):
+    """One step in a plan or a run: marker, title, support line, status.
+
+    Used by: the plan screen (one per stage), the run screen's queued steps,
+    the guide's checklist. The status half is a StatusBadge, so a step and its
+    card and its History entry all say "running" the same way.
+
+    `trailing` takes an already-built widget — a ToolChip on the plan screen, a
+    duration on the run screen — because what belongs at the end of the row is
+    the one thing that genuinely differs between the three uses.
+    """
+
+    clicked = Signal()
+
+    def __init__(self, index: int, title: str, subtitle: str = "",
+                 state: str = "idle", trailing: QWidget = None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("listRow")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMinimumHeight(MIN_TARGET + 20)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_3, theme.SPACE_3,
+                               theme.SPACE_3, theme.SPACE_3)
+        row.setSpacing(theme.SPACE_3)
+
+        self.number = QLabel(f"{index:02d}")
+        self.number.setFixedWidth(24)
+        self.number.setAlignment(Qt.AlignCenter)
+        self.number.setStyleSheet(
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 15px;"
+            f" font-weight: 600; color: {theme.NEUTRAL_350};")
+        row.addWidget(self.number)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(1)
+        self.title = QLabel(title)
+        self.title.setStyleSheet(theme.type_css("CARD_TITLE"))
+        col.addWidget(self.title)
+        self.subtitle = QLabel(subtitle)
+        self.subtitle.setObjectName("meta")
+        self.subtitle.setWordWrap(True)
+        self.subtitle.setVisible(bool(subtitle))
+        col.addWidget(self.subtitle)
+        row.addLayout(col, stretch=1)
+
+        if trailing is not None:
+            row.addWidget(trailing)
+        self.badge = StatusBadge(state, focusable=False)
+        row.addWidget(self.badge)
+        self.setAccessibleName(f"Step {index}. {title}")
+
+    def set_state(self, state: str, detail: str = None):
+        self.badge.set_state(state, detail)
+        self.setAccessibleName(
+            f"Step {self.number.text()}. {self.title.text()}. "
+            f"{self.badge.accessibleName()}")
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
+
+
+class Tabs(QFrame):
+    """The segmented strip: two to five mutually exclusive views of one thing.
+
+    Used by: the inquiry register, Settings' sections, the guide. Tabs, not a
+    combo box, because the alternatives are worth seeing; a combo box hides
+    them and costs a click to remember they exist.
+
+    Emits `changed(index)`. Left/Right arrows move between tabs, which is what
+    a keyboard user expects of a segmented control and what a plain row of
+    buttons does not do.
+    """
+
+    changed = Signal(int)
+
+    def __init__(self, options: list, current: int = 0, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tabStrip")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_1, theme.SPACE_1,
+                               theme.SPACE_1, theme.SPACE_1)
+        row.setSpacing(theme.SPACE_1)
+        self._buttons: list[QPushButton] = []
+        for i, text in enumerate(options):
+            btn = QPushButton(text)
+            btn.setObjectName("tabBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumHeight(MIN_TARGET)
+            btn.clicked.connect(lambda _=False, n=i: self.set_current(n))
+            row.addWidget(btn)
+            self._buttons.append(btn)
+        self._current = -1
+        self.set_current(current)
+
+    def current(self) -> int:
+        return self._current
+
+    def set_current(self, index: int):
+        if not self._buttons:
+            return
+        index = max(0, min(index, len(self._buttons) - 1))
+        for i, btn in enumerate(self._buttons):
+            on = i == index
+            btn.setChecked(on)
+            btn.setProperty("cur", "true" if on else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+        if index != self._current:
+            self._current = index
+            self.changed.emit(index)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Left:
+            self.set_current(self._current - 1)
+            self._buttons[self._current].setFocus()
+            return
+        if event.key() == Qt.Key_Right:
+            self.set_current(self._current + 1)
+            self._buttons[self._current].setFocus()
+            return
+        super().keyPressEvent(event)
+
+
+class CardGrid(QWidget):
+    """A responsive card grid. Reflows by COLUMN COUNT and fills the width.
+
+    Used by: Home, AI tools, Settings, the add-on front doors, History's
+    grouped view — six screens, all of which currently lay cards out at a fixed
+    width and leave a 400px dead gutter down the right-hand side at 1440px.
+
+    That gutter is half the wasted-space problem. A fixed-width card in a
+    variable-width window can only ever be right at one window size; this
+    computes how many columns of at least `min_col_width` fit, gives every one
+    of them an equal stretch, and lets the cards take the remainder. So the
+    content reaches both edges at any width, and reflows to fewer, wider
+    columns as the window narrows rather than clipping or scrolling sideways.
+
+        grid = CardGrid(min_col_width=280)
+        for tool in tools:
+            grid.add(ToolCard(tool))
+
+    Items keep their insertion order across a reflow, which matters because a
+    grid that reshuffles when you resize the window looks like a bug.
+    """
+
+    def __init__(self, min_col_width: int = 280, gap: int = theme.CARD_GAP,
+                 max_columns: int = 0, parent=None):
+        super().__init__(parent)
+        self._min = max(80, int(min_col_width))
+        self._gap = int(gap)
+        self._max_columns = int(max_columns)
+        self._items: list[QWidget] = []
+        self._cols = 0
+        self._laying = False
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 0, 0, 0)
+        self._grid.setHorizontalSpacing(self._gap)
+        self._grid.setVerticalSpacing(self._gap)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+
+    # -- contents ---------------------------------------------------------
+    def add(self, widget: QWidget) -> QWidget:
+        self._items.append(widget)
+        widget.setParent(self)
+        self._relayout(force=True)
+        return widget
+
+    def add_all(self, widgets: list):
+        for widget in widgets:
+            self._items.append(widget)
+            widget.setParent(self)
+        self._relayout(force=True)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def clear(self):
+        for widget in self._items:
+            self._grid.removeWidget(widget)
+            widget.setParent(None)
+            widget.deleteLater()
+        self._items = []
+        self._cols = 0
+
+    # -- layout -----------------------------------------------------------
+    def columns(self) -> int:
+        """How many columns fit right now. Public so a caller can decide to
+        render four compact cards instead of two wide ones."""
+        return max(1, self._cols)
+
+    def _columns_for(self, width: int) -> int:
+        if width <= 0:
+            return 1
+        fit = (width + self._gap) // (self._min + self._gap)
+        fit = max(1, min(int(fit), len(self._items) or 1))
+        if self._max_columns:
+            fit = min(fit, self._max_columns)
+        return fit
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _relayout(self, force: bool = False):
+        # Re-entrancy guard: adding to a QGridLayout triggers a relayout, which
+        # can trigger a resizeEvent, which lands back here.
+        if self._laying:
+            return
+        cols = self._columns_for(self.width())
+        if cols == self._cols and not force:
+            return
+        self._laying = True
+        try:
+            for widget in self._items:
+                self._grid.removeWidget(widget)
+            for index, widget in enumerate(self._items):
+                self._grid.addWidget(widget, index // cols, index % cols)
+            # Equal stretch on the live columns and none on any column left
+            # over from a wider layout, which is what makes the row fill the
+            # width instead of hugging the left edge.
+            for column in range(max(cols, self._grid.columnCount())):
+                self._grid.setColumnStretch(column, 1 if column < cols else 0)
+            self._cols = cols
+        finally:
+            self._laying = False

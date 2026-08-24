@@ -32,44 +32,29 @@ from PySide6.QtWidgets import (
 import app_meta
 import i18n
 import theme
+from dialogs.base import PrismDialog
 from widgets import icons
 from widgets.controls import heading
 
 
-class ContactDialog(QDialog):
+class ContactDialog(PrismDialog):
 
     def __init__(self, transcript: str = "", parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Send this to our team"),
+            i18n.t("Everything you've already told the help screen is below — "
+                   "edit or delete anything you'd rather not send."),
+            icon="mail", parent=parent, closable=False)
         self.sent = False
         self._transcript = transcript
         self.setWindowTitle(i18n.t("Contact the team"))
         self.setMinimumWidth(560)
-        self.resize(620, 640)
+        self.resize(660, 680)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(26, 24, 26, 20)
-        root.setSpacing(14)
-
-        head = QHBoxLayout()
-        head.setSpacing(12)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("mail", 22, theme.ACCENT))
-        glyph.setAlignment(Qt.AlignTop)
-        head.addWidget(glyph)
-        titles = QVBoxLayout()
-        titles.setSpacing(3)
-        titles.addWidget(heading(i18n.t("Send this to our team")))
-        sub = QLabel(i18n.t(
-            "Everything you've already told the help screen is below — edit "
-            "or delete anything you'd rather not send."))
-        sub.setObjectName("meta")
-        sub.setWordWrap(True)
-        titles.addWidget(sub)
-        head.addLayout(titles, stretch=1)
-        root.addLayout(head)
+        root = self.body
 
         who = QHBoxLayout()
-        who.setSpacing(9)
+        who.setSpacing(theme.SPACE_2)
         self._name = QLineEdit()
         self._name.setPlaceholderText(i18n.t("Your name"))
         self._name.setMinimumHeight(36)
@@ -104,39 +89,27 @@ class ContactDialog(QDialog):
             f"font-weight: 600;")
         root.addWidget(where)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(9)
-        self._copy = QPushButton(i18n.t(" Copy it all"))
-        self._copy.setObjectName("smallBtn")
-        self._copy.setCursor(Qt.PointingHandCursor)
-        icons.button_icon(self._copy, "copy", 14, theme.TEXT)
-        self._copy.clicked.connect(self._copy_all)
-        buttons.addWidget(self._copy)
+        # Copy and Save are the two that always work — `mailto:` silently does
+        # nothing on a machine with no mail client configured — so they stay
+        # visible as utilities rather than being folded away behind the
+        # primary.
+        self._copy = self.button(i18n.t("Copy it all"), "secondary",
+                                 icon_name="copy", small=True,
+                                 on_click=self._copy_all)
+        self.footer.add_utility(self._copy)
+        self.footer.add_utility(self.button(
+            i18n.t("Save as a file"), "secondary", icon_name="file",
+            small=True, on_click=self._save,
+            tooltip=i18n.t("Writes this plus a description of your "
+                           "installation, with your key and passwords "
+                           "stripped out, so you can attach it.")))
+        self.footer.add_secondary(
+            self.button(i18n.t("Not now"), on_click=self.reject))
+        self.footer.set_primary(self.button(
+            i18n.t("Open my email app"), "primary", icon_name="mail",
+            on_click=self._send))
 
-        save = QPushButton(i18n.t(" Save as a file"))
-        save.setObjectName("smallBtn")
-        save.setCursor(Qt.PointingHandCursor)
-        save.setToolTip(i18n.t(
-            "Writes this plus a description of your installation, with your "
-            "key and passwords stripped out, so you can attach it."))
-        icons.button_icon(save, "file", 14, theme.TEXT)
-        save.clicked.connect(self._save)
-        buttons.addWidget(save)
-        buttons.addStretch(1)
-
-        cancel = QPushButton(i18n.t("Not now"))
-        cancel.setCursor(Qt.PointingHandCursor)
-        cancel.clicked.connect(self.reject)
-        buttons.addWidget(cancel)
-
-        send = QPushButton(i18n.t(" Open my email app"))
-        send.setObjectName("primaryBtn")
-        send.setCursor(Qt.PointingHandCursor)
-        send.setMinimumHeight(38)
-        icons.button_icon(send, "mail", 15, "#f2f2f3")
-        send.clicked.connect(self._send)
-        buttons.addWidget(send)
-        root.addLayout(buttons)
+        self.tab_chain(self._name, self._email, self._body)
 
     def _draft(self) -> str:
         # Hyphens, not a box-drawing rule. Barlow has no U+2500, so the tidy

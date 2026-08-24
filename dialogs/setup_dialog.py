@@ -1,17 +1,25 @@
 """Setup — the GUI's equivalent of the CLI's onboarding wizard plus /config,
-/agents, /profile, /key and /chrome, all in one scrolling page since a GUI
-doesn't need them as separate steps.
+/agents, /profile, /key and /chrome, all in one page since a GUI doesn't need
+them as separate steps.
+
+This is the first surface a paying customer meets, so it is the one that had
+the most to gain from the shared modal chrome: eight sections used to run down
+a single undifferentiated column separated by hairlines, which reads as one
+very long form and gives a first-time user no idea how much of it is left. The
+sections are cards now, and an index down the left says how many there are and
+lets any one of them be reached in a click.
 
 The rail links to individual settings, so the dialog takes a `focus` argument:
 clicking "API key" opens this scrolled to the key section with the field
 already focused and the section briefly marked, instead of dumping the whole
-wizard on you and leaving you to hunt for the one row you came for."""
+wizard on you and leaving you to hunt for the one row you came for. The index
+drives exactly the same code path — a nav entry IS a `focus`."""
 from __future__ import annotations
 import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
-    QComboBox, QPushButton, QCheckBox, QMessageBox, QScrollArea,
+    QButtonGroup, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
+    QLabel, QComboBox, QPushButton, QCheckBox, QMessageBox, QScrollArea,
     QWidget, QFrame, QApplication, QFileDialog,
 )
 
@@ -23,6 +31,8 @@ import licensing
 import roles as R
 import workspace as W
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import heading, icon_label, kicker, meta
@@ -34,17 +44,39 @@ FOCUS_SECTIONS = {"key": "key", "profile": "profile", "agents": "agents",
                   "chrome": "chrome", "licence": "licence",
                   "language": "language", "team": "team", "config": None}
 
+# (section key, the words on the index, the glyph). The order here is the order
+# down the page and the order down the index — they are the same list, so the
+# two cannot drift apart.
+SECTION_INDEX = [
+    ("licence", "Licence", "key"),
+    ("team", "Your role", "user"),
+    ("language", "Language", "globe"),
+    ("key", "API key", "lock"),
+    ("profile", "What you do", "user"),
+    ("agents", "Specialists", "grid"),
+    ("premium", "Premium plans", "chart"),
+    ("chrome", "Chrome", "globe"),
+]
 
-class Section(QFrame):
-    """One settings block: tracked kicker, optional explainer, then content.
-    Sections are separated by whitespace and a hairline, not by boxes — this
-    is one page you scroll, not six nested frames."""
+
+class Section(C.Card):
+    """One settings block, as a card: tracked kicker, optional explainer, then
+    content.
+
+    These used to be bare frames separated by hairlines, on the theory that
+    Setup is one page you scroll rather than six nested boxes. That was right
+    about the nesting and wrong about the result: eight blocks of left-aligned
+    form rows with nothing but whitespace between them reads as one form eight
+    screens long, and a first-time user cannot see where a section starts, how
+    long it is, or how much of it is still to come. A card answers all three
+    without adding a level of nesting — it IS the level of nesting the
+    hairlines were standing in for.
+    """
 
     def __init__(self, title: str, blurb: str = "", parent=None):
-        super().__init__(parent)
-        box = QVBoxLayout(self)
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(9)
+        super().__init__(parent=parent)
+        box = self.body((theme.CARD_PAD, theme.CARD_PAD,
+                         theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_3)
 
         self._kicker = kicker(title)
         # In its own row with a stretch so flash() tints the words, not the
@@ -62,7 +94,7 @@ class Section(QFrame):
 
         self.content = QVBoxLayout()
         self.content.setContentsMargins(0, 0, 0, 0)
-        self.content.setSpacing(9)
+        self.content.setSpacing(theme.SPACE_3)
         box.addLayout(self.content)
 
     def flash(self):
@@ -71,7 +103,7 @@ class Section(QFrame):
         'here'."""
         self._kicker.setStyleSheet(
             f"background: {theme.ACCENT_RAMP[100]}; color: {theme.ACCENT_RAMP[800]};"
-            f"padding: 3px 7px;")
+            f"padding: 3px 7px; border-radius: {theme.R_CHIP}px;")
         QTimer.singleShot(1400, lambda: self._kicker.setStyleSheet(""))
 
 
@@ -82,138 +114,195 @@ def rule() -> QFrame:
     return line
 
 
-class SetupDialog(QDialog):
+class SetupDialog(PrismDialog):
     def __init__(self, cfg: dict, parent=None, focus: str | None = None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Setup"),
+            i18n.t("Your key, your profile, and which tool handles each kind "
+                   "of step. Shared with the Prism CLI."),
+            icon="sliders", parent=parent)
         self.setWindowTitle("Prism Setup")
         # Sized up front: a QScrollArea reports its viewport's sizeHint, so
         # without this the dialog opens as a slot barely one form row tall.
-        self.resize(720, 680)
-        self.setMinimumSize(560, 460)
+        # Wider than it was because the index now takes a column of its own —
+        # the content column is unchanged in width.
+        self.resize(880, 720)
+        self.setMinimumSize(720, 520)
         self.cfg = dict(cfg)
         self._combos: dict[str, QComboBox] = {}
         self._premium_boxes: dict[str, QCheckBox] = {}
         self._sections: dict[str, Section] = {}
+        self._nav_buttons: dict[str, QPushButton] = {}
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(self._header())
+        # The base class's body carries the page padding; this dialog puts an
+        # index against the left edge, so it takes the padding back and hands
+        # it to the two columns individually.
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(0)
+        split = QHBoxLayout()
+        split.setContentsMargins(0, 0, 0, 0)
+        split.setSpacing(0)
+        split.addWidget(self._index(), stretch=0)
+        self.body.addLayout(split, stretch=1)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.NoFrame)
         inner = QWidget()
         page = QVBoxLayout(inner)
-        page.setContentsMargins(24, 20, 24, 24)
-        page.setSpacing(20)
+        page.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
+                                theme.PAGE_PAD, theme.SPACE_6)
+        page.setSpacing(theme.CARD_GAP)
 
-        for index, (key, section) in enumerate((
+        builders = {
             # First on the page: it says who this copy belongs to and what it
             # can do, which frames every setting under it.
-            ("licence", self._licence_section()),
+            "licence": self._licence_section,
             # Who this copy belongs to and what they may see. Directly under
             # the licence because the two are one idea: the company key says
             # the firm has paid, the designation key says which of its people
             # is sitting here.
-            ("team", self._team_section()),
+            "team": self._team_section,
             # Then language, because it changes the words every section below
             # is written in — someone who opened Setup unable to read it needs
             # to reach this without scrolling past five English sections.
-            ("language", self._language_section()),
-            ("key", self._key_section()),
-            ("profile", self._profile_section()),
-            ("agents", self._agents_section()),
-            ("premium", self._premium_section()),
-            ("chrome", self._chrome_section()),
-        )):
-            if index:
-                page.addWidget(rule())
+            "language": self._language_section,
+            "key": self._key_section,
+            "profile": self._profile_section,
+            "agents": self._agents_section,
+            "premium": self._premium_section,
+            "chrome": self._chrome_section,
+        }
+        for key, _label, _icon in SECTION_INDEX:
+            section = builders[key]()
             self._sections[key] = section
             page.addWidget(section)
         page.addStretch(1)
 
         self.scroll.setWidget(inner)
-        outer.addWidget(self.scroll, stretch=1)
-        outer.addWidget(self._footer())
+        split.addWidget(self.scroll, stretch=1)
+        self._build_footer()
 
         self._rebuild_premium()
+        self._set_tab_order()
+        # Which card the reader is actually looking at, so the index is a
+        # position indicator and not only a set of links.
+        self.scroll.verticalScrollBar().valueChanged.connect(self._sync_index)
+        QTimer.singleShot(0, self._sync_index)
         if focus:
             # Deferred: scrolling to a widget that hasn't been laid out yet
             # lands nowhere.
             QTimer.singleShot(0, lambda: self._focus_section(focus))
 
     # ── chrome ────────────────────────────────────────────────────────────
-    def _header(self) -> QWidget:
-        bar = QFrame()
-        bar.setObjectName("setupHeader")
-        bar.setStyleSheet(f"QFrame#setupHeader {{ background: {theme.SURFACE};"
-                          f"border-bottom: 1px solid {theme.DIVIDER}; }}")
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(24, 16, 24, 16)
-        row.setSpacing(11)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("sliders", 20, theme.ACCENT))
-        glyph.setAlignment(Qt.AlignTop)
-        row.addWidget(glyph)
-        title = QVBoxLayout()
-        title.setSpacing(1)
-        title.addWidget(heading("Setup"))
-        sub = QLabel("Your key, your profile, and which tool handles each kind "
-                     "of step. Shared with the Prism CLI.")
-        sub.setObjectName("meta")
-        sub.setWordWrap(True)
-        title.addWidget(sub)
-        row.addLayout(title, stretch=1)
-        return bar
+    def _index(self) -> QWidget:
+        """The eight sections, down the left, as a reachable list.
 
-    def _footer(self) -> QWidget:
-        bar = QFrame()
-        bar.setObjectName("setupFooter")
-        # Scoped: unscoped, this surface fill lands on the Save button too and
-        # flattens it back to a plain box.
-        bar.setStyleSheet(f"QFrame#setupFooter {{ background: {theme.SURFACE};"
-                          f"border-top: 1px solid {theme.DIVIDER}; }}")
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(24, 13, 24, 13)
-        row.setSpacing(9)
+        Setup already had the machinery for this — `_focus_section` scrolls to
+        a section and flashes it, and the rail has been calling it for a while
+        — it simply had no visible entry point, so the only way to reach the
+        Chrome section was to scroll past seven others and recognise it.
+        """
+        rail = QFrame()
+        rail.setObjectName("setupIndex")
+        rail.setAttribute(Qt.WA_StyledBackground, True)
+        rail.setFixedWidth(184)
+        rail.setStyleSheet(
+            f"#setupIndex {{ background: {theme.WELL};"
+            f" border: none; border-right: 1px solid {theme.HAIRLINE}; }}")
+        col = QVBoxLayout(rail)
+        col.setContentsMargins(theme.SPACE_3, theme.SPACE_5,
+                               theme.SPACE_3, theme.SPACE_3)
+        col.setSpacing(2)
+        col.addWidget(kicker(i18n.t("Sections"), muted=True))
+        col.addSpacing(theme.SPACE_2)
 
-        login_btn = QPushButton(" Open login tabs")
-        login_btn.setObjectName("smallBtn")
-        login_btn.setCursor(Qt.PointingHandCursor)
-        login_btn.setToolTip("Opens each chosen tool in Chrome so you can sign in")
-        icons.button_icon(login_btn, "lock", 14, theme.TEXT)
-        login_btn.clicked.connect(self._open_login_tabs)
-        row.addWidget(login_btn)
+        self._nav_group = QButtonGroup(self)
+        self._nav_group.setExclusive(True)
+        for key, label, icon_name in SECTION_INDEX:
+            btn = QPushButton(f"  {i18n.t(label)}")
+            btn.setObjectName("setupIndexBtn")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumHeight(C.MIN_TARGET + 4)
+            btn.setStyleSheet(
+                f"#setupIndexBtn {{ text-align: left; border: none;"
+                f" background: transparent; padding: 6px {theme.SPACE_2}px;"
+                f" border-radius: {theme.R_CONTROL}px;"
+                f" color: {theme.NEUTRAL[700]}; font-size: 13px; }}"
+                f"#setupIndexBtn:hover {{ background: {theme.NEUTRAL[200]}; }}"
+                f"#setupIndexBtn:checked {{ background: {theme.ACCENT_RAMP[100]};"
+                f" color: {theme.ACCENT_RAMP[800]}; font-weight: 600; }}"
+                f"#setupIndexBtn:focus {{ border: 2px solid {theme.ACCENT}; }}")
+            icons.button_icon(btn, icon_name, 15, theme.NEUTRAL[600])
+            btn.clicked.connect(lambda _=False, k=key: self._focus_section(k))
+            self._nav_group.addButton(btn)
+            self._nav_buttons[key] = btn
+            col.addWidget(btn)
+        col.addStretch(1)
+        return rail
+
+    def _sync_index(self):
+        """Tick whichever card the viewport is currently showing most of."""
+        if not self._sections:
+            return
+        top = self.scroll.verticalScrollBar().value()
+        current = None
+        for key, _label, _icon in SECTION_INDEX:
+            section = self._sections.get(key)
+            if section is None:
+                continue
+            if section.mapTo(self.scroll.widget(), section.rect().topLeft()).y() \
+                    <= top + theme.SPACE_7:
+                current = key
+        btn = self._nav_buttons.get(current or SECTION_INDEX[0][0])
+        if btn is not None and not btn.isChecked():
+            btn.setChecked(True)
+
+    def _build_footer(self):
+        login_btn = self.button(
+            i18n.t("Open login tabs"), "secondary", icon_name="lock",
+            small=True,
+            on_click=self._open_login_tabs,
+            tooltip="Opens each chosen tool in Chrome so you can sign in")
+        self.footer.add_utility(login_btn)
 
         # The one button that makes a support call short. Everything a
         # customer would otherwise have to describe from memory, in a file
         # they can attach to an email — with every credential redacted.
-        diag_btn = QPushButton(" Export diagnostics")
-        diag_btn.setObjectName("smallBtn")
-        diag_btn.setCursor(Qt.PointingHandCursor)
-        diag_btn.setToolTip(
-            "Saves a text file describing this installation and what Prism "
-            "has been doing, so support can see what happened. Your API key, "
-            "passwords and licence key are removed from it.")
-        icons.button_icon(diag_btn, "file", 14, theme.TEXT)
-        diag_btn.clicked.connect(self._export_diagnostics)
-        row.addWidget(diag_btn)
-        row.addStretch(1)
+        diag_btn = self.button(
+            i18n.t("Export diagnostics"), "secondary", icon_name="file",
+            small=True,
+            on_click=self._export_diagnostics,
+            tooltip="Saves a text file describing this installation and what "
+                    "Prism has been doing, so support can see what happened. "
+                    "Your API key, passwords and licence key are removed "
+                    "from it.")
+        self.footer.add_utility(diag_btn)
 
-        cancel = QPushButton("Cancel")
-        cancel.setCursor(Qt.PointingHandCursor)
-        cancel.clicked.connect(self.reject)
-        row.addWidget(cancel)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Save"), "primary", icon_name="check",
+                        on_click=self._save))
 
-        save = QPushButton(" Save")
-        save.setObjectName("primaryBtn")
-        save.setCursor(Qt.PointingHandCursor)
-        save.setDefault(True)
-        icons.button_icon(save, "check", 15, theme.BG)
-        save.clicked.connect(self._save)
-        row.addWidget(save)
-        return bar
+    def _set_tab_order(self):
+        """The order somebody filling this in for the first time reads it.
+
+        Qt's default is construction order, which here is eight helper methods
+        deep and puts the workspace picker between the designation key and the
+        language combo. Setup is the one dialog a customer may have to complete
+        before they can do anything at all, so keyboard-only completion is not
+        optional.
+        """
+        chain = [self.designation_edit, self.workspace_edit,
+                 getattr(self, "member_name", None),
+                 getattr(self, "member_role", None),
+                 self.lang_combo, self.out_lang_combo,
+                 self.key_edit, self.profile_edit]
+        chain += list(self._combos.values())
+        chain.append(self.chrome_edit)
+        self.tab_chain(*chain)
 
     # ── sections ──────────────────────────────────────────────────────────
     def _licence_section(self) -> Section:
@@ -263,9 +352,14 @@ class SetupDialog(QDialog):
                 if feature not in FEATURE_NAMES:
                     continue
                 have = state.has(feature)
+                # theme.OK, not theme.ACCENT. "You have this" is a success
+                # state, and the accent rotates with the role — in a green
+                # profile an accent tick and a neutral padlock were the same
+                # colour family, so the one line telling a customer what they
+                # have paid for stopped distinguishing bought from locked.
                 row = icon_label("check" if have else "lock",
                                  feature_label(feature), 15,
-                                 theme.ACCENT if have else theme.NEUTRAL[400])
+                                 theme.OK if have else theme.NEUTRAL[400])
                 if not have:
                     row.setStyleSheet(f"color: {theme.NEUTRAL[500]};")
                 s.content.addWidget(row)
@@ -276,25 +370,23 @@ class SetupDialog(QDialog):
         s.content.addWidget(note)
 
         row = QHBoxLayout()
-        row.setSpacing(9)
-        change = QPushButton(" Enter a licence key")
-        change.setObjectName("smallBtn")
-        change.setCursor(Qt.PointingHandCursor)
-        icons.button_icon(change, "key", 14, theme.TEXT)
-        change.clicked.connect(self._change_licence)
+        row.setSpacing(theme.SPACE_2)
+        change = C.button(i18n.t(" Enter a licence key"), "secondary", "key",
+                          small=True, on_click=self._change_licence)
         row.addWidget(change)
+        row.addStretch(1)
 
         if state.status != licensing.NONE:
-            release = QPushButton(" Deactivate this computer")
-            release.setObjectName("smallBtn")
-            release.setCursor(Qt.PointingHandCursor)
+            # Destructive, and pushed to the far side of the row rather than
+            # sitting shoulder to shoulder with "Enter a licence key". The two
+            # buttons read almost identically at a glance and one of them ends
+            # this machine's access to the product.
+            release = C.button(i18n.t(" Deactivate this computer"), "destructive",
+                               "trash", small=True, on_click=self._deactivate)
             release.setToolTip(
                 "Frees this machine's seat so the licence can be used on "
                 "another computer. You'll need the key again to come back.")
-            icons.button_icon(release, "trash", 14, theme.TEXT)
-            release.clicked.connect(self._deactivate)
             row.addWidget(release)
-        row.addStretch(1)
         s.content.addLayout(row)
         return s
 

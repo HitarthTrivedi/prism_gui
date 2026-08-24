@@ -16,21 +16,31 @@ from __future__ import annotations
 import os
 import time
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
+    QDialog, QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
     QPlainTextEdit, QMessageBox, QProgressBar,
 )
 
 import core_bridge as CB
+import i18n
+import theme
+from dialogs.base import PrismDialog
 from workers import AutomationWorker, GerberWorker
+from widgets import icons
 from widgets.ask_panel import AskPanel
 
 
-class GerberDialog(QDialog):
+class GerberDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Gerber"),
+            i18n.t("PCB size, track width, spacing, drill size and count — "
+                   "measured off the files themselves."),
+            icon="grid", parent=parent, closable=False)
         self.setWindowTitle("Gerber — PCB fabrication data")
-        self.resize(760, 700)
+        self.resize(820, 740)
+        self.setMinimumSize(640, 620)
         self.cfg = cfg
         self.gerber = CB.get_gerber()
 
@@ -40,10 +50,15 @@ class GerberDialog(QDialog):
         self._agent_worker = None
         self._links: dict = {}
 
-        root = QVBoxLayout(self)
+        # The base class owns the header and footer; `root` is its body column.
+        root = self.body
+        # A stacked form, not a grid of cards: the 16px card gutter
+        # between every row of a single column is what turns a short
+        # form into a tall one with bands of canvas through it.
+        root.setSpacing(theme.ROW_GAP)
 
         title = QLabel("What is this job, and what do you want done with it?")
-        title.setObjectName("h2")
+        title.setObjectName("h4")
         root.addWidget(title)
 
         self.ask = AskPanel(
@@ -55,12 +70,34 @@ class GerberDialog(QDialog):
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
 
-        lock = QLabel(
-            "🔒  The Gerber files never leave this machine. If you ask for a "
+        # The confidentiality promise is the reason this add-on is sellable, so
+        # it is stated as a real notice rather than as an emoji in front of a
+        # dashed placeholder box. The padlock is the system's own line icon: an
+        # emoji arrives pre-coloured and pre-weighted from whatever font the
+        # platform picked, which is the one thing every other glyph in Prism
+        # avoids.
+        lock = QFrame()
+        lock.setObjectName("gerberLock")
+        lock.setAttribute(Qt.WA_StyledBackground, True)
+        lock.setStyleSheet(
+            f"#gerberLock {{ background: {theme.OK_BG};"
+            f" border: 1px solid {theme.OK};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
+        lock_row = QHBoxLayout(lock)
+        lock_row.setContentsMargins(theme.SPACE_3, theme.SPACE_3,
+                                    theme.SPACE_3, theme.SPACE_3)
+        lock_row.setSpacing(theme.SPACE_3)
+        lock_glyph = QLabel()
+        lock_glyph.setPixmap(icons.pixmap("lock", 17, theme.OK_INK))
+        lock_glyph.setAlignment(Qt.AlignTop)
+        lock_row.addWidget(lock_glyph)
+        lock_text = QLabel(
+            "The Gerber files never leave this machine. If you ask for a "
             "write-up below, only the measured NUMBERS are shown to an "
             "agent — never a file, never a path.")
-        lock.setWordWrap(True)
-        lock.setObjectName("emptyState")
+        lock_text.setWordWrap(True)
+        lock_text.setStyleSheet(f"color: {theme.OK_INK}; font-size: 13px;")
+        lock_row.addWidget(lock_text, stretch=1)
         root.addWidget(lock)
 
         # Only appears once a job has actually been measured.
@@ -70,9 +107,14 @@ class GerberDialog(QDialog):
         self.meas_view.setReadOnly(True)
         self.meas_view.setMinimumHeight(260)
         meas_l.addWidget(self.meas_view)
+        # A result, not the absence of one — see the same change in BOQ.
         self.csv_label = QLabel("")
-        self.csv_label.setObjectName("emptyState")
         self.csv_label.setWordWrap(True)
+        self.csv_label.setStyleSheet(
+            f"color: {theme.OK_INK}; background: {theme.OK_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px;"
+            f" font-size: 13px;")
         meas_l.addWidget(self.csv_label)
         self.meas_box.setVisible(False)
         root.addWidget(self.meas_box, stretch=1)
@@ -92,22 +134,18 @@ class GerberDialog(QDialog):
         self.result.setMinimumHeight(100)
         root.addWidget(self.result)
 
-        btns = QHBoxLayout()
-        self.open_btn = QPushButton("Open in browser")
+        self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
+                                    icon_name="external", small=True,
+                                    on_click=self._open_link)
         self.open_btn.setEnabled(False)
-        self.open_btn.clicked.connect(self._open_link)
-        btns.addWidget(self.open_btn)
-        btns.addStretch(1)
-        close = QPushButton("Close")
-        close.clicked.connect(self.reject)
-        btns.addWidget(close)
-        self.run_btn = QPushButton("Write this up")
-        self.run_btn.setObjectName("primary")
+        self.footer.add_utility(self.open_btn)
+        self.footer.add_secondary(
+            self.button(i18n.t("Close"), on_click=self.reject))
+        self.run_btn = self.button(i18n.t("Write this up"), "primary",
+                                   icon_name="pencil", on_click=self._write_up)
         self.run_btn.setEnabled(False)
         self.run_btn.setToolTip("Measure a job first")
-        self.run_btn.clicked.connect(self._write_up)
-        btns.addWidget(self.run_btn)
-        root.addLayout(btns)
+        self.footer.set_primary(self.run_btn)
 
         if attachments:
             self._on_files_added([a["path"] for a in attachments])

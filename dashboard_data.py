@@ -80,7 +80,8 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
             # A frozen build has no console to say why. run_counts() and
             # runs_per_day() have always guarded theirs; this one was the odd
             # one out. Real on a synced or shared team folder.
-            when = _ago(os.path.getmtime(path))
+            when_stamp = os.path.getmtime(path)
+            when = _ago(when_stamp)
         except (OSError, Exception):
             continue
         agents = record.get("agents") or {}
@@ -96,8 +97,25 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
         out.append({
             "title": (record.get("query") or "").strip() or "Untitled task",
             "tools": tools,
-            "when": _ago(os.path.getmtime(path)),
+            # `when` from inside the try above, NOT a second getmtime. The
+            # guard up there exists because Home is built during
+            # MainWindow.__init__, so a run file that vanishes mid-walk does
+            # not blank a panel — it stops the window existing at all. Calling
+            # getmtime again out here re-opened that exact hole one line below
+            # the comment explaining it, and left the guarded value unused.
+            "when": when,
             "ok": not record.get("error"),
+            # Home names the cause on its "stopped before any tool ran" row.
+            # Worth carrying: 86 of this workspace's records are the same
+            # "Chrome would not launch", and telling someone that is far more
+            # actionable than telling them 86 things "Failed".
+            "error": (record.get("error") or "").strip(),
+            # The raw mtime as well as the English. History groups runs by
+            # date, and doing that off _ago()'s wording meant every "N weeks
+            # ago" — one week or four — collapsed into a single bucket, so a
+            # month of work arrived as one undated heap of 78 rows. Reading
+            # the number costs nothing: it is the same stat _ago() just did.
+            "stamp": when_stamp,
             "path": path,
         })
     return out
@@ -234,10 +252,22 @@ def register_view(cfg: dict, rows: list[dict] | None = None) -> list[dict]:
             "item": row.get("Product asked", ""),
             "qty": row.get("Quantity", ""),
             "amount": rupees(row.get("Quotation value")),
+            # The figure behind the formatting, so the AMOUNT column sorts as
+            # money and not as the string "₹2,10,000" — which would file
+            # ₹9,000 above ₹10,00,000.
+            "amount_raw": _amount_of(row.get("Quotation value")),
             "status": status or reg.NEW,
             "tone": status_tone(status),
         })
     return out
+
+
+def _amount_of(value) -> float:
+    """A register amount as a plain number, or 0.0 when it will not parse."""
+    try:
+        return float(CB.get_register().money(value))
+    except Exception:                                   # noqa: BLE001
+        return 0.0
 
 
 def rupees(value, compact: bool = False) -> str:

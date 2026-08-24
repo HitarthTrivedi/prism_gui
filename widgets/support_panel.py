@@ -1,4 +1,4 @@
-"""Help & support — the written answers first, then the assistant, then us.
+"""Help & support — the answer book on the left, the conversation on the right.
 
 ────────────────────────────────────────────────────────────────────────────
 Three tiers, in this order, and the order is the whole design
@@ -26,22 +26,32 @@ they read an answer and pressed "No, still stuck", or they typed a question
 there was no answer for. One of either is enough.
 
 ────────────────────────────────────────────────────────────────────────────
-The transcript is a conversation, not a ledger
+Two columns, because a menu is not a conversation
 ────────────────────────────────────────────────────────────────────────────
-The first version posted every menu into the thread and left it there — ten
-topic cards, then ten question rows, then ten more topic cards when somebody
-went back — and the screen read as a form that kept growing rather than a
-conversation that moved. Three rules fixed it, and they are worth keeping:
+The first version put everything in the thread: ten topic chips floating over
+an empty screen, and a question box exiled to the bottom of it. Nothing about
+the shape said "there are seventy-one answers in here", and the only way to
+find out what a topic contained was to open it and lose your place.
 
-  · **Topics are chips**, one line of the screen, because their names are
-    two words long. Questions stay full-width rows, because they are whole
-    sentences and a truncated question cannot be chosen.
-  · **A menu is retired the moment the conversation moves past it.** The
-    pick is already echoed as the customer's own bubble, so nothing is lost
-    — and live buttons left in the scrollback are how a conversation forks.
-    (The did-this-help row collapses itself for the same reason.)
-  · **Prism's messages carry its mark.** Two voices in one column need
-    telling apart faster than reading them.
+So the screen is now split, and the split is the fix:
+
+  · LEFT — the book. Search across every written answer, then the ten topics
+    with the number of answers in each and the line that says what is on that
+    shelf. It never scrolls away, so browsing costs nothing and going back
+    costs nothing. This is where the topics live now; they are no longer
+    posted into the thread.
+  · RIGHT — the conversation. It opens on the questions the rest of the book
+    points back at most, as pressable rows rather than behind a chip, and it
+    keeps the three rules the first redesign earned:
+
+      · **A menu is retired the moment the conversation moves past it.** The
+        pick is already echoed as the customer's own bubble, so nothing is
+        lost — and live buttons left in the scrollback are how a conversation
+        forks. (The did-this-help row collapses itself for the same reason.)
+      · **Questions stay full-width rows**, because they are whole sentences
+        and a truncated question cannot be chosen.
+      · **Prism's messages carry its mark.** Two voices in one column need
+        telling apart faster than reading them.
 
 This is a SCREEN, not a dialog — it keeps its conversation for the life of
 the window, so following an answer's button to Settings and coming back
@@ -49,18 +59,20 @@ lands on the same thread. Start over is the one control that forgets.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from collections import Counter
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import app_meta
 import i18n
 import support_kb as KB
 import theme
+from widgets import controls as C
 from widgets import icons
-from widgets.controls import kicker
 
 # How the assistant is told to behave. Written as instructions to a support
 # agent rather than as a specification, because that is what produces the
@@ -96,93 +108,97 @@ THE RULES, IN ORDER OF IMPORTANCE
 """
 
 
-# ── layout for the topic chips ─────────────────────────────────────────────
-class _FlowLayout(QLayout):
-    """Left-to-right, wrapping. Qt ships no flow layout; this is the classic
-    example implementation, kept because ten topic chips must take three
-    short rows at any width rather than one column of ten."""
+# ── what the book actually contains ────────────────────────────────────────
+# Read off support_kb rather than typed out here, so a question added there
+# shows up here without anybody remembering to update a count.
+_TOPIC_OF: dict[str, KB.Topic] = {
+    q.qid: topic for topic in KB.TOPICS for q in topic.questions}
+ANSWER_COUNT = len(KB.all_questions())
+TOPIC_COUNT = len(KB.TOPICS)
 
-    def __init__(self, parent=None, hspace: int = 8, vspace: int = 8):
-        super().__init__(parent)
-        self._items = []
-        self._h, self._v = hspace, vspace
-        self.setContentsMargins(0, 0, 0, 0)
 
-    def addItem(self, item):
-        self._items.append(item)
+def _most_pointed_at(limit: int) -> tuple[KB.Question, ...]:
+    """The questions the rest of the book points back at, most first.
 
-    def count(self):
-        return len(self._items)
+    The screen has to open on SOMETHING — ten topic names over an empty field
+    told the customer nothing — and the one thing it must not do is invent a
+    popularity figure it does not have. Nothing in Prism counts how often an
+    answer is read.
 
-    def itemAt(self, index):
-        return self._items[index] if 0 <= index < len(self._items) else None
+    What the book does carry is `related`: every answer names the ones worth
+    reading next, and those pointers were written one at a time by whoever
+    wrote the answers. A question that eleven other answers hand you to is,
+    by the book's own reckoning, the one people keep needing. Ties break on
+    the order the file lists them in, so this is stable between runs.
+    """
+    pull: Counter[str] = Counter()
+    for question in KB.all_questions():
+        for other in question.related:
+            pull[other] += 1
+    order = {q.qid: i for i, q in enumerate(KB.all_questions())}
+    ranked = sorted(pull, key=lambda qid: (-pull[qid], order.get(qid, 9999)))
+    picked = [KB.question(qid) for qid in ranked[:limit]]
+    return tuple(q for q in picked if q is not None)
 
-    def takeAt(self, index):
-        return self._items.pop(index) if 0 <= index < len(self._items) else None
 
-    def expandingDirections(self):
-        return Qt.Orientations(0)
+def _matching(query: str) -> list[KB.Question]:
+    """Every written answer this typed text could be about, best first.
 
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, width):
-        return self._arrange(QRect(0, 0, width, 0), place=False)
-
-    def setGeometry(self, rect):
-        super().setGeometry(rect)
-        self._arrange(rect, place=True)
-
-    def sizeHint(self):
-        return self.minimumSize()
-
-    def minimumSize(self):
-        size = QSize()
-        for item in self._items:
-            size = size.expandedTo(item.minimumSize())
-        return size
-
-    def _arrange(self, rect, *, place: bool) -> int:
-        x, y, row = rect.x(), rect.y(), 0
-        for item in self._items:
-            hint = item.sizeHint()
-            if x + hint.width() > rect.right() + 1 and row:
-                x = rect.x()
-                y += row + self._v
-                row = 0
-            if place:
-                item.setGeometry(QRect(QPoint(x, y), hint))
-            x += hint.width() + self._h
-            row = max(row, hint.height())
-        return y + row - rect.y()
+    Deliberately NOT `KB.search`. That one is a decision — it returns nothing
+    rather than a weak guess, because an empty result is what opens the route
+    to a person. This is a browse filter on a list the customer can already
+    see, so the honest behaviour is the opposite: narrow as they type, match
+    on any part of any word, and let them judge. Both are wired up: this one
+    filters the column, and pressing Ask still goes through `KB.search`.
+    """
+    words = [w for w in query.lower().split() if w]
+    if not words:
+        return []
+    named, mentioned = [], []
+    for question in KB.all_questions():
+        topic = _TOPIC_OF.get(question.qid)
+        heading = " ".join((question.text, " ".join(question.keywords),
+                            topic.label if topic else "")).lower()
+        body = " ".join((question.answer.what, " ".join(question.answer.steps),
+                         question.answer.note)).lower()
+        if all(word in heading for word in words):
+            named.append(question)
+        elif all(word in heading + " " + body for word in words):
+            mentioned.append(question)
+    return named + mentioned
 
 
 def _chip(label: str, icon_name: str = "", tip: str = "") -> QPushButton:
-    """One compact pressable — a topic, or a small conversational move."""
-    btn = QPushButton(f" {label}" if icon_name else label)
-    btn.setObjectName("supportChip")
-    btn.setCursor(Qt.PointingHandCursor)
+    """One compact pressable — a small conversational move inside the thread.
+
+    The capsule object name rather than a hand-rolled stylesheet: `#chipBtn`
+    is the secondary variant in capsule form and already carries hover,
+    pressed, focus and disabled states from style.qss.
+    """
+    btn = C.button(f" {label}" if icon_name else label, "secondary",
+                   small=True)
+    btn.setObjectName("chipBtn")
     if icon_name:
         icons.button_icon(btn, icon_name, 14, theme.ACCENT)
     if tip:
         btn.setToolTip(tip)
-    btn.setStyleSheet(
-        f"QPushButton#supportChip {{ background: {theme.CARD};"
-        f"border: 1px solid {theme.DIVIDER}; border-radius: 14px;"
-        f"padding: 5px 12px; font-size: 13px;"
-        f"color: {theme.NEUTRAL[800]}; }}"
-        f"QPushButton#supportChip:hover {{ border-color: {theme.ACCENT};"
-        f"background: {theme.ACCENT_RAMP[100]}; }}")
     return btn
 
 
 # ── little shared pieces ───────────────────────────────────────────────────
-def _wrap(widget: QWidget, mine: bool, glyph: str = "") -> QWidget:
+def _wrap(widget: QWidget, mine: bool, glyph: str = "",
+          full: bool = False) -> QWidget:
     """Put one message on its side of the transcript.
 
     Stretch rather than a fixed maximum width, so a bubble is ~75% of
     whatever the column happens to be. `glyph` puts Prism's mark beside its
     own messages — two voices in one column need telling apart at a glance.
+
+    `full` is for the menus rather than the messages. A said thing is easier
+    to read short, which is what the 75% is for; a list of questions to
+    choose between is not a said thing, and holding it to 75% left a dead
+    strip down the right of the screen and wrapped questions that would have
+    fitted on one line.
 
     Minimum vertical policy, or a message can be squeezed shorter than its
     own text: these rows stack inside a scroll area that is routinely
@@ -192,7 +208,7 @@ def _wrap(widget: QWidget, mine: bool, glyph: str = "") -> QWidget:
     row.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     box = QHBoxLayout(row)
     box.setContentsMargins(0, 0, 0, 0)
-    box.setSpacing(8)
+    box.setSpacing(theme.SPACE_2)
     if mine:
         box.addStretch(1)
         box.addWidget(widget, stretch=3)
@@ -205,7 +221,8 @@ def _wrap(widget: QWidget, mine: bool, glyph: str = "") -> QWidget:
             mark.setStyleSheet("background: transparent; padding-top: 10px;")
             box.addWidget(mark)
         box.addWidget(widget, stretch=3)
-        box.addStretch(1)
+        if not full:
+            box.addStretch(1)
     return row
 
 
@@ -217,22 +234,21 @@ def _bubble(text: str, mine: bool = False) -> QWidget:
     frame.setStyleSheet(
         f"QFrame#{frame.objectName()} {{"
         f"background: {theme.ACCENT_RAMP[100] if mine else theme.CARD};"
-        f"border: 1px solid {theme.DIVIDER if not mine else theme.ACCENT_RAMP[300]};"
+        f"border: 1px solid {theme.ACCENT_RAMP[300] if mine else theme.HAIRLINE};"
         f"border-radius: {theme.R_CARD}px; }}")
     box = QVBoxLayout(frame)
-    box.setContentsMargins(15, 12, 15, 12)
-    label = QLabel(text)
-    label.setWordWrap(True)
-    label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    label.setStyleSheet(f"color: {theme.NEUTRAL[800]}; font-size: 13.5px;"
-                        " background: transparent;")
-    box.addWidget(label)
+    box.setContentsMargins(theme.SPACE_4 - 1, theme.SPACE_3,
+                           theme.SPACE_4 - 1, theme.SPACE_3)
+    body = C.label(text, level="BODY", wrap=True)
+    body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    box.addWidget(body)
     return _wrap(frame, mine, glyph="" if mine else "prism")
 
 
 class _Choice(QFrame):
-    """One question they can press. Full width and left-aligned, because
-    these are whole sentences — a row of chips would truncate them.
+    """One pressable row: a question in the thread, or a line in the browse
+    column. Full width and left-aligned, because these are whole sentences —
+    a row of chips would truncate them.
 
     A QFrame carrying real QLabels rather than a QPushButton with a newline
     in its text, and that is not a style preference. A push button's minimum
@@ -240,6 +256,11 @@ class _Choice(QFrame):
     one line once the conversation grows taller than the viewport. Labels
     report a minimum height that includes their second line, so there is
     nothing for the layout to take.
+
+    `flat` is the browse-column skin — no box of its own, because ten boxed
+    rows inside one card reads as a list of cards rather than as a list. It
+    keeps the hover tint and gains a current state, since that column has to
+    show which shelf the thread is currently on.
     """
 
     clicked = Signal()
@@ -248,26 +269,35 @@ class _Choice(QFrame):
     # the hairline the stylesheet draws: it is outside the contents rect, so
     # leaving it out overstated the text width by 2px — enough, at exactly the
     # wrong window width, to cost a blurb its last word.
-    PAD, PAD_Y, GAP, ICON, BORDER = 13, 10, 10, 16, 1
+    PAD, PAD_Y, GAP, ICON, BORDER, SLACK = 13, 10, 10, 16, 1, 2
 
     def __init__(self, label: str, icon_name: str = "chevron-right",
-                 blurb: str = "", muted: bool = False, parent=None):
+                 blurb: str = "", muted: bool = False, trail: str = "",
+                 flat: bool = False, level: str = "BODY", parent=None):
         super().__init__(parent)
-        self.setObjectName("supportChoice")
+        self._flat = flat
+        if flat:
+            # Tighter, because these are index entries in a narrow column and
+            # ten of them have to be readable at once — the whole point of the
+            # column is that you can see the shape of the book without
+            # scrolling it.
+            self.PAD, self.PAD_Y = 9, 6
+        self._current = False
+        self.setObjectName("supportNavRow" if flat else "supportChoice")
         self.setCursor(Qt.PointingHandCursor)
         self.setAttribute(Qt.WA_Hover, True)
+        # Reachable, and visibly so. A row you can only get to with a mouse is
+        # not a control, and the focus ring is what the keyboard user reads as
+        # "this is the one Enter will open".
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName(label)
         # Height-for-width, declared. A word-wrapped QLabel knows how tall it
         # needs to be only once it knows how wide it is, and a layout will not
         # ask unless the size policy says to.
         policy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
         policy.setHeightForWidth(True)
         self.setSizePolicy(policy)
-        self.setStyleSheet(
-            f"QFrame#supportChoice {{ background: {theme.CARD};"
-            f"border: 1px solid {theme.DIVIDER};"
-            f"border-radius: {theme.R_CONTROL}px; }}"
-            f"QFrame#supportChoice:hover {{ border-color: {theme.ACCENT};"
-            f"background: {theme.ACCENT_RAMP[100]}; }}")
+        self._skin()
 
         row = QHBoxLayout(self)
         row.setContentsMargins(self.PAD, self.PAD_Y, self.PAD, self.PAD_Y)
@@ -284,20 +314,54 @@ class _Choice(QFrame):
         self._stack = stack = QVBoxLayout()
         stack.setContentsMargins(0, 0, 0, 0)
         stack.setSpacing(1)
-        title = QLabel(label)
-        title.setWordWrap(True)
-        title.setStyleSheet(
-            f"color: {theme.NEUTRAL[500] if muted else theme.NEUTRAL[800]};"
-            f"font-size: 13.5px; background: transparent;")
-        stack.addWidget(title)
+        stack.addWidget(C.label(
+            label, level=level, wrap=True,
+            colour=theme.NEUTRAL[500] if muted else ""))
         if blurb:
-            sub = QLabel(blurb)
-            sub.setObjectName("meta")
-            sub.setWordWrap(True)
-            sub.setStyleSheet("background: transparent;")
-            stack.addWidget(sub)
+            stack.addWidget(C.label(blurb, role="meta", wrap=True))
         row.addLayout(stack, stretch=1)
 
+        # The count on a topic row. Real — it is how many answers are on that
+        # shelf — and it is the thing that makes the column browsable rather
+        # than a list of names.
+        self._trail = 0
+        if trail:
+            tag = C.label(trail, role="meta")
+            tag.setAlignment(Qt.AlignTop | Qt.AlignRight)
+            self._trail = tag.sizeHint().width() + self.GAP
+            row.addWidget(tag, alignment=Qt.AlignTop)
+
+    # ── skin ──────────────────────────────────────────────────────────────
+    def _skin(self):
+        name = self.objectName()
+        if self._flat:
+            fill = theme.ACCENT_RAMP[100] if self._current else "transparent"
+            edge = theme.ACCENT_RAMP[300] if self._current else "transparent"
+            hover = theme.ACCENT_RAMP[100] if self._current else theme.WELL
+            self.setStyleSheet(
+                f"QFrame#{name} {{ background: {fill};"
+                f"border: 1px solid {edge};"
+                f"border-radius: {theme.R_CONTROL}px; }}"
+                f"QFrame#{name}:hover {{ background: {hover};"
+                f"border-color: {theme.ACCENT_RAMP[300]}; }}"
+                f"QFrame#{name}:focus {{ border-color: {theme.ACCENT}; }}")
+            return
+        self.setStyleSheet(
+            f"QFrame#{name} {{ background: {theme.CARD};"
+            f"border: 1px solid {theme.HAIRLINE};"
+            f"border-radius: {theme.R_CONTROL}px; }}"
+            f"QFrame#{name}:hover {{ border-color: {theme.ACCENT};"
+            f"background: {theme.ACCENT_RAMP[100]}; }}"
+            f"QFrame#{name}:focus {{ border-color: {theme.ACCENT};"
+            f"background: {theme.ACCENT_RAMP[100]}; }}")
+
+    def set_current(self, current: bool):
+        if current == self._current:
+            return
+        self._current = current
+        self._skin()
+
+    # ── geometry ──────────────────────────────────────────────────────────
     def hasHeightForWidth(self) -> bool:
         return True
 
@@ -306,15 +370,21 @@ class _Choice(QFrame):
 
         Asked of the TEXT COLUMN, not of the whole row: a QHBoxLayout answers
         heightForWidth by passing the full width to each child rather than
-        the share each will receive. The max with the plain sizeHint covers
-        single-line labels, whose bare-metrics heightForWidth comes up a
-        couple of pixels short and clipped every descender.
+        the share each will receive.
+
+        SLACK, and not `max(…, sizeHint().height())`, which is what this used
+        to take. A word-wrapped QLabel's sizeHint is not its height at any
+        particular width — it is Qt's guess at a pleasant wrap, and for a
+        sentence of forty characters that guess is two lines. Taking the max
+        therefore added a phantom line to every long question and left twenty
+        rows on this screen each carrying an inch of nothing. Two pixels
+        covers the real problem it was hiding: a single-line label's
+        bare-metrics height clips the descender on a "g".
         """
         inner = max(1, width - (2 * self.PAD) - (2 * self.BORDER)
-                    - self.ICON - self.GAP)
-        text = max(self._stack.heightForWidth(inner),
-                   self._stack.sizeHint().height())
-        return text + (2 * self.PAD_Y) + (2 * self.BORDER)
+                    - self.ICON - self.GAP - self._trail)
+        return (self._stack.heightForWidth(inner) + self.SLACK
+                + (2 * self.PAD_Y) + (2 * self.BORDER))
 
     def resizeEvent(self, event):
         """Pin the height to what this width actually needs. A size POLICY
@@ -325,6 +395,7 @@ class _Choice(QFrame):
         super().resizeEvent(event)
         self.setMinimumHeight(self.heightForWidth(self.width()))
 
+    # ── input ─────────────────────────────────────────────────────────────
     def mouseReleaseEvent(self, event):
         # Only a press and release both inside it counts, so dragging away to
         # change your mind works the way it does on every other control.
@@ -332,6 +403,12 @@ class _Choice(QFrame):
                 and self.rect().contains(event.position().toPoint())):
             self.clicked.emit()
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class _Steps(QFrame):
@@ -344,28 +421,23 @@ class _Steps(QFrame):
         self.setObjectName("supportSteps")
         self.setStyleSheet(
             f"QFrame#supportSteps {{ background: {theme.ACCENT_RAMP[100]};"
-            f"border: 1px solid {theme.DIVIDER};"
+            f"border: 1px solid {theme.ACCENT_RAMP[200]};"
             f"border-radius: {theme.R_CONTROL}px; }}")
         box = QVBoxLayout(self)
-        box.setContentsMargins(16, 13, 16, 13)
-        box.setSpacing(8)
-        box.addWidget(kicker(i18n.t("Try this")))
+        box.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
+                               theme.SPACE_4, theme.SPACE_3)
+        box.setSpacing(theme.SPACE_2)
+        box.addWidget(C.kicker(i18n.t("Try this")))
         for index, step in enumerate(steps, 1):
             row = QHBoxLayout()
-            row.setSpacing(10)
-            number = QLabel(str(index))
+            row.setSpacing(theme.SPACE_3 - 2)
+            number = C.label(str(index), level="BODY",
+                             colour=theme.ACCENT_RAMP[700], weight=700)
             number.setFixedWidth(16)
             number.setAlignment(Qt.AlignTop | Qt.AlignRight)
-            number.setStyleSheet(
-                f"color: {theme.ACCENT_RAMP[700]}; font-weight: 700;"
-                f"font-size: 13.5px; background: transparent;")
             row.addWidget(number)
-            body = QLabel(step)
-            body.setWordWrap(True)
+            body = C.label(step, level="BODY", wrap=True)
             body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            body.setStyleSheet(
-                f"color: {theme.NEUTRAL[800]}; font-size: 13.5px;"
-                " background: transparent;")
             row.addWidget(body, stretch=1)
             box.addLayout(row)
 
@@ -383,64 +455,52 @@ class _AnswerCard(QFrame):
         self.setObjectName("supportBot")
         self.setStyleSheet(
             f"QFrame#supportBot {{ background: {theme.CARD};"
-            f"border: 1px solid {theme.DIVIDER};"
+            f"border: 1px solid {theme.HAIRLINE};"
             f"border-radius: {theme.R_CARD}px; }}")
         answer = question.answer
         box = QVBoxLayout(self)
-        box.setContentsMargins(15, 13, 15, 13)
-        box.setSpacing(11)
+        box.setContentsMargins(theme.SPACE_4 - 1, theme.SPACE_3 + 1,
+                               theme.SPACE_4 - 1, theme.SPACE_3 + 1)
+        box.setSpacing(theme.SPACE_3 - 1)
+
+        topic = _TOPIC_OF.get(question.qid)
+        if topic:
+            box.addWidget(C.kicker(topic.label))
 
         if locked:
-            tag = QLabel(i18n.t("This part isn't in your licence — here's "
-                                "what it does anyway."))
-            tag.setObjectName("tagWarn")
-            tag.setWordWrap(True)
+            tag = C.label(i18n.t("This part isn't in your licence — here's "
+                                 "what it does anyway."), role="tagWarn",
+                          wrap=True)
             box.addWidget(tag, alignment=Qt.AlignLeft)
 
-        what = QLabel(answer.what)
-        what.setWordWrap(True)
+        what = C.label(answer.what, level="BODY", wrap=True)
         what.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        what.setStyleSheet(f"color: {theme.NEUTRAL[800]}; font-size: 13.5px;"
-                           " background: transparent;")
         box.addWidget(what)
 
         if answer.steps:
             box.addWidget(_Steps(answer.steps))
 
         if answer.note:
-            note = QLabel(answer.note)
-            note.setObjectName("meta")
-            note.setWordWrap(True)
-            note.setStyleSheet("background: transparent;")
-            box.addWidget(note)
+            box.addWidget(C.label(answer.note, role="meta", wrap=True))
 
         if answer.action:
-            go = QPushButton(i18n.t(answer.action_label or "Take me there"))
-            go.setObjectName("smallBtn")
-            go.setCursor(Qt.PointingHandCursor)
+            go = C.button(i18n.t(answer.action_label or "Take me there"),
+                          "secondary", "arrow-right", small=True)
             go.clicked.connect(
                 lambda _=False, key=answer.action: on_action(key))
             box.addWidget(go, alignment=Qt.AlignLeft)
 
-        rule = QFrame()
-        rule.setObjectName("hr")
-        rule.setFixedHeight(1)
-        box.addWidget(rule)
+        box.addWidget(C.hairline())
 
         self._verdict = QWidget()
         row = QHBoxLayout(self._verdict)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        ask = QLabel(i18n.t("Did that sort it?"))
-        ask.setStyleSheet(f"color: {theme.NEUTRAL[700]}; font-size: 13px;"
-                          " background: transparent;")
-        row.addWidget(ask)
+        row.setSpacing(theme.SPACE_2)
+        row.addWidget(C.label(i18n.t("Did that sort it?"), level="SUPPORT"))
         row.addStretch(1)
         for label, solved in ((i18n.t("Yes, thanks"), True),
                               (i18n.t("No, still stuck"), False)):
-            btn = QPushButton(label)
-            btn.setObjectName("smallBtn")
-            btn.setCursor(Qt.PointingHandCursor)
+            btn = C.button(label, "secondary", small=True)
             btn.clicked.connect(
                 lambda _=False, s=solved: self._answer(s, question.qid,
                                                        on_verdict))
@@ -455,11 +515,9 @@ class _AnswerCard(QFrame):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        said = QLabel(i18n.t("You said: that sorted it") if solved
-                      else i18n.t("You said: still stuck"))
-        said.setStyleSheet(f"color: {theme.NEUTRAL[500]}; font-size: 12px;"
-                           " background: transparent;")
-        layout.addWidget(said)
+        layout.addWidget(C.label(
+            i18n.t("You said: that sorted it") if solved
+            else i18n.t("You said: still stuck"), role="meta"))
         layout.addStretch(1)
         on_verdict(qid, solved)
 
@@ -477,9 +535,15 @@ class SupportPanel(QWidget):
 
     command_requested = Signal(str)
 
-    # Narrower than the report screens' 1120: this is a conversation, and a
-    # bubble stretched across a 27" monitor reads like a banner, not a reply.
-    MAX_W = 880
+    # The browse column. Fixed, because it is an index: a column that grows
+    # with the window would put the topic names on one line at 1920 and three
+    # at 1280, and the list would stop being scannable at either end.
+    NAV_W = 352
+    # How many of the most-pointed-at questions the thread opens on. Seven
+    # fills the conversation column at 1440x900 without the last one landing
+    # half-cut on the fold, which reads as a rendering fault rather than as
+    # "there is more below".
+    STARTERS = 7
 
     def __init__(self, cfg: dict | None = None, parent=None):
         super().__init__(parent)
@@ -489,45 +553,141 @@ class SupportPanel(QWidget):
         self._unsolved: list[str] = []      # ones that did not help
         self._log: list[tuple[str, str]] = []   # ("you"/"prism", text)
         self._live: list[QWidget] = []      # menus still pressable
+        self._nav_rows: dict[str, _Choice] = {}
         self._worker = None
         self._thinking: QWidget | None = None
         self._thinking_timer: QTimer | None = None
 
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(40, 32, 40, 20)
-        holder = QWidget()
-        holder.setMaximumWidth(self.MAX_W)
-        column = QVBoxLayout(holder)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.setSpacing(0)
-        outer.addWidget(holder, stretch=1)
-        outer.addStretch(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        head = QHBoxLayout()
-        head.setSpacing(10)
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        title = QLabel(i18n.t("Help & support"))
-        title.setObjectName("h2")
-        titles.addWidget(title)
-        self._blurb = QLabel(i18n.t(
-            "Start with the common questions — most things are answered in "
-            "one. If yours isn't, the assistant and our team open up."))
-        self._blurb.setWordWrap(True)
-        self._blurb.setStyleSheet(
-            f"font-size: 13px; color: {theme.NEUTRAL[600]};"
-            " background: transparent;")
-        titles.addWidget(self._blurb)
-        head.addLayout(titles, stretch=1)
-        self._restart = QPushButton(i18n.t("Start over"))
-        self._restart.setObjectName("smallBtn")
-        self._restart.setCursor(Qt.PointingHandCursor)
+        self._restart = C.button(i18n.t("Start over"), "secondary", small=True,
+                                 on_click=self._start_over)
         self._restart.setToolTip(i18n.t(
             "Clear this conversation and begin again"))
-        self._restart.clicked.connect(self._start_over)
-        head.addWidget(self._restart, alignment=Qt.AlignTop)
-        column.addLayout(head)
-        column.addSpacing(14)
+        self._head = C.PageHeader(
+            i18n.t("Help & support"),
+            i18n.t("{n} written answers, in plain English. Most things are "
+                   "sorted by one of them.").format(n=ANSWER_COUNT),
+            [self._restart])
+        root.addWidget(self._head)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(theme.PAGE_PAD, theme.PAGE_PAD,
+                                theme.PAGE_PAD, theme.PAGE_PAD)
+        body.setSpacing(theme.CARD_GAP)
+        body.addWidget(self._browse_column())
+        body.addWidget(self._talk_column(), stretch=1)
+        root.addLayout(body, stretch=1)
+
+        self._fill_nav()
+        self._greet()
+
+    # ── the book: search, then the shelves ────────────────────────────────
+    def _browse_column(self) -> QWidget:
+        """Search over every written answer, then the ten topics with the
+        number of answers on each. Fixed to the left of the conversation and
+        never retired, so nothing has to be re-opened to be looked at twice.
+        """
+        holder = QWidget()
+        holder.setFixedWidth(self.NAV_W)
+        col = QVBoxLayout(holder)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(theme.SPACE_3)
+
+        self._search = C.SearchField(i18n.t("Search the written answers"))
+        self._search.changed.connect(self._fill_nav)
+        col.addWidget(self._search)
+
+        card = C.Card()
+        inner = card.body((theme.SPACE_3, theme.SPACE_3,
+                           theme.SPACE_3, theme.SPACE_3), theme.SPACE_2)
+        head = QHBoxLayout()
+        head.setContentsMargins(theme.SPACE_1, 0, theme.SPACE_1, 0)
+        head.setSpacing(theme.SPACE_2)
+        self._nav_kicker = C.kicker(i18n.t("Browse by topic"))
+        head.addWidget(self._nav_kicker, stretch=1)
+        self._nav_count = C.meta(
+            i18n.t("{n} answers").format(n=ANSWER_COUNT))
+        head.addWidget(self._nav_count)
+        inner.addLayout(head)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        listing = QWidget()
+        listing.setStyleSheet("background: transparent;")
+        listing.setMinimumSize(1, 1)
+        self._nav_box = QVBoxLayout(listing)
+        self._nav_box.setContentsMargins(0, 0, theme.SPACE_1, 0)
+        self._nav_box.setSpacing(2)
+        scroll.setWidget(listing)
+        inner.addWidget(scroll, stretch=1)
+        col.addWidget(card, stretch=1)
+        return holder
+
+    def _fill_nav(self, query: str = ""):
+        """Redraw the column: the ten topics, or what a search matched."""
+        while self._nav_box.count():
+            item = self._nav_box.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+        self._nav_rows = {}
+        query = (query or "").strip()
+
+        if not query:
+            self._nav_kicker.setText(i18n.t("Browse by topic").upper())
+            self._nav_count.setText(
+                i18n.t("{n} answers").format(n=ANSWER_COUNT))
+            for topic in KB.TOPICS:
+                row = _Choice(topic.label, topic.icon, topic.blurb,
+                              trail=str(len(topic.questions)), flat=True,
+                              level="CARD_TITLE")
+                row.clicked.connect(
+                    lambda _=False, k=topic.key: self._pick_topic(k))
+                self._nav_box.addWidget(row)
+                self._nav_rows[topic.key] = row
+            self._nav_box.addStretch(1)
+            return
+
+        hits = _matching(query)
+        self._nav_kicker.setText(i18n.t("Matches").upper())
+        self._nav_count.setText(i18n.t("{n} of {total}").format(
+            n=len(hits), total=ANSWER_COUNT))
+        if not hits:
+            # Genuinely empty, so it centres in the height it has rather than
+            # leaving a hole under a one-line apology.
+            blank = C.EmptyState(
+                "search", i18n.t("Nothing here matches that"),
+                i18n.t("Try fewer words. Or ask it in your own words on the "
+                       "right — if we have no written answer, the assistant "
+                       "and our team open up straight away."))
+            self._nav_box.addWidget(blank, stretch=1)
+            return
+        for question in hits:
+            topic = _TOPIC_OF.get(question.qid)
+            row = _Choice(question.text, topic.icon if topic else "help",
+                          blurb=topic.label if topic else "", flat=True)
+            row.clicked.connect(
+                lambda _=False, qid=question.qid: self._show_answer(qid))
+            self._nav_box.addWidget(row)
+        self._nav_box.addStretch(1)
+
+    def _pick_topic(self, key: str):
+        for topic_key, row in self._nav_rows.items():
+            row.set_current(topic_key == key)
+        self._show_topic(key)
+
+    # ── the conversation ──────────────────────────────────────────────────
+    def _talk_column(self) -> QWidget:
+        holder = QWidget()
+        col = QVBoxLayout(holder)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -545,8 +705,8 @@ class SupportPanel(QWidget):
         # same calculation that places the bubbles.
         inner.setMinimumSize(1, 1)
         self._thread_box = QVBoxLayout(inner)
-        self._thread_box.setContentsMargins(0, 4, 10, 14)
-        self._thread_box.setSpacing(12)
+        self._thread_box.setContentsMargins(0, 0, theme.SPACE_3, theme.SPACE_4)
+        self._thread_box.setSpacing(theme.SPACE_3)
         self._thread_box.addStretch(1)
         scroll.setWidget(inner)
         self._scroll = scroll
@@ -560,12 +720,11 @@ class SupportPanel(QWidget):
         scroll.verticalScrollBar().rangeChanged.connect(
             lambda _lo, hi: self._follow
             and self._scroll.verticalScrollBar().setValue(hi))
-        column.addWidget(scroll, stretch=1)
+        col.addWidget(scroll, stretch=1)
 
-        column.addWidget(self._composer())
-        column.addWidget(self._escalation())
-
-        self._greet()
+        col.addWidget(self._composer())
+        col.addWidget(self._escalation())
+        return holder
 
     # ── chrome ────────────────────────────────────────────────────────────
     def _composer(self) -> QWidget:
@@ -573,21 +732,20 @@ class SupportPanel(QWidget):
         bar.setObjectName("supportComposer")
         bar.setStyleSheet(
             f"QFrame#supportComposer {{"
-            f"border-top: 1px solid {theme.DIVIDER}; }}")
+            f"border-top: 1px solid {theme.HAIRLINE}; }}")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 13, 0, 13)
-        row.setSpacing(9)
+        row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+        row.setSpacing(theme.SPACE_2 + 1)
         self._entry = QLineEdit()
         self._entry.setPlaceholderText(
             i18n.t("Or type your question in your own words…"))
         self._entry.setMinimumHeight(38)
+        self._entry.setAccessibleName(i18n.t("Your question"))
         self._entry.returnPressed.connect(self._on_typed)
         row.addWidget(self._entry, stretch=1)
-        self._send = QPushButton(i18n.t("Ask"))
-        self._send.setObjectName("primaryBtn")
-        self._send.setCursor(Qt.PointingHandCursor)
+        self._send = C.button(i18n.t("Ask"), "primary",
+                              on_click=self._on_typed)
         self._send.setMinimumHeight(38)
-        self._send.clicked.connect(self._on_typed)
         row.addWidget(self._send)
         return bar
 
@@ -596,25 +754,19 @@ class SupportPanel(QWidget):
         bar.setObjectName("supportFoot")
         bar.setStyleSheet(
             f"QFrame#supportFoot {{"
-            f"border-top: 1px solid {theme.DIVIDER}; }}")
+            f"border-top: 1px solid {theme.HAIRLINE}; }}")
         row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 11, 0, 0)
-        row.setSpacing(9)
-        self._foot_note = QLabel()
-        self._foot_note.setObjectName("meta")
-        self._foot_note.setWordWrap(True)
+        row.setContentsMargins(0, theme.SPACE_3 - 1, 0, 0)
+        row.setSpacing(theme.SPACE_2 + 1)
+        self._foot_note = C.label("", role="meta", wrap=True)
         row.addWidget(self._foot_note, stretch=1)
 
-        self._ai_btn = QPushButton(i18n.t(" Ask the assistant"))
-        self._ai_btn.setObjectName("smallBtn")
-        self._ai_btn.setCursor(Qt.PointingHandCursor)
-        self._ai_btn.clicked.connect(self._start_ai)
+        self._ai_btn = C.button(i18n.t(" Ask the assistant"), "secondary",
+                                small=True, on_click=self._start_ai)
         row.addWidget(self._ai_btn)
 
-        self._contact_btn = QPushButton(i18n.t(" Contact the team"))
-        self._contact_btn.setObjectName("smallBtn")
-        self._contact_btn.setCursor(Qt.PointingHandCursor)
-        self._contact_btn.clicked.connect(self._open_contact)
+        self._contact_btn = C.button(i18n.t(" Contact the team"), "secondary",
+                                     small=True, on_click=self._open_contact)
         row.addWidget(self._contact_btn)
 
         self._refresh_escalation()
@@ -685,7 +837,8 @@ class SupportPanel(QWidget):
         pick is already echoed as their own bubble, so nothing readable is
         lost — what goes is the wall of buttons that made the first version
         read as a form that kept growing, and the stale-click fork risk that
-        comes with it.
+        comes with it. The browse column is not a menu in this sense: it is
+        an index, it never posted anything into the thread, and it stays.
         """
         for group in self._live:
             self._thread_box.removeWidget(group)
@@ -693,19 +846,26 @@ class SupportPanel(QWidget):
             group.deleteLater()
         self._live = []
 
-    def _options(self, buttons: list, scroll: bool = True,
-                 chips: bool = False):
+    def _options(self, buttons: list, scroll: bool = True, header: str = "",
+                 note: str = ""):
         holder = QWidget()
         holder.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        if chips:
-            box = _FlowLayout(holder)
-        else:
-            box = QVBoxLayout(holder)
-            box.setContentsMargins(0, 0, 0, 0)
-            box.setSpacing(6)
+        box = QVBoxLayout(holder)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(theme.SPACE_2 - 2)
+        if header:
+            box.addWidget(C.kicker(header))
+            if note:
+                box.addWidget(C.label(note, role="meta", wrap=True))
+            box.addSpacing(2)
         for btn in buttons:
-            box.addWidget(btn)
-        row = _wrap(holder, mine=False)
+            # A chip keeps its own width; a question row is a sentence and
+            # takes the column.
+            if isinstance(btn, QPushButton):
+                box.addWidget(btn, alignment=Qt.AlignLeft)
+            else:
+                box.addWidget(btn)
+        row = _wrap(holder, mine=False, full=True)
         self._live.append(row)
         self._say(row, scroll=scroll)
         return holder
@@ -717,19 +877,31 @@ class SupportPanel(QWidget):
             "Hello. I can answer most questions about Prism straight away.")))
         self._say(_bubble(i18n.t(
             "Hello. I can answer most questions about Prism straight away."
-            "\n\nPick the topic that is closest, or type your question at "
-            "the bottom in your own words."), mine=False), scroll=False)
-        self._show_topics(scroll=False)
+            "\n\nPick one of these, browse the topics on the left, or type "
+            "your question at the bottom in your own words."), mine=False),
+            scroll=False)
+        self._show_starters(scroll=False)
         self._entry.setFocus()
 
-    def _show_topics(self, scroll: bool = True):
-        chips = []
-        for topic in KB.TOPICS:
-            btn = _chip(topic.label, topic.icon, topic.blurb)
-            btn.clicked.connect(
-                lambda _=False, k=topic.key: self._show_topic(k))
-            chips.append(btn)
-        self._options(chips, scroll=scroll, chips=True)
+    def _show_starters(self, scroll: bool = True):
+        """Open on real questions rather than on a row of topic names.
+
+        These are not a guess at what is popular — see `_most_pointed_at`.
+        They are the answers the rest of the written material keeps handing
+        people to, which is the closest thing the book has to a well-worn
+        page, and every one of them is one press from being read.
+        """
+        rows = []
+        for question in _most_pointed_at(self.STARTERS):
+            topic = _TOPIC_OF.get(question.qid)
+            row = _Choice(question.text, "chevron-right",
+                          blurb=topic.label if topic else "")
+            row.clicked.connect(
+                lambda _=False, qid=question.qid: self._show_answer(qid))
+            rows.append(row)
+        self._options(rows, scroll=scroll, header=i18n.t("Common questions"),
+                      note=i18n.t("The ones the rest of the help points back "
+                                  "at most often."))
 
     def _show_topic(self, key: str):
         topic = KB.topic(key)
@@ -744,14 +916,14 @@ class SupportPanel(QWidget):
             btn.clicked.connect(
                 lambda _=False, q=question.qid: self._show_answer(q))
             buttons.append(btn)
-        back = _chip(i18n.t("All the topics"), "chevron-left")
-        back.clicked.connect(lambda: self._back_to_topics())
+        back = _chip(i18n.t("Back to the common questions"), "chevron-left")
+        back.clicked.connect(lambda: self._back_to_start())
         self._options(buttons)
         self._options([back])
 
-    def _back_to_topics(self):
+    def _back_to_start(self):
         self._retire_menus()
-        self._show_topics()
+        self._show_starters()
 
     def _show_answer(self, qid: str):
         question = KB.question(qid)
@@ -783,7 +955,7 @@ class SupportPanel(QWidget):
         if solved:
             self._bot(i18n.t("Good — glad that was all it was."))
             again = _chip(i18n.t("Ask about something else"), "help")
-            again.clicked.connect(lambda: self._back_to_topics())
+            again.clicked.connect(lambda: self._back_to_start())
             self._options([again])
             return
 
@@ -872,7 +1044,7 @@ class SupportPanel(QWidget):
         self._stage = "ai"
         self._entry.setPlaceholderText(
             i18n.t("Tell the assistant what's happening…"))
-        self._blurb.setText(i18n.t(
+        self._head.set_subtitle(i18n.t(
             "The assistant answers from Prism's own help. If it doesn't know, "
             "it will say so — then use Contact the team."))
         self._refresh_escalation()
@@ -949,13 +1121,12 @@ class SupportPanel(QWidget):
         frame.setObjectName("supportBot")
         frame.setStyleSheet(
             f"QFrame#supportBot {{ background: {theme.CARD};"
-            f"border: 1px solid {theme.DIVIDER};"
+            f"border: 1px solid {theme.HAIRLINE};"
             f"border-radius: {theme.R_CARD}px; }}")
         box = QVBoxLayout(frame)
-        box.setContentsMargins(15, 12, 15, 12)
-        label = QLabel()
-        label.setStyleSheet(f"color: {theme.NEUTRAL[600]}; font-size: 13.5px;"
-                            " background: transparent;")
+        box.setContentsMargins(theme.SPACE_4 - 1, theme.SPACE_3,
+                               theme.SPACE_4 - 1, theme.SPACE_3)
+        label = C.label("", level="BODY", colour=theme.NEUTRAL[600])
         box.addWidget(label)
         base = i18n.t("Thinking")
         ticks = {"count": 0}
@@ -1045,9 +1216,11 @@ class SupportPanel(QWidget):
         self._entry.clear()
         self._entry.setPlaceholderText(
             i18n.t("Or type your question in your own words…"))
-        self._blurb.setText(i18n.t(
-            "Start with the common questions — most things are answered in "
-            "one. If yours isn't, the assistant and our team open up."))
+        self._head.set_subtitle(i18n.t(
+            "{n} written answers, in plain English. Most things are sorted "
+            "by one of them.").format(n=ANSWER_COUNT))
+        self._search.clear()                     # also redraws the column
+        self._fill_nav()
         self._refresh_escalation()
         self._greet()
 

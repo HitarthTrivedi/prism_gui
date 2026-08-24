@@ -19,10 +19,13 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import i18n
 import identity
 import roles as R
 import theme
 import workspace
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import heading, kicker
@@ -118,23 +121,17 @@ def _role_chip(me: dict) -> QLabel:
     return chip
 
 
-class HistoryDialog(QDialog):
+class HistoryDialog(PrismDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Run history"),
+            i18n.t("Every run, re-rendered from its own record."),
+            icon="clock", parent=parent)
         self.setWindowTitle("Run history")
-        self.resize(940, 640)
+        self.resize(960, 660)
         self.setMinimumSize(720, 480)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 20, 22, 18)
-        root.setSpacing(14)
-
-        head = QHBoxLayout()
-        head.setSpacing(9)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("clock", 20, theme.ACCENT))
-        head.addWidget(glyph)
-        head.addWidget(heading("Run history"), stretch=1)
+        root = self.body
 
         # Whose history is on screen. An owner or manager gets a picker over
         # everyone in the workspace; everybody else gets nothing at all — not
@@ -152,11 +149,11 @@ class HistoryDialog(QDialog):
             for person in self._people:
                 self.who.addItem(_person_label(person), person["mid"])
             self.who.currentIndexChanged.connect(self._switch_person)
-            head.addWidget(QLabel("Showing"))
-            head.addWidget(self.who)
+            self.who.setMinimumHeight(C.MIN_TARGET)
+            self.header.add_action(C.label(i18n.t("Showing"), role="meta"))
+            self.header.add_action(self.who)
         elif R.label(self._me.get("role", "")):
-            head.addWidget(_role_chip(self._me))
-        root.addLayout(head)
+            self.header.add_action(_role_chip(self._me))
 
         split = QSplitter(Qt.Horizontal)
 
@@ -187,13 +184,10 @@ class HistoryDialog(QDialog):
         split.setSizes([280, 620])
         root.addWidget(split, stretch=1)
 
-        footer = QHBoxLayout()
-        footer.addStretch(1)
-        close = QPushButton("Close")
-        close.setCursor(Qt.PointingHandCursor)
-        close.clicked.connect(self.accept)
-        footer.addWidget(close)
-        root.addLayout(footer)
+        # accept(), not reject() — History has always closed with Accepted and
+        # a caller may be reading that.
+        self.footer.add_secondary(
+            self.button(i18n.t("Close"), on_click=self.accept))
 
         self._load()
 
@@ -261,7 +255,8 @@ class HistoryDialog(QDialog):
                 record = json.load(f)
         except Exception as e:
             self.view.setHtml(self._page(
-                f"<p style='color:#8a2f2f'>Couldn't read {os.path.basename(path)}: "
+                f"<p style='color:{theme.ERR_INK}'>Couldn't read "
+                f"{os.path.basename(path)}: "
                 f"{e}</p>"))
             return
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
@@ -301,7 +296,8 @@ class HistoryDialog(QDialog):
         if record.get("error"):
             parts.append(
                 f"<table width='100%' cellspacing='0' cellpadding='10'"
-                f"><tr><td bgcolor='#fdeeee'><span style='color:#8a2f2f'>"
+                f"><tr><td bgcolor='{theme.ERR_BG}'>"
+                f"<span style='color:{theme.ERR_INK}'>"
                 f"This run stopped early — {_esc(record['error'])}</span>"
                 f"</td></tr></table>")
         # /email runs carry a block the plain-run renderer knows nothing about —

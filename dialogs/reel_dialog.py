@@ -16,22 +16,32 @@ import subprocess
 import sys
 import time
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit,
-    QMessageBox, QProgressBar, QRadioButton, QButtonGroup,
+    QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QPlainTextEdit, QMessageBox, QProgressBar, QRadioButton, QButtonGroup,
 )
 
 import core_bridge as CB
+import i18n
+import theme
 import wakeword
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from workers import AutomationWorker, RecordWorker, ReelWorker
 from widgets.ask_panel import AskPanel
 
 
-class ReelDialog(QDialog):
+class ReelDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Make a Reel"),
+            i18n.t("A finished 9:16 video, drawn frame by frame on this "
+                   "machine. No watermark and no daily cap."),
+            icon="video", parent=parent, closable=False)
         self.setWindowTitle("Make a Reel")
-        self.resize(720, 640)
+        self.resize(780, 700)
+        self.setMinimumSize(620, 620)
         self.cfg = cfg
         self.reel = CB.get_reel()
 
@@ -42,10 +52,15 @@ class ReelDialog(QDialog):
         self._worker = None
         self._rec = None
 
-        root = QVBoxLayout(self)
+        # The base class owns the header and footer; `root` is its body column.
+        root = self.body
+        # A stacked form, not a grid of cards: the 16px card gutter
+        # between every row of a single column is what turns a short
+        # form into a tall one with bands of canvas through it.
+        root.setSpacing(theme.ROW_GAP)
 
         title = QLabel("What should the reel be about?")
-        title.setObjectName("h2")
+        title.setObjectName("h4")
         root.addWidget(title)
 
         self.ask = AskPanel(
@@ -78,12 +93,37 @@ class ReelDialog(QDialog):
         if not studio_ok:
             self.studio_btn.setEnabled(False)
             self.studio_btn.setToolTip(studio_why)
+        # Two loose radio buttons under a prompt read as stray options. They
+        # are a real choice between two renderers, so they get a titled well
+        # that says so — and each one clears the 28px target.
+        choice = QFrame()
+        choice.setObjectName("renderChoice")
+        choice.setAttribute(Qt.WA_StyledBackground, True)
+        choice.setStyleSheet(
+            f"#renderChoice {{ background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
+        choice_col = QVBoxLayout(choice)
+        choice_col.setContentsMargins(theme.SPACE_3, theme.SPACE_3,
+                                      theme.SPACE_3, theme.SPACE_3)
+        choice_col.setSpacing(theme.SPACE_2)
+        choice_col.addWidget(C.kicker(i18n.t("How it is made"), muted=True))
         for b in (self.studio_btn, self.reel_btn):
-            root.addWidget(b)
+            b.setMinimumHeight(C.MIN_TARGET)
+            b.setCursor(Qt.PointingHandCursor)
+            choice_col.addWidget(b)
+        root.addWidget(choice)
 
+        # A measured result ("your brand colours came off this logo"), not a
+        # placeholder, so it stops wearing the dashed empty-state box.
         self.brand_label = QLabel("")
-        self.brand_label.setObjectName("emptyState")
         self.brand_label.setWordWrap(True)
+        self.brand_label.setVisible(False)
+        self.brand_label.setStyleSheet(
+            f"color: {theme.OK_INK}; background: {theme.OK_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px;"
+            f" font-size: 13px;")
         root.addWidget(self.brand_label)
 
         self.progress = QProgressBar()
@@ -101,25 +141,21 @@ class ReelDialog(QDialog):
         self.script_view.setMinimumHeight(150)
         root.addWidget(self.script_view, stretch=1)
 
-        btns = QHBoxLayout()
-        self.play_btn = QPushButton("Play")
+        self.play_btn = self.button(i18n.t("Play"), "secondary",
+                                    icon_name="play", small=True,
+                                    on_click=self._play)
         self.play_btn.setEnabled(False)
-        self.play_btn.clicked.connect(self._play)
-        btns.addWidget(self.play_btn)
-        self.folder_btn = QPushButton("Show file")
+        self.footer.add_utility(self.play_btn)
+        self.folder_btn = self.button(i18n.t("Show file"), "secondary",
+                                      icon_name="folder", small=True,
+                                      on_click=self._reveal)
         self.folder_btn.setEnabled(False)
-        self.folder_btn.clicked.connect(self._reveal)
-        btns.addWidget(self.folder_btn)
-        btns.addStretch(1)
-        close = QPushButton("Close")
-        close.clicked.connect(self.reject)
-        btns.addWidget(close)
-        self.run_btn = QPushButton("Make my reel")
-        self.run_btn.setObjectName("primary")
-        self.run_btn.setDefault(True)
-        self.run_btn.clicked.connect(self._run)
-        btns.addWidget(self.run_btn)
-        root.addLayout(btns)
+        self.footer.add_utility(self.folder_btn)
+        self.footer.add_secondary(
+            self.button(i18n.t("Close"), on_click=self.reject))
+        self.run_btn = self.button(i18n.t("Make my reel"), "primary",
+                                   icon_name="video", on_click=self._run)
+        self.footer.set_primary(self.run_btn)
 
         if attachments:
             self._absorb([a["path"] for a in attachments])
@@ -150,6 +186,10 @@ class ReelDialog(QDialog):
                 f"Brand colours read from {', '.join(i['name'] for i in self.images)} — "
                 f"accent {self.brand.get('accent')}, deep {self.brand.get('deep')}. "
                 "Measured from the artwork, not guessed.")
+            # Hidden until there is something to say — an empty tinted strip
+            # under the prompt is a slot waiting to be filled, which is what
+            # the dashed placeholder version of this always looked like.
+            self.brand_label.setVisible(True)
 
     def _toggle_record(self):
         if self._rec:

@@ -13,24 +13,26 @@ import os
 import i18n
 import paths
 import theme
+from dialogs.base import PrismDialog
+from widgets import controls as C
 from widgets import icons
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import Chip, heading
 from widgets.markdown import render_markdown
 
 
-class StageResultDialog(QDialog):
+class StageResultDialog(PrismDialog):
     """One step's full output, popped out into its own window."""
 
     def __init__(self, stage: str, agent: str, text: str, url: str, parent=None,
                  unfinished: bool = False):
-        super().__init__(parent)
-        _, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
+        icon_name, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
+        super().__init__(title, agent, icon=icon_name, parent=parent,
+                         closable=False)
         self.setWindowTitle(f"{title} · {agent}")
-        self.resize(680, 520)
-        root = QVBoxLayout(self)
-        root.setSpacing(11)
-        root.addWidget(heading(title))
+        self.resize(720, 560)
+        root = self.body
+        root.setSpacing(theme.SPACE_3)
         if paths.is_local_result(url):
             # A file, not a tab — an <a href> to a bare path opens nothing, so
             # this step's result used to be unreachable from here.
@@ -77,15 +79,12 @@ class StageResultDialog(QDialog):
         else:
             body.setPlainText("(no response text captured)")
         root.addWidget(body)
-        row = QHBoxLayout()
-        copy_btn = QPushButton(" Copy")
-        copy_btn.setObjectName("smallBtn")
-        icons.button_icon(copy_btn, "copy", 14, theme.TEXT)
-        copy_btn.clicked.connect(
-            lambda: QApplication.clipboard().setText(text or body.toPlainText()))
-        row.addWidget(copy_btn)
-        row.addStretch(1)
-        root.addLayout(row)
+        self.footer.add_utility(self.button(
+            i18n.t("Copy"), "secondary", icon_name="copy", small=True,
+            on_click=lambda: QApplication.clipboard().setText(
+                text or body.toPlainText())))
+        self.footer.set_primary(
+            self.button(i18n.t("Close"), "primary", on_click=self.accept))
 
 
 class _StageRow(QFrame):
@@ -196,7 +195,7 @@ class _TaskHeader(QFrame):
         box.addWidget(used)
 
 
-class CompletionDialog(QDialog):
+class CompletionDialog(PrismDialog):
     """Shown when the work finishes.
 
     `task_groups` turns this into the multi-task view: a heading per queued
@@ -207,21 +206,23 @@ class CompletionDialog(QDialog):
 
     def __init__(self, stage_infos: list[dict], parent=None,
                  task_groups: list[dict] | None = None):
-        super().__init__(parent)
         multi = bool(task_groups and len(task_groups) > 1)
+        # theme.OK, not theme.ACCENT. "Finished" is a success state, and the
+        # accent rotates with the role — this tick was the same hue as every
+        # neutral chrome element in a blue profile and would have been the
+        # same hue as a "failed" cue in a red one.
+        pad = C.IconPad("check", theme.OK, 38, theme.R_CONTROL, 19)
+        super().__init__(i18n.t("Prism finished the work"), parent=parent,
+                         leading=pad, closable=False)
         self.setWindowTitle("All done")
-        self.resize(620, 560 if multi else 460)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(22, 20, 22, 18)
-        outer.setSpacing(13)
-
-        head = QHBoxLayout()
-        head.setSpacing(9)
-        mark = QLabel()
-        mark.setPixmap(icons.pixmap("check", 20, theme.ACCENT))
-        head.addWidget(mark)
-        head.addWidget(heading("Prism finished the work"), stretch=1)
-        outer.addLayout(head)
+        # Sized to what a single task actually produces. The old 460/560 pair
+        # predated the header and footer bands; 520 left a band of bare canvas
+        # under a three-step run, which reads as "something else was meant to
+        # be here" on the one screen whose whole job is to say the work is
+        # finished.
+        self.resize(720, 620 if multi else 470)
+        outer = self.body
+        outer.setSpacing(theme.SPACE_3)
 
         rows = task_groups if multi else [{"stages": stage_infos}]
         every = [s for g in rows for s in g.get("stages", [])]
@@ -236,10 +237,7 @@ class CompletionDialog(QDialog):
             lead += (f" {len(pending)} step(s) ran past Prism's wait — their "
                      "tools are still working, so open those links to collect "
                      "the finished result.")
-        sub = QLabel(lead)
-        sub.setObjectName("meta")
-        sub.setWordWrap(True)
-        outer.addWidget(sub)
+        self.header.set_subtitle(lead)
 
         # A ten-task run is far taller than any screen, so the body scrolls.
         body_host = QWidget()
@@ -259,8 +257,7 @@ class CompletionDialog(QDialog):
         scroll.setWidget(body_host)
         outer.addWidget(scroll, stretch=1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        buttons.button(QDialogButtonBox.Close).clicked.connect(self.accept)
-        outer.addWidget(buttons)
+        # Same result as the QDialogButtonBox it replaces — Close called
+        # accept(), not reject() — without Qt's platform icons riding along.
+        self.footer.set_primary(
+            self.button(i18n.t("Close"), "primary", on_click=self.accept))

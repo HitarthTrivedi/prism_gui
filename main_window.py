@@ -300,10 +300,33 @@ class MainWindow(QMainWindow):
         self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
         self.settings_panel.edit_requested.connect(self._open_setup)
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
+        # The four screens the rail used to spend a row each on.
+        self.settings_panel.navigate.connect(self._handle_command)
+        self.settings_panel.tour_requested.connect(self._start_tour)
+        self.settings_panel.rename_requested.connect(self._ask_display_name)
+        # Releasing this computer's seat happens on the Settings screen now
+        # (the danger group at the foot of the Licence section). The rail's
+        # padlocks and the licence banner are drawn from licensing.state(), so
+        # they have to be told rather than waiting for the ten-minute timer to
+        # notice the licence has gone.
+        self.settings_panel.licence_changed.connect(self.refresh_licence_ui)
         self.history_panel.open_run.connect(self._open_run_record)
+        # A recent-activity row on Home opens the run it names, through the
+        # same handler History uses — same record, same viewer.
+        self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(self._open_email_dialog)
+        # The screens that now offer a way onward. Same pattern as
+        # settings_panel.navigate — the payload is a _handle_command key, so
+        # every screen reaches every other through the one router rather than
+        # each learning about the others.
+        self.catalog_panel.navigate.connect(self._handle_command)
+        self.history_panel.navigate.connect(self._handle_command)
+        self.guide_panel.navigate.connect(self._handle_command)
+        for panel in (self.boq_panel, self.gerber_panel, self.email_panel):
+            panel.navigate.connect(self._handle_command)
+            panel.open_run.connect(self._open_run_record)
         # "Open →" on an active-run card goes to the run itself, not a blank
         # bench — the run is already on the workbench's RUNNING page.
         self.home_panel.open_run.connect(lambda: self._show_screen("workbench"))
@@ -349,7 +372,16 @@ class MainWindow(QMainWindow):
             # copy taken at launch would miss a key they saved thirty seconds
             # ago — which is exactly when somebody opens the help screen.
             self.support_panel.cfg = self.cfg
-        self.sidebar.set_current("home" if index == HOME else "")
+        # The rail highlights the screen we actually landed on, not the name we
+        # were asked for — an unknown key falls back to HOME above. Before
+        # this, every screen but Home passed "", which set_current() ignored,
+        # so the rail sat permanently lit on Home wherever you actually were:
+        # the app could never tell you where you are.
+        self.sidebar.set_current({
+            HOME: "home", WORKBENCH: "workbench", INQUIRY: "inquiry",
+            SETTINGS: "config", GUIDE: "guide", CATALOG: "catalog",
+            HISTORY: "runs", BOQ: "boq", EMAIL: "email",
+            SUPPORT: "support", GERBER: "gerber"}.get(index, "home"))
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
@@ -381,7 +413,9 @@ class MainWindow(QMainWindow):
         Called at startup and after any licence change."""
         state = licensing.state()
         self.sidebar.set_entitlements(state.features, state.usable)
-        self.sidebar.set_plan(*self._plan_summary(state))
+        title, detail = self._plan_summary(state)
+        self.sidebar.set_plan(title, detail, state.usable)
+        self.sidebar.set_profile(identity.display_name(self.cfg))
         if state.usable:
             self.statusBar().showMessage("Ready.")
         else:
@@ -393,7 +427,7 @@ class MainWindow(QMainWindow):
             # shared folder, so their manager cannot see it.
             offline = workspace.unreachable(self.cfg)
             if offline:
-                self._show_banner(offline, "#8a5a2f", "alert")
+                self._show_banner(offline, theme.WARN_INK, "alert")
             else:
                 self.banner.setVisible(False)
             return
@@ -410,11 +444,11 @@ class MainWindow(QMainWindow):
                     f"about {days} more day{'s' if days != 1 else ''} — check "
                     f"this computer's internet connection.")
         elif state.status == licensing.TAMPERED:
-            tone, icon_name = "#8a2f2f", "lock"
+            tone, icon_name = theme.ERR_INK, "lock"
             text = (state.message
                     or "Prism can't verify this computer's licence.")
         else:                                   # EXPIRED or NONE
-            tone, icon_name = "#8a2f2f", "lock"
+            tone, icon_name = theme.ERR_INK, "lock"
             text = ("Your licence has ended. History and everything you've "
                     "already made are still here — new runs are paused until "
                     "it's renewed.")
@@ -469,8 +503,18 @@ class MainWindow(QMainWindow):
         compose.setContentsMargins(0, 0, 0, 0)
         compose.setSpacing(18)
         compose.addWidget(self.input_panel)
-        compose.addWidget(self.agents_panel)
-        compose.addStretch(1)
+        # THE void. This used to be `addWidget(agents_panel)` followed by
+        # `addStretch(1)`, and that stretch was the single biggest piece of
+        # dead space in the product: both panels sat at stretch 0, so the
+        # stretch item absorbed every spare pixel of window height into one
+        # grey band — sitting exactly between the plan and its own Start
+        # button, which is pinned to the foot of the column below it.
+        #
+        # Giving the height to the plan instead is the whole fix. AgentsPanel
+        # is Expanding and keeps exactly one stretch-1 item of its own: the
+        # centring empty state when there is no plan, an inert tail spacer
+        # when there is.
+        compose.addWidget(self.agents_panel, stretch=1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -487,7 +531,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(40, 32, 40, 32)
         layout.setSpacing(20)
         layout.addLayout(self._workbench_header())
-        layout.addWidget(self.work_stack)
+        layout.addWidget(self.work_stack, stretch=1)
         # Lifted out of the scrolling column and pinned to its foot. Prism's
         # full pipeline is nine stages, and with nine plan cards on screen
         # "Start the work" sat well below the fold — the one action the screen
@@ -540,13 +584,39 @@ class MainWindow(QMainWindow):
         self._set_stage("describe")
         return row
 
+    def _ask_display_name(self):
+        """Let a solo copy say who it belongs to.
+
+        Stored in config rather than in the licence store, because it is a
+        preference and not a claim: a member whose name arrives inside a signed
+        designation key keeps that one, and identity.display_name() prefers it.
+        """
+        from PySide6.QtWidgets import QInputDialog
+        current = identity.display_name(self.cfg)
+        name, ok = QInputDialog.getText(
+            self, i18n.t("Your name"),
+            i18n.t("What should Prism call you? This appears on the rail and "
+                   "on Home, and stays on this computer."),
+            text=current)
+        if not ok:
+            return
+        self.cfg["display_name"] = (name or "").strip()
+        CB.config.save(self.cfg)
+        self.sidebar.set_profile(identity.display_name(self.cfg))
+        self.settings_panel.cfg = self.cfg
+        self.settings_panel.refresh()
+        self.home_panel.refresh()
+
     def _start_tour(self):
         """Run the six-step tour, from Home so every step has something to
         point at. Created lazily — most sessions never ask for it."""
         self._show_screen("home")
         if getattr(self, "_tour", None) is None:
             self._tour = TourOverlay(self)
-        self._tour.start()
+        # restart(), not start(): tour_requested only fires on a
+        # deliberate click from Settings, and someone asking for the
+        # tour again wants the tour, not the two steps they had left.
+        self._tour.restart()
 
     def _push_active_run(self, stage: str, agent: str):
         """Mirror the live run onto Home's Active runs section.
@@ -1447,7 +1517,8 @@ class MainWindow(QMainWindow):
         self.routing = routing
         agents_cfg = CB.config.active_agents(self.cfg)
         self.prompt_panel.set_content(self._last_query, routing, agents_cfg)
-        self.agents_panel.set_content(routing, agents_cfg)
+        self.agents_panel.set_content(routing, agents_cfg, self._last_query)
+        self.agents_panel.set_attachment_count(len(self.attachments))
         self.work_stack.setCurrentIndex(COMPOSE)
         # Tasks 2..n were authorised by the same "Start the work" press as
         # task 1 — stopping to ask again for each would defeat the point of
@@ -1494,6 +1565,13 @@ class MainWindow(QMainWindow):
         # screen. From here every later task plans and runs without stopping.
         self._auto_run = True
         run_agents = self.agents_panel.selected_agents()
+        # The ordered form of the same plan. A dict keyed by stage cannot
+        # express order, and cannot hold the same stage twice — which is why
+        # reordering, duplicating and editing a step's prompt could never
+        # reach the engine, even though automation.run() has taken an ordered
+        # (label, agent, questions) list all along. Both are kept: everything
+        # that only needs "which tool ran what" still reads the dict.
+        run_steps = self.agents_panel.selected_steps()
         if not run_agents:
             QMessageBox.information(self, "Run", "Every step is switched off — "
                                                  "turn at least one back on.")
@@ -1523,6 +1601,9 @@ class MainWindow(QMainWindow):
                 return
             run_agents = {stage: name for stage, name in run_agents.items()
                           if stage not in locked}
+            # The same filter on the ordered list, or a step dropped for want
+            # of an entitlement would still run.
+            run_steps = [s for s in run_steps if s[1] not in set(locked.values())]
             if not run_agents:
                 QMessageBox.information(
                     self, "Run", "Every step here needs an add-on that "
@@ -1543,6 +1624,9 @@ class MainWindow(QMainWindow):
                     return
                 run_agents = {k: ("Prism Reel" if v == "Prism Studio" else v)
                               for k, v in run_agents.items()}
+                run_steps = [(label, "Prism Reel" if agent == "Prism Studio"
+                              else agent, questions)
+                             for label, agent, questions in run_steps]
 
         # Ask the licence server, live, before committing to the run. This is
         # the ONLY place a run is authorised — never again once it is moving,
@@ -1552,11 +1636,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Checking your licence…")
         auth_worker = AuthorizeWorker("core", "run")
         auth_worker.done.connect(
-            lambda result: self._start_run(result, run_agents))
+            lambda result: self._start_run(result, run_agents, run_steps))
         self._workers.append(auth_worker)
         auth_worker.start()
 
-    def _start_run(self, auth, run_agents: dict):
+    def _start_run(self, auth, run_agents: dict, run_steps: list = None):
         """Second half of _run_pipeline, once the server has said yes."""
         self.statusBar().clearMessage()
         if not auth.allowed:
@@ -1572,6 +1656,15 @@ class MainWindow(QMainWindow):
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
+        # Seed the timeline with the whole plan before anything runs, rather
+        # than growing it a card at a time. Three things depend on it: the
+        # steps still to come stay on screen instead of the run looking like
+        # it is only ever one step long, the header can say "Step 3 of 7",
+        # and "Queued" becomes reachable at all — the state was written long
+        # ago and could never be seen, because a card was only ever built at
+        # the moment its stage started.
+        self.output_panel.set_plan(run_agents)
+        self.output_panel.set_task(getattr(self, "_last_query", ""))
         self._stage_agents = {}
         self._stage_results = []
         self.input_panel.set_state("running")
@@ -1580,7 +1673,8 @@ class MainWindow(QMainWindow):
         self.output_panel.set_finished(False)
         self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
-        worker = AutomationWorker(self.routing, cfg_for_run, self.attachments, self._last_query)
+        worker = AutomationWorker(self.routing, cfg_for_run, self.attachments,
+                                  self._last_query, custom_stages=run_steps)
         # Hold the machine awake for the duration. A run is tens of minutes
         # and the whole promise is that you walk away — a laptop that sleeps
         # halfway through takes the browser session with it.
@@ -1636,12 +1730,18 @@ class MainWindow(QMainWindow):
                 if done else
                 i18n.t("The browser window was closed before anything ran."),
                 12000)
+            # The engine sends the underlying error and this used to drop it,
+            # leaving the card that was in flight saying "Working…" for ever.
+            self.output_panel.browser_lost(stage, payload.get("error", ""), done)
             return
         if kind == "cancelled":
             done = payload.get("done", 0)
             self.statusBar().showMessage(
                 f"Stopped. {done} step{'s' if done != 1 else ''} finished and "
                 f"kept." if done else "Stopped before anything ran.", 8000)
+            # Same again: a status-bar line lasts eight seconds, and without
+            # this the stopped step kept its clock ticking indefinitely.
+            self.output_panel.run_cancelled(stage, done)
             return
         if kind == "stage_start":
             agent = payload.get("agent", "")
@@ -1654,7 +1754,17 @@ class MainWindow(QMainWindow):
             texts = payload.get("texts") or []
             url = payload.get("url", "")
             timed_out = bool(payload.get("timed_out"))
-            self.output_panel.stage_done(stage, texts, url, timed_out)
+            # `blocked` is the engine's own plain-English reason a step came
+            # back empty — "out of credit", "sign-in wall", "the site changed
+            # its markup". It was computed on every empty result and thrown
+            # away here, which is why an out-of-credit step and a genuinely
+            # broken one looked identical.
+            self.output_panel.stage_done(
+                stage, texts, url, timed_out,
+                blocked=payload.get("blocked") or "",
+                exhausted=bool(payload.get("exhausted")),
+                count=payload.get("count"),
+                snippet=payload.get("snippet", ""))
             if texts:
                 snippet = (texts[0][:150] + "…") if len(texts[0]) > 150 else texts[0]
             elif timed_out:
@@ -1685,12 +1795,24 @@ class MainWindow(QMainWindow):
                 i18n.t("{failed} {why} — trying {agent} instead…")
                 .replace("{failed}", failed).replace("{why}", why)
                 .replace("{agent}", agent), 15000)
-            self.output_panel.stage_started(stage, agent)
+            # NOT stage_started(): that built a second card and orphaned the
+            # first in the timeline, where nothing could update it and the
+            # problem counter no longer saw it. The card now holds RETRYING,
+            # keeps its clock, and carries the engine's own reason instead of
+            # one of two hardcoded phrases that vanished after 15 seconds.
+            self.output_panel.stage_failover(
+                stage, failed, agent, reason=payload.get("reason", ""),
+                exhausted=bool(payload.get("exhausted")))
         elif kind == "stage_recovered":
             texts = payload.get("texts") or []
             url = payload.get("url", "")
             agent = payload.get("agent", "")
-            self.output_panel.stage_done(stage, texts, url, False)
+            # Says which tool actually finished it, and which one could not —
+            # the record already kept `failed` for History and the screen
+            # never showed it.
+            self.output_panel.stage_recovered(
+                stage, agent, failed=payload.get("failed", ""),
+                texts=texts, url=url)
             # Replace the failed record rather than appending a second one, or
             # the completion popup lists the step twice — once failed, once
             # done — and the customer cannot tell which one they got.
@@ -1718,6 +1840,22 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 i18n.t("No other tool could finish the {stage} step either.")
                 .replace("{stage}", stage), 10000)
+            self.output_panel.stage_unrecovered(
+                stage, payload.get("failed", ""), payload.get("reason", ""))
+        # Three kinds the engine has always emitted and this handler has
+        # always let fall straight through the if/elif chain in silence.
+        # stage_skipped is the one that matters: automation.py added it
+        # SPECIFICALLY so the GUI would stop dropping a step without saying
+        # so, and the GUI went on dropping it without saying so.
+        elif kind == "stage_skipped":
+            self.output_panel.stage_skipped(
+                stage, payload.get("agent", ""), payload.get("reason", ""))
+        elif kind == "retry":
+            self.output_panel.stage_retry(stage, payload.get("reason", ""))
+        elif kind == "reel_scene":
+            # Carries no "stage" key — it can only ever be the live one.
+            self.output_panel.scene_progress(
+                payload.get("index", 0), payload.get("total", 0))
         elif kind == "stage_error":
             error = payload.get("error", "")
             licensing.meter.record(
@@ -1757,6 +1895,11 @@ class MainWindow(QMainWindow):
             # not in the CLI's record: which tool actually ran each step, so
             # History can name them instead of showing bare stage keys
             "agents": dict(self._stage_agents),
+            # How long each step actually took. The panel has timed every
+            # stage all along and the number died with the widget — which is
+            # why History can say what a run did but never how long any of it
+            # took, and why "this one is slow" has never been answerable.
+            "durations": self.output_panel.stage_durations(),
         }
         if error:
             record["error"] = error

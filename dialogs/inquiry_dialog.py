@@ -42,15 +42,18 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout,
-    QWidget,
+    QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
 import i18n
+import theme
+from dialogs.base import PrismDialog
 from dialogs.inquiry_setup_dialog import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
+from widgets import controls as C
 from workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
 
 # What each sorted category is called on screen. The engine's keys are English
@@ -77,28 +80,53 @@ SOURCE_LABELS = {
 # the word, because roughly one man in twelve cannot tell the red from the
 # green — and because a register printed on the office laser comes out grey.
 #
-# Tints are pale on purpose (they sit under black text at a comfortable
-# contrast) and the palette is warm/cool rather than red/green alone, so the
-# two ends stay distinguishable to the commonest colour blindness.
+# EVERY PAIR BELOW IS A theme.py TOKEN. It did not use to be: the three tables
+# here carried sixteen hexes that matched nothing in the palette — three
+# different "success greens", two ambers plus a third that was one digit off
+# theme.WARN_INK, a blue and a red that duplicated the accent and error ramps
+# without matching them, and the only purple in the application. Every one of
+# them was invisible to the per-role accent rotation, which is a blunt string
+# replace over eleven known hexes: in a manager's green profile the entire
+# register stayed Prism blue and amber while the rest of the app moved, and the
+# purple stayed purple in all eleven roles.
+#
+# The semantic tones (OK / WARN / ERR) sit outside the accent ramp on purpose
+# and DO NOT rotate, which is exactly what this register needs: "Converted"
+# has to stay green and "Not converted" has to stay red in every profile, or
+# the one column the owner reads at a glance stops meaning anything. INFO is
+# the accent's own mid step and does rotate, by design — it is used here only
+# for "this is information", never for an outcome.
+_OK = (theme.OK_BG, theme.OK_INK)              # money — won, confirmed
+_WARN = (theme.WARN_BG, theme.WARN_INK)        # a person is needed here
+_ERR = (theme.ERR_BG, theme.ERR_INK)           # lost
+_INFO = (theme.INFO_BG, theme.INFO_INK)        # live, or informational
+_NEUTRAL = (theme.NEUTRAL[200], theme.NEUTRAL[800])   # waiting, filed
+_QUIET = (theme.NEUTRAL[100], theme.NEUTRAL[700])     # noise
+
 CATEGORY_COLOURS = {
-    "inquiry":   ("#dff3e4", "#14532d"),   # green — the reason they bought this
-    "order":     ("#c9ebd6", "#0f3d22"),   # deeper green — money confirmed
-    "payment":   ("#dbe9f7", "#17365d"),   # blue — accounts, not sales
-    "vendor":    ("#fdeccd", "#6b4708"),   # amber — someone selling TO them
-    "promotion": ("#ececee", "#5d5d60"),   # grey — noise
-    "internal":  ("#ececee", "#5d5d60"),
-    "other":     ("#ececee", "#5d5d60"),
-    "unsorted":  ("#fde8d4", "#7c3a06"),   # warm — needs a human glance
+    "inquiry":   _OK,        # the reason they bought this
+    "order":     _OK,        # money confirmed
+    "payment":   _INFO,      # accounts, not sales
+    # Amber is reserved for the one row that genuinely needs a human to look
+    # at it. A supplier's mail is filed, not urgent.
+    "vendor":    _NEUTRAL,   # someone selling TO them
+    "promotion": _QUIET,     # noise
+    "internal":  _QUIET,
+    "other":     _QUIET,
+    "unsorted":  _WARN,      # needs a human glance
 }
 
+# The sales pipeline, in order, coloured by whose move it is:
+# arrived (live) -> quoted (theirs) -> chased (theirs) -> haggling (YOURS) ->
+# won / lost.
 STATUS_COLOURS = {
-    "New":            ("#dbe9f7", "#17365d"),
-    "Quoted":         ("#e2e5f5", "#2f3572"),
-    "Following up":   ("#fdeccd", "#6b4708"),
-    "Negotiating":    ("#fde8d4", "#7c3a06"),
-    "Accepted":       ("#dff3e4", "#14532d"),
-    "Converted":      ("#c9ebd6", "#0f3d22"),
-    "Not converted":  ("#f5dcdc", "#7a1f1f"),
+    "New":            _INFO,
+    "Quoted":         _QUIET,
+    "Following up":   _NEUTRAL,
+    "Negotiating":    _WARN,
+    "Accepted":       _OK,
+    "Converted":      _OK,
+    "Not converted":  _ERR,
 }
 
 # What Prism made of a customer's reply, in the owner's words rather than the
@@ -112,12 +140,63 @@ INTENT_LABELS = {
 }
 
 INTENT_COLOURS = {
-    "accepted":    ("#dff3e4", "#14532d"),
-    "rejected":    ("#f5dcdc", "#7a1f1f"),
-    "negotiating": ("#fde8d4", "#7c3a06"),
-    "needs_info":  ("#fdeccd", "#6b4708"),
-    "unclear":     ("#ececee", "#5d5d60"),
+    "accepted":    _OK,
+    "rejected":    _ERR,
+    "negotiating": _WARN,     # they want something from you
+    "needs_info":  _INFO,     # they asked for information
+    "unclear":     _NEUTRAL,
 }
+
+
+class _TableOrEmpty(QStackedWidget):
+    """A table, or — while it has no rows — a centred empty state.
+
+    All five tabs of this screen open empty and stay empty until a mail check
+    runs, and an empty QTableWidget is a column header over several hundred
+    pixels of blank white. That is the screen a customer meets the first time
+    they open Email automation, and it says nothing about what will appear
+    there or how to make it appear.
+
+    Driven off the model's own signals rather than by editing the five places
+    that fill these tables: `setRowCount()` emits rowsInserted / rowsRemoved,
+    so the swap cannot fall out of step with the data the way a hand-placed
+    call would.
+    """
+
+    def __init__(self, table, icon: str, title: str, body: str, parent=None):
+        super().__init__(parent)
+        self._table = table
+        self.addWidget(table)
+        self.addWidget(C.EmptyState(icon, title, body))
+        model = table.model()
+        for signal in (model.rowsInserted, model.rowsRemoved,
+                       model.modelReset, model.layoutChanged):
+            signal.connect(self._sync)
+        self._sync()
+
+    def _rows(self) -> int:
+        # Four of the five are QTableWidgets and the overdue tab is a
+        # QListWidget; the model is what both agree on.
+        return self._table.model().rowCount()
+
+    def _sync(self, *_args):
+        self.setCurrentIndex(0 if self._rows() else 1)
+
+
+def _warning_css() -> str:
+    """The tinted "check this before you send it" note.
+
+    There is no `#warning` rule in style.qss and there never was a `[class=…]`
+    selector either, so every `setProperty("class", "warning")` in this file
+    rendered as ordinary body text — including the one line telling an owner
+    that two rows on their rate list matched and Prism might have picked the
+    wrong price. That is the highest-consequence sentence in the whole feature
+    and it was styled exactly like the paragraph above it.
+    """
+    return (f"color: {theme.WARN_INK}; background: {theme.WARN_BG};"
+            f" border: 1px solid {theme.WARN};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px;")
 
 
 def paint(item: QTableWidgetItem, colours: dict, key: str) -> QTableWidgetItem:
@@ -152,12 +231,16 @@ def open_in_file_manager(path: str) -> None:
         pass
 
 
-class InquiryDialog(QDialog):
+class InquiryDialog(PrismDialog):
 
     def __init__(self, cfg: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Email automation"),
+            i18n.t("Read every inbox, keep one register."),
+            icon="inbox", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Email automation"))
-        self.resize(980, 700)
+        self.resize(1060, 720)
+        self.setMinimumSize(880, 560)
         self.cfg = dict(cfg)
         self._worker = None
         self._send_worker = None
@@ -181,13 +264,15 @@ class InquiryDialog(QDialog):
         # a dialog rather than disappearing into the status line.
         self._quiet = False
 
-        root = QVBoxLayout(self)
-        root.addLayout(self._header())
+        self._build_header_actions()
 
+        self.body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
+                                     theme.PAGE_PAD, theme.SPACE_4)
+        self.body.setSpacing(theme.SPACE_3)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
-        root.addWidget(self.progress)
+        self.body.addWidget(self.progress)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._arrived_tab(), i18n.t("1 · What arrived"))
@@ -195,22 +280,23 @@ class InquiryDialog(QDialog):
         self.tabs.addTab(self._replies_tab(), i18n.t("3 · What they said back"))
         self.tabs.addTab(self._followup_tab(), i18n.t("4 · Waiting on a reply"))
         self.tabs.addTab(self._orders_tab(), i18n.t("5 · The order came"))
-        root.addWidget(self.tabs, stretch=1)
+        self.body.addWidget(self.tabs, stretch=1)
 
-        footer = QHBoxLayout()
-        self.summary = QLabel("")
-        self.summary.setProperty("class", "muted")
-        footer.addWidget(self.summary, stretch=1)
-        open_folder = QPushButton(i18n.t("Open the folder"))
-        open_folder.clicked.connect(lambda: open_in_file_manager(self._root()))
-        footer.addWidget(open_folder)
-        open_register = QPushButton(i18n.t("Open the register"))
-        open_register.clicked.connect(self._open_register)
-        footer.addWidget(open_register)
-        close = QDialogButtonBox(QDialogButtonBox.Close)
-        close.rejected.connect(self.reject)
-        footer.addWidget(close)
-        root.addLayout(footer)
+        self.summary = C.label("", role="meta")
+        self.footer.add_note(self.summary)
+        self.footer.add_utility(self.button(
+            i18n.t("Open the folder"), "secondary", icon_name="folder",
+            small=True,
+            on_click=lambda: open_in_file_manager(self._root())))
+        self.footer.add_utility(self.button(
+            i18n.t("Open the register"), "secondary", icon_name="file",
+            small=True, on_click=self._open_register))
+        # Still a plain reject, exactly as the QDialogButtonBox was — the box
+        # only ever carried one Close button, and it brought Qt's platform
+        # icons with it (a GTK red ✕, the one place the desktop theme leaked
+        # into this window).
+        self.footer.add_secondary(self.button(
+            i18n.t("Close"), "secondary", on_click=self.reject))
 
         # Checking on a timer is what makes this "runs by itself" rather than
         # "a button somebody remembers". Started here rather than in the
@@ -262,29 +348,35 @@ class InquiryDialog(QDialog):
         super().closeEvent(event)
 
     # ── chrome ────────────────────────────────────────────────────────────
-    def _header(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        title = QLabel(i18n.t("Read every inbox, keep one register"))
-        title.setProperty("class", "h2")
-        row.addWidget(title)
-        row.addStretch(1)
-        self.status = QLabel("")
-        self.status.setProperty("class", "muted")
-        row.addWidget(self.status)
+    def _build_header_actions(self):
+        """The controls that act on the whole screen, in the fixed band.
+
+        `setProperty("class", "primary")` was the old way of asking for the
+        solid accent button, and style.qss has never carried a single
+        `[class=...]` selector — so the one button this screen exists for, and
+        four others like it further down this file, all rendered as plain
+        hairline boxes. They are real object names now, through
+        `controls.button`, so a variant is picked by name rather than guessed.
+        """
+        self.status = C.label("", role="meta")
+        self.header.add_action(self.status)
+
         self.auto_box = QCheckBox(i18n.t("Keep checking"))
+        self.auto_box.setMinimumHeight(C.MIN_TARGET)
+        self.auto_box.setCursor(Qt.PointingHandCursor)
         self.auto_box.setToolTip(i18n.t(
             "Check the inbox by itself, on the interval set under Setup → "
             "Your terms. Reading costs nothing and sends nothing."))
         self.auto_box.toggled.connect(self._auto_toggled)
-        row.addWidget(self.auto_box)
-        self.check_btn = QPushButton(i18n.t("Check my mail now"))
-        self.check_btn.setProperty("class", "primary")
-        self.check_btn.clicked.connect(self.check_now)
-        row.addWidget(self.check_btn)
-        setup = QPushButton(i18n.t("Setup"))
-        setup.clicked.connect(self.open_setup)
-        row.addWidget(setup)
-        return row
+        self.header.add_action(self.auto_box)
+
+        setup = self.button(i18n.t("Setup"), "secondary", icon_name="sliders",
+                            on_click=self.open_setup)
+        self.header.add_action(setup)
+        self.check_btn = self.button(i18n.t("Check my mail now"), "primary",
+                                     icon_name="inbox",
+                                     on_click=self.check_now)
+        self.header.add_action(self.check_btn)
 
     def _settings(self) -> dict:
         return settings_of(self.cfg)
@@ -358,7 +450,7 @@ class InquiryDialog(QDialog):
             "made of it. If something is in the wrong column, change it — "
             "Prism remembers that sender and never asks again."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
 
         self.arrived = QTableWidget(0, 4)
@@ -373,7 +465,12 @@ class InquiryDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(self.arrived, stretch=1)
+        layout.addWidget(_TableOrEmpty(
+            self.arrived, "inbox",
+            i18n.t("Nothing has come in yet"),
+            i18n.t("Press Check my mail now and everything that arrived "
+                   "since the last check is listed here, sorted.")),
+            stretch=1)
 
         row = QHBoxLayout()
         row.addWidget(QLabel(i18n.t("This one is really a:")))
@@ -403,11 +500,17 @@ class InquiryDialog(QDialog):
         self.register_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         head = self.register_table.horizontalHeader()
         head.setSectionResizeMode(3, QHeaderView.Stretch)
-        layout.addWidget(self.register_table, stretch=1)
+        layout.addWidget(_TableOrEmpty(
+            self.register_table, "list",
+            i18n.t("The register is empty"),
+            i18n.t("Every inquiry Prism recognises is written here as one "
+                   "row — the number, the customer, and where it has got "
+                   "to.")),
+            stretch=1)
 
         row = QHBoxLayout()
         quote = QPushButton(i18n.t("Prepare a quotation"))
-        quote.setProperty("class", "primary")
+        quote.setObjectName("primaryBtn")
         quote.clicked.connect(self._prepare_quotation)
         row.addWidget(quote)
         edit = QPushButton(i18n.t("Edit this row"))
@@ -451,7 +554,7 @@ class InquiryDialog(QDialog):
             "says what it thinks the customer means — check it, then apply "
             "it to the register. Nothing changes until you press the button."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
 
         self.replies_table = QTableWidget(0, 5)
@@ -465,7 +568,12 @@ class InquiryDialog(QDialog):
         head.setSectionResizeMode(2, QHeaderView.Stretch)
         self.replies_table.currentCellChanged.connect(
             lambda *_: self._show_reply())
-        layout.addWidget(self.replies_table, stretch=2)
+        layout.addWidget(_TableOrEmpty(
+            self.replies_table, "mail",
+            i18n.t("No replies to read"),
+            i18n.t("When a customer answers a quotation you have sent, "
+                   "their reply and what Prism makes of it appear here.")),
+            stretch=2)
 
         layout.addWidget(QLabel(i18n.t("What they actually wrote:")))
         self.reply_text = QPlainTextEdit()
@@ -481,7 +589,7 @@ class InquiryDialog(QDialog):
                 self.intent_picker.addItem(i18n.t(label), key)
         row.addWidget(self.intent_picker)
         apply_btn = QPushButton(i18n.t("Update the register"))
-        apply_btn.setProperty("class", "primary")
+        apply_btn.setObjectName("primaryBtn")
         apply_btn.clicked.connect(self._apply_reply)
         row.addWidget(apply_btn)
         row.addStretch(1)
@@ -579,14 +687,19 @@ class InquiryDialog(QDialog):
             "Quotations that have gone quiet. This is the money already "
             "earned and not yet collected on — the list nobody keeps."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
         self.followups = QListWidget()
-        layout.addWidget(self.followups, stretch=1)
+        layout.addWidget(_TableOrEmpty(
+            self.followups, "clock",
+            i18n.t("Nothing is overdue"),
+            i18n.t("Quotations that have gone quiet are listed here so you "
+                   "can chase them in one go.")),
+            stretch=1)
 
         row = QHBoxLayout()
         self.remind_btn = QPushButton(i18n.t("Send a reminder"))
-        self.remind_btn.setProperty("class", "primary")
+        self.remind_btn.setObjectName("primaryBtn")
         self.remind_btn.clicked.connect(self._send_reminder)
         row.addWidget(self.remind_btn)
         row.addStretch(1)
@@ -613,7 +726,7 @@ class InquiryDialog(QDialog):
             "saved in the inquiry's folder, so nothing is lost if this list "
             "empties when the screen closes."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
 
         self.orders_table = QTableWidget(0, 4)
@@ -628,11 +741,16 @@ class InquiryDialog(QDialog):
         head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         head.setSectionResizeMode(2, QHeaderView.Stretch)
         head.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(self.orders_table, stretch=1)
+        layout.addWidget(_TableOrEmpty(
+            self.orders_table, "archive",
+            i18n.t("No purchase orders yet"),
+            i18n.t("A PO that arrives against one of your quotations is "
+                   "read here and checked against what you sent.")),
+            stretch=1)
 
         row = QHBoxLayout()
         self.po_btn = QPushButton(i18n.t("Read the PO and compare"))
-        self.po_btn.setProperty("class", "primary")
+        self.po_btn.setObjectName("primaryBtn")
         self.po_btn.clicked.connect(self._review_po)
         row.addWidget(self.po_btn)
         folder = QPushButton(i18n.t("Open this inquiry's folder"))
@@ -1383,7 +1501,7 @@ class InquiryDialog(QDialog):
         self._send_worker = SendWorker(
             self.cfg, [{"email": address,
                         "name": row.get("Contact person", "")}],
-            draft.subject(), draft.body(), [])
+            draft.subject(), draft.message(), [])
         self._send_worker.done.connect(
             lambda sent, failed: self._reminder_sent(row, sent, failed))
         self._send_worker.failed.connect(self._reminder_failed)
@@ -1626,7 +1744,7 @@ class InquiryDialog(QDialog):
         self._send_worker = SendWorker(
             self.cfg, [{"email": row.get("Email", ""),
                         "name": row.get("Contact person", "")}],
-            dialog.subject(), dialog.body(), [])
+            dialog.subject(), dialog.message(), [])
         self._send_worker.done.connect(
             lambda sent, failed: self._winback_sent(row, sent, failed))
         self._send_worker.failed.connect(self._reminder_failed)
@@ -1773,39 +1891,45 @@ def _ask_reason(parent) -> tuple[str, bool]:
     return picker.currentText().strip(), ok
 
 
-class _ReminderDialog(QDialog):
+class _ReminderDialog(PrismDialog):
     """The reminder, shown before it goes. Editable, because the right words
     for a customer of fifteen years are not the right words for a new one."""
 
     def __init__(self, subject: str, body: str, address: str, parent=None,
                  note: str = ""):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Send a reminder"),
+            i18n.t("Prism wrote this. Edit anything before it goes."),
+            icon="mail", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Send a reminder"))
-        self.resize(560, 420)
-        layout = QVBoxLayout(self)
+        self.resize(620, 480)
+        layout = self.body
+        layout.setSpacing(theme.ROW_GAP)
         layout.addWidget(QLabel(
             i18n.t("To: {who}").replace("{who}", address)))
         if note:
             caption = QLabel(note)
             caption.setWordWrap(True)
-            caption.setProperty("class", "muted")
+            caption.setObjectName("meta")
             layout.addWidget(caption)
         self._subject = QLineEdit(subject)
         layout.addWidget(self._subject)
         self._body = QTextEdit(body)
         layout.addWidget(self._body, stretch=1)
-        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
-        send = buttons.addButton(i18n.t("Send it"),
-                                 QDialogButtonBox.AcceptRole)
-        send.setProperty("class", "primary")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Send it"), "primary", icon_name="mail",
+                        on_click=self.accept))
 
     def subject(self) -> str:
         return self._subject.text().strip()
 
-    def body(self) -> str:
+    def message(self) -> str:
+        """The reminder text. Named `message`, not `body`, because
+        PrismDialog puts the dialog's content layout on `self.body` and an
+        instance attribute shadows a method of the same name — `draft.body()`
+        would have tried to call a QVBoxLayout."""
         return self._body.toPlainText()
 
 
@@ -1893,7 +2017,7 @@ def _read_sent_quotation(row: dict):
     return quote
 
 
-class _POReviewDialog(QDialog):
+class _POReviewDialog(PrismDialog):
     """The purchase order against the quotation — the second stop.
 
     The screen the runtime plan always named as the missing one. Everything
@@ -1908,10 +2032,16 @@ class _POReviewDialog(QDialog):
 
     def __init__(self, row: dict, order=None, differences: list | None = None,
                  advice: str = "", parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("The order, against the quotation"),
+            i18n.t("Check the figures, then accept. Accepting writes the "
+                   "register and sends nothing."),
+            icon="archive", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("The order, against the quotation"))
-        self.resize(640, 560)
-        layout = QVBoxLayout(self)
+        self.resize(720, 620)
+        self.setMinimumSize(560, 480)
+        layout = self.body
+        layout.setSpacing(theme.ROW_GAP)
 
         who = QLabel("   ·   ".join(part for part in (
             row.get("Inquiry no", ""),
@@ -1921,13 +2051,13 @@ class _POReviewDialog(QDialog):
              .replace("{when}", row.get("Quotation date", ""))
              if row.get("Quotation value") else "")) if part))
         who.setWordWrap(True)
-        who.setProperty("class", "h2")
+        who.setObjectName("h2")
         layout.addWidget(who)
 
         if advice:
             note = QLabel(advice)
             note.setWordWrap(True)
-            note.setProperty("class", "warning")
+            note.setStyleSheet(_warning_css())
             layout.addWidget(note)
 
         if order is not None:
@@ -1960,8 +2090,11 @@ class _POReviewDialog(QDialog):
                     if diff.kind == po.MONEY:
                         # The word is in the cells; the tint says "money"
                         # at arm's length, same palette as everywhere else.
-                        cell.setBackground(QColor("#fde8d4"))
-                        cell.setForeground(QColor("#7c3a06"))
+                        # WARN, because a purchase order whose figures differ
+                        # from the quotation is precisely the row a person has
+                        # to look at before accepting it.
+                        cell.setBackground(QColor(theme.WARN_BG))
+                        cell.setForeground(QColor(theme.WARN_INK))
                     table.setItem(index, column, cell)
             layout.addWidget(table, stretch=1)
         elif order is not None and not advice:
@@ -1969,7 +2102,7 @@ class _POReviewDialog(QDialog):
                 "Nothing differs from the quotation — the numbers are the "
                 "numbers you sent."))
             matches.setWordWrap(True)
-            matches.setProperty("class", "muted")
+            matches.setObjectName("meta")
             layout.addWidget(matches)
 
         form = QFormLayout()
@@ -1992,17 +2125,15 @@ class _POReviewDialog(QDialog):
             "production sheet comes from the BOQ button on the Inquiries "
             "tab."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Cancel).setText(i18n.t("Not now"))
-        accept = buttons.addButton(i18n.t("Accept — mark converted"),
-                                   QDialogButtonBox.AcceptRole)
-        accept.setProperty("class", "primary")
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addStretch(1)
+        self.footer.add_secondary(
+            self.button(i18n.t("Not now"), on_click=self.reject))
+        self.footer.set_primary(self.button(
+            i18n.t("Accept — mark converted"), "primary", icon_name="check",
+            on_click=self._accept))
 
     def _accept(self):
         if not self.number() or not self.value_text():
@@ -2024,7 +2155,7 @@ class _POReviewDialog(QDialog):
         return self._value.text().strip()
 
 
-class _EditRowDialog(QDialog):
+class _EditRowDialog(PrismDialog):
     """Correct one register row by hand.
 
     Only the fields a person can sensibly know better than Prism. The inquiry
@@ -2037,13 +2168,18 @@ class _EditRowDialog(QDialog):
               "Product asked", "Quantity", "Notes")
 
     def __init__(self, row: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Edit this row"),
+            i18n.t("Only the fields a person knows better than Prism. The "
+                   "numbers and dates are the register's own bookkeeping."),
+            icon="pencil", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Edit inquiry {no}").replace(
             "{no}", row.get("Inquiry no", "")))
-        self.resize(520, 400)
+        self.resize(600, 480)
         self._edits = {}
 
-        layout = QVBoxLayout(self)
+        layout = self.body
+        layout.setSpacing(theme.ROW_GAP)
         form = QFormLayout()
         for field in self.FIELDS:
             edit = QLineEdit(str(row.get(field, "") or ""))
@@ -2064,13 +2200,15 @@ class _EditRowDialog(QDialog):
             "Changing the status here does not send anything — it only "
             "corrects the record."))
         note.setWordWrap(True)
-        note.setProperty("class", "muted")
+        note.setObjectName("meta")
         layout.addWidget(note)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addStretch(1)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Save"), "primary", icon_name="check",
+                        on_click=self.accept))
 
     def changes(self) -> dict:
         out = {f: e.text().strip() for f, e in self._edits.items()}
@@ -2088,7 +2226,7 @@ class _EditRowDialog(QDialog):
         return out
 
 
-class QuotationDialog(QDialog):
+class QuotationDialog(PrismDialog):
     """Price one inquiry, review it, and send it.
 
     The one screen in this feature where a person is genuinely required. Prism
@@ -2098,9 +2236,14 @@ class QuotationDialog(QDialog):
 
     def __init__(self, cfg: dict, row: dict, items: list, parent=None, *,
                  cost_lines: list | None = None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Prepare a quotation"),
+            i18n.t("Prism prices it and writes the covering mail. You check "
+                   "the figure and press Send."),
+            icon="file", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Prepare a quotation"))
-        self.resize(760, 720)
+        self.resize(820, 760)
+        self.setMinimumSize(640, 600)
         self.cfg, self.row, self.items = dict(cfg), row, items
         self.cost_lines = list(cost_lines or [])
         self.parent_dialog = parent
@@ -2110,7 +2253,8 @@ class QuotationDialog(QDialog):
         quoting = CB.get_quoting()
         self.matches = quoting.match_item(row.get("Product asked", ""), items)
 
-        layout = QVBoxLayout(self)
+        layout = self.body
+        layout.setSpacing(theme.ROW_GAP)
         asked = QLabel(i18n.t("They asked for: {what}").replace(
             "{what}", row.get("Product asked", "")[:120]))
         asked.setWordWrap(True)
@@ -2163,13 +2307,16 @@ class QuotationDialog(QDialog):
             "Two rows on your rate list are close — check the one Prism "
             "picked before this goes out."))
         self.verdict.setWordWrap(True)
-        self.verdict.setProperty("class", "muted" if confident else "warning")
+        if confident:
+            self.verdict.setObjectName("meta")
+        else:
+            self.verdict.setStyleSheet(_warning_css())
         layout.addWidget(self.verdict)
 
         self.workings = QPlainTextEdit()
         self.workings.setReadOnly(True)
         self.workings.setFixedHeight(160)
-        self.workings.setProperty("class", "mono")
+        self.workings.setObjectName("mono")
         self.workings.setVisible(False)
         layout.addWidget(self.workings)
 
@@ -2179,29 +2326,39 @@ class QuotationDialog(QDialog):
 
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setProperty("class", "mono")
+        self.preview.setObjectName("mono")
+        # The quotation itself. A floor on it, because everything else in this
+        # column has a fixed height and the stretch alone let the one thing the
+        # owner is meant to CHECK collapse to three lines on a short window.
+        self.preview.setMinimumHeight(170)
         layout.addWidget(self.preview, stretch=1)
 
         layout.addWidget(QLabel(i18n.t("The email that carries it:")))
         self.subject = QLineEdit()
         layout.addWidget(self.subject)
-        self.body = QTextEdit()
-        self.body.setFixedHeight(130)
-        layout.addWidget(self.body)
+        # `mail_body`, not `body`: PrismDialog owns `self.body` (the content
+        # layout), and quietly rebinding it here would break any later use of
+        # the scaffold from this class.
+        self.mail_body = QTextEdit()
+        self.mail_body.setFixedHeight(130)
+        layout.addWidget(self.mail_body)
 
-        row_buttons = QHBoxLayout()
-        self.save_btn = QPushButton(i18n.t("Save without sending"))
-        self.save_btn.clicked.connect(lambda: self._finish(send=False))
-        row_buttons.addWidget(self.save_btn)
-        row_buttons.addStretch(1)
-        self.send_btn = QPushButton(i18n.t("Send it"))
-        self.send_btn.setProperty("class", "primary")
-        self.send_btn.clicked.connect(lambda: self._finish(send=True))
-        row_buttons.addWidget(self.send_btn)
-        cancel = QPushButton(i18n.t("Cancel"))
-        cancel.clicked.connect(self.reject)
-        row_buttons.addWidget(cancel)
-        layout.addLayout(row_buttons)
+        # Order matters more here than anywhere else in the app: the old row
+        # put Cancel to the RIGHT of the solid accent "Send it", so the last
+        # thing under the cursor on the screen that emails a price to a
+        # customer was the one button that throws the work away. Primary last,
+        # always.
+        self.save_btn = self.button(i18n.t("Save without sending"),
+                                    "secondary", icon_name="file",
+                                    small=True,
+                                    on_click=lambda: self._finish(send=False))
+        self.footer.add_utility(self.save_btn)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.send_btn = self.button(i18n.t("Send it"), "primary",
+                                    icon_name="mail",
+                                    on_click=lambda: self._finish(send=True))
+        self.footer.set_primary(self.send_btn)
 
         self._source_changed()
 
@@ -2251,8 +2408,8 @@ class QuotationDialog(QDialog):
         if not self.subject.text().strip():
             self.subject.setText(
                 f"{i18n.t('Quotation')} {self.quote.number} — {description[:50]}")
-        if not self.body.toPlainText().strip():
-            self.body.setPlainText(_default_body(self.quote, settings))
+        if not self.mail_body.toPlainText().strip():
+            self.mail_body.setPlainText(_default_body(self.quote, settings))
 
     def _recalculate_from_rates(self):
         quoting = CB.get_quoting()
@@ -2375,7 +2532,7 @@ class QuotationDialog(QDialog):
             self._send_worker = SendWorker(
                 self.cfg, [{"email": address,
                             "name": self.row.get("Contact person", "")}],
-                self.subject.text(), self.body.toPlainText(),
+                self.subject.text(), self.mail_body.toPlainText(),
                 [{"path": written, "name": os.path.basename(written),
                   "mime": "text/csv"}])
             self._send_worker.done.connect(

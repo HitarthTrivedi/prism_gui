@@ -90,6 +90,22 @@ def current() -> dict:
         return dict(_cached)
 
 
+def display_name(cfg: dict | None = None) -> str:
+    """What to call this person on screen, or "" if nobody has said.
+
+    A team member's name arrives inside their signed designation key and is
+    not the customer's to type. A SOLO copy has no key and therefore had no
+    name at all — every screen called them "This computer", permanently, with
+    nowhere to change it. So the config carries a plain display name for that
+    case, and the signed one still wins wherever it exists: a member cannot
+    rename themselves past what their firm issued.
+    """
+    signed = (current().get("name") or "").strip()
+    if signed:
+        return signed
+    return str((cfg or {}).get("display_name") or "").strip()
+
+
 def reload() -> dict:
     """Forget the cached identity — after activating a designation key."""
     global _cached, _viewing

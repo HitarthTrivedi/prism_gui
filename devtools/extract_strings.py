@@ -58,6 +58,30 @@ ARG_SLOTS = {
     "nav_button": (0, 3),   # (label, icon_name, small, tip)
     "_action": (0, 2),      # (label, icon_name, tip, slot)
     "_section": (0,),       # (text, faint) — the rail's group headers
+
+    # ── the shared component system (widgets/controls.py, dialogs/base.py) ──
+    # These slots are not decoration: without an entry here EVERY positional
+    # argument is scraped, and several of these take DATA in the first slot.
+    # FileItem's first argument is a filename and MetricCard's second is a
+    # measured number — putting either in the catalogue would mean i18n.t()
+    # swapping a customer's own file or figure for a translation, which is the
+    # precise failure the allow-list exists to prevent.
+    "label": (0, 7),        # (text, role, level, colour, weight, wrap, size, tooltip)
+    "button": (0,),         # (text, …) — tooltip differs between the two
+                            # button() helpers, so it is caught by keyword below
+    "icon_button": (1,),    # (icon_name, tooltip, on_click, colour)
+    "Pill": (0,),           # (text, tone)
+    "Chip": (0,),           # (text, icon_name, style)
+    "StatusBadge": (1,),    # (state, detail) — `state` is a lookup key
+    "PageHeader": (0, 1),   # (title, subtitle, actions)
+    "SectionHeader": (0, 1),
+    "SearchField": (0,),    # (placeholder)
+    "FilterChips": (0,),    # (options, current)
+    "Tabs": (0,),           # (options, current)
+    "EmptyState": (1, 2, 3),  # (icon, title, body, action_text) — icon is a glyph
+    "MetricCard": (0, 2),   # (label_text, value, detail, …) — value is DATA
+    "FileItem": (1,),       # (name, detail, …) — name is a FILENAME
+    "StepRow": (1, 2),      # (index, title, subtitle, state, …)
 }
 
 # Words that look like copy but must never be translated. The product name is
@@ -100,6 +124,15 @@ TEXT_CALLS = {
     # Prism's own text helpers (widgets/controls.py) and local factories
     "heading", "meta", "kicker", "icon_label", "nav_button", "Section",
     "_action", "_tag", "_mini", "_section", "pill", "chip",
+    # The shared component system. Every one of these puts words on screen,
+    # and the redesign routed most of the app's copy through them — 200-odd
+    # call sites that were silently invisible to this scanner, so their copy
+    # reached no translator and shipped in English inside a Hindi build. The
+    # matcher resolves C.button(), self.button() and a bare button() to the
+    # same name, so one entry covers every calling style.
+    "label", "button", "icon_button", "Pill", "Chip", "StatusBadge",
+    "PageHeader", "SectionHeader", "SearchField", "FilterChips", "Tabs",
+    "EmptyState", "MetricCard", "FileItem", "StepRow",
     # the hand-written escape hatch
     "t", "_t", "tr",
 }
@@ -240,8 +273,15 @@ def collect() -> dict[str, list[str]]:
                             for s in _walk_strings(arg):
                                 note(s, rel, forced=explicit)
                         for kw in node.keywords:
-                            if kw.arg in ("text", "tip", "title", "blurb",
-                                          "label", "placeholder", "desc"):
+                            # `tooltip`, `subtitle`, `body`, `action_text` and
+                            # `detail` are how the shared components take most
+                            # of their copy, and the two button() helpers put
+                            # tooltip at different positions — so the keyword
+                            # is the only reliable way to catch it.
+                            if kw.arg in ("text", "tip", "tooltip", "title",
+                                          "blurb", "label", "label_text",
+                                          "placeholder", "desc", "subtitle",
+                                          "body", "action_text", "detail"):
                                 for s in _walk_strings(kw.value):
                                     note(s, rel)
                 elif isinstance(node, ast.Assign):

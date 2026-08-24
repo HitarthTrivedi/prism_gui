@@ -1,9 +1,19 @@
 """Context rail, bottom half: "Behind the scenes".
 
-The full transformation chain — your raw words → Prism's task brief → the
-engineered prompt each tool actually receives. The design files this under a
-disclosure with the note "Optional — only if you're curious", so it ships
-collapsed: the rail stays about the plan, and this opens only when asked."""
+The whole transformation chain in one place — your raw words → Prism's task
+brief → the engineered prompt each tool actually receives, grouped by tool and
+in running order. The design files this under a disclosure with the note
+"Optional — only if you're curious", so it ships collapsed.
+
+What changed in this pass is what it is *for*. It used to be the only route to
+the prompts at all: they were readable nowhere else, behind a closed
+disclosure inside a rail that starts at 44px, which is why the audit called it
+the most buried thing in the product. The plan now shows each step's real
+prompt on its own row and lets you rewrite it in place, and the task brief sits
+above the steps. So this is no longer the only copy — it is the whole chain,
+end to end, for when you want to read the transformation rather than one step
+of it.
+"""
 from __future__ import annotations
 import html
 from PySide6.QtCore import Qt
@@ -12,8 +22,10 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import i18n
 import theme
 from widgets import icons
+from widgets import controls as C
 from widgets.controls import kicker
 from widgets.markdown import render_markdown
 
@@ -23,21 +35,24 @@ class PromptPanel(QWidget):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setSpacing(theme.SPACE_2)
 
-        self.toggle = QPushButton("  BEHIND THE SCENES")
+        self.toggle = QPushButton("  " + i18n.t("BEHIND THE SCENES"))
         self.toggle.setObjectName("ghostBtn")
         self.toggle.setCursor(Qt.PointingHandCursor)
         self.toggle.setCheckable(True)
+        self.toggle.setMinimumHeight(C.MIN_TARGET)
         self.toggle.setLayoutDirection(Qt.RightToLeft)   # chevron on the right
+        family, px, weight, _ink = theme.T_LABEL
         self.toggle.setStyleSheet(
-            "text-align: right; padding: 2px 0; font-family: 'Barlow Condensed';"
-            "font-size: 11.5px; font-weight: 600; color: #416180;")
+            f"text-align: right; padding: 2px 0; font-family: '{family}';"
+            f"font-size: {px}px; font-weight: {weight}; "
+            f"color: {theme.ACCENT_RAMP[700]};")
         icons.button_icon(self.toggle, "chevron-right", 16, theme.NEUTRAL[500])
         self.toggle.toggled.connect(self._on_toggled)
         root.addWidget(self.toggle)
 
-        self.blurb = QLabel(self._BLURB)
+        self.blurb = QLabel(i18n.t(self._BLURB))
         self.blurb.setObjectName("meta")
         self.blurb.setWordWrap(True)
         root.addWidget(self.blurb)
@@ -46,12 +61,16 @@ class PromptPanel(QWidget):
         self.view.setReadOnly(True)
         self.view.setMinimumHeight(230)
         self.view.setVisible(False)
+        self.view.setStyleSheet(
+            f"background: {theme.CARD}; border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; padding: {theme.SPACE_2}px;")
         root.addWidget(self.view)
 
         self._has_content = False
 
-    _BLURB = ("See exactly what Prism will ask each tool, in plain English. "
-              "Optional — only if you're curious.")
+    _BLURB = ("The whole chain: your words, Prism's brief, and the exact "
+              "prompt each tool receives. To change one, open Prompt on that "
+              "step in the plan.")
 
     def _on_toggled(self, open_: bool):
         icons.button_icon(self.toggle, "chevron-down" if open_ else "chevron-right",
@@ -61,8 +80,9 @@ class PromptPanel(QWidget):
             self.view.setVisible(True)
             return
         self.view.setVisible(False)
-        self.blurb.setText("Nothing to show yet — show the steps first."
-                           if open_ else self._BLURB)
+        self.blurb.setText(
+            i18n.t("Nothing to show yet — make a plan first.") if open_
+            else i18n.t(self._BLURB))
         self.blurb.setVisible(True)
 
     def clear(self):
@@ -104,17 +124,17 @@ class PromptPanel(QWidget):
         A = CB.agents
         esc = html.escape
 
-        parts = [self._marker("01", "YOU SAID")]
+        parts = [self._marker("01", i18n.t("YOU SAID"))]
         parts.append(self._block(esc(query.strip()), theme.SURFACE, mono=False,
                                  color=theme.NEUTRAL[800], italic=True))
 
         brief = (routing.get("_brief") or "").strip()
         if brief:
-            parts.append(self._marker("02", "PRISM'S TASK BRIEF"))
+            parts.append(self._marker("02", i18n.t("PRISM'S TASK BRIEF")))
             parts.append(self._rich_block(render_markdown(brief), theme.NEUTRAL[100]))
 
         step = "03" if brief else "02"
-        parts.append(self._marker(step, "ENGINEERED PER-TOOL PROMPTS"))
+        parts.append(self._marker(step, i18n.t("ENGINEERED PER-TOOL PROMPTS")))
         any_prompt = False
         for stage in A.PIPELINE_ORDER:
             data = routing.get(stage)
@@ -131,8 +151,9 @@ class PromptPanel(QWidget):
                     f"{esc(agent)}</span></p>")
                 parts.append(self._block(esc(q), theme.NEUTRAL[100]))
         if not any_prompt:
-            parts.append(self._block("No per-tool prompts were engineered for "
-                                     "this task.", theme.NEUTRAL[100], mono=False,
+            parts.append(self._block(i18n.t("No per-tool prompts were engineered "
+                                            "for this task."),
+                                     theme.NEUTRAL[100], mono=False,
                                      color=theme.NEUTRAL[600]))
         self.view.setHtml("".join(parts))
         self._has_content = True

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 import i18n
 import licensing
 import theme
+from dialogs.base import PrismDialog
 from widgets import icons
 from widgets.controls import heading, kicker, meta
 
@@ -167,74 +168,35 @@ TOPICS: tuple[Topic, ...] = (
 )
 
 
-class GuideDialog(QDialog):
+class GuideDialog(PrismDialog):
     command_requested = Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("How to use Prism"),
+            i18n.t("Everything Prism can do, and what to type to get it. No "
+                   "experience needed."),
+            icon="help", parent=parent, scrollable=True)
         self.setWindowTitle(i18n.t("How to use Prism"))
-        self.resize(720, 700)
-        self.setMinimumSize(520, 460)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(self._header())
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        inner = QWidget()
-        page = QVBoxLayout(inner)
-        page.setContentsMargins(26, 22, 26, 26)
-        page.setSpacing(20)
+        self.resize(760, 720)
+        self.setMinimumSize(560, 480)
 
         state = licensing.state()
         for topic in TOPICS:
             unlocked = not topic.feature or state.has(topic.feature)
-            page.addWidget(_TopicCard(topic, unlocked, self.command_requested))
-        page.addStretch(1)
-        scroll.setWidget(inner)
-        outer.addWidget(scroll, stretch=1)
+            self.body.addWidget(
+                _TopicCard(topic, unlocked, self.command_requested))
+        self.body.addStretch(1)
 
-        footer = QFrame()
-        footer.setStyleSheet(
-            f"background: {theme.SURFACE}; border-top: 1px solid {theme.DIVIDER};")
-        row = QHBoxLayout(footer)
-        row.setContentsMargins(24, 13, 24, 13)
         note = meta(i18n.t("Anything greyed out isn't part of your plan — "
                            "ask us and we'll switch it on."))
         note.setWordWrap(True)
-        row.addWidget(note, stretch=1)
-        close = QPushButton(i18n.t("Close"))
-        close.setObjectName("primaryBtn")
-        close.setCursor(Qt.PointingHandCursor)
-        close.setMinimumHeight(36)
-        close.clicked.connect(self.accept)
-        row.addWidget(close)
-        outer.addWidget(footer)
-
-    def _header(self) -> QWidget:
-        bar = QFrame()
-        bar.setStyleSheet(
-            f"background: {theme.SURFACE}; border-bottom: 1px solid {theme.DIVIDER};")
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(26, 18, 26, 18)
-        row.setSpacing(12)
-        glyph = QLabel()
-        glyph.setPixmap(icons.pixmap("help", 22, theme.ACCENT))
-        glyph.setAlignment(Qt.AlignTop)
-        row.addWidget(glyph)
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        titles.addWidget(heading(i18n.t("How to use Prism")))
-        sub = QLabel(i18n.t("Everything Prism can do, and what to type to get "
-                            "it. No experience needed."))
-        sub.setObjectName("meta")
-        sub.setWordWrap(True)
-        titles.addWidget(sub)
-        row.addLayout(titles, stretch=1)
-        return bar
+        self.footer.add_note(note)
+        # Close is the ONLY thing this footer does, so it is the primary. A
+        # solid accent "Close" beside nothing else is not a competing call to
+        # action; a hairline one on an otherwise empty bar is just quiet.
+        self.footer.set_primary(
+            self.button(i18n.t("Close"), "primary", on_click=self.accept))
 
 
 class _TopicCard(QFrame):
