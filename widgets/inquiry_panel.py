@@ -114,15 +114,35 @@ class InquiryPanel(QScrollArea):
             i18n.t("Read the inbox, register every inquiry, quote it, chase "
                    "it, and check the PO."),
             size=13, colour=theme.NEUTRAL[600]))
-        self._col.addLayout(head)
 
         if reread or self._rows is None:
             self._rows = DATA.register_rows(self.cfg)
         stats = DATA.inquiry_stats(self.cfg, self._rows)
         if not stats:
+            self._col.addLayout(head)
             self._col.addWidget(self._not_set_up())
             self._col.addStretch(1)
             return
+
+        # This screen is a REPORT — four figures, four read-only tabs. Reading
+        # a mail, editing a register field, and preparing a quotation all
+        # happen in the working dialog behind it, and until now the only door
+        # into that dialog was "Chase again" — a button that exists solely on
+        # the "gone quiet" tab, and only once something is actually overdue.
+        # Two brand-new inquiries with nothing overdue yet left this whole
+        # screen with no way in at all. The door has to be on every tab, not
+        # conditional on there being something to chase.
+        head_row = QHBoxLayout()
+        head_row.addLayout(head, 1)
+        open_btn = QPushButton(i18n.t("Check my mail now"))
+        open_btn.setObjectName("primaryBtn")
+        open_btn.setCursor(Qt.PointingHandCursor)
+        open_btn.setToolTip(i18n.t(
+            "Opens the working screen — read each mail, edit the register, "
+            "prepare and send a quotation."))
+        open_btn.clicked.connect(self.open_dialog.emit)
+        head_row.addWidget(open_btn, alignment=Qt.AlignTop)
+        self._col.addLayout(head_row)
 
         self._col.addLayout(self._leads(stats))
         self._col.addWidget(self._tab_strip(), alignment=Qt.AlignLeft)
