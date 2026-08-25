@@ -425,6 +425,19 @@ class InquiryDialog(PrismDialog):
         self.tabs.addTab(self._replies_tab(), i18n.t("3 · What they said back"))
         self.tabs.addTab(self._followup_tab(), i18n.t("4 · Waiting on a reply"))
         self.tabs.addTab(self._orders_tab(), i18n.t("5 · The order came"))
+        # Qt's default tab bar splits its width EQUALLY across every tab
+        # (Fusion-style "expanding"), so the shortest label ("Inquiries")
+        # was squeezed down to the same narrow share as the longest ("What
+        # they said back") and both ended up truncated with "…" — reported
+        # directly, none of the five titles were fully readable. Turning
+        # expanding off lets each tab claim only the width its own text
+        # needs; ElideNone then guarantees no title is ever cut short, and
+        # the tab bar's own scroll arrows (on by default) take over if the
+        # five together genuinely do not fit a narrowed window.
+        bar = self.tabs.tabBar()
+        bar.setExpanding(False)
+        bar.setElideMode(Qt.ElideNone)
+        self.tabs.setUsesScrollButtons(True)
         self.body.addWidget(self.tabs, stretch=1)
 
         self.summary = C.label("", role="meta")

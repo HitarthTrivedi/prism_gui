@@ -33,6 +33,7 @@ from email.message import EmailMessage
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
@@ -379,6 +380,18 @@ class TheScreen(unittest.TestCase):
 
     def test_it_opens_with_an_empty_register_rather_than_an_error(self):
         self.assertEqual(self.dialog.register_table.rowCount(), 0)
+
+    def test_no_tab_title_is_ever_cut_short(self):
+        """Reported directly, with screenshots: none of the five titles were
+        fully readable, because Qt's default tab bar splits its width
+        EQUALLY across every tab — so "Inquiries" was squeezed down to the
+        same narrow share as "What they said back" and both got an ellipsis
+        on top of that. expanding=False lets each tab claim only what its
+        own text needs; elideMode=ElideNone is the actual guarantee that no
+        title is ever shortened, whatever width is left over."""
+        bar = self.dialog.tabs.tabBar()
+        self.assertFalse(bar.expanding())
+        self.assertEqual(bar.elideMode(), Qt.ElideNone)
 
     def _result(self):
         known = triage.Knowledge.from_dict(self.cfg["inquiry"]["knowledge"])
