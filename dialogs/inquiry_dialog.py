@@ -64,13 +64,49 @@ CATEGORY_LABELS = {
     "other": "Other", "unsorted": "Needs a look",
 }
 
-# The register tab's date filter. "week" and "older" split on the same
-# boundary (today minus 6 days) so the two are exact complements of each
-# other and nothing between them is silently dropped from either.
+# The "Show:" date filter — shared by the register tab and the arrived-mail
+# log. "week" and "older" split on the same boundary (today minus 6 days) so
+# the two are exact complements of each other and nothing between them is
+# silently dropped from either.
 REGISTER_RANGES = [
     ("all", "All time"), ("today", "Today"), ("yesterday", "Yesterday"),
     ("week", "Last 7 days"), ("older", "Older than that"),
 ]
+
+
+def _parse_iso(text: str) -> date | None:
+    """A plain YYYY-MM-DD back into a date, or None for anything blank or
+    unreadable — the worklist file's own dates, as opposed to the register's
+    hand-typeable ones which go through register.parse_date() instead."""
+    try:
+        return date.fromisoformat((text or "").strip())
+    except ValueError:
+        return None
+
+
+def _in_date_range(when: date | None, filter_key: str, today: date) -> bool:
+    """One rule, used everywhere a "Show:" filter reads a date — the
+    register, and the arrived-mail log below it.
+
+    An unreadable or missing date — a hand-typed register the owner edited,
+    or an old worklist row from before a field existed — falls under "Older
+    than that" rather than every bucket or none: it is shown somewhere,
+    which a silent drop is not, and it is not claimed as today's when
+    nobody can say that it is.
+    """
+    if filter_key == "all":
+        return True
+    if when is None:
+        return filter_key == "older"
+    if filter_key == "today":
+        return when == today
+    if filter_key == "yesterday":
+        return when == today - timedelta(days=1)
+    if filter_key == "week":
+        return today - timedelta(days=6) <= when <= today
+    if filter_key == "older":
+        return when < today - timedelta(days=6)
+    return True
 
 SOURCE_LABELS = {
     "rule": "sorted here, by a rule",
@@ -219,6 +255,101 @@ def paint(item: QTableWidgetItem, colours: dict, key: str) -> QTableWidgetItem:
     return item
 
 
+# ── the worklist: what keeps arrived mail, replies and purchase orders on
+#    screen after the check that found them has long since moved its
+#    bookmark past them ────────────────────────────────────────────────────
+def _iso_date(when) -> str:
+    """A plain YYYY-MM-DD out of whatever a message's date carries, so the
+    worklist file — and its "Show:" filter — can compare dates as strings
+    without needing the original object back."""
+    if when is None:
+        return date.today().isoformat()
+    try:
+        return when.date().isoformat() if hasattr(when, "date") else when.isoformat()
+    except (TypeError, ValueError):
+        return date.today().isoformat()
+
+
+def _arrived_entry(message, verdict) -> dict:
+    """What one arrived-mail row needs to redraw itself from disk."""
+    return {
+        "message_id": message.message_id or "",
+        "from_name": message.from_name,
+        "from_addr": message.from_addr,
+        "subject": message.subject,
+        "date": _iso_date(message.date),
+        "category": verdict.category,
+        "reason": verdict.reason,
+        "source": verdict.source,
+    }
+
+
+def _worklist_entry(item) -> dict:
+    """What one reply or purchase-order Item needs to redraw itself, and to
+    be acted on, after the live Message that a check built it from is gone —
+    everything _show_reply() and _review_po() would otherwise have read off
+    that Message, plus the paths to the files already saved on disk."""
+    message = item.message
+    return {
+        "message_id": getattr(message, "message_id", "") or "",
+        "inquiry_no": item.inquiry_no,
+        "from_name": getattr(message, "from_name", ""),
+        "from_addr": getattr(message, "from_addr", ""),
+        "subject": getattr(message, "subject", ""),
+        "body": (getattr(message, "body", "") or "")[:4000],
+        "attachment_names": list(getattr(message, "attachment_names", None) or []),
+        "date": _iso_date(getattr(message, "date", None)),
+        "intent": item.intent,
+        "note": item.note,
+        "folder": item.folder,
+        "files": list(item.files or []),
+    }
+
+
+class _StoredMessage:
+    """Enough of core.inbox.Message to satisfy _show_reply(), _review_po()
+    and _po_file() for a reply or order read back from the worklist file,
+    where the real Message from the check that found it no longer exists."""
+
+    def __init__(self, entry: dict):
+        self.from_name = entry.get("from_name", "")
+        self.from_addr = entry.get("from_addr", "")
+        self.subject = entry.get("subject", "")
+        self.body = entry.get("body", "")
+        self.attachment_names = list(entry.get("attachment_names") or [])
+
+    def snippet(self, limit: int = 1500) -> str:
+        text = (self.body or "").strip()
+        if len(text) > limit:
+            text = text[:limit].rstrip() + " …"
+        return f"Subject: {self.subject}\n\n{text}".strip()
+
+
+class _StoredItem:
+    """A reply or order Item, rebuilt from one worklist row rather than from
+    a live check. Same shape as mailflow.Item for every attribute the
+    working dialog reads — .row, .message, .folder, .files, .intent, .note,
+    .inquiry_no, plus .message_id for resolving it — so nothing downstream
+    has to know whether an item came from this check or from disk."""
+
+    def __init__(self, entry: dict, row: dict | None):
+        self.message_id = entry.get("message_id", "")
+        self.row = row
+        self._entry_inquiry_no = entry.get("inquiry_no", "")
+        self.folder = entry.get("folder", "")
+        self.files = list(entry.get("files") or [])
+        self.intent = entry.get("intent", "")
+        self.note = entry.get("note", "")
+        self.message = _StoredMessage(entry)
+
+    @property
+    def inquiry_no(self) -> str:
+        # The register's own copy when the row still exists there — the
+        # freshest source, and the one every other status field comes from
+        # — falling back to what was true at the moment this was persisted.
+        return (self.row or {}).get("Inquiry no", "") or self._entry_inquiry_no
+
+
 def open_in_file_manager(path: str) -> None:
     """Reveal a folder or file in Finder/Explorer.
 
@@ -266,6 +397,7 @@ class InquiryDialog(PrismDialog):
         self._replies = []
         self._orders = []
         self._po_row = None
+        self._po_item = None
         self._followup_rows = []
         # The walk across the configured mailboxes: the accounts still to
         # check, how far along it is, and every account's result so far.
@@ -322,6 +454,13 @@ class InquiryDialog(PrismDialog):
         self._apply_auto_interval()
 
         self._refresh_register()
+        # Draw the three worklist tabs from what is already on disk, before
+        # any check has run this session — reopening the dialog tomorrow
+        # must show the same pending replies and orders it showed today,
+        # not a blank screen waiting for a fresh check to repopulate them.
+        self._render_arrived()
+        self._render_replies()
+        self._render_orders()
         QTimer.singleShot(0, self._first_look)
 
     def closeEvent(self, event):
@@ -459,12 +598,24 @@ class InquiryDialog(PrismDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         note = QLabel(i18n.t(
-            "Everything that came in since the last check, and what Prism "
-            "made of it. If something is in the wrong column, change it — "
-            "Prism remembers that sender and never asks again."))
+            "Every mail Prism has ever sorted, and what it made of it — kept "
+            "here permanently, not just since the last check. If something "
+            "is in the wrong column, change it — Prism remembers that "
+            "sender and never asks again."))
         note.setWordWrap(True)
         note.setObjectName("meta")
         layout.addWidget(note)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel(i18n.t("Show:")))
+        self.arrived_filter = QComboBox()
+        for value, label in REGISTER_RANGES:
+            self.arrived_filter.addItem(i18n.t(label), value)
+        self.arrived_filter.currentIndexChanged.connect(
+            lambda *_: self._render_arrived())
+        filter_row.addWidget(self.arrived_filter)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
 
         self.arrived = QTableWidget(0, 4)
         self.arrived.setHorizontalHeaderLabels(
@@ -481,8 +632,8 @@ class InquiryDialog(PrismDialog):
         layout.addWidget(_TableOrEmpty(
             self.arrived, "inbox",
             i18n.t("Nothing has come in yet"),
-            i18n.t("Press Check my mail now and everything that arrived "
-                   "since the last check is listed here, sorted.")),
+            i18n.t("Press Check my mail now and everything that arrives is "
+                   "listed here, sorted, and stays listed.")),
             stretch=1)
 
         row = QHBoxLayout()
@@ -639,16 +790,37 @@ class InquiryDialog(PrismDialog):
         return page
 
     def _fill_replies(self, result):
-        rows = list(getattr(result, "replies", None) or [])
+        """Bank whatever this check found into the worklist file, then draw
+        the tab from THAT — never straight from `result`, which only ever
+        holds what this one check happened to see. See _render_replies()."""
+        entries = [_worklist_entry(item)
+                  for item in list(getattr(result, "replies", None) or [])]
+        folder = self._root()
+        if folder and entries:
+            CB.get_worklist().append(folder, "replies", entries)
+        self._render_replies()
+
+    def _render_replies(self):
+        """Redraw from the worklist file, not from memory — a reply from
+        two checks ago that nobody has applied yet is exactly as pending as
+        one from thirty seconds ago, and both must still be here after the
+        dialog is closed and reopened."""
+        worklist = CB.get_worklist()
         register = CB.get_register()
-        self._replies = rows
-        self.replies_table.setRowCount(len(rows))
-        for index, item in enumerate(rows):
+        folder = self._root()
+        data = worklist.load(folder) if folder else {"replies": []}
+        items = [_StoredItem(entry, register.find(self._register_rows,
+                                                   entry.get("inquiry_no", "")))
+                for entry in worklist.pending(data, "replies")]
+        self._replies = items
+        self.replies_table.setRowCount(len(items))
+        for index, item in enumerate(items):
             row = item.row or {}
             would = register.REPLY_STATUS.get(item.intent, "")
-            cells = [row.get("Inquiry no", ""),
-                     row.get("Customer", "") or row.get("Email", ""),
-                     getattr(item.message, "subject", ""),
+            cells = [row.get("Inquiry no", "") or item.inquiry_no,
+                     row.get("Customer", "") or row.get("Email", "")
+                     or item.message.from_addr,
+                     item.message.subject,
                      i18n.t(INTENT_LABELS.get(item.intent, item.intent)),
                      would or i18n.t("nothing — needs your eye")]
             for column, value in enumerate(cells):
@@ -658,7 +830,7 @@ class InquiryDialog(PrismDialog):
                 elif column == 4 and would:
                     paint(cell, STATUS_COLOURS, would)
                 self.replies_table.setItem(index, column, cell)
-        if rows:
+        if items:
             self.replies_table.setCurrentCell(0, 0)
         self._show_reply()
 
@@ -708,18 +880,18 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        # Resolved in the worklist file, not just popped from the table — a
+        # re-check must never bring an already-applied reply back onto this
+        # list, which popping the in-memory row alone would not have
+        # prevented once the dialog closed and reopened.
+        if item.message_id:
+            CB.get_worklist().resolve(self._root(), "replies", item.message_id)
         self._refresh_register()
         self.status.setText(
             i18n.t("{no} is now {status}.")
             .replace("{no}", target.get("Inquiry no", ""))
             .replace("{status}", target.get("Status", "")))
-        # Take it off the list — it has been dealt with, and leaving it there
-        # invites applying the same reply twice.
-        row_index = self.replies_table.currentRow()
-        if row_index >= 0:
-            self.replies_table.removeRow(row_index)
-            self._replies.pop(row_index)
-        self._show_reply()
+        self._render_replies()
 
     # ── tab 4: chasing ────────────────────────────────────────────────────
     def _followup_tab(self) -> QWidget:
@@ -803,20 +975,39 @@ class InquiryDialog(PrismDialog):
         return page
 
     def _fill_orders(self, result):
-        rows = list(getattr(result, "orders", None) or [])
-        self._orders = rows
-        self.orders_table.setRowCount(len(rows))
-        for index, item in enumerate(rows):
+        """Bank whatever this check found into the worklist file, then draw
+        the tab from THAT — see _fill_replies() for why."""
+        entries = [_worklist_entry(item)
+                  for item in list(getattr(result, "orders", None) or [])]
+        folder = self._root()
+        if folder and entries:
+            CB.get_worklist().append(folder, "orders", entries)
+        self._render_orders()
+
+    def _render_orders(self):
+        """Redraw from the worklist file. This is the tab a friend's PO
+        went missing from the moment the mailbox's bookmark moved past it —
+        an unaccepted order three checks old is still an unaccepted order."""
+        worklist = CB.get_worklist()
+        register = CB.get_register()
+        folder = self._root()
+        data = worklist.load(folder) if folder else {"orders": []}
+        items = [_StoredItem(entry, register.find(self._register_rows,
+                                                   entry.get("inquiry_no", "")))
+                for entry in worklist.pending(data, "orders")]
+        self._orders = items
+        self.orders_table.setRowCount(len(items))
+        for index, item in enumerate(items):
             row = item.row or {}
-            cells = [row.get("Inquiry no", ""),
+            cells = [row.get("Inquiry no", "") or item.inquiry_no,
                      row.get("Customer", "") or row.get("Email", "")
-                     or getattr(item.message, "from_addr", ""),
-                     getattr(item.message, "subject", ""),
+                     or item.message.from_addr,
+                     item.message.subject,
                      i18n.t(item.note) if item.note else ""]
             for column, value in enumerate(cells):
                 self.orders_table.setItem(index, column,
                                           QTableWidgetItem(str(value)))
-        if rows:
+        if items:
             self.orders_table.setCurrentCell(0, 0)
 
     def _selected_order(self):
@@ -864,6 +1055,11 @@ class InquiryDialog(PrismDialog):
                 self, i18n.t("Purchase order"),
                 i18n.t("Pick an order from the list first."))
             return
+        # Read again in _po_accepted() — the review dialog is modal, so the
+        # selection cannot change underneath it, but the item itself (and
+        # its message id, needed to resolve it in the worklist file) is not
+        # otherwise threaded through _show_po()/_po_read().
+        self._po_item = item
         register = CB.get_register()
         row = register.find(self._register_rows, item.inquiry_no) or item.row
         if not row:
@@ -965,12 +1161,13 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        # Resolved in the worklist file — see _apply_reply() for why popping
+        # the in-memory row is not enough on its own.
+        item = getattr(self, "_po_item", None)
+        if item is not None and item.message_id:
+            CB.get_worklist().resolve(self._root(), "orders", item.message_id)
         self._refresh_register()
-        # Dealt with — leaving it in the list invites accepting it twice.
-        index = self.orders_table.currentRow()
-        if 0 <= index < len(self._orders):
-            self.orders_table.removeRow(index)
-            self._orders.pop(index)
+        self._render_orders()
         self.status.setText(
             i18n.t("{no} is converted — PO {po}, ₹{value}.")
             .replace("{no}", target.get("Inquiry no", ""))
@@ -1355,25 +1552,55 @@ class InquiryDialog(PrismDialog):
         CB.config.save(self.cfg)
 
     def _fill_arrived(self, result):
-        rows = list(getattr(result, "sorted_mail", None) or [])
+        """Bank whatever this check sorted into the worklist file, then
+        draw the tab from THAT — see _fill_replies() for why: a table
+        rebuilt straight from `result` shows only this check's mail, and
+        goes blank the moment a later check (or a tab switch, which used to
+        force a redraw from nothing) has nothing new to add."""
+        entries = [_arrived_entry(message, verdict)
+                  for message, verdict in
+                  list(getattr(result, "sorted_mail", None) or [])]
+        folder = self._root()
+        if folder and entries:
+            CB.get_worklist().append(folder, "arrived", entries)
+        self._render_arrived()
+
+    def _render_arrived(self):
+        """Redraw from the worklist file's full log, filtered by the
+        "Show:" range — not from memory, and not only "since the last
+        check"."""
+        worklist = CB.get_worklist()
+        folder = self._root()
+        data = worklist.load(folder) if folder else {"arrived": []}
+        filter_key = (self.arrived_filter.currentData()
+                     if hasattr(self, "arrived_filter") else "all") or "all"
+        today = date.today()
+        rows = [r for r in worklist.history(data, "arrived")
+               if _in_date_range(_parse_iso(r.get("date", "")),
+                                 filter_key, today)]
         self.arrived.setRowCount(len(rows))
-        for index, (message, verdict) in enumerate(rows):
-            who = message.from_name or message.from_addr
+        for index, entry in enumerate(rows):
+            who = entry.get("from_name") or entry.get("from_addr", "")
             self.arrived.setItem(index, 0, QTableWidgetItem(who))
-            self.arrived.setItem(index, 1, QTableWidgetItem(message.subject))
-            label = i18n.t(CATEGORY_LABELS.get(verdict.category, verdict.category))
+            self.arrived.setItem(index, 1,
+                                 QTableWidgetItem(entry.get("subject", "")))
+            category = entry.get("category", "")
+            label = i18n.t(CATEGORY_LABELS.get(category, category))
             self.arrived.setItem(index, 2, paint(
-                QTableWidgetItem(label), CATEGORY_COLOURS, verdict.category))
-            why = verdict.reason or i18n.t(SOURCE_LABELS.get(verdict.source, ""))
+                QTableWidgetItem(label), CATEGORY_COLOURS, category))
+            why = entry.get("reason") or i18n.t(
+                SOURCE_LABELS.get(entry.get("source", ""), ""))
             self.arrived.setItem(index, 3, QTableWidgetItem(why))
-            self.arrived.item(index, 0).setData(Qt.UserRole, message.from_addr)
+            self.arrived.item(index, 0).setData(
+                Qt.UserRole, entry.get("from_addr", ""))
         self._sorted_mail = rows
 
     def _correct(self):
         row = self.arrived.currentRow()
         if row < 0 or not getattr(self, "_sorted_mail", None):
             return
-        address = self.arrived.item(row, 0).data(Qt.UserRole)
+        entry = self._sorted_mail[row]
+        address = entry.get("from_addr", "")
         category = self.recategorise.currentData()
         settings = self._settings()
         knowledge = settings.get("knowledge") or {}
@@ -1383,11 +1610,19 @@ class InquiryDialog(PrismDialog):
         settings["knowledge"] = knowledge
         self.cfg["inquiry"] = settings
         CB.config.save(self.cfg)
+        # Update the log entry itself, not just what is on screen right
+        # now — otherwise the very next tab switch redraws from disk and
+        # the correction looks like it never took.
+        reason = i18n.t("sorted here, you taught it")
+        if entry.get("message_id"):
+            CB.get_worklist().update(
+                self._root(), "arrived", entry["message_id"],
+                {"category": category, "reason": reason, "source": "learned"})
+        entry["category"], entry["reason"] = category, reason
         self.arrived.setItem(row, 2, paint(QTableWidgetItem(
             i18n.t(CATEGORY_LABELS.get(category, category))),
             CATEGORY_COLOURS, category))
-        self.arrived.setItem(row, 3, QTableWidgetItem(
-            i18n.t("sorted here, you taught it")))
+        self.arrived.setItem(row, 3, QTableWidgetItem(reason))
         self.status.setText(
             i18n.t("Remembered. Mail from {who} will be sorted that way from "
                    "now on.").replace("{who}", address))
@@ -1445,26 +1680,9 @@ class InquiryDialog(PrismDialog):
 
     def _register_date_matches(self, row: dict, filter_key: str,
                                today: date) -> bool:
-        if filter_key == "all":
-            return True
         register = CB.get_register()
-        when = register.parse_date(row.get("Date received", ""))
-        # An unreadable or blank date — a hand-typed register the owner
-        # edited, or a row from before this column was tracked — falls under
-        # "Older than that" rather than every bucket or none: it is shown
-        # somewhere, which a silent drop is not, and it is not claimed as
-        # today's when nobody can say that it is.
-        if when is None:
-            return filter_key == "older"
-        if filter_key == "today":
-            return when == today
-        if filter_key == "yesterday":
-            return when == today - timedelta(days=1)
-        if filter_key == "week":
-            return today - timedelta(days=6) <= when <= today
-        if filter_key == "older":
-            return when < today - timedelta(days=6)
-        return True
+        return _in_date_range(register.parse_date(row.get("Date received", "")),
+                              filter_key, today)
 
     def _render_register(self):
         """Redraw the table from _register_rows and the date filter,
@@ -2414,10 +2632,14 @@ class QuotationDialog(PrismDialog):
             i18n.t("Prepare a quotation"),
             i18n.t("Prism prices it and writes the covering mail. You check "
                    "the figure and press Send."),
-            icon="file", parent=parent, closable=False)
+            icon="file", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(i18n.t("Prepare a quotation"))
-        self.resize(820, 760)
-        self.setMinimumSize(640, 600)
+        self.resize(860, 820)
+        # Lower than before now that the body scrolls (scrollable=True) — a
+        # short laptop screen shrinks the window and scrolls the form instead
+        # of Qt compressing every row into the one above it, which is what
+        # produced the overlapping labels the previous fixed-height body did.
+        self.setMinimumSize(620, 460)
         self.cfg, self.row, self.items = dict(cfg), row, items
         self.cost_lines = list(cost_lines or [])
         self.parent_dialog = parent

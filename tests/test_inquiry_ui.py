@@ -895,6 +895,133 @@ class WhatTheCustomerSaidBack(unittest.TestCase):
         self.assertEqual(self.dialog.tabs.currentIndex(), 1)
 
 
+class NothingIsLostToASecondCheckOrAReopen(unittest.TestCase):
+    """The actual report: a friend's reply had shown up on "What they said
+    back" and a purchase order on "The order came" — both real, both still
+    needing an answer — and switching tabs, or the next check finding
+    nothing new, made them disappear. Nothing about the reply or the PO
+    changed; the mailbox's own read bookmark had simply moved past the
+    message that found them, and the three tables below were drawing
+    straight from that one check's result and nothing else.
+
+    core/worklist.py is the fix — see tests/test_worklist.py for the file
+    format itself. These prove it end to end: through _fill_*(), through a
+    second check finding nothing, and through a brand new InquiryDialog
+    pointed at the same folder, which is what actually happens when the
+    screen is closed and reopened."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.cfg = ready_cfg(self.folder)
+        self.dialog = UI.InquiryDialog(self.cfg)
+        self.row = register.from_message(message())
+        register.mark_quoted(self.row, "QTN/26-27/0001", "50000")
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        self.dialog._refresh_register()
+
+    def _reply_result(self):
+        result = mailflow.Result()
+        result.replies = [mailflow.Item(
+            "reply", message("Re: Enquiry", body="Done, go ahead."),
+            self.dialog._register_rows[0], intent="accepted")]
+        return result
+
+    def _order_result(self):
+        result = mailflow.Result()
+        result.orders = [mailflow.Item(
+            "order", message("PO 4471", body="Please supply as quoted."),
+            self.dialog._register_rows[0], note="Matches the quotation")]
+        return result
+
+    # ── replies ──────────────────────────────────────────────────────────
+    def test_a_reply_survives_an_empty_second_check(self):
+        self.dialog._fill_replies(self._reply_result())
+        empty = mailflow.Result()      # a later check that found nothing new
+        self.dialog._fill_replies(empty)
+        self.assertEqual(self.dialog.replies_table.rowCount(), 1)
+
+    def test_a_reply_survives_reopening_the_dialog(self):
+        self.dialog._fill_replies(self._reply_result())
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        self.assertEqual(reopened.replies_table.rowCount(), 1)
+        self.assertIn("go ahead", reopened.reply_text.toPlainText())
+
+    def test_applying_it_in_the_reopened_dialog_still_removes_it(self):
+        self.dialog._fill_replies(self._reply_result())
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        with _NoSave():
+            reopened._apply_reply()
+        self.assertEqual(reopened.replies_table.rowCount(), 0)
+        # And it does not come back a third time.
+        third = UI.InquiryDialog(self.cfg)
+        third._refresh_register()
+        self.assertEqual(third.replies_table.rowCount(), 0)
+
+    # ── purchase orders ──────────────────────────────────────────────────
+    def test_a_purchase_order_survives_an_empty_second_check(self):
+        self.dialog._fill_orders(self._order_result())
+        self.dialog._fill_orders(mailflow.Result())
+        self.assertEqual(self.dialog.orders_table.rowCount(), 1)
+
+    def test_a_purchase_order_survives_reopening_the_dialog(self):
+        self.dialog._fill_orders(self._order_result())
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        self.assertEqual(reopened.orders_table.rowCount(), 1)
+        self.assertEqual(reopened.orders_table.item(0, 3).text(),
+                         "Matches the quotation")
+
+    def test_accepting_it_in_the_reopened_dialog_resolves_it_for_good(self):
+        self.dialog._fill_orders(self._order_result())
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        reopened._po_item = reopened._selected_order()
+        reopened._po_accepted(reopened._register_rows[0], "PO4471", "50000", "")
+        self.assertEqual(reopened.orders_table.rowCount(), 0)
+        third = UI.InquiryDialog(self.cfg)
+        third._refresh_register()
+        self.assertEqual(third.orders_table.rowCount(), 0)
+
+    # ── arrived mail ─────────────────────────────────────────────────────
+    def test_arrived_mail_survives_an_empty_second_check(self):
+        known = triage.Knowledge.from_dict(self.cfg["inquiry"]["knowledge"])
+        result = mailflow.Result()
+        result.sorted_mail = [(message(), triage.rules_pass(message(), known))]
+        self.dialog._fill_arrived(result)
+        self.dialog._fill_arrived(mailflow.Result())
+        self.assertEqual(self.dialog.arrived.rowCount(), 1)
+
+    def test_arrived_mail_survives_reopening_the_dialog(self):
+        known = triage.Knowledge.from_dict(self.cfg["inquiry"]["knowledge"])
+        result = mailflow.Result()
+        result.sorted_mail = [(message(), triage.rules_pass(message(), known))]
+        self.dialog._fill_arrived(result)
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        self.assertEqual(reopened.arrived.rowCount(), 1)
+
+    def test_a_correction_survives_reopening_the_dialog(self):
+        """The same report, for _correct(): teaching Prism a sender is not
+        an enquiry must not be forgotten the moment the screen closes."""
+        known = triage.Knowledge.from_dict(self.cfg["inquiry"]["knowledge"])
+        msg = message("Newsletter", "promo@x.example", "buy now")
+        result = mailflow.Result()
+        result.sorted_mail = [(msg, triage.rules_pass(msg, known))]
+        self.dialog._fill_arrived(result)
+        self.dialog.arrived.setCurrentCell(0, 0)
+        position = self.dialog.recategorise.findData("other")
+        self.dialog.recategorise.setCurrentIndex(position)
+        with _NoSave():
+            self.dialog._correct()
+
+        reopened = UI.InquiryDialog(self.cfg)
+        reopened._refresh_register()
+        self.assertEqual(reopened.arrived.item(0, 2).text(),
+                         UI.CATEGORY_LABELS["other"])
+
+
 class CorrectingTheRegisterByHand(unittest.TestCase):
     """They can always edit the CSV in Excel — it is their file. But a
     register that can only be corrected by closing the app is one they will
@@ -1418,6 +1545,39 @@ class TypingOverThePriceByHand(unittest.TestCase):
     def quote_dialog(self):
         return UI.QuotationDialog(self.cfg, self.dialog._register_rows[0],
                                   self.items, self.dialog)
+
+    def test_the_form_rows_do_not_overlap(self):
+        """Adding Rate and Unit as their own rows, on top of a dialog that
+        was never told it could grow past a fixed height, once squeezed
+        every label onto the box above it — illegible, and specifically
+        reported as such. scrollable=True is the fix (see __init__); this
+        pins the actual geometry so a future field added the same way fails
+        loudly here instead of shipping as a screenshot of overlapping
+        text."""
+        q = self.quote_dialog()
+        # show(), deliberately not followed by _app.processEvents(): this
+        # test file leaves plenty of QTimer.singleShot(0, ...) calls queued
+        # by dialogs earlier tests construct and never close (most notably
+        # InquiryDialog's own deferred _first_look(), which pops a genuinely
+        # blocking QMessageBox when a fixture's cfg is not "ready"). Draining
+        # the whole application queue here — rather than just laying this
+        # widget out, which show() already does on its own — hung the whole
+        # suite on someone else's leftover dialog the first time this was
+        # written with processEvents() in it.
+        q.show()
+        try:
+            rows = [q.item_picker, q.rate_edit, q.unit_edit,
+                    q.description, q.quantity]
+            tops = [w.mapTo(q, w.geometry().topLeft()).y() for w in rows]
+            bottoms = [top + w.geometry().height()
+                      for top, w in zip(tops, rows)]
+            for i in range(len(rows) - 1):
+                self.assertLess(
+                    bottoms[i], tops[i + 1],
+                    f"row {i} (bottom={bottoms[i]}) overlaps row {i + 1} "
+                    f"(top={tops[i + 1]})")
+        finally:
+            q.close()
 
     def test_the_suggested_rate_is_pre_filled(self):
         q = self.quote_dialog()

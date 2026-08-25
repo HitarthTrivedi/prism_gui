@@ -201,6 +201,11 @@ def get_mailflow():
     return mailflow
 
 
+def get_worklist():
+    from core import worklist
+    return worklist
+
+
 def get_files():
     from core import files
     return files
