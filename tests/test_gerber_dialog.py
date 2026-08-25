@@ -26,9 +26,33 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("PRISM_LICENSE_OFFLINE_DEV", "1")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from dialogs import gerber_dialog as GD  # noqa: E402
 from dialogs.gerber_dialog import GerberDialog  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
+
+# REPORTS_DIR is a real, visible ~/Desktop/Prism Gerber by design (see the
+# constant's own comment) — exactly right for the app, and exactly wrong for
+# a test run to litter on whoever's machine runs the suite. Redirected for
+# the whole module, not just per-test: a measurement genuinely can outlive
+# its own test under GIL contention from the other thousand-odd tests in a
+# full run (a per-test mock.patch already proved this — two real CSVs
+# landed in the real folder from a straggler GerberWorker whose `done`
+# signal was not delivered until well after that test's teardown had put
+# the real path back). A module-wide redirect does not make that structurally
+# impossible — a worker could in principle outlive this whole file's run —
+# but it shrinks the exposed window from "the rest of the suite" to "the
+# rest of this one file", which is what actually stopped the leak.
+_REAL_REPORTS_DIR = GD.REPORTS_DIR
+_SCRATCH_REPORTS_DIR = tempfile.mkdtemp(prefix="prism-test-gerber-reports-")
+
+
+def setUpModule():
+    GD.REPORTS_DIR = _SCRATCH_REPORTS_DIR
+
+
+def tearDownModule():
+    GD.REPORTS_DIR = _REAL_REPORTS_DIR
 
 REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
 
@@ -86,6 +110,22 @@ def _measure_and_join(dlg, paths, timeout_s=15.0, step_s=0.02):
     if worker is not None:
         worker.wait(5000)          # the run already finished; this returns fast
     return bool(dlg.jobs)
+
+
+class TheReportsGoSomewhereFindable(unittest.TestCase):
+    """Every other add-on's CSV lands in the hidden ~/.prism/runs — exactly
+    where an owner who wants to email a customer the numbers in the next
+    five minutes will never think to look. Gerber's own reports go
+    somewhere they will actually be found again."""
+
+    def test_it_is_a_named_folder_on_the_desktop(self):
+        # _REAL_REPORTS_DIR, not GD.REPORTS_DIR — setUpModule has already
+        # redirected the live attribute to a scratch folder by the time any
+        # test runs (see its comment for why), so this checks what the app
+        # actually ships with, captured before that redirect happened.
+        desktop = os.path.expanduser("~/Desktop")
+        self.assertTrue(_REAL_REPORTS_DIR.startswith(desktop + os.sep))
+        self.assertEqual(os.path.basename(_REAL_REPORTS_DIR), "Prism Gerber")
 
 
 class AnAgentOnlyEverSeesTheNumbers(unittest.TestCase):
@@ -236,6 +276,18 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
         if not os.path.isdir(REAL):
             raise unittest.SkipTest("sample jobs not on this machine")
 
+    def setUp(self):
+        # The module-level redirect (see setUpModule) already keeps this off
+        # the real Desktop; this narrows it further to a fresh folder per
+        # test, purely so each test can assert against a path that is
+        # unambiguously its own.
+        self._reports_dir = tempfile.mkdtemp(prefix="prism-test-gerber-reports-")
+        self._reports_patch = mock.patch.object(GD, "REPORTS_DIR", self._reports_dir)
+        self._reports_patch.start()
+
+    def tearDown(self):
+        self._reports_patch.stop()
+
     def test_a_single_job_measures_and_a_csv_is_saved(self):
         src = os.path.join(REAL, "layer 1.zip")
         if not os.path.exists(src):
@@ -246,7 +298,8 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
         self.assertEqual(len(dlg.jobs), 1)
         name, job = dlg.jobs[0]
         self.assertAlmostEqual(job["answers"]["pcb_size_mm"][0], 60.0, places=1)
-        self.assertIn(".prism/runs/gerber_", dlg.csv_label.text())
+        self.assertIn(self._reports_dir, dlg.csv_label.text())
+        self.assertTrue(os.path.isdir(self._reports_dir))
         self.assertTrue(dlg.run_btn.isEnabled())
 
     def _two_fast_jobs_folder(self):
