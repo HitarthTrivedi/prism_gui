@@ -65,6 +65,7 @@ class EmailSetupDialog(PrismDialog):
         self.pass_edit.setPlaceholderText(
             "leave blank to keep the saved password" if self._saved_password
             else "16-character app password — spaces are fine, paste as shown")
+        self.pass_edit.textChanged.connect(self._update_password_status)
         form.addRow("Password:", self.pass_edit)
         self.host_edit = QLineEdit(existing.get("host", ""))
         self.host_edit.setPlaceholderText("auto-detected for Gmail/Outlook/Yahoo")
@@ -73,6 +74,16 @@ class EmailSetupDialog(PrismDialog):
         self.port_edit.setPlaceholderText("465 = SSL, 587 = STARTTLS")
         form.addRow("SMTP port:", self.port_edit)
         root.addLayout(form)
+
+        # The placeholder alone reads as "empty" to anyone who has not
+        # stopped to read the grey text — the same misreading that, on the
+        # Inquiry Automation side, turned "the password is always shown
+        # blank" into a belief that Prism deletes it. See
+        # InquirySetupDialog._update_password_status() for the original.
+        self.password_status = QLabel("")
+        self.password_status.setWordWrap(True)
+        root.addWidget(self.password_status)
+        self._update_password_status()
 
         self.status = QLabel("")
         self.status.setObjectName("dim")
@@ -93,6 +104,30 @@ class EmailSetupDialog(PrismDialog):
             self.button(i18n.t("Save"), "primary", on_click=self._save))
         self.tab_chain(self.addr_edit, self.pass_edit, self.host_edit,
                        self.port_edit)
+
+    def _update_password_status(self):
+        """Say, in words nobody can miss, whether the password box being
+        blank means "nothing saved" or "already saved, and staying that
+        way." Silent once something new has actually been typed — at that
+        point the box speaks for itself."""
+        if self.pass_edit.text():
+            self.password_status.setText("")
+            self.password_status.setVisible(False)
+            return
+        if self._saved_password:
+            self.password_status.setText(i18n.t(
+                "✓ A password is already saved for this account. Leave this "
+                "box blank and it stays exactly as it is — nothing is "
+                "removed by opening or saving this screen. Type a new one "
+                "here only if you want to replace it."))
+            self.password_status.setStyleSheet(
+                f"color: {theme.OK_INK}; font-size: 12.5px;")
+        else:
+            self.password_status.setText(i18n.t(
+                "No password saved yet for this account."))
+            self.password_status.setStyleSheet(
+                f"color: {theme.NEUTRAL[600]}; font-size: 12.5px;")
+        self.password_status.setVisible(True)
 
     def _autofill_server(self, address: str):
         """Fill host/port the moment the domain is recognisable, so the two

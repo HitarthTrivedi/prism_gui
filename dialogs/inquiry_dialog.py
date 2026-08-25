@@ -33,17 +33,17 @@ import csv
 import os
 import subprocess
 import sys
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar,
+    QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -63,6 +63,14 @@ CATEGORY_LABELS = {
     "promotion": "Promotion", "vendor": "Supplier", "internal": "Internal",
     "other": "Other", "unsorted": "Needs a look",
 }
+
+# The register tab's date filter. "week" and "older" split on the same
+# boundary (today minus 6 days) so the two are exact complements of each
+# other and nothing between them is silently dropped from either.
+REGISTER_RANGES = [
+    ("all", "All time"), ("today", "Today"), ("yesterday", "Yesterday"),
+    ("week", "Last 7 days"), ("older", "Older than that"),
+]
 
 SOURCE_LABELS = {
     "rule": "sorted here, by a rule",
@@ -250,6 +258,11 @@ class InquiryDialog(PrismDialog):
         self._result = None
         self._sorted_mail = []
         self._register_rows = []
+        # What the table actually shows once the date filter is applied — the
+        # same dict objects as _register_rows, never copies, so a mutation
+        # through _selected_row() (which reads this list) still lands on the
+        # row register.save() will actually write.
+        self._visible_rows = []
         self._replies = []
         self._orders = []
         self._po_row = None
@@ -491,6 +504,17 @@ class InquiryDialog(PrismDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel(i18n.t("Show:")))
+        self.register_filter = QComboBox()
+        for value, label in REGISTER_RANGES:
+            self.register_filter.addItem(i18n.t(label), value)
+        self.register_filter.currentIndexChanged.connect(
+            lambda *_: self._render_register())
+        filter_row.addWidget(self.register_filter)
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
         self.register_table = QTableWidget(0, 6)
         self.register_table.setHorizontalHeaderLabels(
             [i18n.t("Inquiry no"), i18n.t("Date"), i18n.t("Customer"),
@@ -513,6 +537,13 @@ class InquiryDialog(PrismDialog):
         quote.setObjectName("primaryBtn")
         quote.clicked.connect(self._prepare_quotation)
         row.addWidget(quote)
+        already = QPushButton(i18n.t("Mark as already quoted"))
+        already.setToolTip(i18n.t(
+            "For one you priced by phone or in person, outside Prism — logs "
+            "it as quoted and stops the follow-up chase, without opening "
+            "the pricing screen."))
+        already.clicked.connect(self._mark_already_quoted)
+        row.addWidget(already)
         edit = QPushButton(i18n.t("Edit this row"))
         edit.clicked.connect(self._edit_row)
         row.addWidget(edit)
@@ -535,6 +566,17 @@ class InquiryDialog(PrismDialog):
         row.addWidget(lost)
         row.addStretch(1)
         layout.addLayout(row)
+
+        import_row = QHBoxLayout()
+        import_btn = QPushButton(i18n.t("Import a CSV into the register"))
+        import_btn.setToolTip(i18n.t(
+            "For a list of inquiries you already kept before using Prism — "
+            "added alongside what is already here. Nothing already in the "
+            "register is touched, changed or duplicated."))
+        import_btn.clicked.connect(self._import_csv_into_register)
+        import_row.addWidget(import_btn)
+        import_row.addStretch(1)
+        layout.addLayout(import_row)
         return page
 
     # ── tab 3: what the customer said back ────────────────────────────────
@@ -1361,23 +1403,15 @@ class InquiryDialog(PrismDialog):
             return []
 
     def _refresh_register(self):
+        """Read the register off disk and redraw the table from it. Anything
+        that only changes what is SHOWN — the date filter — calls
+        _render_register() directly instead; re-reading a CSV on a shared
+        drive to change nothing but which rows are visible would make
+        switching the filter cost what a real mail check costs."""
         register = CB.get_register()
         rows = self._rows()
         self._register_rows = rows
-        self.register_table.setRowCount(len(rows))
-        for index, row in enumerate(rows):
-            when = row.get("Date received", "")
-            clock = row.get("Time received", "")
-            values = [row.get("Inquiry no", ""),
-                      f"{when} {clock}".strip(),
-                      row.get("Customer", "") or row.get("Email", ""),
-                      row.get("Product asked", ""), row.get("Status", ""),
-                      row.get("Order value") or row.get("Quotation value", "")]
-            for column, value in enumerate(values):
-                cell = QTableWidgetItem(str(value))
-                if column == 4:
-                    paint(cell, STATUS_COLOURS, str(value))
-                self.register_table.setItem(index, column, cell)
+        self._render_register()
 
         self.followups.clear()
         settings = self._settings()
@@ -1409,9 +1443,57 @@ class InquiryDialog(PrismDialog):
             summary = CB.get_mailflow().day_summary(self._paths())
             self.summary.setText(summary.replace("\n", "   ").replace("  ", " "))
 
+    def _register_date_matches(self, row: dict, filter_key: str,
+                               today: date) -> bool:
+        if filter_key == "all":
+            return True
+        register = CB.get_register()
+        when = register.parse_date(row.get("Date received", ""))
+        # An unreadable or blank date — a hand-typed register the owner
+        # edited, or a row from before this column was tracked — falls under
+        # "Older than that" rather than every bucket or none: it is shown
+        # somewhere, which a silent drop is not, and it is not claimed as
+        # today's when nobody can say that it is.
+        if when is None:
+            return filter_key == "older"
+        if filter_key == "today":
+            return when == today
+        if filter_key == "yesterday":
+            return when == today - timedelta(days=1)
+        if filter_key == "week":
+            return today - timedelta(days=6) <= when <= today
+        if filter_key == "older":
+            return when < today - timedelta(days=6)
+        return True
+
+    def _render_register(self):
+        """Redraw the table from _register_rows and the date filter,
+        without touching the disk. _visible_rows becomes the table's actual
+        row order — see its definition in __init__ for why _selected_row()
+        must read that list and not _register_rows directly."""
+        filter_key = self.register_filter.currentData() or "all"
+        today = date.today()
+        rows = [r for r in (self._register_rows or [])
+                if self._register_date_matches(r, filter_key, today)]
+        self._visible_rows = rows
+        self.register_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            when = row.get("Date received", "")
+            clock = row.get("Time received", "")
+            values = [row.get("Inquiry no", ""),
+                      f"{when} {clock}".strip(),
+                      row.get("Customer", "") or row.get("Email", ""),
+                      row.get("Product asked", ""), row.get("Status", ""),
+                      row.get("Order value") or row.get("Quotation value", "")]
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(str(value))
+                if column == 4:
+                    paint(cell, STATUS_COLOURS, str(value))
+                self.register_table.setItem(index, column, cell)
+
     def _selected_row(self) -> dict | None:
         index = self.register_table.currentRow()
-        rows = getattr(self, "_register_rows", [])
+        rows = getattr(self, "_visible_rows", [])
         if index < 0 or index >= len(rows):
             QMessageBox.information(
                 self, i18n.t("Email automation"),
@@ -1448,6 +1530,71 @@ class InquiryDialog(PrismDialog):
             self._explain(str(e))
             return
         self._refresh_register()
+
+    def _mark_already_quoted(self):
+        """Log a quotation made outside Prism — a phone call, a counter
+        sale, or one written before this inquiry ever reached this screen.
+        Reuses the same "Quoted" status a real pricing run would set, so it
+        gets the same colour and the same follow-up chasing — the only
+        difference is that nothing was priced or sent through Prism itself."""
+        row = self._selected_row()
+        if not row:
+            return
+        quote_no, value, ok = _ask_already_quoted(self, row)
+        if not ok:
+            return
+        register = CB.get_register()
+        register.mark_quoted(row, quote_no, value)
+        try:
+            register.save(self._register_rows, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        self._refresh_register()
+        self.status.setText(i18n.t(
+            "Marked as quoted. Prism will remind you if there is no reply."))
+
+    def _import_csv_into_register(self):
+        """Bring in a register the owner already kept before Prism, or one a
+        colleague built up separately — appended, not swapped in, and
+        nothing already here is touched. See register.merge_in() for how a
+        row already present is recognised and skipped."""
+        if not self._root():
+            QMessageBox.information(
+                self, i18n.t("Email automation"),
+                i18n.t("Set up a mailbox and a folder first."))
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Choose the CSV you already kept"),
+            os.path.expanduser("~"), "CSV (*.csv)")
+        if not path:
+            return
+        register = CB.get_register()
+        try:
+            incoming = register.load(path)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        if not incoming:
+            QMessageBox.information(
+                self, i18n.t("Import"),
+                i18n.t("That file has no rows in it."))
+            return
+        merged, added, skipped = register.merge_in(self._register_rows,
+                                                    incoming)
+        try:
+            register.save(merged, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        self._refresh_register()
+        message = i18n.t("Added {n} row(s) to the register.").replace(
+            "{n}", str(added))
+        if skipped:
+            message += " " + i18n.t(
+                "{n} looked like ones already in the register, so they "
+                "were left out.").replace("{n}", str(skipped))
+        QMessageBox.information(self, i18n.t("Import"), message)
 
     # ── chasing a quiet quotation ─────────────────────────────────────────
     def _send_reminder(self):
@@ -1891,6 +2038,33 @@ def _ask_reason(parent) -> tuple[str, bool]:
     return picker.currentText().strip(), ok
 
 
+def _ask_already_quoted(parent, row: dict) -> tuple[str, str, bool]:
+    """Both fields optional — an owner who just wants the chase to stop
+    should not be blocked on a quotation number they may never have
+    written down."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(i18n.t("Mark as already quoted"))
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel(i18n.t(
+        "For {who} — logs it as quoted, without opening the pricing "
+        "screen.").replace(
+        "{who}", row.get("Customer", "") or row.get("Email", ""))))
+    form = QFormLayout()
+    number = QLineEdit()
+    number.setPlaceholderText(i18n.t("optional"))
+    form.addRow(i18n.t("Quotation no:"), number)
+    value = QLineEdit()
+    value.setPlaceholderText(i18n.t("optional"))
+    form.addRow(i18n.t("Value:"), value)
+    layout.addLayout(form)
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    ok = dialog.exec() == QDialog.Accepted
+    return number.text().strip(), value.text().strip(), ok
+
+
 class _ReminderDialog(PrismDialog):
     """The reminder, shown before it goes. Editable, because the right words
     for a customer of fifteen years are not the right words for a new one."""
@@ -2249,6 +2423,15 @@ class QuotationDialog(PrismDialog):
         self.parent_dialog = parent
         self._send_worker = None
         self.quote = None
+        # Whether the rate box holds something Prism suggested or something
+        # the owner typed over it. A fresh item pick clears this — see
+        # _item_picked() — because a different item earns a fresh suggestion,
+        # not the last one's leftover override.
+        self._rate_dirty = False
+        # True only while code, not the owner, is writing into rate_edit —
+        # otherwise _set_rate_text()'s own write would set _rate_dirty right
+        # back to True the instant it finished clearing it.
+        self._populating = False
 
         quoting = CB.get_quoting()
         self.matches = quoting.match_item(row.get("Product asked", ""), items)
@@ -2284,20 +2467,45 @@ class QuotationDialog(PrismDialog):
                     f"{item.label}   ·   ₹{quoting.indian_currency(item.rate)}", item)
         self.item_row_label = QLabel(i18n.t("Item:"))
         form.addRow(self.item_row_label, self.item_picker)
+        # Picking here is a starting point, not the last word — everything
+        # below is editable afterwards, and a fresh pick clears any typed-in
+        # rate so it doesn't silently carry over onto a different item.
+        self.item_picker.currentIndexChanged.connect(self._item_picked)
+
+        # Rate and unit are what used to be locked inside item.rate_for() and
+        # item.unit with no way to see or touch them. A newbie whose customer
+        # asked to round to a friendly number, or whose rate list doesn't
+        # cover a one-off, had no field to type into — only the item picker,
+        # which offers exactly the rates already on the list and nothing
+        # else. Prism still suggests a number; this is where it stops being
+        # the only number.
+        self.rate_edit = QLineEdit()
+        self.rate_edit.setPlaceholderText(i18n.t("Prism suggests one — type "
+                                                  "over it to use your own"))
+        self.rate_edit.textChanged.connect(self._rate_edited)
+        form.addRow(i18n.t("Rate (per unit):"), self.rate_edit)
+        self.unit_edit = QLineEdit()
+        self.unit_edit.setPlaceholderText(i18n.t("nos, kg, mtr…"))
+        self.unit_edit.textChanged.connect(self._recalculate)
+        form.addRow(i18n.t("Unit:"), self.unit_edit)
 
         # Only the cost-sheet route needs a weight: it is what the per-kg
         # lines multiply. Blank is not zero-by-accident — a cost sheet with a
         # material line and no weight would quote the labour alone, so the
-        # recalculation refuses rather than under-quoting.
+        # recalculation refuses rather than under-quoting, unless a rate has
+        # been typed in by hand instead — see _recalculate_from_cost().
         self.description = QLineEdit(row.get("Product asked", "")[:120])
+        self.description.textChanged.connect(self._recalculate)
         self.weight = QLineEdit("")
         self.weight.setPlaceholderText(i18n.t("kg per piece — from the drawing"))
+        self.weight.textChanged.connect(self._recalculate)
         self.desc_label = QLabel(i18n.t("Describe it:"))
         self.weight_label = QLabel(i18n.t("Weight each:"))
         form.addRow(self.desc_label, self.description)
         form.addRow(self.weight_label, self.weight)
 
         self.quantity = QLineEdit(_quantity_of(row))
+        self.quantity.textChanged.connect(self._recalculate)
         form.addRow(i18n.t("Quantity:"), self.quantity)
         layout.addLayout(form)
 
@@ -2367,22 +2575,53 @@ class QuotationDialog(PrismDialog):
         return self.source.currentData() or "rates"
 
     def _source_changed(self, *_):
-        """Show only the boxes the chosen route actually uses."""
+        """Show only the boxes the chosen route actually uses.
+
+        Rate, unit and description stay visible either way — see the comment
+        above rate_edit — because "let me type the final number myself" is
+        just as real a need on the cost-sheet route as on the rate list.
+        Only weight is route-specific: it means nothing outside a per-kg
+        cost-sheet line."""
         cost = self._mode() == "cost"
         for widget in (self.item_picker, self.item_row_label):
             widget.setVisible(not cost)
-        for widget in (self.description, self.weight,
-                       self.desc_label, self.weight_label):
+        for widget in (self.weight, self.weight_label):
             widget.setVisible(cost)
         self.verdict.setVisible(not cost)
         self.workings.setVisible(cost)
         self._recalculate()
 
-    def _recalculate(self):
+    def _recalculate(self, *_):
         if self._mode() == "cost":
             self._recalculate_from_cost()
         else:
             self._recalculate_from_rates()
+
+    def _item_picked(self, *_):
+        """A fresh pick from the list is a fresh start: the description, unit
+        and any typed-over rate all reset to what this item actually says,
+        rather than keeping the previous item's hand-typed leftovers."""
+        item = self.item_picker.currentData()
+        if item is not None:
+            self._populating = True
+            self.description.setText(item.description)
+            self.unit_edit.setText(item.unit)
+            self._populating = False
+            self._rate_dirty = False
+        self._recalculate()
+
+    def _rate_edited(self, *_):
+        """Distinguish the owner typing a number from Prism writing one in —
+        only the former should stick through the next recalculation."""
+        if self._populating:
+            return
+        self._rate_dirty = True
+        self._recalculate()
+
+    def _set_rate_text(self, rate):
+        self._populating = True
+        self.rate_edit.setText(f"{rate:.2f}")
+        self._populating = False
 
     def _finalise(self, line, description: str):
         """Everything the two routes share: number it, wrap it in the terms,
@@ -2417,11 +2656,19 @@ class QuotationDialog(PrismDialog):
         if item is None:
             return
         quantity = quoting.to_decimal(self.quantity.text()) or Decimal(1)
+        suggested = item.rate_for(quantity)
+        if self._rate_dirty:
+            rate, basis = quoting.to_decimal(self.rate_edit.text()) or suggested, \
+                "entered by hand"
+        else:
+            rate, basis = suggested, "rate list"
+            self._set_rate_text(rate)
+        description = self.description.text().strip() or item.description
+        unit = self.unit_edit.text().strip() or item.unit
         self._finalise(
-            quoting.QuoteLine(item.description, quantity, item.unit,
-                              item.rate_for(quantity), item.hsn,
-                              basis="rate list"),
-            item.description)
+            quoting.QuoteLine(description, quantity, unit, rate, item.hsn,
+                              basis=basis),
+            description)
 
     def _recalculate_from_cost(self):
         """Run the owner's own formulas and show every line of the working.
@@ -2432,6 +2679,26 @@ class QuotationDialog(PrismDialog):
         """
         quoting = CB.get_quoting()
         quantity = quoting.to_decimal(self.quantity.text()) or Decimal(1)
+        description = self.description.text().strip() or self.row.get(
+            "Product asked", "")
+        unit = self.unit_edit.text().strip() or "nos"
+
+        # A rate typed by hand skips the formula entirely — the cost sheet is
+        # a way to WORK a rate out, not the only way to have one, and an item
+        # the sheet has no line for (a one-off, an odd size) should not be
+        # stuck without a price just because there is no formula for it.
+        if self._rate_dirty:
+            rate = quoting.to_decimal(self.rate_edit.text())
+            self.workings.setPlainText(i18n.t(
+                "Rate entered by hand — the cost-sheet working below is not "
+                "shown for a rate you typed yourself. Clear the rate box to "
+                "let Prism work it out again."))
+            self._finalise(
+                quoting.QuoteLine(description, quantity, unit, rate, "",
+                                  basis="entered by hand"),
+                description)
+            return
+
         weight = quoting.to_decimal(self.weight.text())
         needs_weight = any(line.basis == quoting.PER_KG
                            for line in self.cost_lines)
@@ -2439,7 +2706,7 @@ class QuotationDialog(PrismDialog):
             self.workings.setPlainText(i18n.t(
                 "Your cost sheet charges for material by the kilogram, so "
                 "Prism needs the weight of one piece before it can work "
-                "anything out."))
+                "anything out — or type a rate below yourself."))
             self.preview.setPlainText("")
             self.quote = None
             return
@@ -2474,10 +2741,9 @@ class QuotationDialog(PrismDialog):
                          else i18n.t("less")))
         self.workings.setPlainText("\n".join(rows))
 
-        description = self.description.text().strip() or self.row.get(
-            "Product asked", "")
+        self._set_rate_text(breakdown.per_piece)
         self._finalise(
-            quoting.QuoteLine(description, quantity, "nos",
+            quoting.QuoteLine(description, quantity, unit,
                               breakdown.per_piece, "", basis="cost sheet"),
             description)
 

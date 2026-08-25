@@ -338,6 +338,18 @@ class InquirySetupDialog(PrismDialog):
         form.addRow(i18n.t("Password:"), self.password)
         layout.addLayout(form)
 
+        # The placeholder alone was too quiet — a blank password box reads as
+        # "empty" to anyone who has not memorised what the grey text says, and
+        # that misreading is exactly what "the app password vanished" turned
+        # out to be: the password was never lost, but nothing on screen said
+        # so loudly enough to be believed. This is the loud version, and it is
+        # kept in sync with _saved_password and what is actually typed rather
+        # than shown once and forgotten.
+        self.password_status = QLabel("")
+        self.password_status.setWordWrap(True)
+        layout.addWidget(self.password_status)
+        self._update_password_status()
+
         layout.addSpacing(4)
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -467,6 +479,12 @@ class InquirySetupDialog(PrismDialog):
         self.folder_name.setText(account.get("folder", "") or "INBOX")
         self._tested_ok = False
         self._set_test_state("")
+        # Explicit, not relied on via password.clear()'s textChanged: Qt does
+        # not emit that signal when the box was already empty, which is
+        # exactly the case switching between two unfilled-password rows — and
+        # that is the one case where a stale "already saved" from the row
+        # left behind would be believed most easily.
+        self._update_password_status()
         if account.get("host"):
             self.advanced_btn.setChecked(True)
         self._loading = False
@@ -522,6 +540,31 @@ class InquirySetupDialog(PrismDialog):
         if getattr(self, "_tested_ok", False):
             self._tested_ok = False
             self._set_test_state("")
+        self._update_password_status()
+
+    def _update_password_status(self):
+        """Say, in words nobody can miss, whether the password box being
+        blank means "nothing saved" or "already saved, and staying that
+        way." Silent otherwise, once something new has actually been typed —
+        at that point the box speaks for itself."""
+        if self.password.text():
+            self.password_status.setText("")
+            self.password_status.setVisible(False)
+            return
+        if self._saved_password:
+            self.password_status.setText(i18n.t(
+                "✓ A password is already saved for this mailbox. Leave this "
+                "box blank and it stays exactly as it is — nothing is "
+                "removed by opening or saving this screen. Type a new one "
+                "here only if you want to replace it."))
+            self.password_status.setStyleSheet(
+                f"color: {theme.OK_INK}; font-size: 12.5px;")
+        else:
+            self.password_status.setText(i18n.t(
+                "No password saved yet for this mailbox."))
+            self.password_status.setStyleSheet(
+                f"color: {theme.NEUTRAL[600]}; font-size: 12.5px;")
+        self.password_status.setVisible(True)
 
     def _set_test_state(self, text: str, tone: str = ""):
         """One place that paints the result, so success and failure cannot

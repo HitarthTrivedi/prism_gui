@@ -317,6 +317,7 @@ class MainWindow(QMainWindow):
         self.boq_panel.opened.connect(self._open_boq_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(self._open_email_dialog)
+        self.email_panel.change_account.connect(self._open_email_setup)
         # The screens that now offer a way onward. Same pattern as
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
@@ -1063,6 +1064,15 @@ class MainWindow(QMainWindow):
                 return
             self.cfg = dlg.cfg
         EmailComposeDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_email_setup(self):
+        """The only door back into the sending-account setup once one is
+        already configured — see EmailPanel.header_actions()."""
+        dlg = EmailSetupDialog(self.cfg, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.cfg = dlg.cfg
+            self.email_panel.cfg = self.cfg
+            self.email_panel.refresh()
 
     def _open_setup(self, focus: str | None = None):
         """The rail links straight at individual settings, so pass along which
