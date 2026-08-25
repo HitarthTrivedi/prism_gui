@@ -306,6 +306,14 @@ def _apply(response: dict[str, Any], *, key: str = "") -> LicenseState:
         data["token"] = response["token"]
     if response.get("license_id"):
         data["license_id"] = response["license_id"]
+    # The server's version advice, kept beside the token so updater.py can
+    # read it without a round trip: the newest build it knows of, and the
+    # oldest it will still lease to. Only what the server actually said —
+    # a refresh that says nothing about versions leaves the last advice
+    # standing rather than blanking it.
+    for field in ("latest_version", "min_supported_version"):
+        if response.get(field):
+            data[field] = str(response[field])
     data["server"] = client.server_url()
     store.save(user_dir(), data)
     store.touch_clock(user_dir())
@@ -497,7 +505,7 @@ def _refresh_lease_once() -> bool:
     return _store_lease(response)
 
 
-def refresh(blocking: bool = False) -> LicenseState | None:
+def refresh(blocking: bool = False, on_done=None) -> LicenseState | None:
     """Renew the token and the lease. Returns immediately unless `blocking`.
 
     Called at launch and periodically. Never surfaces an error: an unreachable
@@ -507,18 +515,25 @@ def refresh(blocking: bool = False) -> LicenseState | None:
     on a second one — they are ordered (a lease is bound to the licence id the
     token carries) and neither is urgent, so one background thread doing both
     in sequence is both correct and cheaper than two racing.
+
+    `on_done()` — "Check for updates" needs to know when the round trip has
+    landed. It is called ON THE WORKER THREAD, with no arguments, once both
+    refreshes are through (or have given up); pass a Qt signal's `emit` and
+    Qt queues it back to the UI thread by itself, where the caller reads
+    state() afresh. Never called for a blocking refresh, whose caller
+    already has the result.
     """
     store.touch_clock(user_dir())
     if blocking:
         result = _refresh_once()
         _refresh_lease_once()
         return result
-    threading.Thread(target=_safe_refresh, name="prism-license-refresh",
-                     daemon=True).start()
+    threading.Thread(target=_safe_refresh, args=(on_done,),
+                     name="prism-license-refresh", daemon=True).start()
     return None
 
 
-def _safe_refresh() -> None:
+def _safe_refresh(on_done=None) -> None:
     try:
         _refresh_once()
     except Exception:                               # noqa: BLE001
@@ -527,6 +542,11 @@ def _safe_refresh() -> None:
         _refresh_lease_once()
     except Exception:                               # noqa: BLE001
         pass
+    if on_done is not None:
+        try:
+            on_done()
+        except Exception:                           # noqa: BLE001
+            pass                                    # a UI nicety, never a fault
 
 
 # ── live authorisation & metering ──────────────────────────────────────────
