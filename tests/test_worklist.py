@@ -29,7 +29,133 @@ class TheFileStartsEmpty(unittest.TestCase):
 
     def test_a_folder_never_checked_reads_as_empty(self):
         data = worklist.load(tempfile.mkdtemp())
-        self.assertEqual(data, {"arrived": [], "replies": [], "orders": []})
+        self.assertEqual(data, {"arrived": [], "replies": [], "orders": [],
+                                "sent": []})
+
+
+class OneFilePerSection(unittest.TestCase):
+    """The owner asked for "a file for every section and every phase" — so
+    that opening the folder by eye shows replies.json holding the replies
+    and nothing else."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+
+    def test_each_kind_lands_in_its_own_file(self):
+        worklist.append(self.folder, "arrived", [{"message_id": "<a@x>"}])
+        worklist.append(self.folder, "replies", [{"message_id": "<r@x>"}])
+        names = sorted(os.listdir(os.path.join(self.folder, "worklist")))
+        self.assertEqual(names, ["arrived.json", "replies.json"])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.folder, "worklist.json")))
+
+    def test_writing_one_kind_does_not_touch_another(self):
+        worklist.append(self.folder, "arrived", [{"message_id": "<a@x>"}])
+        before = os.path.getmtime(worklist.path_for(self.folder, "arrived"))
+        worklist.append(self.folder, "orders", [{"message_id": "<o@x>"}])
+        self.assertEqual(
+            os.path.getmtime(worklist.path_for(self.folder, "arrived")), before)
+
+    def test_paths_know_the_folder(self):
+        paths = CB.get_mailflow().Paths(self.folder)
+        self.assertEqual(paths.worklist_dir,
+                         os.path.join(self.folder, "worklist"))
+
+
+class MigratingTheOldFile(unittest.TestCase):
+    """An older Prism kept everything in one worklist.json. It must fold
+    into the per-section files without losing a row, without doubling one,
+    and without ever deleting the original."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.legacy = os.path.join(self.folder, "worklist.json")
+
+    def _write_legacy(self, data):
+        import json
+        with open(self.legacy, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def test_the_rows_come_across_and_the_old_file_is_kept_as_a_backup(self):
+        self._write_legacy({"arrived": [{"message_id": "<a@x>"}],
+                            "replies": [{"message_id": "<r@x>",
+                                         "resolved": True}],
+                            "orders": []})
+        data = worklist.load(self.folder)
+        self.assertEqual([r["message_id"] for r in data["arrived"]], ["<a@x>"])
+        self.assertTrue(data["replies"][0]["resolved"])
+        self.assertFalse(os.path.exists(self.legacy))
+        self.assertTrue(os.path.exists(self.legacy + ".bak"))
+
+    def test_running_twice_changes_nothing(self):
+        self._write_legacy({"arrived": [{"message_id": "<a@x>"}]})
+        first = worklist.load(self.folder)
+        second = worklist.load(self.folder)
+        self.assertEqual(first, second)
+        self.assertEqual(len(second["arrived"]), 1)
+
+    def test_a_per_section_row_wins_over_the_old_file(self):
+        """The per-section file may carry a newer resolved flag; the old
+        file must not undo it."""
+        worklist.append(self.folder, "replies", [{"message_id": "<r@x>"}])
+        worklist.resolve(self.folder, "replies", "<r@x>")
+        self._write_legacy({"replies": [{"message_id": "<r@x>",
+                                         "resolved": False}]})
+        data = worklist.load(self.folder)
+        self.assertEqual(len(data["replies"]), 1)
+        self.assertTrue(data["replies"][0]["resolved"])
+
+    def test_an_unreadable_old_file_is_left_exactly_where_it_is(self):
+        with open(self.legacy, "w", encoding="utf-8") as f:
+            f.write("{ not json")
+        data = worklist.load(self.folder)
+        self.assertEqual(data["arrived"], [])
+        self.assertTrue(os.path.exists(self.legacy))
+
+    def test_the_owners_real_shape_migrates_cleanly(self):
+        """The exact key set the previous release wrote."""
+        self._write_legacy({"arrived": [
+            {"message_id": f"<{i}@x>", "from_name": "A", "from_addr": "a@b.c",
+             "subject": f"s{i}", "date": "2026-08-25", "category": "other",
+             "reason": "", "source": "rule"} for i in range(19)],
+            "replies": [], "orders": []})
+        data = worklist.load(self.folder)
+        self.assertEqual(len(data["arrived"]), 19)
+        self.assertEqual(data["sent"], [])
+
+
+class TheSentLog(unittest.TestCase):
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+
+    def test_two_reminders_on_one_day_are_two_rows(self):
+        for _ in range(2):
+            worklist.log_sent(self.folder, "reminder", to="a@b.c",
+                              subject="Reminder", inquiry_no="INQ/1")
+        data = worklist.load(self.folder)
+        self.assertEqual(len(data["sent"]), 2)
+
+    def test_it_is_a_log_with_no_resolved_flag(self):
+        worklist.log_sent(self.folder, "quotation", to="a@b.c",
+                          subject="Q", inquiry_no="INQ/1", quotation_no="QTN/1")
+        row = worklist.load(self.folder)["sent"][0]
+        self.assertNotIn("resolved", row)
+        for key in ("kind", "date", "time", "to", "subject", "inquiry_no",
+                    "quotation_no"):
+            self.assertIn(key, row)
+
+    def test_sent_for_reads_back_one_inquiry_oldest_first(self):
+        from datetime import datetime
+        worklist.log_sent(self.folder, "quotation", to="a@b.c", subject="Q",
+                          inquiry_no="INQ/1", when=datetime(2026, 8, 24, 9, 0))
+        worklist.log_sent(self.folder, "reminder", to="a@b.c", subject="R",
+                          inquiry_no="INQ/1", when=datetime(2026, 8, 25, 9, 0))
+        worklist.log_sent(self.folder, "reminder", to="x@y.z", subject="R",
+                          inquiry_no="INQ/2")
+        rows = worklist.sent_for(worklist.load(self.folder), "INQ/1")
+        self.assertEqual([r["kind"] for r in rows], ["quotation", "reminder"])
+        self.assertEqual(rows[0]["date"], "2026-08-24")
 
 
 class AppendingDoesNotDouble(unittest.TestCase):

@@ -36,14 +36,16 @@ import sys
 from datetime import date, timedelta
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QDate, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog,
+    QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget,
-    QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QRadioButton, QSizePolicy, QStackedWidget, QTabBar,
+    QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout,
+    QWidget,
 )
 
 import core_bridge as CB
@@ -71,6 +73,7 @@ CATEGORY_LABELS = {
 REGISTER_RANGES = [
     ("all", "All time"), ("today", "Today"), ("yesterday", "Yesterday"),
     ("week", "Last 7 days"), ("older", "Older than that"),
+    ("custom", "Pick dates…"),
 ]
 
 
@@ -84,7 +87,8 @@ def _parse_iso(text: str) -> date | None:
         return None
 
 
-def _in_date_range(when: date | None, filter_key: str, today: date) -> bool:
+def _in_date_range(when: date | None, filter_key: str, today: date,
+                   start: date | None = None, end: date | None = None) -> bool:
     """One rule, used everywhere a "Show:" filter reads a date — the
     register, and the arrived-mail log below it.
 
@@ -92,10 +96,18 @@ def _in_date_range(when: date | None, filter_key: str, today: date) -> bool:
     or an old worklist row from before a field existed — falls under "Older
     than that" rather than every bucket or none: it is shown somewhere,
     which a silent drop is not, and it is not claimed as today's when
-    nobody can say that it is.
+    nobody can say that it is. "custom" is the owner's own from/to pair,
+    both ends inclusive, which is how a person says "from the 1st to the
+    15th".
     """
     if filter_key == "all":
         return True
+    if filter_key == "custom":
+        if when is None:
+            return False
+        if start is not None and end is not None and start > end:
+            start, end = end, start
+        return (start is None or when >= start) and (end is None or when <= end)
     if when is None:
         return filter_key == "older"
     if filter_key == "today":
@@ -211,7 +223,8 @@ class _TableOrEmpty(QStackedWidget):
         super().__init__(parent)
         self._table = table
         self.addWidget(table)
-        self.addWidget(C.EmptyState(icon, title, body))
+        self.empty = C.EmptyState(icon, title, body)
+        self.addWidget(self.empty)
         model = table.model()
         for signal in (model.rowsInserted, model.rowsRemoved,
                        model.modelReset, model.layoutChanged):
@@ -219,12 +232,373 @@ class _TableOrEmpty(QStackedWidget):
         self._sync()
 
     def _rows(self) -> int:
-        # Four of the five are QTableWidgets and the overdue tab is a
-        # QListWidget; the model is what both agree on.
         return self._table.model().rowCount()
 
     def _sync(self, *_args):
         self.setCurrentIndex(0 if self._rows() else 1)
+
+
+# ── the six tabs, in the order an inquiry lives ──────────────────────────────
+# "To quote" first because "2 to quote" is the number the owner opens Prism
+# for; the two "All …" tabs last because they are for looking things up, not
+# for the day's work. The numbers in the labels are the reading order and
+# are what the tests pin.
+TABS = [
+    ("to_quote", "1 · To quote"),
+    ("waiting", "2 · No answer yet"),
+    ("replies", "3 · They answered"),
+    ("orders", "4 · Order came"),
+    ("register", "5 · All inquiries"),
+    ("arrived", "6 · All mail"),
+]
+TAB_INDEX = {key: index for index, (key, _label) in enumerate(TABS)}
+# Tabs whose title carries a live count. The reference tabs do not: "All
+# inquiries (312)" is not a number anybody acts on.
+COUNTED_TABS = ("to_quote", "waiting", "replies", "orders")
+
+DRAWING_EXTENSIONS = (".dwg", ".dxf", ".pdf")
+
+# Every button the Selected-inquiry panel can show, in the words the owner
+# reads. The key is what actions_for() returns; the variant is fixed per
+# button because a button that is primary on one row and secondary on the
+# next is a button nobody learns.
+ROW_ACTIONS = [
+    ("prepare", "Prepare a quotation", "primary"),
+    ("remind", "Send a reminder", "primary"),
+    ("win_back", "Write a reply to win them back", "primary"),
+    ("record_po", "Record the PO by hand", "primary"),
+    ("already_quoted", "Already quoted by phone", "secondary"),
+    ("boq", "Count quantities from the drawing", "secondary"),
+    ("phone", "They replied by phone…", "secondary"),
+    ("lost", "Mark as lost", "secondary"),
+    ("revise", "Send a revised quotation", "secondary"),
+    ("edit", "Edit details", "tertiary"),
+    ("folder", "Open this inquiry's folder", "tertiary"),
+    ("delete", "Delete this inquiry", "destructive"),
+]
+
+
+def actions_for(status: str, tab: str = "register",
+                has_drawing: bool = False) -> list[str]:
+    """Which buttons a register row gets, by where it is in its life.
+
+    The seven-button row this replaces showed every action for every row,
+    all the time — "Win this back" on an inquiry nobody had quoted yet,
+    "Prepare a quotation" on one already converted. A person who has never
+    used a CRM reads that as "which of these am I meant to press?", and the
+    honest answer for any one row is two or three of them. So: at most
+    three boxed buttons, the first of them the one the row is waiting for,
+    plus the two quiet links every row gets.
+
+    Pure — no Qt — so the table below can be tested as a table.
+    """
+    register = CB.get_register()
+    status = (status or "").strip()
+    if status in ("", register.NEW):
+        keys = (["prepare", "boq", "already_quoted"] if has_drawing
+                else ["prepare", "already_quoted"])
+    elif status in (register.QUOTED, register.FOLLOWING_UP):
+        keys = ["remind", "phone", "lost"]
+    elif status == register.NEGOTIATING:
+        keys = ["win_back", "revise", "phone"]
+    elif status == register.ACCEPTED:
+        keys = ["record_po", "phone", "lost"]
+    elif status == register.CONVERTED:
+        keys = ["boq"] if has_drawing else []
+    elif status == register.NOT_CONVERTED:
+        keys = ["win_back"]
+    else:
+        keys = []
+    # Every row can be edited, opened, and — the owner asked for this on
+    # every row, not only new ones — deleted, with the "block this sender?"
+    # question that follows. A newsletter that got itself registered is the
+    # commonest reason, and it can be sitting at any status.
+    return keys + ["edit", "folder", "delete"]
+
+
+class _RoomyTabBar(QTabBar):
+    """A tab bar that gives every title a few pixels more than Qt thinks it
+    needs. Measured with the real stylesheet, Qt's own sizeHint came out
+    two pixels short of the semi-bold text the stylesheet paints — enough
+    to shave the last letter. Asking for the slack here, rather than
+    hunting the exact padding arithmetic, is what makes it impossible to
+    regress when the font or the stylesheet moves."""
+
+    SLACK = 8
+
+    def tabSizeHint(self, index: int):      # noqa: N802 — Qt's name
+        hint = super().tabSizeHint(index)
+        return QSize(hint.width() + self.SLACK, hint.height())
+
+
+class _Tabs(QTabWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTabBar(_RoomyTabBar(self))
+
+
+class _StatusLine(QLabel):
+    """The one-line message under the header. Hides itself when it has
+    nothing to say, so an idle screen does not carry an empty band — and
+    shows itself the moment it has, so "Checking demo@…" is never written
+    into a label nobody can see."""
+
+    def setText(self, text: str):          # noqa: N802 — Qt's name
+        super().setText(text)
+        self.setVisible(bool(text))
+
+
+class _SelectedPanel(C.Card):
+    """The card under every table: which row is picked, where it stands,
+    and only the buttons that make sense for it.
+
+    Buttons are built once and shown or hidden per row, never rebuilt — so
+    `remind_btn`, `po_btn` and the rest stay stable objects the rest of the
+    dialog (and the tests) can hold on to. The row of buttons is a
+    FlowLayout: at any width the two quiet links wrap under the boxed
+    buttons instead of being cut off at the edge, which is the failure the
+    owner photographed.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(stripe=True, parent=parent)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        col = self.body((theme.CARD_PAD, theme.SPACE_3,
+                         theme.CARD_PAD, theme.SPACE_3), theme.SPACE_2)
+        self.title = C.label("", level="CARD_TITLE", wrap=True)
+        col.addWidget(self.title)
+        self.info = C.label("", level="META", wrap=True)
+        col.addWidget(self.info)
+        # A slot a tab can put its own controls in — the reply text and the
+        # "Prism thinks" row on the replies tab, the re-sort row on the mail
+        # log. Hidden with the rest when nothing is selected.
+        self.extra_host = QWidget()
+        self.extra = QVBoxLayout(self.extra_host)
+        self.extra.setContentsMargins(0, 0, 0, 0)
+        self.extra.setSpacing(theme.SPACE_2)
+        col.addWidget(self.extra_host)
+        self._flow_host = QWidget()
+        self.flow = C.FlowLayout(self._flow_host)
+        col.addWidget(self._flow_host)
+        self.buttons: dict[str, QPushButton] = {}
+        self.clear()
+
+    def add_action(self, key: str, text: str, variant: str = "secondary",
+                   on_click=None) -> QPushButton:
+        btn = C.button(i18n.t(text), variant, on_click=on_click)
+        self.buttons[key] = btn
+        self.flow.addWidget(btn)
+        return btn
+
+    def show_row(self, title: str, info: str, keys, extra: bool = False):
+        self.title.setText(title)
+        self.info.setText(info)
+        self.info.setVisible(bool(info))
+        keys = set(keys)
+        for key, btn in self.buttons.items():
+            btn.setVisible(key in keys)
+        self._flow_host.setVisible(bool(keys))
+        self.extra_host.setVisible(extra)
+
+    def clear(self):
+        self.show_row(i18n.t("Pick a row above."), "", ())
+
+
+class _TabPage(QWidget):
+    """One tab, always the same four parts top to bottom: a sentence saying
+    what the list is and what to do; a toolbar (Show: range, search); the
+    table, which is the ONLY thing that grows with the window; and the
+    Selected-inquiry panel. Six tabs of the same shape is what lets somebody
+    who learned one of them use the other five."""
+
+    def __init__(self, sentence: str, table, icon: str, empty_title: str,
+                 empty_body: str, *, ranges: bool = True, search: bool = True,
+                 on_change=None, parent=None):
+        super().__init__(parent)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, theme.SPACE_3, 0, 0)
+        col.setSpacing(theme.ROW_GAP)
+
+        self.sentence = C.label(i18n.t(sentence), level="SUPPORT", wrap=True)
+        self.sentence.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        col.addWidget(self.sentence)
+
+        self.toolbar = C.Toolbar()
+        self.filter = None
+        self.search = None
+        self.date_from = None
+        self.date_to = None
+        if ranges:
+            self.toolbar.add(QLabel(i18n.t("Show:")))
+            self.filter = QComboBox()
+            for value, label in REGISTER_RANGES:
+                self.filter.addItem(i18n.t(label), value)
+            self.filter.setMinimumHeight(C.MIN_TARGET)
+            self.toolbar.add(self.filter)
+            # The owner's own from/to pair — "from the 1st to the 15th" —
+            # shown only once "Pick dates…" is chosen, so the four everyday
+            # choices stay one click and the toolbar stays short.
+            self._from_label = QLabel(i18n.t("from"))
+            self.date_from = QDateEdit(QDate.currentDate().addDays(-30))
+            self._to_label = QLabel(i18n.t("to"))
+            self.date_to = QDateEdit(QDate.currentDate())
+            for box in (self.date_from, self.date_to):
+                box.setCalendarPopup(True)
+                box.setDisplayFormat("dd-MM-yyyy")
+                box.setMinimumHeight(C.MIN_TARGET)
+                if on_change is not None:
+                    box.dateChanged.connect(lambda *_: on_change())
+            for widget in (self._from_label, self.date_from,
+                           self._to_label, self.date_to):
+                self.toolbar.add(widget)
+                widget.setVisible(False)
+            self.filter.currentIndexChanged.connect(self._range_picked)
+            if on_change is not None:
+                self.filter.currentIndexChanged.connect(lambda *_: on_change())
+        if search:
+            self.search = C.SearchField(
+                i18n.t("Find a customer or inquiry number"))
+            self.search.setMaximumWidth(320)
+            if on_change is not None:
+                self.search.changed.connect(lambda *_: on_change())
+            self.toolbar.add(self.search)
+        self.toolbar.add_stretch()
+        col.addWidget(self.toolbar)
+
+        self.table = table
+        self.stack = _TableOrEmpty(table, icon, i18n.t(empty_title),
+                                   i18n.t(empty_body))
+        self.empty = self.stack.empty
+        col.addWidget(self.stack, stretch=1)
+
+        self.panel = _SelectedPanel()
+        col.addWidget(self.panel)
+
+    def add_tool(self, widget) -> QWidget:
+        """A control on the right end of the toolbar."""
+        return self.toolbar.add(widget)
+
+    def _range_picked(self, *_):
+        custom = self.range_key() == "custom"
+        for widget in (self._from_label, self.date_from,
+                       self._to_label, self.date_to):
+            widget.setVisible(custom)
+
+    def range_key(self) -> str:
+        return (self.filter.currentData() if self.filter is not None
+                else "all") or "all"
+
+    def range_bounds(self) -> tuple[date | None, date | None]:
+        if self.date_from is None or self.range_key() != "custom":
+            return None, None
+        return (self.date_from.date().toPython(),
+                self.date_to.date().toPython())
+
+    def in_range(self, when: date | None, today: date | None = None) -> bool:
+        start, end = self.range_bounds()
+        return _in_date_range(when, self.range_key(), today or date.today(),
+                              start, end)
+
+    def search_text(self) -> str:
+        return (self.search.text() if self.search is not None else "").strip()
+
+
+def _dmy(iso: str, short: bool = False) -> str:
+    """A worklist date (YYYY-MM-DD) the way the register and the owner write
+    one: DD-MM-YYYY, or DD-MM when several sit in one cell."""
+    when = _parse_iso(iso)
+    if when is None:
+        return iso or ""
+    return when.strftime("%d-%m" if short else "%d-%m-%Y")
+
+
+def _rupees(value) -> str:
+    """"42480.00" → "₹42,480.00"; blank stays blank. The register keeps bare
+    digits so Excel reads the column as numbers; the screen is for people."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        quoting = CB.get_quoting()
+        return "₹" + quoting.indian_currency(quoting.to_decimal(text))
+    except Exception:               # noqa: BLE001 — an odd cell is shown as typed
+        return text
+
+
+def _matches(text: str, *values) -> bool:
+    """Case-insensitive "is this typed text anywhere in the row"."""
+    if not text:
+        return True
+    haystack = " ".join(str(v or "") for v in values).lower()
+    return text.lower() in haystack
+
+
+class _RegisterOnlyItem:
+    """A row on the orders tab that has no mail behind it — the customer
+    said yes (Status Accepted) and the PO is coming by hand, by phone, or
+    on paper. Same shape as _StoredItem for everything the tab reads, with
+    an empty message so the "read the PO off the mail" path politely finds
+    nothing to read."""
+
+    def __init__(self, row: dict):
+        self.message_id = ""
+        self.row = row
+        self.folder = row.get("Folder", "")
+        self.files: list = []
+        self.intent = ""
+        self.note = i18n.t("Said yes — waiting for the PO")
+        self.message = _StoredMessage({"from_addr": row.get("Email", ""),
+                                       "subject": ""})
+
+    @property
+    def inquiry_no(self) -> str:
+        return (self.row or {}).get("Inquiry no", "")
+
+
+class _PhoneReplyDialog(PrismDialog):
+    """"They replied by phone…" — the same four answers Prism would read
+    out of a mail, picked by hand. In GIDC most answers come by phone, and
+    without this the register could only move when the customer wrote."""
+
+    CHOICES = ("accepted", "negotiating", "needs_info", "rejected")
+
+    def __init__(self, row: dict, parent=None):
+        super().__init__(
+            i18n.t("They replied by phone"),
+            i18n.t("What did they say? The register moves the same way it "
+                   "would for a reply by mail."),
+            icon="mic", parent=parent, closable=False)
+        who = row.get("Customer", "") or row.get("Email", "")
+        self.body.addWidget(C.label(
+            f"{row.get('Inquiry no', '')} · {who}", level="CARD_TITLE",
+            wrap=True))
+        self._radios: list[tuple[str, QRadioButton]] = []
+        for key in self.CHOICES:
+            radio = QRadioButton(i18n.t(INTENT_LABELS[key]))
+            radio.setMinimumHeight(C.MIN_TARGET)
+            self._radios.append((key, radio))
+            self.body.addWidget(radio)
+        self._radios[0][1].setChecked(True)
+        self.body.addWidget(QLabel(i18n.t("A note, if you want one:")))
+        self._note = QLineEdit()
+        self._note.setPlaceholderText(i18n.t(
+            "e.g. wants delivery in two weeks, will confirm Monday"))
+        self.body.addWidget(self._note)
+        self.body.addStretch(1)
+        self.footer.add_secondary(
+            self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.footer.set_primary(
+            self.button(i18n.t("Update the register"), "primary",
+                        icon_name="check", on_click=self.accept))
+
+    def intent(self) -> str:
+        for key, radio in self._radios:
+            if radio.isChecked():
+                return key
+        return self.CHOICES[0]
+
+    def note(self) -> str:
+        return self._note.text().strip()
 
 
 def _warning_css() -> str:
@@ -372,15 +746,23 @@ def open_in_file_manager(path: str) -> None:
 
 class InquiryDialog(PrismDialog):
 
-    def __init__(self, cfg: dict, parent=None):
-        super().__init__(
-            i18n.t("Email automation"),
-            i18n.t("Read every inbox, keep one register."),
-            icon="inbox", parent=parent, closable=False)
+    def __init__(self, cfg: dict, parent=None, tab: int = 0):
+        # No subtitle: the sentence at the top of each tab says what THAT
+        # list is for, which is the only sentence the owner needs, and the
+        # header band's 20px are worth more as table rows.
+        super().__init__(i18n.t("Email automation"), "",
+                         icon="inbox", parent=parent, closable=False)
         self.setWindowTitle(i18n.t("Email automation"))
-        self.resize(1060, 720)
-        self.setMinimumSize(880, 560)
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
+        self._size_to_screen()
         self.cfg = dict(cfg)
+        # The row the owner last picked, in ANY table — the one every
+        # action button acts on. Always one of the dicts in _register_rows,
+        # never a copy, so a change lands on the row register.save() writes.
+        self._focus_row = None
+        self._to_quote_rows: list[dict] = []
+        self._waiting_rows: list[dict] = []
+        self._pages: dict[str, _TabPage] = {}
         self._worker = None
         self._send_worker = None
         self._draft_worker = None
@@ -411,43 +793,61 @@ class InquiryDialog(PrismDialog):
 
         self._build_header_actions()
 
-        self.body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
-                                     theme.PAGE_PAD, theme.SPACE_4)
+        self.body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
+                                     theme.PAGE_PAD, theme.SPACE_3)
         self.body.setSpacing(theme.SPACE_3)
+
+        # The message bar: what Prism is doing right now, in one line, with
+        # the busy bar beside it. Used to be a label squeezed into the header
+        # action row, where "Writing it in your browser — this takes a minute
+        # or two…" pushed "Check my mail now" off the right edge.
+        bar = QWidget()
+        bar_row = QHBoxLayout(bar)
+        bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.setSpacing(theme.SPACE_3)
+        self.status = _StatusLine("")
+        self.status.setObjectName("meta")
+        self.status.setWordWrap(True)
+        bar_row.addWidget(self.status, stretch=1)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
+        self.progress.setFixedWidth(140)
         self.progress.setVisible(False)
-        self.body.addWidget(self.progress)
+        bar_row.addWidget(self.progress)
+        self.body.addWidget(bar)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._arrived_tab(), i18n.t("1 · What arrived"))
-        self.tabs.addTab(self._register_tab(), i18n.t("2 · Inquiries"))
-        self.tabs.addTab(self._replies_tab(), i18n.t("3 · What they said back"))
-        self.tabs.addTab(self._followup_tab(), i18n.t("4 · Waiting on a reply"))
-        self.tabs.addTab(self._orders_tab(), i18n.t("5 · The order came"))
-        # Qt's default tab bar splits its width EQUALLY across every tab
-        # (Fusion-style "expanding"), so the shortest label ("Inquiries")
-        # was squeezed down to the same narrow share as the longest ("What
-        # they said back") and both ended up truncated with "…" — reported
-        # directly, none of the five titles were fully readable. Turning
-        # expanding off lets each tab claim only the width its own text
-        # needs; ElideNone then guarantees no title is ever cut short, and
-        # the tab bar's own scroll arrows (on by default) take over if the
-        # five together genuinely do not fit a narrowed window.
-        bar = self.tabs.tabBar()
-        bar.setExpanding(False)
-        bar.setElideMode(Qt.ElideNone)
+        self.tabs = _Tabs()
+        builders = {
+            "to_quote": self._to_quote_tab, "waiting": self._followup_tab,
+            "replies": self._replies_tab, "orders": self._orders_tab,
+            "register": self._register_tab, "arrived": self._arrived_tab,
+        }
+        for key, label in TABS:
+            page = builders[key]()
+            self._pages[key] = page
+            self.tabs.addTab(page, i18n.t(label))
+        # Three things keep a title from ever being cut to "1 · What arriv…"
+        # again: no equal-width splitting (each tab is as wide as its own
+        # text), no eliding, and — the one that actually bit — the bar
+        # MEASURING with the same font the stylesheet PAINTS with. QSS sets
+        # QTabBar::tab to Barlow 13/600; the widget's own font was 14/400,
+        # and a rect sized for regular text is too narrow for semi-bold.
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setExpanding(False)
+        tab_bar.setElideMode(Qt.ElideNone)
+        tab_bar.setFont(theme.font("SUPPORT", 600))
         self.tabs.setUsesScrollButtons(True)
+        self.tabs.currentChanged.connect(
+            lambda index: self._sync_panel(TABS[index][0])
+            if 0 <= index < len(TABS) else None)
         self.body.addWidget(self.tabs, stretch=1)
 
-        self.summary = C.label("", role="meta")
-        self.footer.add_note(self.summary)
         self.footer.add_utility(self.button(
             i18n.t("Open the folder"), "secondary", icon_name="folder",
             small=True,
             on_click=lambda: open_in_file_manager(self._root())))
         self.footer.add_utility(self.button(
-            i18n.t("Open the register"), "secondary", icon_name="file",
+            i18n.t("Open the register file"), "secondary", icon_name="file",
             small=True, on_click=self._open_register))
         # Still a plain reject, exactly as the QDialogButtonBox was — the box
         # only ever carried one Close button, and it brought Qt's platform
@@ -474,7 +874,19 @@ class InquiryDialog(PrismDialog):
         self._render_arrived()
         self._render_replies()
         self._render_orders()
+        self.tabs.setCurrentIndex(max(0, min(int(tab or 0), len(TABS) - 1)))
         QTimer.singleShot(0, self._first_look)
+
+    def _size_to_screen(self):
+        """Open at most of the screen, never less than a size every tab is
+        readable at. A 1366×768 laptop — ordinary kit in a drawing office —
+        gets 1229×655, which is seven table rows on a text tab; the
+        maximise button is there for the rest."""
+        screen = QGuiApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 1280, 800)
+        self.setMinimumSize(960, 640)
+        self.resize(max(960, min(1440, int(avail.width() * 0.9))),
+                    max(640, min(900, int(avail.height() * 0.9))))
 
     def closeEvent(self, event):
         """Wind up every worker before this dialog is destroyed.
@@ -523,15 +935,15 @@ class InquiryDialog(PrismDialog):
         hairline boxes. They are real object names now, through
         `controls.button`, so a variant is picked by name rather than guessed.
         """
-        self.status = C.label("", role="meta")
-        self.header.add_action(self.status)
-
-        self.auto_box = QCheckBox(i18n.t("Keep checking"))
+        # Three controls, no more: the status text that used to sit here
+        # moved to the message bar under the header, because a long message
+        # pushed the one primary button off the right edge.
+        self.auto_box = QCheckBox(i18n.t("Check by itself"))
         self.auto_box.setMinimumHeight(C.MIN_TARGET)
         self.auto_box.setCursor(Qt.PointingHandCursor)
         self.auto_box.setToolTip(i18n.t(
-            "Check the inbox by itself, on the interval set under Setup → "
-            "Your terms. Reading costs nothing and sends nothing."))
+            "Read the inbox on its own, every few minutes (set under Setup "
+            "→ Your terms). Reading sends nothing."))
         self.auto_box.toggled.connect(self._auto_toggled)
         self.header.add_action(self.auto_box)
 
@@ -607,143 +1019,123 @@ class InquiryDialog(PrismDialog):
         self.check_now(quiet=True)
 
     # ── tab 1: what arrived ───────────────────────────────────────────────
+    # ── building the six tabs ─────────────────────────────────────────────
+    @staticmethod
+    def _make_table(headers: list[str], stretch: int,
+                    fit=()) -> QTableWidget:
+        """A plain grid, the same on every tab: one column takes the slack,
+        the ones named in `fit` size to their text — so a date is never
+        "02-08-20…" and an inquiry number is never "INQ/…"."""
+        table = QTableWidget(0, len(headers))
+        table.setHorizontalHeaderLabels([i18n.t(h) for h in headers])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        head = table.horizontalHeader()
+        head.setSectionResizeMode(stretch, QHeaderView.Stretch)
+        for column in fit:
+            head.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        return table
+
+    def _add_row_actions(self, panel: _SelectedPanel) -> _SelectedPanel:
+        """Every button a register row can have, built once for this panel.
+        Which of them show is actions_for()'s decision, per row."""
+        handlers = {
+            "prepare": self._prepare_quotation, "revise": self._prepare_quotation,
+            "remind": self._send_reminder, "win_back": self._win_back,
+            "record_po": self._record_po_by_hand,
+            "already_quoted": self._mark_already_quoted,
+            "boq": self._make_boq, "phone": self._phone_reply,
+            "lost": self._mark_lost, "edit": self._edit_row,
+            "folder": self._open_inquiry_folder, "delete": self._delete_inquiry,
+        }
+        for key, text, variant in ROW_ACTIONS:
+            panel.add_action(key, text, variant, handlers[key])
+        return panel
+
+    # ── tab 6: all mail ───────────────────────────────────────────────────
     def _arrived_tab(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        note = QLabel(i18n.t(
-            "Every mail Prism has ever sorted, and what it made of it — kept "
-            "here permanently, not just since the last check. If something "
-            "is in the wrong column, change it — Prism remembers that "
-            "sender and never asks again."))
-        note.setWordWrap(True)
-        note.setObjectName("meta")
-        layout.addWidget(note)
-
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel(i18n.t("Show:")))
-        self.arrived_filter = QComboBox()
-        for value, label in REGISTER_RANGES:
-            self.arrived_filter.addItem(i18n.t(label), value)
-        self.arrived_filter.currentIndexChanged.connect(
-            lambda *_: self._render_arrived())
-        filter_row.addWidget(self.arrived_filter)
-        filter_row.addStretch(1)
-        layout.addLayout(filter_row)
-
-        self.arrived = QTableWidget(0, 4)
-        self.arrived.setHorizontalHeaderLabels(
-            [i18n.t("From"), i18n.t("Subject"), i18n.t("Sorted as"),
-             i18n.t("Why")])
-        self.arrived.verticalHeader().setVisible(False)
-        self.arrived.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.arrived.setSelectionBehavior(QAbstractItemView.SelectRows)
-        header = self.arrived.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(_TableOrEmpty(
-            self.arrived, "inbox",
-            i18n.t("Nothing has come in yet"),
-            i18n.t("Press Check my mail now and everything that arrives is "
-                   "listed here, sorted, and stays listed.")),
-            stretch=1)
-
+        self.arrived = self._make_table(
+            ["From", "Subject", "Sorted as", "Why", "Date"], stretch=1,
+            fit=(0, 2, 3, 4))
+        page = _TabPage(
+            "Every mail Prism has read and how it sorted it. If one is in "
+            "the wrong column, correct it here and Prism will remember that "
+            "sender.",
+            self.arrived, "inbox", "Nothing has come in yet",
+            "Press Check my mail now. Everything that arrives is listed here "
+            "and stays listed.", on_change=self._render_arrived)
+        self.arrived_filter = page.filter
         row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_2)
         row.addWidget(QLabel(i18n.t("This one is really a:")))
         self.recategorise = QComboBox()
+        self.recategorise.setMinimumHeight(C.MIN_TARGET)
         for key, label in CATEGORY_LABELS.items():
             if key != "unsorted":
                 self.recategorise.addItem(i18n.t(label), key)
         row.addWidget(self.recategorise)
-        fix = QPushButton(i18n.t("Correct it, and remember this sender"))
-        fix.clicked.connect(self._correct)
-        row.addWidget(fix)
+        row.addWidget(C.button(i18n.t("Correct it — remember this sender"),
+                               "primary", icon_name="check",
+                               on_click=self._correct))
         row.addStretch(1)
-        layout.addLayout(row)
+        page.panel.extra.addLayout(row)
+        self.arrived.currentCellChanged.connect(
+            lambda *_: self._sync_panel("arrived"))
         return page
 
-    # ── tab 2: the register ───────────────────────────────────────────────
+    # ── tab 1: to quote ───────────────────────────────────────────────────
+    def _to_quote_tab(self) -> QWidget:
+        self.to_quote_table = self._make_table(
+            ["Inquiry no", "Date", "Customer", "What they want", "Qty",
+             "Status"], stretch=3, fit=(0, 1, 4, 5))
+        page = _TabPage(
+            "These inquiries have no quotation yet. Pick one, then press "
+            "Prepare a quotation.",
+            self.to_quote_table, "list", "Nothing to quote",
+            "Every inquiry has a quotation. New ones appear here as soon as "
+            "Prism reads them.", on_change=self._render_to_quote)
+        self._add_row_actions(page.panel)
+        self.to_quote_table.currentCellChanged.connect(
+            lambda *_: self._sync_panel("to_quote"))
+        return page
+
+    # ── tab 5: every inquiry ──────────────────────────────────────────────
     def _register_tab(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel(i18n.t("Show:")))
-        self.register_filter = QComboBox()
-        for value, label in REGISTER_RANGES:
-            self.register_filter.addItem(i18n.t(label), value)
-        self.register_filter.currentIndexChanged.connect(
-            lambda *_: self._render_register())
-        filter_row.addWidget(self.register_filter)
-        filter_row.addStretch(1)
-        layout.addLayout(filter_row)
-
-        self.register_table = QTableWidget(0, 6)
-        self.register_table.setHorizontalHeaderLabels(
-            [i18n.t("Inquiry no"), i18n.t("Date"), i18n.t("Customer"),
-             i18n.t("What they want"), i18n.t("Status"), i18n.t("Value")])
-        self.register_table.verticalHeader().setVisible(False)
-        self.register_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.register_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        head = self.register_table.horizontalHeader()
-        head.setSectionResizeMode(3, QHeaderView.Stretch)
-        layout.addWidget(_TableOrEmpty(
-            self.register_table, "list",
-            i18n.t("The register is empty"),
-            i18n.t("Every inquiry Prism recognises is written here as one "
-                   "row — the number, the customer, and where it has got "
-                   "to.")),
-            stretch=1)
-
-        row = QHBoxLayout()
-        quote = QPushButton(i18n.t("Prepare a quotation"))
-        quote.setObjectName("primaryBtn")
-        quote.clicked.connect(self._prepare_quotation)
-        row.addWidget(quote)
-        already = QPushButton(i18n.t("Mark as already quoted"))
-        already.setToolTip(i18n.t(
-            "For one you priced by phone or in person, outside Prism — logs "
-            "it as quoted and stops the follow-up chase, without opening "
-            "the pricing screen."))
-        already.clicked.connect(self._mark_already_quoted)
-        row.addWidget(already)
-        edit = QPushButton(i18n.t("Edit this row"))
-        edit.clicked.connect(self._edit_row)
-        row.addWidget(edit)
-        folder = QPushButton(i18n.t("Open this inquiry's folder"))
-        folder.clicked.connect(self._open_inquiry_folder)
-        row.addWidget(folder)
-        boq = QPushButton(i18n.t("Make a BOQ from the drawing"))
-        boq.clicked.connect(self._make_boq)
-        row.addWidget(boq)
-        win = QPushButton(i18n.t("Win this back"))
-        win.setToolTip(i18n.t(
-            "For a customer who said no, or wants a better rate. Prism writes "
-            "the reply using the AI tools in your browser and your own "
-            "bargaining limits — then shows it to you before anything is "
-            "sent."))
-        win.clicked.connect(self._win_back)
-        row.addWidget(win)
-        lost = QPushButton(i18n.t("Mark as not converted"))
-        lost.clicked.connect(self._mark_lost)
-        row.addWidget(lost)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-        import_row = QHBoxLayout()
-        import_btn = QPushButton(i18n.t("Import a CSV into the register"))
+        self.register_table = self._make_table(
+            ["Inquiry no", "Date", "Customer", "What they want", "Status",
+             "Value"], stretch=3, fit=(0, 1, 4, 5))
+        page = _TabPage(
+            "Every inquiry Prism has written in the register, and where each "
+            "one stands.",
+            self.register_table, "list", "The register is empty",
+            "Every inquiry Prism recognises is written here as one row — the "
+            "number, the customer, and where it has got to.",
+            on_change=self._render_register)
+        self.register_filter = page.filter
+        self.register_chips = C.FilterChips(
+            [("all", i18n.t("All")), ("open", i18n.t("Open")),
+             ("won", i18n.t("Won")), ("lost", i18n.t("Lost"))], current="all")
+        self.register_chips.changed.connect(lambda *_: self._render_register())
+        page.add_tool(self.register_chips)
+        # The one rare thing on this screen, kept out of the daily tabs.
+        import_btn = C.button(i18n.t("Bring in an old list (CSV)…"),
+                              "secondary", small=True,
+                              on_click=self._import_csv_into_register)
         import_btn.setToolTip(i18n.t(
             "For a list of inquiries you already kept before using Prism — "
             "added alongside what is already here. Nothing already in the "
             "register is touched, changed or duplicated."))
-        import_btn.clicked.connect(self._import_csv_into_register)
-        import_row.addWidget(import_btn)
-        import_row.addStretch(1)
-        layout.addLayout(import_row)
+        page.add_tool(import_btn)
+        self._add_row_actions(page.panel)
+        self.register_table.currentCellChanged.connect(
+            lambda *_: self._sync_panel("register"))
         return page
 
-    # ── tab 3: what the customer said back ────────────────────────────────
+    # ── tab 3: they answered ──────────────────────────────────────────────
     def _replies_tab(self) -> QWidget:
         """Replies on quotations already out, and what Prism made of them.
 
@@ -753,53 +1145,49 @@ class InquiryDialog(PrismDialog):
         proposes, shows the words it read it from, and the owner presses the
         button.
         """
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        note = QLabel(i18n.t(
-            "Replies to quotations you have sent. Prism reads each one and "
-            "says what it thinks the customer means — check it, then apply "
-            "it to the register. Nothing changes until you press the button."))
-        note.setWordWrap(True)
-        note.setObjectName("meta")
-        layout.addWidget(note)
+        self.replies_table = self._make_table(
+            ["Inquiry no", "Customer", "Subject", "Prism thinks",
+             "Register will say"], stretch=2, fit=(0, 3, 4))
+        page = _TabPage(
+            "The customer wrote back about a quotation. Read what they said, "
+            "then tell Prism what it means.",
+            self.replies_table, "mail", "No answers to read",
+            "When a customer replies to a quotation, it is listed here with "
+            "what Prism makes of it.", on_change=self._render_replies)
 
-        self.replies_table = QTableWidget(0, 5)
-        self.replies_table.setHorizontalHeaderLabels(
-            [i18n.t("Inquiry no"), i18n.t("Customer"), i18n.t("Subject"),
-             i18n.t("Prism reads this as"), i18n.t("Register will say")])
-        self.replies_table.verticalHeader().setVisible(False)
-        self.replies_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.replies_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        head = self.replies_table.horizontalHeader()
-        head.setSectionResizeMode(2, QHeaderView.Stretch)
-        self.replies_table.currentCellChanged.connect(
-            lambda *_: self._show_reply())
-        layout.addWidget(_TableOrEmpty(
-            self.replies_table, "mail",
-            i18n.t("No replies to read"),
-            i18n.t("When a customer answers a quotation you have sent, "
-                   "their reply and what Prism makes of it appear here.")),
-            stretch=2)
-
-        layout.addWidget(QLabel(i18n.t("What they actually wrote:")))
+        panel = page.panel
+        self.reply_sent_line = C.label("", level="META", wrap=True)
+        panel.extra.addWidget(self.reply_sent_line)
+        panel.extra.addWidget(C.label(i18n.t("What they wrote:"),
+                                      level="LABEL"))
         self.reply_text = QPlainTextEdit()
         self.reply_text.setReadOnly(True)
-        self.reply_text.setFixedHeight(120)
-        layout.addWidget(self.reply_text)
-
+        # Four to eight lines, from the font — never a fixed pixel height,
+        # which is what squeezed the old tab into illegibility.
+        line = self.reply_text.fontMetrics().lineSpacing()
+        self.reply_text.setMinimumHeight(line * 4 + 2 * theme.SPACE_2)
+        self.reply_text.setMaximumHeight(line * 8 + 2 * theme.SPACE_2)
+        panel.extra.addWidget(self.reply_text)
         row = QHBoxLayout()
-        row.addWidget(QLabel(i18n.t("Treat this reply as:")))
+        row.setSpacing(theme.SPACE_2)
+        row.addWidget(QLabel(i18n.t("Prism thinks:")))
         self.intent_picker = QComboBox()
+        self.intent_picker.setMinimumHeight(C.MIN_TARGET)
         for key, label in INTENT_LABELS.items():
             if key != "unclear":
                 self.intent_picker.addItem(i18n.t(label), key)
         row.addWidget(self.intent_picker)
-        apply_btn = QPushButton(i18n.t("Update the register"))
-        apply_btn.setObjectName("primaryBtn")
-        apply_btn.clicked.connect(self._apply_reply)
-        row.addWidget(apply_btn)
+        self.apply_btn = C.button(i18n.t("Update the register"), "primary",
+                                  icon_name="check", on_click=self._apply_reply)
+        row.addWidget(self.apply_btn)
         row.addStretch(1)
-        layout.addLayout(row)
+        panel.extra.addLayout(row)
+        panel.add_action("win_back", "Write a reply to win them back",
+                         "secondary", self._win_back)
+        panel.add_action("folder", "Open this inquiry's folder", "tertiary",
+                         self._open_inquiry_folder)
+        self.replies_table.currentCellChanged.connect(
+            lambda *_: self._sync_panel("replies"))
         return page
 
     def _fill_replies(self, result):
@@ -825,6 +1213,12 @@ class InquiryDialog(PrismDialog):
         items = [_StoredItem(entry, register.find(self._register_rows,
                                                    entry.get("inquiry_no", "")))
                 for entry in worklist.pending(data, "replies")]
+        page = self._pages.get("replies")
+        text = page.search_text() if page else ""
+        items = [item for item in items
+                 if _matches(text, item.inquiry_no,
+                             (item.row or {}).get("Customer", ""),
+                             item.message.from_addr, item.message.subject)]
         self._replies = items
         self.replies_table.setRowCount(len(items))
         for index, item in enumerate(items):
@@ -846,6 +1240,7 @@ class InquiryDialog(PrismDialog):
         if items:
             self.replies_table.setCurrentCell(0, 0)
         self._show_reply()
+        self._refresh_counts()
 
     def _selected_reply(self):
         index = self.replies_table.currentRow()
@@ -906,34 +1301,24 @@ class InquiryDialog(PrismDialog):
             .replace("{status}", target.get("Status", "")))
         self._render_replies()
 
-    # ── tab 4: chasing ────────────────────────────────────────────────────
+    # ── tab 2: no answer yet ──────────────────────────────────────────────
     def _followup_tab(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        note = QLabel(i18n.t(
-            "Quotations that have gone quiet. This is the money already "
-            "earned and not yet collected on — the list nobody keeps."))
-        note.setWordWrap(True)
-        note.setObjectName("meta")
-        layout.addWidget(note)
-        self.followups = QListWidget()
-        layout.addWidget(_TableOrEmpty(
-            self.followups, "clock",
-            i18n.t("Nothing is overdue"),
-            i18n.t("Quotations that have gone quiet are listed here so you "
-                   "can chase them in one go.")),
-            stretch=1)
-
-        row = QHBoxLayout()
-        self.remind_btn = QPushButton(i18n.t("Send a reminder"))
-        self.remind_btn.setObjectName("primaryBtn")
-        self.remind_btn.clicked.connect(self._send_reminder)
-        row.addWidget(self.remind_btn)
-        row.addStretch(1)
-        layout.addLayout(row)
+        self.followups = self._make_table(
+            ["Quotation no", "Customer", "Quoted on", "Value", "Reminder",
+             "Inquiry no"], stretch=1, fit=(0, 2, 3, 4, 5))
+        page = _TabPage(
+            "Quotations you sent that the customer has not answered yet.",
+            self.followups, "clock", "Every quotation has been answered",
+            "When you send a quotation it waits here until the customer "
+            "replies.", on_change=self._render_waiting)
+        self.followups_empty = page.empty
+        self._add_row_actions(page.panel)
+        self.remind_btn = page.panel.buttons["remind"]
+        self.followups.currentCellChanged.connect(
+            lambda *_: self._sync_panel("waiting"))
         return page
 
-    # ── tab 5: the purchase order ─────────────────────────────────────────
+    # ── tab 4: the order came ─────────────────────────────────────────────
     def _orders_tab(self) -> QWidget:
         """Purchase orders, against the quotations they answer.
 
@@ -944,47 +1329,29 @@ class InquiryDialog(PrismDialog):
         this check costs two seconds now or an argument in three weeks.
         Accepting is a button a person presses; nothing here accepts itself.
         """
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        note = QLabel(i18n.t(
-            "Purchase orders that arrived by mail. Prism reads the PO, puts "
-            "it against the quotation you sent, and shows every difference — "
-            "accepting it is yours to press. The PO file itself is already "
-            "saved in the inquiry's folder, so nothing is lost if this list "
-            "empties when the screen closes."))
-        note.setWordWrap(True)
-        note.setObjectName("meta")
-        layout.addWidget(note)
-
-        self.orders_table = QTableWidget(0, 4)
-        self.orders_table.setHorizontalHeaderLabels(
-            [i18n.t("Inquiry no"), i18n.t("Customer"), i18n.t("Subject"),
-             i18n.t("What Prism noticed")])
-        self.orders_table.verticalHeader().setVisible(False)
-        self.orders_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.orders_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        head = self.orders_table.horizontalHeader()
-        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        head.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        head.setSectionResizeMode(2, QHeaderView.Stretch)
-        head.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(_TableOrEmpty(
-            self.orders_table, "archive",
-            i18n.t("No purchase orders yet"),
-            i18n.t("A PO that arrives against one of your quotations is "
-                   "read here and checked against what you sent.")),
-            stretch=1)
-
-        row = QHBoxLayout()
-        self.po_btn = QPushButton(i18n.t("Read the PO and compare"))
-        self.po_btn.setObjectName("primaryBtn")
-        self.po_btn.clicked.connect(self._review_po)
-        row.addWidget(self.po_btn)
-        folder = QPushButton(i18n.t("Open this inquiry's folder"))
-        folder.clicked.connect(self._open_order_folder)
-        row.addWidget(folder)
-        row.addStretch(1)
-        layout.addLayout(row)
+        self.orders_table = self._make_table(
+            ["Inquiry no", "Customer", "Subject", "What Prism noticed"],
+            stretch=2, fit=(0, 1, 3))
+        page = _TabPage(
+            "A purchase order arrived, or a customer said yes. Check it "
+            "against your quotation, then record it.",
+            self.orders_table, "archive", "No orders waiting",
+            "A PO that arrives by mail is read here and checked against what "
+            "you quoted.", on_change=self._render_orders)
+        panel = page.panel
+        self.po_btn = panel.add_action("po", "Read the PO and compare",
+                                       "primary", self._review_po)
+        panel.add_action("record_po", "Record the PO by hand", "primary",
+                         self._record_po_by_hand)
+        panel.add_action("phone", "They replied by phone…", "secondary",
+                         self._phone_reply)
+        panel.add_action("lost", "Mark as lost", "secondary", self._mark_lost)
+        panel.add_action("remove_order", "Not an order — remove it",
+                         "secondary", self._remove_order)
+        panel.add_action("folder", "Open this inquiry's folder", "tertiary",
+                         self._open_order_folder)
+        self.orders_table.currentCellChanged.connect(
+            lambda *_: self._sync_panel("orders"))
         return page
 
     def _fill_orders(self, result):
@@ -1008,6 +1375,21 @@ class InquiryDialog(PrismDialog):
         items = [_StoredItem(entry, register.find(self._register_rows,
                                                    entry.get("inquiry_no", "")))
                 for entry in worklist.pending(data, "orders")]
+        # Plus every row the customer said yes on and no PO has landed for —
+        # it is coming by hand, by phone or on paper, and "Record the PO by
+        # hand" is how it gets in. Without these the tab only ever showed
+        # POs that happened to arrive by mail.
+        covered = {item.inquiry_no for item in items}
+        for row in self._register_rows:
+            if ((row.get("Status") or "").strip() == register.ACCEPTED
+                    and row.get("Inquiry no", "") not in covered):
+                items.append(_RegisterOnlyItem(row))
+        page = self._pages.get("orders")
+        text = page.search_text() if page else ""
+        items = [item for item in items
+                 if _matches(text, item.inquiry_no,
+                             (item.row or {}).get("Customer", ""),
+                             item.message.from_addr, item.message.subject)]
         self._orders = items
         self.orders_table.setRowCount(len(items))
         for index, item in enumerate(items):
@@ -1022,6 +1404,7 @@ class InquiryDialog(PrismDialog):
                                           QTableWidgetItem(str(value)))
         if items:
             self.orders_table.setCurrentCell(0, 0)
+        self._refresh_counts()
 
     def _selected_order(self):
         index = self.orders_table.currentRow()
@@ -1529,8 +1912,9 @@ class InquiryDialog(PrismDialog):
             # quotation — somebody waiting on an answer — beats a new
             # inquiry, which will still be there this afternoon.
             self.tabs.setCurrentIndex(
-                4 if result.orders else
-                2 if result.replies else (0 if result.fetched else 1))
+                TAB_INDEX["orders"] if result.orders else
+                TAB_INDEX["replies"] if result.replies else
+                TAB_INDEX["to_quote"])
         self._quiet = False
         # Last, and only after the register has been written: a reminder must
         # never go out to somebody whose reply arrived in this same check and
@@ -1585,12 +1969,14 @@ class InquiryDialog(PrismDialog):
         worklist = CB.get_worklist()
         folder = self._root()
         data = worklist.load(folder) if folder else {"arrived": []}
-        filter_key = (self.arrived_filter.currentData()
-                     if hasattr(self, "arrived_filter") else "all") or "all"
+        page = self._pages.get("arrived")
         today = date.today()
+        text = page.search_text() if page else ""
         rows = [r for r in worklist.history(data, "arrived")
-               if _in_date_range(_parse_iso(r.get("date", "")),
-                                 filter_key, today)]
+                if (page is None or page.in_range(
+                    _parse_iso(r.get("date", "")), today))
+                and _matches(text, r.get("from_name"), r.get("from_addr"),
+                             r.get("subject"))]
         self.arrived.setRowCount(len(rows))
         for index, entry in enumerate(rows):
             who = entry.get("from_name") or entry.get("from_addr", "")
@@ -1604,9 +1990,12 @@ class InquiryDialog(PrismDialog):
             why = entry.get("reason") or i18n.t(
                 SOURCE_LABELS.get(entry.get("source", ""), ""))
             self.arrived.setItem(index, 3, QTableWidgetItem(why))
+            self.arrived.setItem(index, 4, QTableWidgetItem(
+                _dmy(entry.get("date", ""))))
             self.arrived.item(index, 0).setData(
                 Qt.UserRole, entry.get("from_addr", ""))
         self._sorted_mail = rows
+        self._refresh_counts()
 
     def _correct(self):
         row = self.arrived.currentRow()
@@ -1651,45 +2040,44 @@ class InquiryDialog(PrismDialog):
             return []
 
     def _refresh_register(self):
-        """Read the register off disk and redraw the table from it. Anything
-        that only changes what is SHOWN — the date filter — calls
-        _render_register() directly instead; re-reading a CSV on a shared
-        drive to change nothing but which rows are visible would make
-        switching the filter cost what a real mail check costs."""
+        """Read the register off disk and redraw every table drawn from it.
+        Anything that only changes what is SHOWN — a date filter, a search
+        — calls the tab's own _render_*() instead; re-reading a CSV on a
+        shared drive to change nothing but which rows are visible would
+        make switching the filter cost what a real mail check costs."""
         register = CB.get_register()
         rows = self._rows()
         self._register_rows = rows
-        self._render_register()
-
-        self.followups.clear()
         settings = self._settings()
         due = register.awaiting_followup(
             rows,
             after_days=int(settings.get("followup_days", 2) or 2),
             max_reminders=int(settings.get("max_reminders", 3) or 3))
         self._followup_rows = list(due)
-        for row in due:
-            # The QUOTATION number leads. That is the document the customer is
-            # sitting on and the one they will quote back on the phone; the
-            # inquiry number is our filing reference and comes second.
-            # "Reminders sent" is blank in a freshly quoted row, and a bare
-            # "reminders sent" with no number in front of it reads as broken.
-            sent = (row.get("Reminders sent") or "0").strip() or "0"
-            chased = (i18n.t("not chased yet") if sent == "0" else
-                      i18n.t("{n} reminder(s) sent").replace("{n}", sent))
-            self.followups.addItem(QListWidgetItem(
-                f"{row.get('Quotation no','') or i18n.t('(no quotation number)')}"
-                f"  ·  {row.get('Customer','') or row.get('Email','')}"
-                f"  ·  {i18n.t('quoted')} {row.get('Quotation date','')}"
-                f"  ·  {chased}"
-                f"  ·  {row.get('Inquiry no','')}"))
-        if not due:
-            self.followups.addItem(QListWidgetItem(
-                i18n.t("Nothing is waiting — every quotation has been answered.")))
+        focus_no = (self._focus_row or {}).get("Inquiry no", "")
+        self._render_register()
+        self._render_to_quote()
+        self._render_waiting()
+        self._reselect(focus_no)
 
-        if rows:
-            summary = CB.get_mailflow().day_summary(self._paths())
-            self.summary.setText(summary.replace("\n", "   ").replace("  ", " "))
+    def _reselect(self, inquiry_no: str):
+        """After a save, land the owner back on the row they were on — in
+        whichever tab it now lives — instead of clearing the panel and
+        making them find it again."""
+        if not inquiry_no:
+            return
+        current = TABS[self.tabs.currentIndex()][0]
+        tables = {"to_quote": (self.to_quote_table, self._to_quote_rows),
+                  "waiting": (self.followups, self._waiting_rows),
+                  "register": (self.register_table, self._visible_rows)}
+        for key in (current, "to_quote", "waiting", "register"):
+            table, rows = tables.get(key, (None, []))
+            if table is None:
+                continue
+            for index, row in enumerate(rows):
+                if row.get("Inquiry no", "") == inquiry_no:
+                    table.setCurrentCell(index, 0)
+                    return
 
     def _register_date_matches(self, row: dict, filter_key: str,
                                today: date) -> bool:
@@ -1697,40 +2085,279 @@ class InquiryDialog(PrismDialog):
         return _in_date_range(register.parse_date(row.get("Date received", "")),
                               filter_key, today)
 
-    def _render_register(self):
-        """Redraw the table from _register_rows and the date filter,
-        without touching the disk. _visible_rows becomes the table's actual
-        row order — see its definition in __init__ for why _selected_row()
-        must read that list and not _register_rows directly."""
-        filter_key = self.register_filter.currentData() or "all"
+    def _filtered(self, key: str, rows: list[dict]) -> list[dict]:
+        """A tab's Show: range and search box applied to register rows —
+        in memory, never a disk read."""
+        page = self._pages.get(key)
+        if page is None:
+            return list(rows)
+        register = CB.get_register()
         today = date.today()
-        rows = [r for r in (self._register_rows or [])
-                if self._register_date_matches(r, filter_key, today)]
+        text = page.search_text()
+        return [r for r in rows
+                if page.in_range(register.parse_date(r.get("Date received", "")),
+                                 today)
+                and _matches(text, r.get("Inquiry no"), r.get("Customer"),
+                             r.get("Email"), r.get("Product asked"),
+                             r.get("Quotation no"))]
+
+    @staticmethod
+    def _fill_cells(table: QTableWidget, values: list, status_column=None):
+        index = table.rowCount()
+        table.setRowCount(index + 1)
+        for column, value in enumerate(values):
+            cell = QTableWidgetItem(str(value))
+            if column == status_column:
+                paint(cell, STATUS_COLOURS, str(value))
+            table.setItem(index, column, cell)
+
+    def _render_register(self):
+        """Redraw the All-inquiries table from _register_rows and its
+        filters, without touching the disk. _visible_rows becomes the
+        table's actual row order — see its definition in __init__ for why
+        _selected_row() must read that list and not _register_rows."""
+        register = CB.get_register()
+        chip = (self.register_chips.current()
+                if hasattr(self, "register_chips") else "all") or "all"
+        wanted = {"all": None, "open": set(register.OPEN_STATUSES),
+                  "won": {register.CONVERTED},
+                  "lost": {register.NOT_CONVERTED}}[chip]
+        rows = [r for r in self._filtered("register", self._register_rows or [])
+                if wanted is None
+                or ((r.get("Status") or "").strip() or register.NEW) in wanted]
         self._visible_rows = rows
-        self.register_table.setRowCount(len(rows))
-        for index, row in enumerate(rows):
+        self.register_table.setRowCount(0)
+        for row in rows:
             when = row.get("Date received", "")
             clock = row.get("Time received", "")
-            values = [row.get("Inquiry no", ""),
-                      f"{when} {clock}".strip(),
-                      row.get("Customer", "") or row.get("Email", ""),
-                      row.get("Product asked", ""), row.get("Status", ""),
-                      row.get("Order value") or row.get("Quotation value", "")]
-            for column, value in enumerate(values):
-                cell = QTableWidgetItem(str(value))
-                if column == 4:
-                    paint(cell, STATUS_COLOURS, str(value))
-                self.register_table.setItem(index, column, cell)
+            self._fill_cells(self.register_table, [
+                row.get("Inquiry no", ""), f"{when} {clock}".strip(),
+                row.get("Customer", "") or row.get("Email", ""),
+                row.get("Product asked", ""), row.get("Status", ""),
+                _rupees(row.get("Order value") or row.get("Quotation value"))],
+                status_column=4)
+        self._refresh_counts()
 
-    def _selected_row(self) -> dict | None:
+    def _render_to_quote(self):
+        register = CB.get_register()
+        rows = [r for r in self._filtered("to_quote", self._register_rows or [])
+                if ((r.get("Status") or "").strip() or register.NEW)
+                == register.NEW]
+        self._to_quote_rows = rows
+        self.to_quote_table.setRowCount(0)
+        for row in rows:
+            self._fill_cells(self.to_quote_table, [
+                row.get("Inquiry no", ""), row.get("Date received", ""),
+                row.get("Customer", "") or row.get("Email", ""),
+                row.get("Product asked", ""), row.get("Quantity", ""),
+                row.get("Status", "") or register.NEW], status_column=5)
+        self._refresh_counts()
+
+    def _render_waiting(self):
+        """Every quotation still unanswered, with what has been done about
+        it so far — from worklist/sent.json, so the column can say WHEN a
+        reminder went, not just how many."""
+        register = CB.get_register()
+        rows = [r for r in self._filtered("waiting", self._register_rows or [])
+                if (r.get("Status") or "").strip()
+                in (register.QUOTED, register.FOLLOWING_UP)]
+        self._waiting_rows = rows
+        due_ids = {id(r) for r in self._followup_rows}
+        settings = self._settings()
+        max_reminders = int(settings.get("max_reminders", 3) or 3)
+        folder = self._root()
+        data = CB.get_worklist().load(folder) if folder else {}
+        self.followups.setRowCount(0)
+        for row in rows:
+            sent_count = int((row.get("Reminders sent") or "0").strip() or 0)
+            reminders = [e for e in CB.get_worklist().sent_for(
+                data, row.get("Inquiry no", "")) if e.get("kind") == "reminder"]
+            if sent_count >= max_reminders:
+                chased = i18n.t("{n} sent — call them").replace(
+                    "{n}", str(sent_count))
+            elif id(row) in due_ids:
+                chased = i18n.t("Due today")
+            elif reminders:
+                chased = i18n.t("Sent {dates}").replace(
+                    "{dates}", ", ".join(_dmy(e.get("date", ""), short=True)
+                                         for e in reminders))
+            elif sent_count:
+                chased = i18n.t("{n} sent").replace("{n}", str(sent_count))
+            else:
+                chased = i18n.t("Not yet due")
+            self._fill_cells(self.followups, [
+                row.get("Quotation no", "") or i18n.t("(no number)"),
+                row.get("Customer", "") or row.get("Email", ""),
+                row.get("Quotation date", ""),
+                _rupees(row.get("Quotation value")), chased,
+                row.get("Inquiry no", "")])
+            if id(row) in due_ids:
+                paint(self.followups.item(self.followups.rowCount() - 1, 4),
+                      {"due": _WARN}, "due")
+        page = self._pages.get("waiting")
+        if page is not None:
+            n = len(self._followup_rows)
+            page.sentence.setText(
+                i18n.t("Quotations you sent that the customer has not "
+                       "answered yet. None needs a reminder today.") if not n
+                else i18n.t("Quotations you sent that the customer has not "
+                            "answered yet. {n} need a reminder today.")
+                .replace("{n}", str(n)))
+        self._refresh_counts()
+
+    def _refresh_counts(self):
+        """The live number in each daily tab's title. Translate the label
+        FIRST, then append the count — a string with a number in it is not
+        in the catalogue and would never translate."""
+        if not hasattr(self, "tabs") or len(self._pages) < len(TABS):
+            return
+        counts = {"to_quote": len(self._to_quote_rows),
+                  "waiting": len(self._followup_rows),
+                  "replies": len(self._replies),
+                  "orders": len(self._orders)}
+        for index, (key, label) in enumerate(TABS):
+            text = i18n.t(label)
+            if key in COUNTED_TABS:
+                text = f"{text} ({counts.get(key, 0)})"
+            if self.tabs.tabText(index) != text:
+                self.tabs.setTabText(index, text)
+
+    # ── which row, and what it can have done to it ────────────────────────
+    def _current_row(self) -> dict | None:
+        """The picked register row, or None — silently. The twin of
+        _selected_row() for signal handlers, which must never pop a
+        message box."""
+        row = self._focus_row
+        if row is not None and any(row is r for r in self._register_rows):
+            return row
         index = self.register_table.currentRow()
         rows = getattr(self, "_visible_rows", [])
-        if index < 0 or index >= len(rows):
+        return rows[index] if 0 <= index < len(rows) else None
+
+    def _selected_row(self) -> dict | None:
+        row = self._current_row()
+        if row is None:
             QMessageBox.information(
                 self, i18n.t("Email automation"),
                 i18n.t("Pick an inquiry from the list first."))
-            return None
-        return rows[index]
+        return row
+
+    def _has_drawing(self, row: dict) -> bool:
+        folder = row.get("Folder", "")
+        try:
+            return bool(folder) and os.path.isdir(folder) and any(
+                name.lower().endswith(DRAWING_EXTENSIONS)
+                for name in os.listdir(folder))
+        except OSError:
+            return False
+
+    def _row_title(self, row: dict) -> str:
+        parts = [row.get("Inquiry no", ""),
+                 row.get("Customer", "") or row.get("Email", ""),
+                 row.get("Product asked", "")]
+        if row.get("Quantity"):
+            parts.append(row["Quantity"])
+        return " · ".join(p for p in parts if p)
+
+    def _row_info(self, row: dict) -> str:
+        register = CB.get_register()
+        status = (row.get("Status") or "").strip() or register.NEW
+        bits = [i18n.t(status)]
+        if row.get("Date received"):
+            bits.append(i18n.t("came {when}").replace(
+                "{when}", row["Date received"]))
+        folder = self._root()
+        sent = []
+        if folder:
+            try:
+                sent = CB.get_worklist().sent_for(
+                    CB.get_worklist().load(folder), row.get("Inquiry no", ""))
+            except Exception:           # noqa: BLE001 — a log, not the record
+                sent = []
+        if sent:
+            words = {"quotation": i18n.t("quotation"),
+                     "revised": i18n.t("revised quotation"),
+                     "reminder": i18n.t("reminder"),
+                     "winback": i18n.t("reply")}
+            bits.append(i18n.t("Sent so far: {what}").replace("{what}", ", ".join(
+                f"{words.get(e.get('kind'), e.get('kind', ''))} "
+                f"{_dmy(e.get('date', ''), short=True)}" for e in sent)))
+        else:
+            bits.append(i18n.t("Sent so far: nothing yet"))
+        return " · ".join(bits)
+
+    def _sync_panel(self, key: str):
+        """Redraw one tab's Selected-inquiry panel for whatever row is
+        picked there. Runs from selection signals, so it never asks
+        anything and never pops a box."""
+        page = self._pages.get(key)
+        if page is None:
+            return
+        panel = page.panel
+        if key == "replies":
+            item = self._selected_reply()
+            self._show_reply()
+            if item is None:
+                panel.clear()
+                return
+            row = item.row or {}
+            self._focus_row = row if row else None
+            self.reply_sent_line.setText(self._row_info(row) if row else "")
+            title = (self._row_title(row) if row else
+                     f"{item.inquiry_no} · {item.message.from_addr}")
+            panel.show_row(title, "", ["win_back", "folder"] if row else [],
+                           extra=True)
+            return
+        if key == "orders":
+            item = self._selected_order()
+            if item is None:
+                panel.clear()
+                return
+            row = item.row or {}
+            self._focus_row = row if row else None
+            keys = (["po", "remove_order", "folder"] if item.message_id
+                    else ["record_po", "phone", "lost", "folder"])
+            title = (self._row_title(row) if row else
+                     f"{item.inquiry_no} · {item.message.from_addr}")
+            panel.show_row(title, self._row_info(row) if row else "", keys)
+            return
+        if key == "arrived":
+            index = self.arrived.currentRow()
+            rows = self._sorted_mail or []
+            if not 0 <= index < len(rows):
+                panel.clear()
+                return
+            entry = rows[index]
+            self._focus_row = None
+            category = entry.get("category", "")
+            panel.show_row(
+                f"{entry.get('from_name') or entry.get('from_addr', '')} · "
+                f"{entry.get('subject', '')}",
+                i18n.t("Sorted as {what} · {when}")
+                .replace("{what}", i18n.t(CATEGORY_LABELS.get(category, category)))
+                .replace("{when}", _dmy(entry.get("date", ""))),
+                (), extra=True)
+            return
+        table, rows = {"to_quote": (self.to_quote_table, self._to_quote_rows),
+                       "waiting": (self.followups, self._waiting_rows),
+                       "register": (self.register_table, self._visible_rows)
+                       }[key]
+        index = table.currentRow()
+        row = rows[index] if 0 <= index < len(rows) else None
+        self._focus_row = row
+        if row is None:
+            panel.clear()
+            return
+        keys = actions_for(row.get("Status", ""), key, self._has_drawing(row))
+        panel.show_row(self._row_title(row), self._row_info(row), keys)
+        remind = panel.buttons.get("remind")
+        if remind is not None and "remind" in keys:
+            settings = self._settings()
+            sent = int((row.get("Reminders sent") or "0").strip() or 0)
+            stop = sent >= int(settings.get("max_reminders", 3) or 3)
+            remind.setEnabled(not stop)
+            remind.setToolTip(i18n.t("Three reminders have gone. Call them.")
+                              if stop else "")
 
     def _open_register(self):
         if not self._root():
@@ -1761,6 +2388,111 @@ class InquiryDialog(PrismDialog):
             self._explain(str(e))
             return
         self._refresh_register()
+
+    def _delete_inquiry(self):
+        """Take a row out of the register — and, since the usual reason is
+        a newsletter or a supplier that got itself registered, offer to stop
+        that sender ever being treated as an inquiry again. The inquiry's
+        folder on disk is left alone: deleting a line from a book is not
+        the same as shredding the file."""
+        row = self._selected_row()
+        if not row:
+            return
+        no = row.get("Inquiry no", "")
+        who = row.get("Customer", "") or row.get("Email", "")
+        answer = QMessageBox.question(
+            self, i18n.t("Delete this inquiry"),
+            i18n.t("Delete {no} ({who}) from the register?\n\nIts folder, "
+                   "with the mail and any drawings, stays on disk.")
+            .replace("{no}", no).replace("{who}", who),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        address = (row.get("Email") or "").strip().lower()
+        block = False
+        if address:
+            block = QMessageBox.question(
+                self, i18n.t("Block this sender?"),
+                i18n.t("Also stop treating mail from {who} as inquiries?\n\n"
+                       "Prism will file anything from that address as "
+                       "\"Other\" from now on and never register it.")
+                .replace("{who}", address),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
+        register = CB.get_register()
+        self._register_rows = [r for r in self._register_rows if r is not row]
+        try:
+            register.save(self._register_rows, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        if block:
+            self._learn_sender(address, "other")
+        self._focus_row = None
+        self._refresh_register()
+        self.status.setText(
+            i18n.t("{no} deleted. Mail from {who} will be filed as Other.")
+            .replace("{no}", no).replace("{who}", address) if block
+            else i18n.t("{no} deleted.").replace("{no}", no))
+
+    def _learn_sender(self, address: str, category: str):
+        """Remember a sender's category — the same knowledge the sorter's
+        rules read first, so that address never goes to an AI again."""
+        settings = self._settings()
+        knowledge = settings.get("knowledge") or {}
+        learned = dict(knowledge.get("learned") or {})
+        learned[address] = category
+        knowledge["learned"] = learned
+        settings["knowledge"] = knowledge
+        self.cfg["inquiry"] = settings
+        CB.config.save(self.cfg)
+
+    def _phone_reply(self):
+        """"They replied by phone…" — the register moves exactly as it would
+        for a reply by mail, without one."""
+        row = self._selected_row()
+        if not row:
+            return
+        dialog = _PhoneReplyDialog(row, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        register = CB.get_register()
+        intent, note = dialog.intent(), dialog.note()
+        if intent == "rejected":
+            register.mark_lost(row, note or i18n.t("Declined by phone"))
+        else:
+            register.mark_reply(row, intent)
+            if note:
+                row["Notes"] = (row.get("Notes", "") + " " + note).strip()
+        try:
+            register.save(self._register_rows, self._paths().register_csv)
+        except Exception as e:
+            self._explain(str(e))
+            return
+        self._refresh_register()
+        self.status.setText(
+            i18n.t("{no} is now {status}.")
+            .replace("{no}", row.get("Inquiry no", ""))
+            .replace("{status}", i18n.t(row.get("Status", ""))))
+
+    def _record_po_by_hand(self):
+        """The PO came on paper, or the customer said yes on the phone —
+        the same review sheet, with nothing pre-filled."""
+        row = self._selected_row()
+        if not row:
+            return
+        self._po_row = row
+        self._po_item = None
+        self._show_po(None, row, advice=i18n.t(
+            "Type the PO number, date and value from the printed order."))
+
+    def _remove_order(self):
+        """A mail Prism took for a purchase order and was not one."""
+        item = self._selected_order()
+        if item is None:
+            return
+        if item.message_id and self._root():
+            CB.get_worklist().resolve(self._root(), "orders", item.message_id)
+        self._render_orders()
 
     def _mark_already_quoted(self):
         """Log a quotation made outside Prism — a phone call, a counter
@@ -1836,14 +2568,12 @@ class InquiryDialog(PrismDialog):
         chases the whole list unattended is one bad afternoon away from
         mailing the same buyer three times.
         """
-        index = self.followups.currentRow()
-        rows = getattr(self, "_followup_rows", [])
-        if index < 0 or index >= len(rows):
+        row = self._current_row()
+        if row is None:
             QMessageBox.information(
                 self, i18n.t("Reminder"),
                 i18n.t("Pick a quotation from the list first."))
             return
-        row = rows[index]
         address = row.get("Email", "")
         if not address:
             QMessageBox.information(
@@ -1881,11 +2611,13 @@ class InquiryDialog(PrismDialog):
                         "name": row.get("Contact person", "")}],
             draft.subject(), draft.message(), [])
         self._send_worker.done.connect(
-            lambda sent, failed: self._reminder_sent(row, sent, failed))
+            lambda sent, failed, s=draft.subject():
+            self._reminder_sent(row, sent, failed, subject=s))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
 
-    def _reminder_sent(self, row: dict, sent: list, failed: list):
+    def _reminder_sent(self, row: dict, sent: list, failed: list,
+                       subject: str = ""):
         self.remind_btn.setEnabled(True)
         self.status.setText("")
         if failed:
@@ -1902,10 +2634,30 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        self._log_sent("reminder", row, subject or
+                       self._reminder_words(row)[0])
         self._refresh_register()
         self.status.setText(
             i18n.t("Reminder sent to {who}.").replace(
                 "{who}", row.get("Email", "")))
+
+    def _log_sent(self, kind: str, row: dict, subject: str):
+        """Write one line to worklist/sent.json — the readable history the
+        "Sent so far" line and the reminder column are drawn from. The
+        register's own "Reminders sent" count stays the engine's schedule;
+        this is written in the same breath so the two cannot disagree. A
+        failure here must never undo a send that already happened, so it is
+        swallowed rather than raised."""
+        folder = self._root()
+        if not folder:
+            return
+        try:
+            CB.get_worklist().log_sent(
+                folder, kind, to=row.get("Email", ""), subject=subject,
+                inquiry_no=row.get("Inquiry no", ""),
+                quotation_no=row.get("Quotation no", ""))
+        except Exception:               # noqa: BLE001 — see docstring
+            pass
 
     def _reminder_failed(self, message: str):
         self.remind_btn.setEnabled(True)
@@ -1952,7 +2704,8 @@ class InquiryDialog(PrismDialog):
                         "name": row.get("Contact person", "")}],
             subject, body, [])
         self._send_worker.done.connect(
-            lambda sent, failed: self._reminder_sent(row, sent, failed))
+            lambda sent, failed, s=subject:
+            self._reminder_sent(row, sent, failed, subject=s))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
 
@@ -2124,11 +2877,13 @@ class InquiryDialog(PrismDialog):
                         "name": row.get("Contact person", "")}],
             dialog.subject(), dialog.message(), [])
         self._send_worker.done.connect(
-            lambda sent, failed: self._winback_sent(row, sent, failed))
+            lambda sent, failed, s=dialog.subject():
+            self._winback_sent(row, sent, failed, subject=s))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
 
-    def _winback_sent(self, row: dict, sent: list, failed: list):
+    def _winback_sent(self, row: dict, sent: list, failed: list,
+                      subject: str = ""):
         if failed:
             self._explain(failed[0][1])
             return
@@ -2145,6 +2900,7 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        self._log_sent("winback", row, subject)
         self._refresh_register()
         self.status.setText(i18n.t("Sent. This inquiry is open again."))
 
@@ -3062,6 +3818,10 @@ class QuotationDialog(PrismDialog):
         self.parent_dialog._explain(message)
 
     def _record(self, register, paths, *, sent: bool):
+        # A second quotation on a row that already had one is a revision —
+        # said so in the sent log, because "we quoted them twice" and "we
+        # revised our quotation" are different stories on the phone.
+        revised = bool((self.row.get("Quotation no") or "").strip())
         register.mark_quoted(self.row, self.quote.number, self.quote.total)
         if not sent:
             # Saved but not sent is not "Quoted" — the customer has not seen a
@@ -3074,6 +3834,12 @@ class QuotationDialog(PrismDialog):
                           paths.register_csv)
         except Exception as e:
             self.parent_dialog._explain(str(e))
+            return
+        if sent:
+            log = getattr(self.parent_dialog, "_log_sent", None)
+            if log is not None:
+                log("revised" if revised else "quotation", self.row,
+                    self.subject.text())
 
 
 def _quantity_of(row: dict) -> str:

@@ -291,7 +291,7 @@ Rough sizes, not promises.
 | 6 | PO reading and comparison | ✅ **built** | Scanned POs still need typing in. |
 | 7 | SOP sending and revision chasing | ✅ **built** | The easiest win he gave us. |
 | 8 | Month-end numbers | ✅ **built** | The screen that renews the subscription. |
-| 9 | **The screens he clicks in** | ⬜ next | The engine runs the loop; the window does not exist yet. |
+| 9 | **The screens he clicks in** | ✅ **built** | A plain launcher ("what needs you today") and one working window whose tabs follow the life of an inquiry — see EMAIL_WORKFLOW_RUNTIME.md §5. |
 
 The engine is done and covered by 133 tests. What remains is the interface —
 the mail-account setup, the worklist, the quotation review with its Hold

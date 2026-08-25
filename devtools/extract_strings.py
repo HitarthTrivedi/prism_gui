@@ -58,6 +58,11 @@ ARG_SLOTS = {
     "nav_button": (0, 3),   # (label, icon_name, small, tip)
     "_action": (0, 2),      # (label, icon_name, tip, slot)
     "_section": (0,),       # (text, faint) — the rail's group headers
+    # The Email automation window's tab pages and their action buttons:
+    # (sentence, table, icon, empty_title, empty_body) and (key, text, …).
+    "_TabPage": (0, 3, 4),
+    "add_action": (1,),
+    "_make_table": (0,),    # (headers, stretch, fit) — the column titles
 
     # ── the shared component system (widgets/controls.py, dialogs/base.py) ──
     # These slots are not decoration: without an entry here EVERY positional
@@ -119,6 +124,7 @@ TEXT_CALLS = {
     "getExistingDirectory", "getOpenFileName", "getOpenFileNames",
     "getSaveFileName", "getText",
     # Qt widget constructors that take their label first
+    "_TabPage", "add_action", "_make_table",
     "QLabel", "QPushButton", "QCheckBox", "QRadioButton", "QGroupBox",
     "QAction", "QListWidgetItem", "QToolButton", "QTreeWidgetItem",
     # Prism's own text helpers (widgets/controls.py) and local factories
@@ -148,6 +154,7 @@ COPY_TABLES = {
     "PLACEHOLDERS", "SKIP", "SOON",
     "MORE", "ADDONS", "DIRECT", "SECTIONS", "CARDS", "TABS", "STEPS",
     "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
+    "ROW_ACTIONS", "REGISTER_RANGES", "OPEN_LABEL",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's

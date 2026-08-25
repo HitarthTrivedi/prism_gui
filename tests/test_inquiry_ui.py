@@ -368,15 +368,25 @@ class TheScreen(unittest.TestCase):
         self.cfg = ready_cfg(self.folder)
         self.dialog = UI.InquiryDialog(self.cfg)
 
-    def test_five_tabs_in_the_order_the_work_happens(self):
-        """Arrived → registered → answered → chased → ordered. The tab order
-        IS the explanation of the feature, so it is worth a test of its own —
-        and the fifth tab is the end the whole workflow was sold on: the
-        purchase order arriving is the last step of "inquiry to order"."""
-        self.assertEqual(self.dialog.tabs.count(), 5)
-        self.assertTrue(self.dialog.tabs.tabText(0).startswith("1"))
-        self.assertTrue(self.dialog.tabs.tabText(3).startswith("4"))
-        self.assertTrue(self.dialog.tabs.tabText(4).startswith("5"))
+    def test_six_tabs_in_the_order_an_inquiry_lives(self):
+        """To quote → no answer yet → they answered → the order came, then
+        the two reference tabs. The tab order IS the explanation of the
+        feature, so it is worth a test of its own — and "To quote" is first
+        because "2 to quote" is the number the owner opens Prism for; the
+        whole register is a lookup, so it sits near the end."""
+        self.assertEqual(self.dialog.tabs.count(), 6)
+        for index in range(6):
+            self.assertTrue(
+                self.dialog.tabs.tabText(index).startswith(str(index + 1)))
+        self.assertIn("To quote", self.dialog.tabs.tabText(0))
+        self.assertIn("Order came", self.dialog.tabs.tabText(3))
+        self.assertIn("All inquiries", self.dialog.tabs.tabText(4))
+        self.assertIn("All mail", self.dialog.tabs.tabText(5))
+
+    def test_the_daily_tabs_carry_a_live_count_and_the_reference_tabs_do_not(self):
+        self.assertTrue(self.dialog.tabs.tabText(0).endswith("(0)"))
+        self.assertFalse(self.dialog.tabs.tabText(4).endswith(")"))
+        self.assertFalse(self.dialog.tabs.tabText(5).endswith(")"))
 
     def test_it_opens_with_an_empty_register_rather_than_an_error(self):
         self.assertEqual(self.dialog.register_table.rowCount(), 0)
@@ -476,9 +486,13 @@ class TheScreen(unittest.TestCase):
         self.assertIn("INQ/", self.dialog.register_table.item(0, 0).text())
 
     def test_an_empty_follow_up_list_says_so_rather_than_being_blank(self):
+        """The old tab put a placeholder ROW in the list to say this, which
+        defeated its own empty state (the row count was never zero). Now the
+        table is genuinely empty and the empty state carries the sentence."""
         self.dialog._refresh_register()
-        self.assertEqual(self.dialog.followups.count(), 1)
-        self.assertIn("Nothing is waiting", self.dialog.followups.item(0).text())
+        self.assertEqual(self.dialog.followups.rowCount(), 0)
+        self.assertIn("Every quotation has been answered",
+                      self.dialog.followups_empty.title.text())
 
     def test_a_quiet_quotation_appears_on_the_chase_list(self):
         row = register.from_message(message())
@@ -486,7 +500,8 @@ class TheScreen(unittest.TestCase):
                              date.today().replace(day=1))
         register.save([row], mailflow.Paths(self.folder).register_csv)
         self.dialog._refresh_register()
-        self.assertIn("QTN/26-27/0001", self.dialog.followups.item(0).text())
+        self.assertIn("QTN/26-27/0001", self.dialog.followups.item(0, 0).text())
+        self.assertEqual(self.dialog.followups.item(0, 4).text(), "Due today")
 
     def test_the_whole_callback_path_after_a_check(self):
         """What the worker actually calls back into. Everything above tests a
@@ -1035,6 +1050,385 @@ class NothingIsLostToASecondCheckOrAReopen(unittest.TestCase):
                          UI.CATEGORY_LABELS["other"])
 
 
+class OnlyTheRightButtonsForTheRow(unittest.TestCase):
+    """The seven-button row showed every action for every row, all the
+    time — "Win this back" on an inquiry nobody had quoted, "Prepare a
+    quotation" on one already converted. A person who has never used a CRM
+    reads that as "which of these am I meant to press?". Now a row gets
+    the two or three that make sense where it is, plus the same quiet
+    links every row gets."""
+
+    def test_the_table_itself(self):
+        A = UI.actions_for
+        self.assertEqual(A(register.NEW)[:2], ["prepare", "already_quoted"])
+        self.assertIn("boq", A(register.NEW, has_drawing=True))
+        self.assertNotIn("boq", A(register.NEW, has_drawing=False))
+        self.assertEqual(A(register.QUOTED)[:3], ["remind", "phone", "lost"])
+        self.assertEqual(A(register.FOLLOWING_UP)[0], "remind")
+        self.assertEqual(A(register.NEGOTIATING)[0], "win_back")
+        self.assertEqual(A(register.ACCEPTED)[0], "record_po")
+        self.assertEqual(A(register.NOT_CONVERTED)[0], "win_back")
+        self.assertEqual(A(register.CONVERTED, has_drawing=False),
+                         ["edit", "folder", "delete"])
+        self.assertEqual(A("")[0], "prepare")            # blank = New
+
+    def test_every_row_can_be_edited_opened_and_deleted(self):
+        for status in register.STATUSES + ("",):
+            keys = UI.actions_for(status)
+            self.assertEqual(keys[-3:], ["edit", "folder", "delete"], status)
+
+    def test_never_more_than_three_boxed_buttons(self):
+        for status in register.STATUSES + ("",):
+            for drawing in (False, True):
+                keys = UI.actions_for(status, has_drawing=drawing)
+                self.assertLessEqual(len(keys) - 3, 3, (status, drawing))
+
+
+class ThePanelUnderTheTable(unittest.TestCase):
+    """Widget-level: picking a row shows its buttons and hides the rest;
+    nothing selected shows "Pick a row above." and no buttons."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.cfg = ready_cfg(self.folder)
+        self.new = register.from_message(message("New one"))
+        self.quoted = register.from_message(
+            message("Quoted one", "buyer@q.example"))
+        register.mark_quoted(self.quoted, "QTN/26-27/0001", "50000")
+        register.save([self.new, self.quoted],
+                      mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(self.cfg)
+
+    def _visible(self, key):
+        # isVisibleTo() reports widgets on a tab that is not the current one
+        # as hidden (the QTabWidget hides the page), so switch to it first —
+        # which is also what a person does before they can see the panel.
+        self.dialog.tabs.setCurrentIndex(UI.TAB_INDEX[key])
+        panel = self.dialog._pages[key].panel
+        return {k for k, btn in panel.buttons.items()
+                if btn.isVisibleTo(self.dialog)}
+
+    def test_nothing_selected_shows_the_prompt_and_no_buttons(self):
+        page = self.dialog._pages["register"]
+        self.dialog.register_table.setCurrentCell(-1, -1)
+        self.assertIn("Pick a row", page.panel.title.text())
+        self.assertEqual(self._visible("register"), set())
+
+    def test_a_new_inquiry_gets_prepare_and_nothing_about_reminders(self):
+        page = self.dialog._pages["to_quote"]
+        self.dialog.to_quote_table.setCurrentCell(0, 0)
+        shown = self._visible("to_quote")
+        self.assertIn("prepare", shown)
+        self.assertIn("delete", shown)
+        self.assertNotIn("remind", shown)
+        self.assertNotIn("win_back", shown)
+        self.assertIn(self.new["Inquiry no"], page.panel.title.text())
+
+    def test_a_quoted_inquiry_gets_the_reminder_and_the_phone_answer(self):
+        self.dialog.followups.setCurrentCell(0, 0)
+        shown = self._visible("waiting")
+        self.assertEqual({"remind", "phone", "lost", "edit", "folder",
+                          "delete"}, shown)
+        self.assertEqual(self.dialog._selected_row()["Inquiry no"],
+                         self.quoted["Inquiry no"])
+
+    def test_the_row_picked_in_one_tab_is_the_row_the_buttons_act_on(self):
+        """_selected_row() used to read only the register table; every
+        action on the To-quote tab would then have asked "pick an inquiry"
+        with one plainly picked."""
+        self.dialog.to_quote_table.setCurrentCell(0, 0)
+        self.assertEqual(self.dialog._selected_row()["Inquiry no"],
+                         self.new["Inquiry no"])
+
+    def test_the_selection_survives_a_save(self):
+        """After an action the tables redraw; the owner must land back on
+        the row they were on, not on "Pick a row above."."""
+        self.dialog.register_table.setCurrentCell(0, 0)
+        picked = self.dialog._selected_row()["Inquiry no"]
+        self.dialog._refresh_register()
+        self.assertEqual(self.dialog._selected_row()["Inquiry no"], picked)
+
+    def test_three_reminders_disable_the_button_and_say_why(self):
+        self.quoted["Reminders sent"] = "3"
+        register.save([self.new, self.quoted],
+                      mailflow.Paths(self.folder).register_csv)
+        self.dialog._refresh_register()
+        self.dialog.followups.setCurrentCell(0, 0)
+        self.assertFalse(self.dialog.remind_btn.isEnabled())
+        self.assertIn("Call them", self.dialog.remind_btn.toolTip())
+
+
+class AnsweringByPhone(unittest.TestCase):
+    """In GIDC most answers come by phone. Without this the register could
+    only move when the customer wrote."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.row = register.from_message(message())
+        register.mark_quoted(self.row, "QTN/26-27/0001", "50000")
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(ready_cfg(self.folder))
+        self.dialog.followups.setCurrentCell(0, 0)
+
+    def _answer(self, intent, note=""):
+        class Fake:
+            def __init__(self, *a, **k):
+                pass
+
+            def exec(self):
+                return UI.QDialog.Accepted
+
+            def intent(self_inner):
+                return intent
+
+            def note(self_inner):
+                return note
+        with _Patched(UI, "_PhoneReplyDialog", Fake):
+            self.dialog._phone_reply()
+        return register.load(mailflow.Paths(self.folder).register_csv)[0]
+
+    def test_they_accepted(self):
+        self.assertEqual(self._answer("accepted")["Status"], register.ACCEPTED)
+
+    def test_they_want_a_better_rate(self):
+        self.assertEqual(self._answer("negotiating")["Status"],
+                         register.NEGOTIATING)
+
+    def test_they_declined_goes_through_the_same_door_as_a_mail_no(self):
+        saved = self._answer("rejected", "too costly")
+        self.assertEqual(saved["Status"], register.NOT_CONVERTED)
+        self.assertEqual(saved["Reason if lost"], "too costly")
+
+    def test_a_note_is_kept(self):
+        saved = self._answer("needs_info", "will confirm Monday")
+        self.assertIn("will confirm Monday", saved["Notes"])
+
+
+class DeletingAnInquiry(unittest.TestCase):
+    """A newsletter that got itself registered is the commonest reason. The
+    row goes; the folder stays; and the owner is asked whether that sender
+    should ever be treated as an inquiry again."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.row = register.from_message(
+            message("Pitch week!", "Jill <info@e.atlassian.com>"))
+        self.keep = register.from_message(message())
+        register.save([self.row, self.keep],
+                      mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(ready_cfg(self.folder))
+        self.dialog.register_table.setCurrentCell(0, 0)
+
+    def _delete(self, answers):
+        """`answers` are the replies to the two questions, in order."""
+        given = iter(answers)
+
+        class Box:
+            Yes, No = UI.QMessageBox.Yes, UI.QMessageBox.No
+
+            @staticmethod
+            def question(*a, **k):
+                return next(given)
+
+            @staticmethod
+            def information(*a, **k):
+                pass
+        with _Patched(UI, "QMessageBox", Box), _NoSave() as saver:
+            self.dialog._delete_inquiry()
+        return (register.load(mailflow.Paths(self.folder).register_csv),
+                saver.saved)
+
+    def test_the_row_goes_and_the_others_stay(self):
+        rows, _ = self._delete([UI.QMessageBox.Yes, UI.QMessageBox.No])
+        self.assertEqual([r["Inquiry no"] for r in rows],
+                         [self.keep["Inquiry no"]])
+
+    def test_saying_no_to_the_first_question_changes_nothing(self):
+        rows, saved = self._delete([UI.QMessageBox.No])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(saved, [])
+
+    def test_blocking_the_sender_teaches_the_sorter(self):
+        _, saved = self._delete([UI.QMessageBox.Yes, UI.QMessageBox.Yes])
+        learned = saved[-1]["inquiry"]["knowledge"]["learned"]
+        self.assertEqual(learned.get("info@e.atlassian.com"), "other")
+
+    def test_not_blocking_the_sender_teaches_nothing(self):
+        _, saved = self._delete([UI.QMessageBox.Yes, UI.QMessageBox.No])
+        self.assertEqual(saved, [])
+
+    def test_the_folder_on_disk_is_left_alone(self):
+        folder = os.path.join(self.folder, "keep-me")
+        os.makedirs(folder)
+        self.row["Folder"] = folder
+        register.save([self.row, self.keep],
+                      mailflow.Paths(self.folder).register_csv)
+        self.dialog._refresh_register()
+        self.dialog.register_table.setCurrentCell(0, 0)
+        self._delete([UI.QMessageBox.Yes, UI.QMessageBox.No])
+        self.assertTrue(os.path.isdir(folder))
+
+
+class PickingYourOwnDates(unittest.TestCase):
+    """Today / yesterday / last 7 days cover the working week; "from the
+    1st to the 15th" needs the owner's own pair, both ends inclusive."""
+
+    def test_the_rule(self):
+        d = date
+        self.assertTrue(UI._in_date_range(d(2026, 8, 10), "custom",
+                                          d(2026, 8, 26), d(2026, 8, 1),
+                                          d(2026, 8, 15)))
+        self.assertTrue(UI._in_date_range(d(2026, 8, 15), "custom",
+                                          d(2026, 8, 26), d(2026, 8, 1),
+                                          d(2026, 8, 15)))
+        self.assertFalse(UI._in_date_range(d(2026, 8, 16), "custom",
+                                           d(2026, 8, 26), d(2026, 8, 1),
+                                           d(2026, 8, 15)))
+        # Ends the wrong way round still mean the same fortnight.
+        self.assertTrue(UI._in_date_range(d(2026, 8, 10), "custom",
+                                          d(2026, 8, 26), d(2026, 8, 15),
+                                          d(2026, 8, 1)))
+        self.assertFalse(UI._in_date_range(None, "custom", d(2026, 8, 26),
+                                           d(2026, 8, 1), d(2026, 8, 15)))
+
+    def test_the_date_boxes_appear_only_when_asked_for(self):
+        folder = tempfile.mkdtemp()
+        dialog = UI.InquiryDialog(ready_cfg(folder))
+        dialog.tabs.setCurrentIndex(UI.TAB_INDEX["register"])
+        page = dialog._pages["register"]
+        self.assertFalse(page.date_from.isVisibleTo(dialog))
+        page.filter.setCurrentIndex(page.filter.findData("custom"))
+        self.assertTrue(page.date_from.isVisibleTo(dialog))
+        self.assertTrue(page.date_to.isVisibleTo(dialog))
+
+    def test_the_register_filters_to_the_pair(self):
+        folder = tempfile.mkdtemp()
+        rows = []
+        for day in (1, 10, 20):
+            row = register.from_message(message(sender=f"d{day}@x.example"))
+            row["Date received"] = f"{day:02d}-08-2026"
+            rows.append(row)
+        register.save(rows, mailflow.Paths(folder).register_csv)
+        dialog = UI.InquiryDialog(ready_cfg(folder))
+        page = dialog._pages["register"]
+        page.filter.setCurrentIndex(page.filter.findData("custom"))
+        page.date_from.setDate(UI.QDate(2026, 8, 5))
+        page.date_to.setDate(UI.QDate(2026, 8, 15))
+        self.assertEqual([r["Date received"] for r in dialog._visible_rows],
+                         ["10-08-2026"])
+
+
+class EverythingIsReadableAtTheSmallestSize(unittest.TestCase):
+    """The owner's screenshots: tab titles cut to "1 · What arriv…", a row
+    of seven buttons with their words clipped inside them, labels drawn on
+    top of the boxes below. Each was a widget sized on one assumption and
+    painted on another. These pin the geometry with the REAL stylesheet and
+    fonts loaded the way main.py loads them — an offscreen default font
+    would pass while the shipped app failed."""
+
+    @classmethod
+    def setUpClass(cls):
+        import i18n
+        import paths
+        import theme
+        theme.load_fonts()
+        # The fonts and the stylesheet are what size the widgets; the
+        # role-hue rotation is not, and apply_role() rewrites theme.ACCENT
+        # for the whole process — which test_roles then trips over.
+        qss = open(paths.resource("style.qss"), encoding="utf-8").read()
+        qss = i18n.style_for_script(qss)
+        cls._old_qss = _app.styleSheet()
+        _app.setStyleSheet(qss.replace(
+            "%ASSETS%", paths.resource("assets").replace(os.sep, "/")))
+
+    @classmethod
+    def tearDownClass(cls):
+        _app.setStyleSheet(cls._old_qss)
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        rows = []
+        for n, status in enumerate((register.NEW, register.QUOTED,
+                                    register.NEGOTIATING, register.ACCEPTED)):
+            row = register.from_message(message(sender=f"c{n}@x.example"))
+            row["Status"] = status
+            row["Quotation no"] = f"QTN/{n}" if status != register.NEW else ""
+            rows.append(row)
+        register.save(rows, mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(ready_cfg(self.folder))
+        self.dialog.resize(960, 640)          # the minimum it allows
+        # show(), never app.processEvents() — see the note on the quotation
+        # form's geometry test for why draining the queue here hangs.
+        self.dialog.show()
+
+    def tearDown(self):
+        self.dialog.close()
+
+    def test_no_tab_title_is_ever_cut_short(self):
+        bar = self.dialog.tabs.tabBar()
+        fm = bar.fontMetrics()
+        for index in range(bar.count()):
+            text = bar.tabText(index)
+            # padding 6px 15px + 2px border each side, from style.qss
+            needed = fm.horizontalAdvance(text) + 2 * 15 + 2 * 2
+            self.assertGreaterEqual(bar.tabRect(index).width(), needed, text)
+
+    def _show_tab(self, key):
+        """Switch tabs and lay the page out NOW, by hand. The stacked widget
+        sizes a newly-current page on the next pass of the event loop, and
+        NOTHING here may run that loop — not processEvents(), and not
+        sendPostedEvents() either: a zero-delay QTimer.singleShot is
+        delivered as a posted event, so flushing them fired the deferred
+        _first_look() of an earlier test's unclosed dialog and hung the
+        whole suite on its "set up now?" box. Setting the page's geometry
+        to its parent's rect and activating its layout is all a real
+        event-loop pass would have done for it."""
+        self.dialog.tabs.setCurrentIndex(UI.TAB_INDEX[key])
+        page = self.dialog._pages[key]
+        page.setGeometry(page.parentWidget().rect())
+        page.layout().activate()
+        return page
+
+    def test_every_action_button_shows_its_whole_label(self):
+        for key in ("to_quote", "waiting", "register"):
+            page = self._show_tab(key)
+            page.table.setCurrentCell(0, 0)
+            page.layout().activate()
+            for name, btn in page.panel.buttons.items():
+                if not btn.isVisibleTo(self.dialog):
+                    continue
+                fm = btn.fontMetrics()
+                self.assertGreaterEqual(
+                    btn.width(), fm.horizontalAdvance(btn.text()),
+                    f"{key}/{name}: {btn.text()!r} is clipped")
+                self.assertLessEqual(btn.geometry().right(),
+                                     page.panel.width(),
+                                     f"{key}/{name} sticks out of the panel")
+
+    def test_the_table_gets_the_height_and_nothing_is_squeezed(self):
+        from widgets.register_table import ROW_HEIGHT
+        for key, _label in UI.TABS:
+            page = self._show_tab(key)
+            self.assertGreaterEqual(page.stack.height(), 4 * ROW_HEIGHT, key)
+            # With a row picked the button row may wrap; whatever height
+            # that takes, the panel must hold every visible button whole —
+            # a sizeHint comparison cannot say that, the geometry can.
+            page.table.setCurrentCell(0, 0)
+            page.layout().activate()
+            for name, btn in page.panel.buttons.items():
+                if btn.isVisibleTo(self.dialog):
+                    top = btn.mapTo(page.panel, btn.rect().topLeft()).y()
+                    self.assertLessEqual(top + btn.height(),
+                                         page.panel.height(),
+                                         f"{key}/{name} is cut off below")
+
+    def test_nothing_that_holds_text_has_a_fixed_height(self):
+        """The old replies tab pinned its text box to 120px, which is what
+        squeezed everything else when the window was short."""
+        for box in (self.dialog.reply_text,):
+            self.assertLess(box.minimumHeight(), box.maximumHeight())
+
+
 class CorrectingTheRegisterByHand(unittest.TestCase):
     """They can always edit the CSV in Excel — it is their file. But a
     register that can only be corrected by closing the app is one they will
@@ -1098,10 +1492,10 @@ class ChasingAQuietQuotation(unittest.TestCase):
         self.assertEqual(len(self.dialog._followup_rows), 1)
 
     def test_nothing_is_sent_without_a_selection(self):
-        """The list is a QListWidget with no row selected on open. Firing at
-        whatever happens to be first would mail a real customer."""
+        """No row selected on open. Firing at whatever happens to be first
+        would mail a real customer."""
         shown = []
-        self.dialog.followups.setCurrentRow(-1)
+        self.dialog.followups.setCurrentCell(-1, -1)
         with _Patched(UI, "QMessageBox", _Recording(shown)):
             self.dialog._send_reminder()
         self.assertEqual(len(shown), 1)
@@ -1124,6 +1518,33 @@ class ChasingAQuietQuotation(unittest.TestCase):
         saved = register.load(mailflow.Paths(self.folder).register_csv)
         self.assertEqual((saved[0]["Reminders sent"] or "0"), "0")
         self.assertIn("mailbox full", told[0])
+
+    def test_a_sent_reminder_is_written_to_the_sent_log(self):
+        """The register's count says HOW MANY; worklist/sent.json says WHEN
+        and WHAT — the line "Waiting on a reply" reads back as "reminder
+        sent 24-08, 25-08" instead of a bare "2"."""
+        self.dialog._reminder_sent(self.dialog._followup_rows[0], ["x"], [],
+                                   subject="Reminder: our quotation")
+        sent = CB.get_worklist().load(self.folder)["sent"]
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["kind"], "reminder")
+        self.assertEqual(sent[0]["inquiry_no"], self.row["Inquiry no"])
+        self.assertEqual(sent[0]["quotation_no"], "QTN/26-27/0001")
+        self.assertEqual(sent[0]["subject"], "Reminder: our quotation")
+
+    def test_a_failed_reminder_is_not_logged_as_sent(self):
+        self.dialog._explain = lambda *_: None
+        self.dialog._reminder_sent(self.dialog._followup_rows[0],
+                                   [], [("a@b.c", "mailbox full")])
+        self.assertEqual(CB.get_worklist().load(self.folder)["sent"], [])
+
+    def test_the_old_three_argument_call_still_works(self):
+        """_chase_automatically and every existing test call it without a
+        subject; the log then carries the reminder's own wording."""
+        self.dialog._reminder_sent(self.dialog._followup_rows[0], ["x"], [])
+        sent = CB.get_worklist().load(self.folder)["sent"]
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0]["subject"])
 
     def test_chasing_stops_after_three(self):
         row = dict(self.row)
@@ -1848,6 +2269,13 @@ class WinningBackACustomerWhoSaidNo(unittest.TestCase):
         saved = register.load(mailflow.Paths(self.folder).register_csv)
         self.assertEqual(saved[0]["Status"], register.NOT_CONVERTED)
         self.assertTrue(told)
+
+    def test_a_won_back_mail_is_written_to_the_sent_log(self):
+        self.dialog._winback_sent(self.dialog._register_rows[0], ["ok"], [],
+                                  subject="Regarding our quotation")
+        sent = CB.get_worklist().load(self.folder)["sent"]
+        self.assertEqual([s["kind"] for s in sent], ["winback"])
+        self.assertEqual(sent[0]["subject"], "Regarding our quotation")
 
 
 class _Signal:

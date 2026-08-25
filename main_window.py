@@ -1093,9 +1093,12 @@ class MainWindow(QMainWindow):
             self.inquiry_panel.refresh()
             self.home_panel.refresh()
 
-    def _open_inquiry_dialog(self):
+    def _open_inquiry_dialog(self, tab: int = 0):
+        """The working window, opened on the tab the owner asked for — the
+        launcher's "Quote them" lands on To quote, "Read the answer" on
+        They answered, and so on."""
         from dialogs.inquiry_dialog import InquiryDialog
-        dialog = InquiryDialog(self.cfg, self)
+        dialog = InquiryDialog(self.cfg, self, tab=int(tab or 0))
         dialog.exec()
         # The dialog saves its own settings and its reading bookmark, so pick
         # up whatever it wrote rather than overwriting it from a stale copy on
