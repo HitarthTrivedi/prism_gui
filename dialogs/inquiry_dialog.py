@@ -41,7 +41,8 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog,
     QDialogButtonBox,
-    QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QFileDialog, QFormLayout, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar,
     QPushButton, QRadioButton, QSizePolicy, QStackedWidget, QTabBar,
     QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout,
@@ -3547,6 +3548,13 @@ class QuotationDialog(PrismDialog):
         # thing under the cursor on the screen that emails a price to a
         # customer was the one button that throws the work away. Primary last,
         # always.
+        # The owner asked for this in so many words: before a price goes
+        # out, see the customer's ask, our rates, what the job takes, and
+        # the quotation, all on one screen.
+        self.compare_btn = self.button(i18n.t("Compare side by side"),
+                                       "secondary", icon_name="grid",
+                                       small=True, on_click=self._compare)
+        self.footer.add_utility(self.compare_btn)
         self.save_btn = self.button(i18n.t("Save without sending"),
                                     "secondary", icon_name="file",
                                     small=True,
@@ -3560,6 +3568,9 @@ class QuotationDialog(PrismDialog):
         self.footer.set_primary(self.send_btn)
 
         self._source_changed()
+
+    def _compare(self):
+        _CompareDialog(self).exec()
 
     # ── which pricing route ───────────────────────────────────────────────
     def _mode(self) -> str:
@@ -3840,6 +3851,230 @@ class QuotationDialog(PrismDialog):
             if log is not None:
                 log("revised" if revised else "quotation", self.row,
                     self.subject.text())
+
+
+class _CompareDialog(PrismDialog):
+    """Four panels side by side, so the owner can hold the customer's ask
+    against their own numbers before a price goes out:
+
+        what they asked for  ·  our rates
+        materials this job needs  ·  our quotation
+
+    Everything here is read off what the quotation screen already holds —
+    the register row, the rate-list matches or cost-sheet lines, the live
+    quotation — so it can never disagree with the figure about to be sent.
+    Where something is not set up (no cost sheet, no drawing), the panel
+    says so in a sentence rather than showing an empty box.
+    """
+
+    def __init__(self, quote_dialog, parent=None):
+        super().__init__(
+            i18n.t("Compare side by side"),
+            i18n.t("What they asked for, against what you charge and what "
+                   "it takes to make — and the quotation that comes out."),
+            icon="grid", parent=parent or quote_dialog, closable=True,
+            scrollable=True)
+        self.setWindowTitle(i18n.t("Compare side by side"))
+        self.resize(1080, 760)
+        self.setMinimumSize(760, 520)
+        q = quote_dialog
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(theme.CARD_GAP)
+        grid.setVerticalSpacing(theme.CARD_GAP)
+        panels = [
+            ("mail", i18n.t("What they asked for"), self._asked(q)),
+            ("file", i18n.t("Our rates"), self._rates(q)),
+            ("archive", i18n.t("Materials this job needs"), self._materials(q)),
+            ("pencil", i18n.t("Our quotation"), self._quotation(q)),
+        ]
+        for index, (icon, title, text) in enumerate(panels):
+            grid.addWidget(self._panel(icon, title, text),
+                           index // 2, index % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        self.body.addLayout(grid)
+        self.body.addStretch(1)
+        self.footer.set_primary(
+            self.button(i18n.t("Back to the quotation"), "primary",
+                        icon_name="check", on_click=self.accept))
+
+    # ── the four panels ───────────────────────────────────────────────────
+    @staticmethod
+    def _panel(icon: str, title: str, text: str) -> QWidget:
+        card = C.Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_4,
+                         theme.CARD_PAD, theme.SPACE_4), theme.SPACE_2)
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACE_2)
+        head.addWidget(C.IconPad(icon, theme.ACCENT, 28, theme.R_CONTROL, 14))
+        head.addWidget(C.label(title, level="SECTION"), stretch=1)
+        col.addLayout(head)
+        col.addWidget(C.hairline())
+        box = QPlainTextEdit()
+        box.setReadOnly(True)
+        box.setObjectName("mono")
+        box.setPlainText(text)
+        box.setMinimumHeight(180)
+        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        col.addWidget(box, stretch=1)
+        return card
+
+    @staticmethod
+    def _asked(q) -> str:
+        row = q.row or {}
+        lines = []
+
+        def put(label: str, value):
+            value = str(value or "").strip()
+            if value:
+                lines.append(f"{i18n.t(label):<16} {value}")
+        put("Inquiry", row.get("Inquiry no"))
+        put("Customer", row.get("Customer"))
+        put("Contact", row.get("Contact person"))
+        put("Email", row.get("Email"))
+        put("Phone", row.get("Phone"))
+        put("Received", " ".join(p for p in (row.get("Date received"),
+                                             row.get("Time received")) if p))
+        lines.append("")
+        put("They want", row.get("Product asked"))
+        put("Quantity", row.get("Quantity"))
+        drawings = _CompareDialog._drawings(row)
+        put("Drawing", (", ".join(os.path.basename(d) for d in drawings)
+                        if drawings else
+                        (row.get("Drawing") or i18n.t("No"))))
+        if row.get("Notes"):
+            lines += ["", i18n.t("Notes"), "  " + row["Notes"]]
+        return "\n".join(lines) or i18n.t("Nothing was recorded for this inquiry.")
+
+    @staticmethod
+    def _rates(q) -> str:
+        quoting = CB.get_quoting()
+        lines = []
+        if q.matches:
+            lines.append(i18n.t("From your rate list — the rows closest to "
+                                "what they asked for:"))
+            lines.append("")
+            for match in q.matches:
+                item = match.item
+                lines.append(f"  {item.label}")
+                lines.append(f"    ₹{quoting.indian_currency(item.rate)} "
+                             f"{i18n.t('per')} {item.unit or 'nos'}"
+                             + (f"   HSN {item.hsn}" if item.hsn else ""))
+                if item.slabs:
+                    slabs = ", ".join(
+                        f"₹{quoting.indian_currency(rate)} @ {int(minimum):,}"
+                        for minimum, rate in sorted(item.slabs))
+                    lines.append(f"    {i18n.t('Quantity slabs')}: {slabs}")
+                lines.append(f"    {i18n.t('why')}: {match.reason}")
+                lines.append("")
+        elif q.items:
+            lines.append(i18n.t("Nothing on your rate list matches what they "
+                                "asked for. Pick a row by hand on the "
+                                "quotation screen, or price it from the cost "
+                                "sheet."))
+            lines.append("")
+        if q.cost_lines:
+            lines.append(i18n.t("From your cost sheet:"))
+            lines.append("")
+            basis_words = {quoting.PER_KG: i18n.t("per kg"),
+                           quoting.PER_PIECE: i18n.t("per piece"),
+                           quoting.PER_LOT: i18n.t("per lot"),
+                           quoting.PERCENT: "%"}
+            for line in q.cost_lines:
+                unit = basis_words.get(line.basis, line.basis)
+                figure = (f"{line.rate:g}%" if line.basis == quoting.PERCENT
+                          else f"₹{quoting.indian_currency(line.rate)} {unit}")
+                lines.append(f"  {line.name:<28} {figure}")
+        if not q.items and not q.cost_lines:
+            lines.append(i18n.t("No rate list or cost sheet is set up. Add "
+                                "one under Setup → Files."))
+        rate_now = (q.rate_edit.text() or "").strip()
+        if rate_now:
+            lines += ["", i18n.t("Rate on the quotation screen now: ₹{rate} "
+                                 "per unit").replace("{rate}", rate_now)]
+        return "\n".join(lines).rstrip()
+
+    @staticmethod
+    def _materials(q) -> str:
+        quoting = CB.get_quoting()
+        row = q.row or {}
+        lines = []
+        materials = [l for l in q.cost_lines if l.basis == quoting.PER_KG]
+        processes = [l for l in q.cost_lines if l.basis == quoting.PER_PIECE]
+        setup = [l for l in q.cost_lines if l.basis == quoting.PER_LOT]
+        overheads = [l for l in q.cost_lines if l.basis == quoting.PERCENT]
+        weight = quoting.to_decimal(q.weight.text()) if q.weight.text() else None
+        quantity = quoting.to_decimal(q.quantity.text()) or Decimal(1)
+
+        if materials:
+            lines.append(i18n.t("Material, from your cost sheet:"))
+            for line in materials:
+                text = f"  {line.name:<28} ₹{quoting.indian_currency(line.rate)} {i18n.t('per kg')}"
+                if weight:
+                    total_kg = weight * quantity
+                    # "225 kg", not "225.000 kg" — Decimal keeps the places
+                    # it was typed with, and a kilogram figure read aloud on
+                    # the phone does not carry three noughts.
+                    kg = f"{total_kg.normalize():f}"
+                    text += (f"   → {kg} kg {i18n.t('for')} "
+                             f"{quantity:,.0f} {i18n.t('pieces')} = "
+                             f"₹{quoting.indian_currency(line.rate * total_kg)}")
+                lines.append(text)
+            if not weight:
+                lines.append("  " + i18n.t("(type the weight of one piece on "
+                                           "the quotation screen to see the "
+                                           "total material)"))
+            lines.append("")
+        if processes:
+            lines.append(i18n.t("Work on each piece:"))
+            for line in processes:
+                lines.append(f"  {line.name:<28} ₹{quoting.indian_currency(line.rate)}")
+            lines.append("")
+        if setup:
+            lines.append(i18n.t("Once per order:"))
+            for line in setup:
+                lines.append(f"  {line.name:<28} ₹{quoting.indian_currency(line.rate)}")
+            lines.append("")
+        if overheads:
+            lines.append(i18n.t("On top:"))
+            for line in overheads:
+                lines.append(f"  {line.name:<28} {line.rate:g}%")
+            lines.append("")
+        drawings = _CompareDialog._drawings(row)
+        if drawings:
+            lines.append(i18n.t("Drawings filed with this inquiry:"))
+            for path in drawings:
+                lines.append(f"  {os.path.basename(path)}")
+            lines.append("  " + i18n.t("(Count quantities from the drawing "
+                                       "on the Inquiries tab gives the "
+                                       "take-off)"))
+        if not q.cost_lines and not drawings:
+            lines.append(i18n.t(
+                "Your rate list gives a finished price, so the materials "
+                "behind it are not listed here. Add a cost sheet under "
+                "Setup → Files — material per kg, work per piece, setup per "
+                "order — and this panel will show what the job takes."))
+        return "\n".join(lines).rstrip()
+
+    @staticmethod
+    def _quotation(q) -> str:
+        if q.quote is None:
+            return i18n.t("Nothing has been priced yet — fill in the "
+                          "quotation screen first.")
+        quoting = CB.get_quoting()
+        settings = settings_of(q.cfg)
+        return quoting.render_text(q.quote, settings.get("company", ""))
+
+    @staticmethod
+    def _drawings(row: dict) -> list[str]:
+        folder = (row or {}).get("Folder", "")
+        try:
+            if folder and os.path.isdir(folder):
+                return [os.path.join(folder, n) for n in sorted(os.listdir(folder))
+                        if n.lower().endswith(DRAWING_EXTENSIONS)]
+        except OSError:
+            pass
+        return []
 
 
 def _quantity_of(row: dict) -> str:

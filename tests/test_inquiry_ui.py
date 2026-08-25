@@ -1318,6 +1318,82 @@ class PickingYourOwnDates(unittest.TestCase):
                          ["10-08-2026"])
 
 
+class ComparingSideBySide(unittest.TestCase):
+    """The owner asked for it in so many words: before a price goes out, one
+    window with the customer's ask, our rates, what the job takes, and the
+    quotation. Every panel is read off what the quotation screen already
+    holds, so it can never disagree with the figure about to be sent."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.rates = os.path.join(self.folder, "rates.csv")
+        with open(self.rates, "w", encoding="utf-8") as f:
+            f.write("Code,Description,Unit,Rate,HSN\n"
+                    "CS-201,Compression spring 2mm,nos,42.50,7320\n")
+        self.cost = os.path.join(self.folder, "costs.csv")
+        with open(self.cost, "w", encoding="utf-8") as f:
+            f.write("SS 304 wire,per_kg,95\nCoiling,per_piece,1.20\n"
+                    "Tool setting,per_lot,800\nOverheads,percent,12\n")
+        self.cfg = ready_cfg(self.folder)
+        self.cfg["inquiry"]["rate_list"] = self.rates
+        self.cfg["inquiry"]["cost_sheet"] = self.cost
+        self.row = register.from_message(message())
+        self.row["Quantity"] = "5000 nos"
+        self.row["Notes"] = "Need it before Diwali"
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(self.cfg)
+        self.dialog._refresh_register()
+        quoting = CB.get_quoting()
+        self.q = UI.QuotationDialog(
+            self.cfg, self.dialog._register_rows[0],
+            quoting.load_rates(self.rates), self.dialog,
+            cost_lines=quoting.load_cost_lines(self.cost))
+
+    def _texts(self):
+        from PySide6.QtWidgets import QPlainTextEdit
+        window = UI._CompareDialog(self.q)
+        return [box.toPlainText() for box in window.findChildren(QPlainTextEdit)]
+
+    def test_the_button_is_on_the_quotation_screen(self):
+        self.assertEqual(self.q.compare_btn.text(), "Compare side by side")
+
+    def test_four_panels_in_the_order_asked_for(self):
+        asked, rates, materials, quotation = self._texts()
+        self.assertIn("compression spring", asked.lower())
+        self.assertIn("5000 nos", asked)
+        self.assertIn("Need it before Diwali", asked)
+        self.assertIn("CS-201", rates)
+        self.assertIn("42.50", rates)
+        self.assertIn("SS 304 wire", materials)
+        self.assertIn("per kg", materials)
+        self.assertIn("QUOTATION", quotation)
+
+    def test_the_quotation_panel_is_the_live_figure(self):
+        """Typing a rate over Prism's suggestion must show up here too —
+        the whole point is comparing what is ABOUT to be sent."""
+        self.q.rate_edit.setText("40")
+        _, rates, _, quotation = self._texts()
+        self.assertIn("40", rates)
+        self.assertIn("40.00", quotation)
+
+    def test_material_totals_appear_once_a_weight_is_given(self):
+        self.q.source.setCurrentIndex(self.q.source.findData("cost"))
+        self.q.weight.setText("0.045")
+        self.q.quantity.setText("5000")
+        _, _, materials, _ = self._texts()
+        self.assertIn("225 kg", materials)          # 0.045 × 5000
+        self.assertIn("21,375.00", materials)       # × ₹95
+
+    def test_no_cost_sheet_says_so_instead_of_an_empty_box(self):
+        q = UI.QuotationDialog(self.cfg, self.dialog._register_rows[0],
+                               CB.get_quoting().load_rates(self.rates),
+                               self.dialog)
+        from PySide6.QtWidgets import QPlainTextEdit
+        window = UI._CompareDialog(q)
+        materials = [b.toPlainText() for b in window.findChildren(QPlainTextEdit)][2]
+        self.assertIn("cost sheet", materials)
+
+
 class EverythingIsReadableAtTheSmallestSize(unittest.TestCase):
     """The owner's screenshots: tab titles cut to "1 · What arriv…", a row
     of seven buttons with their words clipped inside them, labels drawn on
