@@ -112,6 +112,27 @@ from core import voice as voice            # noqa: E402
 from core import mailer as mailer          # noqa: E402
 
 
+def resolved_agents(chosen: dict) -> list[tuple[str, str]]:
+    """(tool name, sign-in URL) for a {category: tool} mapping, de-duplicated
+    by tool and kept in mapping-iteration order.
+
+    The one place this dedupe-and-look-up loop lives — SetupDialog, the
+    wizard, MainWindow's own "Login tabs" and Settings' site-card grid all
+    need the same answer to "which tools, which URLs" and used to each write
+    their own copy of this loop.
+    """
+    out, seen = [], set()
+    for name in chosen.values():
+        if name and name not in seen:
+            seen.add(name)
+            out.append((name, (agents.AGENT_REGISTRY.get(name) or {}).get("url", "")))
+    return out
+
+
+def login_tab_urls(chosen: dict) -> list[str]:
+    return [url for _name, url in resolved_agents(chosen) if url]
+
+
 def automation_available() -> tuple[bool, str]:
     """Selenium/undetected-chromedriver are optional/heavy — probe lazily so
     the GUI can start and show a clear message instead of crashing on import."""

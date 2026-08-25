@@ -12,14 +12,15 @@ The work column is a two-page stack: composing (task + plan) and running
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QFont, QCursor
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
     QMenu,
 )
 
+import app_meta
 import awake
 import core_bridge as CB
 import diagnostics
@@ -27,12 +28,14 @@ import i18n
 import identity
 import licensing
 import theme
+import updater
 import workspace
 from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.home_panel import HomePanel
 from widgets.inquiry_panel import InquiryPanel
 from widgets.settings_panel import SettingsPanel
+from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from widgets.simple_panels import (
     BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel, HistoryPanel,
@@ -62,6 +65,10 @@ COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 # screens of the body stack the rail switches between
 HOME, WORKBENCH, INQUIRY, SETTINGS = 0, 1, 2, 3
 GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT, GERBER = 4, 5, 6, 7, 8, 9, 10
+# Appended, not inserted — nothing else renumbers. Reached only from
+# _first_run(), never from the rail, so it has no entry in _show_screen()'s
+# name->index table.
+WIZARD = 11
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -132,6 +139,14 @@ class MainWindow(QMainWindow):
         self._run_finished = False                # a finished plan is spent — see _back_to_plan
         self._run_id = ""                         # licence server's id for the current run
         self._active_run = None                   # the AutomationWorker, so Stop can reach it
+        # Whichever worker represents the in-flight "Make a plan" attempt —
+        # AuthorizeWorker while the licence check is out, then the RouteWorker
+        # once Groq is actually being asked. Neither can be interrupted
+        # mid-call (no cancellable HTTP hook), so Cancel doesn't kill the
+        # thread — it just clears this, and _on_routed/_on_route_failed
+        # compare self.sender() against it and discard the answer if the
+        # attempt it belongs to is no longer the current one.
+        self._active_plan_worker = None
 
         # ── the task queue ───────────────────────────────────────────────────
         # Tasks the user lined up before pressing Make a plan. Each one is a
@@ -288,6 +303,8 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.support_panel)        # SUPPORT
         self.gerber_panel = GerberPanel(self.cfg)
         self.screens.addWidget(self.gerber_panel)          # GERBER
+        self.wizard_panel = WizardPanel(self.cfg)
+        self.screens.addWidget(self.wizard_panel)          # WIZARD
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -298,6 +315,8 @@ class MainWindow(QMainWindow):
         self.home_panel.open_history.connect(lambda: self._handle_command("runs"))
         self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
         self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
+        self.wizard_panel.finished.connect(self._on_wizard_finished)
+        self.wizard_panel.guide_requested.connect(self._open_guide)
         self.settings_panel.edit_requested.connect(self._open_setup)
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
         # The four screens the rail used to spend a row each on.
@@ -396,13 +415,34 @@ class MainWindow(QMainWindow):
         self._banner_text = QLabel()
         self._banner_text.setWordWrap(True)
         row.addWidget(self._banner_text, stretch=1)
+        # One row, two buttons. The main one is re-labelled per banner (the
+        # licence key by default, Download for an update); the quiet second
+        # one exists only for the update banner's "Not now" and stays hidden
+        # otherwise. Both dispatch through a stored callable rather than
+        # reconnecting `clicked` on every repaint — a signal connected twice
+        # opens two dialogs, and refresh_licence_ui runs on a timer.
+        self._banner_action = None
+        self._banner_alt_action = None
+        self._banner_alt = QPushButton("Not now")
+        self._banner_alt.setObjectName("smallBtn")
+        self._banner_alt.setCursor(Qt.PointingHandCursor)
+        self._banner_alt.clicked.connect(self._banner_alt_clicked)
+        self._banner_alt.setVisible(False)
+        row.addWidget(self._banner_alt)
         self._banner_btn = QPushButton("Enter a licence key")
         self._banner_btn.setObjectName("smallBtn")
         self._banner_btn.setCursor(Qt.PointingHandCursor)
-        self._banner_btn.clicked.connect(self._open_license_dialog)
+        self._banner_btn.clicked.connect(self._banner_clicked)
         row.addWidget(self._banner_btn)
         self.banner.setVisible(False)
         return self.banner
+
+    def _banner_clicked(self):
+        (self._banner_action or self._open_license_dialog)()
+
+    def _banner_alt_clicked(self):
+        if self._banner_alt_action is not None:
+            self._banner_alt_action()
 
     def refresh_licence_ui(self):
         """Repaint everything that depends on the licence: the banner, the
@@ -423,14 +463,40 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
 
         if state.status == licensing.VALID:
-            # A healthy licence frees the banner for the other thing worth
-            # interrupting someone about: their work is no longer reaching the
-            # shared folder, so their manager cannot see it.
+            # A healthy licence frees the banner for the other things worth
+            # interrupting someone about, in this order:
+            #
+            #   1. the server has stopped leasing to this build — new work is
+            #      already refused, so this outranks everything below;
+            #   2. their work is no longer reaching the shared folder, so
+            #      their manager cannot see it;
+            #   3. a newer Prism exists. Advisory, dismissible per version,
+            #      and last — a nudge must never sit on top of a problem.
+            if updater.required(state):
+                wanted = updater.target(state)
+                self._show_banner(
+                    i18n.t("This version of Prism can no longer start new "
+                           "work. Update to Prism {version} to continue — "
+                           "History and everything you've made are still "
+                           "here.").format(version=wanted),
+                    theme.ERR_INK, "alert",
+                    action=("Download update", self._open_download))
+                return
             offline = workspace.unreachable(self.cfg)
             if offline:
                 self._show_banner(offline, theme.WARN_INK, "alert")
-            else:
-                self.banner.setVisible(False)
+                return
+            newer = updater.available(state)
+            if newer and not updater.dismissed(newer):
+                self._show_banner(
+                    i18n.t("Prism {version} is available. You have "
+                           "{current}.").format(version=newer,
+                                                current=app_meta.VERSION),
+                    theme.INFO_INK, "arrow-up",
+                    action=("Download", self._open_download),
+                    alt=("Not now", lambda: self._dismiss_update(newer)))
+                return
+            self.banner.setVisible(False)
             return
 
         if state.status == licensing.STALE:
@@ -478,7 +544,21 @@ class MainWindow(QMainWindow):
             licensing.EXPIRED: i18n.t("Ended — renew to start new work"),
         }.get(state.status, i18n.t("No licence yet"))
 
-    def _show_banner(self, text: str, tone: str, icon_name: str):
+    def _show_banner(self, text: str, tone: str, icon_name: str,
+                     action: tuple | None = None, alt: tuple | None = None):
+        """`action` is (label, callable) for the banner's button; the default
+        is the licence-key dialog, which every licence banner wants. `alt` is
+        an optional second, quieter (label, callable) — the update banner's
+        "Not now" — and is hidden when absent."""
+        label, fn = action or ("Enter a licence key", self._open_license_dialog)
+        self._banner_btn.setText(label)
+        self._banner_action = fn
+        if alt:
+            self._banner_alt.setText(alt[0])
+            self._banner_alt_action = alt[1]
+        else:
+            self._banner_alt_action = None
+        self._banner_alt.setVisible(bool(alt))
         self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
         self._banner_text.setText(text)
         self._banner_text.setStyleSheet(f"color: {tone}; font-size: 13px;")
@@ -486,6 +566,20 @@ class MainWindow(QMainWindow):
             f"QFrame#licenceBanner {{ background: {theme.NEUTRAL[100]};"
             f"border-bottom: 1px solid {theme.DIVIDER}; }}")
         self.banner.setVisible(True)
+
+    # ── updates (Phase 0: a banner and a link — see updater.py) ─────────────
+    def _open_download(self):
+        """Send them to the fixed download address. The browser, not the
+        app: nothing is fetched or run by Prism itself until Phase 1."""
+        try:
+            QDesktopServices.openUrl(QUrl(updater.download_url()))
+        except Exception:                          # noqa: BLE001
+            pass
+
+    def _dismiss_update(self, version: str):
+        """"Not now" — for THIS version. A newer one brings the banner back."""
+        updater.dismiss(version)
+        self.refresh_licence_ui()
 
     def _open_license_dialog(self, mode: str = "change"):
         from dialogs.license_dialog import LicenseDialog
@@ -773,6 +867,7 @@ class MainWindow(QMainWindow):
         self.sidebar.tour_requested.connect(self._start_tour)
 
         self.input_panel.route_clicked.connect(self._route)
+        self.input_panel.cancel_route_clicked.connect(self._cancel_route)
         self.input_panel.mic_toggle_clicked.connect(self._toggle_mic)
         self.input_panel.attach_file_clicked.connect(self._attach_file_dialog)
         self.input_panel.attach_folder_clicked.connect(self._attach_folder_dialog)
@@ -1084,34 +1179,20 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Setup saved.", 4000)
 
     def _first_run(self):
-        self._welcome()
-        if licensing.state().usable:
-            self._open_setup()
-
-    def _welcome(self):
-        """Shown once, before Setup, on a machine that has never been set up.
-
-        Setup asks for an API key from a service they have not heard of. Doing
-        that cold is the moment a first-time user decides the software is for
-        somebody else — so it is worth thirty seconds explaining what Prism is
-        and offering the guide first.
+        """A never-configured machine goes straight into the wizard - no
+        blocking Welcome popup first. The wizard's own first page carries the
+        explanation and a non-blocking link to the guide instead (see
+        WizardPanel), so there's one flow, not a decision box in front of it.
         """
-        from PySide6.QtWidgets import QMessageBox
-        box = QMessageBox(self)
-        box.setWindowTitle(i18n.t("Welcome to Prism"))
-        box.setText(i18n.t("Prism does jobs for you using AI."))
-        box.setInformativeText(i18n.t(
-            "You describe a job in your own words — \u201cwrite a proposal "
-            "for a 40-camera CCTV project\u201d — and Prism works out which "
-            "AI tools are needed, uses them in order, and hands you the "
-            "finished result.\n\n"
-            "Setting up takes about five minutes and only happens once. "
-            "Would you like a quick tour first?"))
-        tour = box.addButton(i18n.t("Show me around"), QMessageBox.AcceptRole)
-        box.addButton(i18n.t("Set up now"), QMessageBox.RejectRole)
-        box.exec()
-        if box.clickedButton() is tour:
-            self._open_guide()
+        if licensing.state().usable:
+            self.wizard_panel.start(self.cfg)
+            self.screens.setCurrentIndex(WIZARD)
+
+    def _on_wizard_finished(self, cfg: dict):
+        self.cfg = cfg
+        self.settings_panel.cfg = cfg
+        self.statusBar().showMessage("Setup saved.", 4000)
+        self._handle_command("workbench")
 
     def _open_guide(self):
         """The guide, with its buttons wired back into the rail so reading
@@ -1131,11 +1212,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Login", f"Automation deps not available: {err}")
             return
         automation = CB.get_automation()
-        urls, seen = [], set()
-        for name in agents.values():
-            if name not in seen:
-                urls.append(CB.agents.AGENT_REGISTRY[name]["url"])
-                seen.add(name)
+        urls = CB.login_tab_urls(agents)
         automation.open_login_tabs(urls)
         self.statusBar().showMessage(
             i18n.t("Opened {n} login tab(s) in Chrome.").format(n=len(urls)),
@@ -1484,17 +1561,43 @@ class MainWindow(QMainWindow):
         # follows is browser automation against the customer's own logins and
         # costs us nothing, so counting both would burn two units per journey.
         auth_worker = AuthorizeWorker("core", "plan")
-        auth_worker.done.connect(lambda result: self._start_route(result, query))
+        auth_worker.done.connect(
+            lambda result, w=auth_worker: self._start_route(result, query, w))
         self._workers.append(auth_worker)
+        self._active_plan_worker = auth_worker
         auth_worker.start()
 
-    def _start_route(self, auth, query: str):
-        """Second half of _route, once the server has said yes."""
+    def _cancel_route(self):
+        """Neither AuthorizeWorker nor RouteWorker can be interrupted
+        mid-call — a licence check and a Groq call are each one blocking
+        network round trip with no cancellable hook, unlike a browser run,
+        which polls a stop flag between and inside its waits. So this
+        doesn't stop the thread; it clears the pointer _on_routed and
+        _on_route_failed check, so whichever of them the abandoned worker
+        eventually reaches finds itself no longer current and discards its
+        answer instead of surprising the user with a plan they cancelled."""
+        self._active_plan_worker = None
+        self.input_panel.set_busy(False)
+        self.input_panel.set_state("ready")
+        self.statusBar().showMessage("Cancelled — nothing was kept.", 4000)
+
+    def _start_route(self, auth, query: str, worker):
+        """Second half of _route, once the server has said yes.
+
+        `worker` (the AuthorizeWorker, passed explicitly rather than read via
+        self.sender() — this is reached through a lambda, and sender()'s
+        tracking is only reliable for a direct signal-to-bound-method
+        connection) confirms this is still the attempt Cancel would affect,
+        not one it already abandoned.
+        """
+        if self._active_plan_worker is not worker:
+            return   # cancelled while the licence check was in flight
         if not auth.allowed:
             # A refusal will refuse identically for every task behind this
             # one, so stop the queue rather than firing N hopeless requests
             # at the licence server.
             self._queue_stopped = True
+            self._active_plan_worker = None
             self.input_panel.set_busy(False)
             self.input_panel.set_state("ready")
             QMessageBox.warning(self, "Licence", auth.message)
@@ -1515,9 +1618,13 @@ class MainWindow(QMainWindow):
         worker.done.connect(self._on_routed)
         worker.failed.connect(self._on_route_failed)
         self._workers.append(worker)
+        self._active_plan_worker = worker
         worker.start()
 
     def _on_routed(self, routing: dict):
+        if self.sender() is not self._active_plan_worker:
+            return   # cancelled — this RouteWorker's answer came in too late
+        self._active_plan_worker = None
         self.input_panel.set_busy(False)
         # The router's Groq calls are already counted by licensing/meter.py;
         # send them now rather than waiting for a run that may never happen.
@@ -1547,6 +1654,9 @@ class MainWindow(QMainWindow):
             f"run all {total} in order.", 8000)
 
     def _on_route_failed(self, error: str):
+        if self.sender() is not self._active_plan_worker:
+            return   # cancelled — this RouteWorker's failure came in too late
+        self._active_plan_worker = None
         self.input_panel.set_busy(False)
         self.input_panel.set_state("ready")
         # Keep the task. Planning is where runs fail most often — a Groq rate

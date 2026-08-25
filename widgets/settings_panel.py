@@ -51,6 +51,7 @@ import identity
 import licensing
 import paths
 import theme
+import updater
 import workspace
 from widgets import controls as C
 from widgets.controls import Card, Pill
@@ -87,11 +88,12 @@ SECTIONS = [
     ("profile", "Profile", "Your copy",
      "Who this copy files its work under, and where that work is kept."),
     ("agents", "Agents", "Configure",
-     "One tool per kind of step. The router suggests; you decide."),
+     "Your Groq key and one tool per kind of step — the router suggests, "
+     "you decide — plus where each one signs in."),
     ("language", "Language", "Configure",
      "Prism's own words, and — separately — what the AI tools write back in."),
     ("status", "Connections", "Configure",
-     "Everything Prism has to be able to reach: your key, your browser, your "
+     "Everything else Prism has to be able to reach: your browser, your "
      "team folder."),
     ("privacy", "Privacy & data", "Configure",
      "Where your work is written, who else can read it, and every folder "
@@ -153,7 +155,11 @@ class SettingsPanel(QWidget):
     navigate = Signal(str)           # a rail command key — see MORE_LINKS
     rename_requested = Signal()      # set the display name on a solo copy
     tour_requested = Signal()
-    licence_changed = Signal()       # this computer's seat was released
+    licence_changed = Signal()       # seat released, or a version check landed
+    # "Check for updates" finished its round trip. Emitted FROM the licensing
+    # worker thread (licensing.refresh's on_done); Qt queues it back to this
+    # thread, which is the whole reason it is a Signal and not a callback.
+    _update_checked = Signal()
 
     NAV_W = 214
 
@@ -162,6 +168,8 @@ class SettingsPanel(QWidget):
         self.cfg = cfg
         self._section = "licence"
         self._claims_height = False
+        self._update_check = ""          # "" | "checking" | "done"
+        self._update_checked.connect(self._after_update_check)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -664,6 +672,22 @@ class SettingsPanel(QWidget):
         categories = CB.agents.CATEGORIES
         premium = set(self.cfg.get("premium") or [])
 
+        # The Groq key and the agent picks are one job — "change my AI
+        # setup" — even though they used to live on two different nav
+        # destinations (this section and Connections). Shown before the
+        # empty-state return below so it's visible even with zero agents
+        # picked yet.
+        key_set = bool((self.cfg.get("api_key") or "").strip())
+        col.addWidget(self._facts([
+            (i18n.t("Groq key"), Pill(i18n.t("Set") if key_set else i18n.t("Not set"),
+                                      "ok" if key_set else "warn")),
+        ]))
+        if not key_set:
+            col.addWidget(self._note(i18n.t(
+                "Prism cannot route anything without a Groq key. It is free "
+                "at console.groq.com — API Keys, then Create API Key.")))
+        col.addWidget(self._buttons([self._edit_button("Change API key", "key")]))
+
         picked = [(stage, chosen.get(stage))
                   for stage in CB.agents.PIPELINE_ORDER
                   if stage != "summary" and stage in categories]
@@ -696,6 +720,20 @@ class SettingsPanel(QWidget):
             col.addWidget(self._note(i18n.t(
                 "None ticked. Prism spreads the work evenly instead, which is "
                 "the right answer while every tool is on its free tier.")))
+
+        # "Which tools you'll sign into" is a direct consequence of which
+        # tools you picked, so it belongs beside the pick rather than on the
+        # separate Connections page.
+        sites = self._login_sites()
+        if sites:
+            col.addWidget(self._head(
+                i18n.t("Where 'Open login tabs' will take you"),
+                i18n.t("One tab per tool you have picked, opened in Prism's "
+                       "own Chrome profile so the sign-in sticks.")))
+            site_grid = C.CardGrid(min_col_width=300)
+            for tool, url in sites:
+                site_grid.add(self._site_card(tool, url))
+            col.addWidget(site_grid)
 
         col.addWidget(self._buttons([
             self._edit_button("Re-pick agents", "agents", "primary"),
@@ -778,15 +816,15 @@ class SettingsPanel(QWidget):
 
     # ── connections ───────────────────────────────────────────────────────
     def _connections(self, col):
-        key_set = bool((self.cfg.get("api_key") or "").strip())
+        """Chrome + browser automation + team-folder reachability — what's
+        left once the Groq key and the login-site grid moved to Agents (they
+        were never really "connections" so much as "your AI setup," which is
+        one nav destination, not two)."""
         chrome = (self.cfg.get("chrome_version") or "").strip()
         offline = workspace.unreachable(self.cfg)
         ok, why = self._safe(CB.automation_available) or (False, "")
 
         col.addWidget(self._facts([
-            (i18n.t("Groq key"),
-             Pill(i18n.t("Set") if key_set else i18n.t("Not set"),
-                  "ok" if key_set else "warn")),
             (i18n.t("Chrome"), chrome or i18n.t("Auto-detect")),
             (i18n.t("Browser automation"),
              Pill(i18n.t("Ready") if ok else i18n.t("Unavailable"),
@@ -795,10 +833,6 @@ class SettingsPanel(QWidget):
              Pill(i18n.t("Unreachable") if offline else i18n.t("Reachable"),
                   "err" if offline else "ok")),
         ]))
-        if not key_set:
-            col.addWidget(self._note(i18n.t(
-                "Prism cannot route anything without a Groq key. It is free "
-                "at console.groq.com — API Keys, then Create API Key.")))
         if not ok and why:
             col.addWidget(self._note(str(why).splitlines()[0]))
         if offline:
@@ -812,38 +846,16 @@ class SettingsPanel(QWidget):
                    "Chrome does not reach it.")))
         col.addWidget(self._facts(self._browser_rows()))
 
-        sites = self._login_sites()
-        if sites:
-            col.addWidget(self._head(
-                i18n.t("Where 'Open login tabs' will take you"),
-                i18n.t("One tab per tool you have picked, opened in Prism's "
-                       "own Chrome profile so the sign-in sticks.")))
-            grid = C.CardGrid(min_col_width=300)
-            for tool, url in sites:
-                grid.add(self._site_card(tool, url))
-            col.addWidget(grid)
-
         col.addWidget(self._buttons([
-            C.button(i18n.t("Open login tabs"), "primary",
-                     on_click=self.login_tabs.emit),
-            self._edit_button("Change API key", "key"),
             self._edit_button("Pin Chrome version", "chrome"),
         ]))
 
     def _login_sites(self) -> list[tuple[str, str]]:
         """The tools this copy is set up to drive, and the address each one
-        signs in at — read from the agent registry, in the order the pipeline
-        uses them, de-duplicated the same way SetupDialog does it."""
-        registry = getattr(CB.agents, "AGENT_REGISTRY", {}) or {}
-        chosen = dict(self.cfg.get("agents") or {})
-        seen, out = set(), []
-        for stage in CB.agents.PIPELINE_ORDER:
-            tool = chosen.get(stage)
-            if not tool or tool in seen:
-                continue
-            seen.add(tool)
-            out.append((tool, (registry.get(tool) or {}).get("url", "")))
-        return out
+        signs in at — reads core_bridge.resolved_agents(), the one shared
+        implementation of this lookup (also used by SetupDialog, MainWindow's
+        Login tabs, and the wizard)."""
+        return CB.resolved_agents(dict(self.cfg.get("agents") or {}))
 
     def _site_card(self, tool: str, url: str) -> Card:
         card = Card()
@@ -974,6 +986,99 @@ class SettingsPanel(QWidget):
     def _open_folder(self, path: str):
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
+    # ── updates (Phase 0 — a check, a line, a link; see updater.py) ───────
+    def _version_row(self) -> QWidget:
+        """The running version, and the button that asks whether it is the
+        newest. The ten-minute lease timer asks the same question on its own;
+        this is for the customer who has just read our release email."""
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_3)
+        row.addWidget(C.label(app_meta.VERSION, level="SUPPORT",
+                              colour=theme.TEXT, weight=500))
+        if self._update_check == "checking":
+            row.addWidget(C.label(i18n.t("Checking…"), level="META"))
+        else:
+            row.addWidget(C.button(i18n.t("Check for updates"), small=True,
+                                   on_click=self._check_for_updates))
+        return box
+
+    def _update_card(self) -> Card | None:
+        """What the last answer from the server means for this build, or
+        nothing at all when there is nothing to say — a settings page must
+        not carry a permanent "you are up to date" pat on the back."""
+        state = licensing.state()
+        if updater.required(state):
+            return self._action_card(
+                i18n.t("Update needed"),
+                i18n.t("This version of Prism can no longer start new work. "
+                       "Download Prism {version} to continue — your history, "
+                       "settings and files are untouched.").format(
+                           version=updater.target(state)),
+                download=True)
+        newer = updater.available(state)
+        if newer:
+            return self._action_card(
+                i18n.t("Update available"),
+                i18n.t("Prism {version} is available. You have {current}. "
+                       "Download it, close Prism, and run the new one — your "
+                       "settings and history carry over.").format(
+                           version=newer, current=app_meta.VERSION),
+                download=True)
+        if self._update_check == "done":
+            return self._note(
+                i18n.t("You have the latest version of Prism."), "info")
+        return None
+
+    def _action_card(self, kicker: str, text: str, download: bool) -> Card:
+        card = Card()
+        card.setStyleSheet(
+            f"#card {{ background: {theme.INFO_BG};"
+            f" border-radius: {theme.R_CARD}px;"
+            f" border: 1px solid {theme.ACCENT_RAMP[200]}; }}")
+        col = card.body((theme.CARD_PAD, theme.SPACE_4,
+                         theme.CARD_PAD, theme.SPACE_4), spacing=0)
+        col.addWidget(C.kicker(kicker))
+        col.addSpacing(theme.SPACE_2)
+        col.addWidget(C.label(text, level="SUPPORT", colour=theme.INFO_INK,
+                              wrap=True))
+        if download:
+            col.addSpacing(theme.SPACE_3)
+            col.addWidget(self._buttons([
+                C.button(i18n.t("Download"), "primary",
+                         on_click=self._open_download)]))
+        return card
+
+    def _check_for_updates(self):
+        """Ask the server now rather than at the next ten-minute tick.
+
+        licensing.refresh() does its round trip on a worker thread; the
+        answer comes back through _update_checked, which Qt delivers on this
+        thread. Until then the row says "Checking…" and the button is gone,
+        so a second click cannot start a second thread.
+        """
+        if self._update_check == "checking":
+            return
+        self._update_check = "checking"
+        licensing.refresh(on_done=self._update_checked.emit)
+        self.refresh()
+
+    def _after_update_check(self):
+        self._update_check = "done"
+        licensing.reload()
+        # The main window listens to this and redraws its banner, so the
+        # answer shows in both places at once.
+        self.licence_changed.emit()
+        self.refresh()
+
+    @staticmethod
+    def _open_download():
+        try:
+            QDesktopServices.openUrl(QUrl(updater.download_url()))
+        except Exception:                            # noqa: BLE001
+            pass
+
     # ── diagnostics ───────────────────────────────────────────────────────
     def _diagnostics(self, col):
         col.addWidget(self._head(
@@ -987,7 +1092,7 @@ class SettingsPanel(QWidget):
 
         col.addWidget(self._head(i18n.t("This installation")))
         col.addWidget(self._facts([
-            (i18n.t("Version"), app_meta.VERSION),
+            (i18n.t("Version"), self._version_row()),
             (i18n.t("Packaged build"),
              i18n.t("Yes") if self._safe(paths.is_frozen) else i18n.t("No")),
             (i18n.t("Platform"), platform.platform()),
@@ -1000,6 +1105,9 @@ class SettingsPanel(QWidget):
              Pill(i18n.t("On") if C.shadows_enabled() else i18n.t("Off"),
                   "accent" if C.shadows_enabled() else "quiet")),
         ]))
+        update_card = self._update_card()
+        if update_card is not None:
+            col.addWidget(update_card)
         col.addWidget(self._note(i18n.t(
             "Card shadows and entrance animations are drawn through a "
             "separate graphics path that renders nothing at all on some "
