@@ -82,7 +82,7 @@ Engine (`prism_terminal`):
 
 - `b80d208` — `core/gerber_clean.py` (new), `outline_face()` factored out of
   `board_outline()`.
-- *(this commit)* — noded polygonising + 0.15 mm loose-end joining
+- `d675456` — noded polygonising + 0.15 mm loose-end joining
   (`closed_faces`, `_join_loose_ends`); `panel()`; `pad_pitch()`,
   `smt_pads()`, `_pad_dims()`; Excellon keeps modal X/Y so every hit has a
   position (was 121 of 218 on EI-500DT); `holes` carried through
@@ -95,7 +95,7 @@ GUI (`prism_gui`):
 
 - `37dd8dc` — **Clean outside the border** button, `GerberCleanWorker`,
   `core_bridge.get_gerber_clean()`, `tests/test_gerber_clean.py`.
-- *(this commit)* — `tests/test_gerber.py` +5 classes (array, pitch, SMT,
+- `d719c36` — `tests/test_gerber.py` +5 classes (array, pitch, SMT,
   gappy outline, gerbonara cross-check of pitch and SMT);
   `tests/gerber_samples.json` re-pinned (CT-TT size corrected to 184 × 39;
   new locked keys); `docs/GERBER_FIXES.md` #21 and open items 10–11;
