@@ -1445,6 +1445,11 @@ class MainWindow(QMainWindow):
             self._record_worker = RecordWorker(self.cfg)
             self._record_worker.done.connect(self._on_transcribed)
             self._record_worker.failed.connect(self._on_voice_failed)
+            # Join the retirement list like every other worker: without this a
+            # mic recording/transcription still running when the window closes
+            # is never stopped or wait()-ed, and Qt's ~QThread qFatal()s on a
+            # live thread — a hard crash whose log says only "Prism closed".
+            self._workers.append(self._record_worker)
             self._record_worker.start()
             self.input_panel.set_recording(True)
             self.input_panel.append_status("Recording — press Stop when you're done…")

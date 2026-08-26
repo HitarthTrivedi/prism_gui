@@ -185,7 +185,7 @@ class _Disclosure(QWidget):
         row.addStretch(1)
         column.addLayout(row)
 
-        self.body = QLabel(i18n.t(body))
+        self.body = QLabel(i18n.t(body), self)
         self.body.setWordWrap(True)
         self.body.setObjectName("meta")
         self.body.setVisible(False)
@@ -395,7 +395,7 @@ class InquirySetupDialog(PrismDialog):
         adv_row.addStretch(1)
         layout.addLayout(adv_row)
 
-        self.advanced = QWidget()
+        self.advanced = QWidget(self)
         adv = QFormLayout(self.advanced)
         adv.setContentsMargins(0, 6, 0, 0)
         self.host = QLineEdit(self._accounts[0].get("host", ""))
@@ -615,6 +615,27 @@ class InquirySetupDialog(PrismDialog):
         self._verify = InboxVerifyWorker(address, password, typed_host)
         self._verify.done.connect(finished)
         self._verify.start()
+
+    def closeEvent(self, event):
+        """Wind up the connection test before this dialog is destroyed.
+
+        "Check this works" starts an InboxVerifyWorker that sits in a blocking
+        DNS/IMAP call — tens of seconds on a wrong host. Closing the dialog
+        while it runs would destroy a live QThread, and Qt's ~QThread qFatal()s
+        on that — a hard crash. The worker has no stop() (nothing to interrupt
+        a socket mid-connect), so the only move is a bounded wait then
+        terminate the overrun.
+        """
+        w = self._verify
+        if w is not None:
+            try:
+                if w.isRunning():
+                    if not w.wait(3000):
+                        w.terminate()
+                        w.wait(1000)
+            except RuntimeError:
+                pass        # already deleted; nothing to wait for
+        super().closeEvent(event)
 
     # ── 2. where things are kept ──────────────────────────────────────────
     def _folder_tab(self) -> QWidget:

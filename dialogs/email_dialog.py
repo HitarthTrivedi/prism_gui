@@ -189,6 +189,25 @@ class EmailSetupDialog(PrismDialog):
         CB.config.save(self.cfg)
         self.accept()
 
+    def closeEvent(self, event):
+        """Wind up the sign-in test before this dialog is destroyed.
+
+        "Check this works" starts a VerifyWorker in a blocking SMTP sign-in;
+        closing the dialog while it runs would destroy a live QThread and Qt
+        qFatal()s on that. VerifyWorker has no stop(), so bounded-wait then
+        terminate the overrun.
+        """
+        w = self._verify_worker
+        if w is not None:
+            try:
+                if w.isRunning():
+                    if not w.wait(3000):
+                        w.terminate()
+                        w.wait(1000)
+            except RuntimeError:
+                pass
+        super().closeEvent(event)
+
 
 class EmailComposeDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
@@ -253,7 +272,7 @@ class EmailComposeDialog(PrismDialog):
 
         # Who this is going to. A standing fact about the draft, so it reads
         # as an inset well rather than as a dashed "nothing here yet" box.
-        self.who_label = QLabel("")
+        self.who_label = QLabel("", self)
         self.who_label.setWordWrap(True)
         self.who_label.setStyleSheet(
             f"color: {theme.NEUTRAL[700]}; background: {theme.WELL};"
@@ -276,7 +295,7 @@ class EmailComposeDialog(PrismDialog):
         self.rec_empty.setObjectName("emptyState")
         self.rec_empty.setWordWrap(True)
         rec_layout.addWidget(self.rec_empty)
-        self.rec_list = QListWidget()
+        self.rec_list = QListWidget(self)
         self.rec_list.setMaximumHeight(120)
         self.rec_list.setVisible(False)
         rec_layout.addWidget(self.rec_list)
@@ -638,7 +657,11 @@ class EmailComposeDialog(PrismDialog):
     def _set_sending(self, sending: bool):
         """A blast is minutes long — everything that would change what is being
         sent is locked while it runs, and Send becomes the way to stop."""
-        for w in (self.subject_edit, self.body_edit, self.goal_edit,
+        # self.ask is the compose box (an AskPanel); it replaced the old
+        # goal_edit line when this dialog was rebuilt, but this lock list kept
+        # the dead name — so every Send raised AttributeError before a single
+        # mail went out. Lock the box that actually exists.
+        for w in (self.subject_edit, self.body_edit, self.ask,
                   self.add_edit, self.remove_btn):
             w.setEnabled(not sending)
         self.send_btn.setEnabled(True)
@@ -710,6 +733,16 @@ class EmailComposeDialog(PrismDialog):
             self.status.setText(f"Sent, but couldn't save to History: {e}")
 
     def closeEvent(self, event):
+        """Wind up every worker before this dialog is destroyed.
+
+        A QThread destroyed while still running aborts the whole process — Qt
+        calls qFatal() from ~QThread. This dialog owns four: a mailbox verify,
+        a voice recorder, a browser draft that runs for MINUTES, and the send.
+        The old handler stopped only the send, so closing mid-draft (the long
+        one) crashed. Modelled on InquiryDialog.closeEvent.
+        """
+        # The send is the one worth interrupting the user for — a blast that is
+        # part-way out is a real thing to stop on purpose.
         if self._send_worker and self._send_worker.isRunning():
             leave = QMessageBox.question(
                 self, "Still sending",
@@ -717,6 +750,22 @@ class EmailComposeDialog(PrismDialog):
             if leave != QMessageBox.Yes:
                 event.ignore()
                 return
-            self._send_worker.stop()
-            self._send_worker.wait(15000)
+        # Stop and JOIN every worker, send included. Order: ask all to stop,
+        # then wait each, terminating only a thread that overruns its wait.
+        for worker in (self._worker, self._send_worker, self._rec):
+            if worker is None:
+                continue
+            try:
+                if not worker.isRunning():
+                    continue
+            except RuntimeError:
+                continue        # already deleted; nothing to wait for
+            stop = getattr(worker, "stop", None)
+            if callable(stop):
+                stop()
+            # The browser draft sits in a Selenium poll seconds wide, so a
+            # short wait would expire and terminate a thread about to finish.
+            if not worker.wait(10_000):
+                worker.terminate()
+                worker.wait(1000)
         super().closeEvent(event)
