@@ -30,6 +30,13 @@ from workers import AutomationWorker, GerberWorker
 from widgets import icons
 from widgets.ask_panel import AskPanel
 
+# Every other add-on's numbers land in the hidden ~/.prism/runs folder, which
+# is exactly where a factory owner never thinks to look for the CSV they
+# need to email a customer in the next five minutes. The measured Gerber
+# figures go somewhere they will actually be found again: a named folder
+# right on the Desktop.
+REPORTS_DIR = os.path.join(os.path.expanduser("~/Desktop"), "Prism Gerber")
+
 
 class GerberDialog(PrismDialog):
     def __init__(self, cfg: dict, attachments: list, parent=None):
@@ -37,10 +44,15 @@ class GerberDialog(PrismDialog):
             i18n.t("Gerber"),
             i18n.t("PCB size, track width, spacing, drill size and count — "
                    "measured off the files themselves."),
-            icon="grid", parent=parent, closable=False)
+            icon="grid", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle("Gerber — PCB fabrication data")
-        self.resize(820, 740)
-        self.setMinimumSize(640, 620)
+        self.resize(820, 780)
+        # Lower than before now that the body scrolls (scrollable=True) — a
+        # fixed, non-scrolling height is what let the measured-results box
+        # (260px) plus the write-up box (100px) plus everything above them
+        # outgrow the window and get compressed into illegibility instead of
+        # just scrolling, once a job was actually measured.
+        self.setMinimumSize(620, 480)
         self.cfg = cfg
         self.gerber = CB.get_gerber()
 
@@ -184,7 +196,7 @@ class GerberDialog(PrismDialog):
         G = self.gerber
         blocks = []
         csv_paths = []
-        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+        os.makedirs(REPORTS_DIR, exist_ok=True)
         for name, job in results:
             label = name if len(results) > 1 else ""
             heading = f"═══ {name} ═══\n" if len(results) > 1 else ""
@@ -200,7 +212,7 @@ class GerberDialog(PrismDialog):
                           for c in label)[:40]
             csv_name = f"gerber_{stem}_{int(time.time())}.csv" if stem \
                 else f"gerber_{int(time.time())}.csv"
-            csv_path = os.path.join(CB.config.RUNS_DIR, csv_name)
+            csv_path = os.path.join(REPORTS_DIR, csv_name)
             G.write_report_csv(job, csv_path)
             csv_paths.append(csv_path)
         self.meas_view.setPlainText("\n\n".join(blocks))
@@ -208,7 +220,7 @@ class GerberDialog(PrismDialog):
         note = ""
         if len(results) > 1:
             summary_path = os.path.join(
-                CB.config.RUNS_DIR, f"gerber_summary_{int(time.time())}.csv")
+                REPORTS_DIR, f"gerber_summary_{int(time.time())}.csv")
             G.write_summary_csv(results, summary_path)
             csv_paths.append(summary_path)
             note = f"{len(results)} jobs measured separately. "

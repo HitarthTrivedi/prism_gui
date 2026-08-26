@@ -188,6 +188,7 @@ class _StarterRow(QFrame):
 
 class InputPanel(Card):
     route_clicked = Signal(str)
+    cancel_route_clicked = Signal()
     mic_toggle_clicked = Signal()
     attach_file_clicked = Signal()
     attach_folder_clicked = Signal()
@@ -221,6 +222,7 @@ class InputPanel(Card):
     def __init__(self, parent=None):
         super().__init__(stripe=True, radius=theme.R_HERO, raised=True,
                          parent=parent)
+        self._busy = False
         self.content = self.body((theme.CARD_PAD, theme.CARD_PAD,
                                   theme.CARD_PAD, theme.CARD_PAD), spacing=0)
 
@@ -318,8 +320,7 @@ class InputPanel(Card):
         self.route_btn.setMinimumHeight(C.MIN_TARGET + 10)
         self.route_btn.setLayoutDirection(Qt.RightToLeft)   # arrow trails
         icons.button_icon(self.route_btn, "arrow-right", 15, theme.CARD)
-        self.route_btn.clicked.connect(
-            lambda: self.route_clicked.emit(self.text.toPlainText()))
+        self.route_btn.clicked.connect(self._on_route_btn_clicked)
         row.addWidget(self.route_btn)
         self.content.addWidget(self.actions_row)
 
@@ -675,9 +676,24 @@ class InputPanel(Card):
         self.mic_btn.setStyleSheet(
             f"background: {theme.ERR_BG};" if self._blink_on else "")
 
+    def _on_route_btn_clicked(self):
+        """The same button does both jobs, like mic_btn's Speak/Stop — while
+        busy it reads "Cancel" and means that instead of "Make a plan"."""
+        if self._busy:
+            self.cancel_route_clicked.emit()
+        else:
+            self.route_clicked.emit(self.text.toPlainText())
+
     def set_busy(self, busy: bool):
-        self.route_btn.setEnabled(not busy)
+        self._busy = busy
         self.route_btn.setText(
-            f"{i18n.t('Planning…') if busy else i18n.t('Make a plan')}  ")
+            f"{i18n.t('Cancel') if busy else i18n.t('Make a plan')}  ")
+        icons.button_icon(self.route_btn, "stop" if busy else "arrow-right",
+                          15, theme.CARD)
         if busy:
             self.set_state("routing")
+        # Enabled either way: "routing" disables it in set_state (nothing to
+        # route to yet), but busy needs it clickable as Cancel instead. When
+        # not busy, the caller always follows with its own set_state() right
+        # after, which re-settles this correctly for that state.
+        self.route_btn.setEnabled(True)

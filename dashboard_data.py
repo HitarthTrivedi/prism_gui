@@ -186,6 +186,82 @@ def register_rows(cfg: dict) -> list[dict]:
         return []
 
 
+def needs_you(cfg: dict, rows: list[dict] | None = None) -> dict:
+    """The four things the owner opens Prism for, as counts — the launcher's
+    "What needs you today" card and its deep links into the working window.
+
+        to_quote   inquiries with no quotation yet (Status New)
+        waiting    quotations sent and not answered (Quoted / Following up)
+        due        of those, the ones due a reminder today
+        replies    customer answers not yet applied to the register
+        orders     purchase orders (by mail, or a "yes" waiting for its PO)
+        sent_today what Prism sent for them today
+
+    Zeros — never an exception — when nothing is set up, the register is
+    unreadable, or the worklist folder does not exist yet: this feeds a
+    screen that must always draw.
+    """
+    rows = register_rows(cfg) if rows is None else rows
+    out = {"to_quote": 0, "waiting": 0, "due": 0, "replies": 0, "orders": 0,
+           "sent_today": 0}
+    try:
+        from dialogs.inquiry_setup_dialog import settings_of
+        settings = settings_of(cfg) or {}
+        reg = CB.get_register()
+        status = lambda r: (r.get("Status") or "").strip() or reg.NEW  # noqa: E731
+        out["to_quote"] = sum(1 for r in rows if status(r) == reg.NEW)
+        out["waiting"] = sum(1 for r in rows
+                             if status(r) in (reg.QUOTED, reg.FOLLOWING_UP))
+        out["due"] = len(reg.awaiting_followup(
+            rows,
+            after_days=int(settings.get("followup_days", 2) or 2),
+            max_reminders=int(settings.get("max_reminders", 3) or 3)))
+        accepted = sum(1 for r in rows if status(r) == reg.ACCEPTED)
+        folder = settings.get("folder", "")
+        if folder:
+            wl = CB.get_worklist()
+            data = wl.load(folder)
+            out["replies"] = len(wl.pending(data, "replies"))
+            pending_orders = wl.pending(data, "orders")
+            covered = {e.get("inquiry_no", "") for e in pending_orders}
+            out["orders"] = len(pending_orders) + sum(
+                1 for r in rows if status(r) == reg.ACCEPTED
+                and r.get("Inquiry no", "") not in covered)
+            today = date.today().isoformat()
+            out["sent_today"] = sum(1 for e in data.get("sent", [])
+                                    if e.get("date") == today)
+        else:
+            out["orders"] = accepted
+    except Exception:
+        pass
+    return out
+
+
+def month_summary(cfg: dict, rows: list[dict] | None = None) -> dict | None:
+    """This month's figures for the launcher's plain table, straight off
+    register.summarise(). None when there is no register at all."""
+    rows = register_rows(cfg) if rows is None else rows
+    if not rows:
+        return None
+    reg = CB.get_register()
+    today = date.today()
+    try:
+        month = reg.summarise(rows, since=today.replace(day=1))
+    except Exception:
+        return None
+    return {
+        "received": month.received,
+        "quoted": month.quoted,
+        "quoted_value": rupees(month.quoted_value),
+        "converted": month.converted,
+        "converted_value": rupees(month.converted_value),
+        "conversion": month.conversion,
+        "waiting": month.waiting,
+        "reasons": dict(month.reasons or {}),
+        "month": today.strftime("%B %Y"),
+    }
+
+
 def inquiry_stats(cfg: dict, rows: list[dict] | None = None) -> dict | None:
     """The four figures the Inquiry screen leads with, and the two Home shows.
 

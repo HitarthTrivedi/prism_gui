@@ -203,11 +203,38 @@ plan any more.
 | `core/po.py` | Read the PO, compare it to the quotation, flag every difference. | ✅ built |
 | `core/mailflow.py` | The daily loop that joins them — one `check()` call. | ✅ built |
 
-**Still to do: the screens.** The engine runs the whole loop; what does not
-exist yet is the window he clicks in — the setup panel for the mail account,
-the worklist, the quotation review with its Hold button, and the PO
-confirmation. That is the next piece of work, and it is the part he will judge
-the product by.
+**The screens — built, and rebuilt once.** Two surfaces: the sidebar screen
+(`widgets/inquiry_panel.py`) is a plain launcher — "What needs you today" in
+words, with a button on each line that opens the working window on exactly
+that list, then this month's figures as a two-column table; the working
+window (`dialogs/inquiry_dialog.py`) has six tabs in the order an inquiry
+lives — *To quote · No answer yet · They answered · Order came · All
+inquiries · All mail* — each the same shape: one sentence, a Show:/search
+toolbar (with the owner's own from/to dates), the table, and a "Selected
+inquiry" panel showing only the two or three actions that make sense for
+that row's Status (plus *Edit details*, *Open this inquiry's folder*, and
+*Delete this inquiry*, which also offers to block the sender). "They replied
+by phone…" moves the register without a mail, because in GIDC most answers
+come by phone.
+
+**What sits on disk beside the register** — the owner asked for a file per
+section, and gets one:
+
+```
+<inquiry folder>/
+  inquiries.csv          the register (unchanged)
+  inquiries/INQ-…/       one folder per inquiry (unchanged)
+  worklist/arrived.json  every mail Prism sorted — a permanent log
+  worklist/replies.json  customer answers, resolved when applied
+  worklist/orders.json   purchase orders, resolved when accepted or removed
+  worklist/sent.json     every mail Prism sent for him — quotation, reminder,
+                         win-back — so "No answer yet" can say WHEN, not
+                         just how many
+  worklist.json.bak      the older single file, kept after migration
+```
+
+`core/worklist.py` owns the folder; an older `worklist.json` is folded into
+it the first time anything reads the folder and never deleted.
 
 One dependency was added: **openpyxl**, so rate lists can be read straight from
 Excel. It is optional at runtime — without it `core/quoting.py` still reads

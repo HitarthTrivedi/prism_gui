@@ -40,7 +40,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # revoked-licence test in test_authorization.py. See tests/conftest.py.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
 import dashboard_data as DATA  # noqa: E402
@@ -134,9 +134,9 @@ class NoRegisterYet(unittest.TestCase):
         self.assertNotIn("Set up Email automation", labels)
         check_btn = next(b for b in buttons if b.text() == "Check my mail now")
         fired = []
-        panel.open_dialog.connect(lambda: fired.append(True))
+        panel.open_dialog.connect(lambda tab: fired.append(tab))
         check_btn.click()
-        self.assertEqual(fired, [True])
+        self.assertEqual(fired, [0])
 
     def test_an_unconfigured_mailbox_still_offers_setup(self):
         panel = InquiryPanel({})
@@ -200,11 +200,32 @@ class TheFiguresComeFromTheRegister(unittest.TestCase):
         self.assertEqual(len(series), 7)
         self.assertEqual(series[-1], 2)   # two rows dated today
 
-    def test_every_tab_builds(self):
-        for tab in ("arrived", "register", "replies", "waiting"):
-            with self.subTest(tab=tab):
-                panel = InquiryPanel(self.cfg)
-                panel._pick(tab)
+    def test_the_populated_screen_builds_twice_over(self):
+        """The launcher has no tabs any more — one build, then a refresh,
+        is every state it has."""
+        panel = InquiryPanel(self.cfg)
+        panel.refresh()
+        panel.refresh(reread=False)
+
+    def test_what_needs_you_counts_come_from_the_register(self):
+        counts = DATA.needs_you(self.cfg)
+        self.assertEqual(counts["to_quote"], 1)       # INQ/2 is New
+        self.assertEqual(counts["waiting"], 1)        # INQ/1 is Quoted
+        self.assertEqual(counts["replies"], 0)
+        self.assertEqual(counts["orders"], 0)
+
+    def test_needs_you_is_all_zeros_when_nothing_is_set_up(self):
+        counts = DATA.needs_you({})
+        self.assertEqual(set(counts.values()), {0})
+
+    def test_the_month_table_reads_the_register(self):
+        month = DATA.month_summary(self.cfg)
+        # Two rows are dated today; the 20- and 30-day-old ones may or may
+        # not fall inside the calendar month depending on when this runs.
+        self.assertGreaterEqual(month["received"], 2)
+        self.assertGreaterEqual(month["quoted"], 1)
+        self.assertIn("₹", month["quoted_value"])
+        self.assertIsNone(DATA.month_summary({}))
 
 
 class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
@@ -240,26 +261,42 @@ class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
         self.assertEqual(DATA.inquiry_stats(self.cfg)["waiting"], 0)
 
     def test_the_working_dialog_is_still_reachable(self):
+        from widgets.inquiry_panel import OPEN_LABEL
         panel = InquiryPanel(self.cfg)
         fired = []
-        panel.open_dialog.connect(lambda: fired.append(True))
+        panel.open_dialog.connect(lambda tab: fired.append(tab))
         opener = next((b for b in panel.findChildren(QPushButton)
-                      if b.text() == "Check my mail now"), None)
+                      if b.text() == OPEN_LABEL), None)
         self.assertIsNotNone(
             opener,
             "no button anywhere on the populated screen opens the working "
             "dialog — reading mail, editing the register and preparing a "
             "quotation are all unreachable")
         opener.click()
-        self.assertEqual(fired, [True])
+        self.assertEqual(fired, [0])
 
-    def test_it_is_still_there_on_every_tab(self):
-        for _key, label in TABS:
-            with self.subTest(tab=label):
-                panel = InquiryPanel(self.cfg)
-                panel._pick(_key)
-                labels = [b.text() for b in panel.findChildren(QPushButton)]
-                self.assertIn("Check my mail now", labels)
+    def test_each_needs_you_line_opens_its_own_tab(self):
+        """"Quote them" lands on To quote — not on whatever tab the window
+        last showed. Two New rows → exactly one such line and button."""
+        panel = InquiryPanel(self.cfg)
+        fired = []
+        panel.open_dialog.connect(lambda tab: fired.append(tab))
+        quote = next(b for b in panel.findChildren(QPushButton)
+                     if b.text() == "Quote them")
+        quote.click()
+        self.assertEqual(fired, [TABS.index(("to_quote", "1 · To quote"))])
+        labels = [b.text() for b in panel.findChildren(QPushButton)]
+        # Nothing waiting, nobody answered, no orders — no buttons for those.
+        for absent in ("Send a reminder", "See them", "Read the answer",
+                       "Open the order"):
+            self.assertNotIn(absent, labels)
+
+    def test_a_zero_is_said_in_words(self):
+        panel = InquiryPanel(self.cfg)
+        texts = [lbl.text() for lbl in panel.findChildren(QLabel)]
+        self.assertIn("2 new inquiries to quote", texts)
+        self.assertIn("No new answers", texts)
+        self.assertIn("No new orders", texts)
 
 
 class AHostileRegister(unittest.TestCase):
@@ -295,11 +332,12 @@ class AHostileRegister(unittest.TestCase):
     def test_money_with_words_in_it_does_not_raise(self):
         self.assertIsInstance(DATA.register_view(self.cfg)[0]["amount"], str)
 
-    def test_every_tab_still_builds(self):
-        for tab in ("arrived", "register", "replies", "waiting"):
-            with self.subTest(tab=tab):
-                panel = InquiryPanel(self.cfg)
-                panel._pick(tab)
+    def test_the_screen_still_builds(self):
+        panel = InquiryPanel(self.cfg)
+        panel.refresh()
+        self.assertEqual(set(DATA.needs_you(self.cfg).keys()),
+                         {"to_quote", "waiting", "due", "replies", "orders",
+                          "sent_today"})
 
 
 def _licence(features) -> LicenseState:
@@ -455,19 +493,19 @@ class TheScreenStaysInStepWithTheStore(unittest.TestCase):
         with mock.patch.object(main_window.MainWindow, "_open_inquiry_setup",
                                lambda self: opened.append("setup")), \
              mock.patch.object(main_window.MainWindow, "_open_inquiry_dialog",
-                               lambda self: opened.append("dialog")):
+                               lambda self, tab=0: opened.append("dialog")):
             win = main_window.MainWindow()
             win.inquiry_panel.set_up.emit()
             self.assertEqual(opened, ["setup"])
 
-    def test_chase_again_opens_the_working_dialog(self):
+    def test_the_launcher_opens_the_working_dialog_on_the_tab_it_names(self):
         import main_window
         opened = []
         with mock.patch.object(main_window.MainWindow, "_open_inquiry_dialog",
-                               lambda self: opened.append("dialog")):
+                               lambda self, tab=0: opened.append(tab)):
             win = main_window.MainWindow()
-            win.inquiry_panel.open_dialog.emit()
-            self.assertEqual(opened, ["dialog"])
+            win.inquiry_panel.open_dialog.emit(2)
+            self.assertEqual(opened, [2])
 
 
 if __name__ == "__main__":

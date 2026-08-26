@@ -1,18 +1,15 @@
-"""Setup — the GUI's equivalent of the CLI's onboarding wizard plus /config,
-/agents, /profile, /key and /chrome, all in one page since a GUI doesn't need
-them as separate steps.
+"""Setup — the returning-user editor for /config, /agents, /profile, /key and
+/chrome, all in one page since a GUI doesn't need them as separate steps.
 
-This is the first surface a paying customer meets, so it is the one that had
-the most to gain from the shared modal chrome: eight sections used to run down
-a single undifferentiated column separated by hairlines, which reads as one
-very long form and gives a first-time user no idea how much of it is left. The
-sections are cards now, and an index down the left says how many there are and
-lets any one of them be reached in a click.
+This is never a first-time user's first screen — that's the wizard
+(widgets/wizard_panel.py) now. This dialog is what "Re-pick agents" or the
+Settings screen's "Change API key" opens: a customer who already knows what
+they're changing, reached one section at a time.
 
 The rail links to individual settings, so the dialog takes a `focus` argument:
 clicking "API key" opens this scrolled to the key section with the field
 already focused and the section briefly marked, instead of dumping the whole
-wizard on you and leaving you to hunt for the one row you came for. The index
+page on you and leaving you to hunt for the one row you came for. The index
 drives exactly the same code path — a nav entry IS a `focus`."""
 from __future__ import annotations
 import os
@@ -34,10 +31,8 @@ import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
 from widgets import icons
-from widgets.agents_panel import STAGE_COPY
+from widgets.agents_picker import AgentsPicker
 from widgets.controls import heading, icon_label, kicker, meta
-
-SKIP = "— skip this category —"
 
 # rail command -> the section it should land on (None = top of the page)
 FOCUS_SECTIONS = {"key": "key", "profile": "profile", "agents": "agents",
@@ -129,7 +124,6 @@ class SetupDialog(PrismDialog):
         self.resize(880, 720)
         self.setMinimumSize(720, 520)
         self.cfg = dict(cfg)
-        self._combos: dict[str, QComboBox] = {}
         self._premium_boxes: dict[str, QCheckBox] = {}
         self._sections: dict[str, Section] = {}
         self._nav_buttons: dict[str, QPushButton] = {}
@@ -184,6 +178,7 @@ class SetupDialog(PrismDialog):
         self._build_footer()
 
         self._rebuild_premium()
+        self._refresh_login_cta()
         self._set_tab_order()
         # Which card the reader is actually looking at, so the index is a
         # position indicator and not only a set of links.
@@ -300,7 +295,8 @@ class SetupDialog(PrismDialog):
                  getattr(self, "member_role", None),
                  self.lang_combo, self.out_lang_combo,
                  self.key_edit, self.profile_edit]
-        chain += list(self._combos.values())
+        chain += self._agents_picker.combos()
+        chain.append(self._login_cta)
         chain.append(self.chrome_edit)
         self.tab_chain(*chain)
 
@@ -735,29 +731,23 @@ class SetupDialog(PrismDialog):
         s = Section("Your specialists",
                     "One tool per kind of step. These are the names you'll see "
                     "on the steps — skip any you don't want Prism to use.")
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(9)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        current_agents = self.cfg.get("agents", {}) or {}
-        # Pipeline order, not dict order — these rows should read in the same
-        # sequence the plan lists them in.
-        for cat in [c for c in CB.agents.PIPELINE_ORDER if c in CB.agents.CATEGORIES]:
-            meta = CB.agents.CATEGORIES[cat]
-            combo = QComboBox()
-            combo.addItems(list(meta["agents"]) + [SKIP])
-            default = current_agents.get(cat)
-            combo.setCurrentText(default if default in meta["agents"] else SKIP)
-            combo.currentIndexChanged.connect(self._rebuild_premium)
-            combo.setToolTip(meta.get("desc", ""))
-            self._combos[cat] = combo
-            # The plan calls this step "Build the slides"; setup should name
-            # the same thing the same way, with the same icon.
-            icon_name, title, _ = STAGE_COPY.get(cat, ("grid", meta["label"], ""))
-            form.addRow(icon_label(icon_name, title), combo)
-        s.content.addLayout(form)
+        self._agents_picker = AgentsPicker(self.cfg.get("agents"))
+        self._agents_picker.picked_changed.connect(self._rebuild_premium)
+        self._agents_picker.picked_changed.connect(self._refresh_login_cta)
+        s.content.addWidget(self._agents_picker)
+
+        # Right where the decision gets made, not tucked in the footer: the
+        # moment you've picked a specialist is the moment "now sign into it"
+        # is the obvious next thing, not something to notice later.
+        s.content.addWidget(rule())
+        self._login_cta = self.button(
+            i18n.t("Open login tabs — sign in to these now"), "secondary",
+            icon_name="lock", on_click=self._open_login_tabs)
+        s.content.addWidget(self._login_cta)
         return s
+
+    def _refresh_login_cta(self):
+        self._login_cta.setEnabled(bool(self._current_agents()))
 
     def _premium_section(self) -> Section:
         s = Section("Premium plans",
@@ -852,17 +842,12 @@ class SetupDialog(PrismDialog):
                  "chrome": getattr(self, "chrome_edit", None)}.get(key)
         if field is not None:
             field.setFocus()
-        elif key == "agents" and self._combos:
-            next(iter(self._combos.values())).setFocus()
+        elif key == "agents" and self._agents_picker.combos():
+            self._agents_picker.combos()[0].setFocus()
 
     # ── data ──────────────────────────────────────────────────────────────
     def _current_agents(self) -> dict:
-        out = {}
-        for cat, combo in self._combos.items():
-            v = combo.currentText()
-            if v != SKIP:
-                out[cat] = v
-        return out
+        return self._agents_picker.current_agents()
 
     def _rebuild_premium(self):
         while self.premium_layout.count():
@@ -903,11 +888,7 @@ class SetupDialog(PrismDialog):
         except Exception as e:
             QMessageBox.warning(self, "Login tabs", f"Automation deps not available: {e}")
             return
-        urls, seen = [], set()
-        for name in agents.values():
-            if name not in seen:
-                urls.append(CB.agents.AGENT_REGISTRY[name]["url"])
-                seen.add(name)
+        urls = CB.login_tab_urls(agents)
         automation.open_login_tabs(urls)
         QMessageBox.information(
             self, "Login tabs",

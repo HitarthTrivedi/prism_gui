@@ -37,7 +37,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
-    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
+    QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -1164,6 +1164,84 @@ class Toolbar(QFrame):
         rule.setFixedHeight(MIN_TARGET - 8)
         rule.setStyleSheet(f"background: {theme.HAIRLINE};")
         self._row.addWidget(rule)
+
+
+class FlowLayout(QLayout):
+    """A row of widgets that wraps onto the next line when it runs out of
+    width, instead of clipping the ones on the right.
+
+    Qt's own canonical example, kept because a QHBoxLayout has exactly one
+    failure mode and it is the one the owner photographed: seven buttons in
+    a row on a window narrower than seven buttons, and the last two simply
+    gone. A flow layout has no such width; whatever does not fit steps down
+    a line. Used for every action row in the Email automation window.
+    """
+
+    def __init__(self, parent=None, margin: int = 0,
+                 h_space: int = theme.SPACE_2, v_space: int = theme.SPACE_2):
+        super().__init__(parent)
+        self._items: list = []
+        self._h, self._v = h_space, v_space
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    # -- QLayout contract --------------------------------------------------
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._arrange(QRect(0, 0, width, 0), dry_run=True)
+
+    def setGeometry(self, rect: QRect):
+        super().setGeometry(rect)
+        self._arrange(rect, dry_run=False)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        left, top, right, bottom = self.getContentsMargins()
+        return size + QSize(left + right, top + bottom)
+
+    # -- the wrap --------------------------------------------------------
+    def _arrange(self, rect: QRect, *, dry_run: bool) -> int:
+        left, top, right, bottom = self.getContentsMargins()
+        inner = rect.adjusted(left, top, -right, -bottom)
+        x, y = inner.x(), inner.y()
+        line_height = 0
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None and not widget.isVisibleTo(widget.parentWidget()):
+                continue                    # hidden buttons take no room
+            hint = item.sizeHint()
+            next_x = x + hint.width() + self._h
+            if next_x - self._h > inner.right() + 1 and line_height > 0:
+                x = inner.x()
+                y = y + line_height + self._v
+                next_x = x + hint.width() + self._h
+                line_height = 0
+            if not dry_run:
+                item.setGeometry(QRect(x, y, hint.width(), hint.height()))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + bottom
 
 
 class SearchField(QLineEdit):

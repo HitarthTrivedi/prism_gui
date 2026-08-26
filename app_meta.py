@@ -18,3 +18,8 @@ PUBLISHER = "Alphakore"
 # TODO(alphakore): confirm these before the first client build ships.
 SUPPORT_EMAIL = "hello@alphakore.in"
 WEBSITE = "https://alphakore.in"
+
+# Where a person downloads a newer Prism. Fixed, and opened in the browser —
+# Prism never fetches or runs an update itself (see updater.py). The
+# releases page, so the same address serves every version that follows.
+DOWNLOAD_URL = "https://github.com/HitarthTrivedi/prism_gui/releases/latest"

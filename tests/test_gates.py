@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -114,10 +115,10 @@ class GateTest(unittest.TestCase):
         return licensing.reload()
 
     def _window(self):
-        """A real MainWindow, with Setup stubbed — it would otherwise pop on a
-        window that has no Groq key configured."""
+        """A real MainWindow, with first-run stubbed — it would otherwise pop
+        the setup wizard on a window that has no Groq key configured."""
         import main_window
-        with mock.patch.object(main_window.MainWindow, "_open_setup"):
+        with mock.patch.object(main_window.MainWindow, "_first_run"):
             return main_window.MainWindow()
 
     def _instant_authorize(self, allowed=True, message=""):
@@ -635,3 +636,138 @@ class Attachments(GateTest):
         self.assertTrue(explained.called)
         self.assertEqual(explained.call_args[0][1], "attach")
         self.assertEqual(win.attachments, [])
+
+
+class UpdateBanner(GateTest):
+    """Phase 0 of update-plan.md: the server's version advice becomes a
+    banner, in the right place in the pecking order, and "Not now" is
+    remembered per version. How the advice gets INTO the state is
+    test_updater.py's job; this is what the window does with it."""
+
+    def setUp(self):
+        super().setUp()
+        import workspace
+        self.extra = [
+            # The shared-folder banner reads the developer's real config.
+            # Pinned to "reachable" so it cannot outrank the update banner
+            # on one machine and not another.
+            mock.patch.object(workspace, "unreachable", return_value=""),
+            mock.patch.object(licensing.secretstore, "_keyring",
+                              return_value=None),
+        ]
+        for p in self.extra:
+            p.start()
+
+    def tearDown(self):
+        for p in self.extra:
+            p.stop()
+        super().tearDown()
+
+    def _advised(self, **fields):
+        """A valid licence whose server has said `fields` about versions."""
+        self.grant(["core"])
+        store.update(self.tmp, **fields)
+        licensing.reload()
+        return self._window()
+
+    def test_a_newer_version_is_offered_and_can_wait(self):
+        win = self._advised(latest_version="99.0.0")
+        self.assertFalse(win.banner.isHidden())
+        self.assertIn("99.0.0", win._banner_text.text())
+        self.assertEqual(win._banner_btn.text(), "Download")
+        self.assertFalse(win._banner_alt.isHidden())
+        self.assertEqual(win._banner_alt.text(), "Not now")
+        win._banner_alt_clicked()
+        self.assertTrue(win.banner.isHidden())
+
+    def test_the_same_or_an_older_version_is_not_offered(self):
+        import app_meta
+        for version in (app_meta.VERSION, "0.0.1", "", "garbage"):
+            win = self._advised(latest_version=version)
+            self.assertTrue(win.banner.isHidden(), version)
+
+    def test_not_now_is_per_version(self):
+        win = self._advised(latest_version="99.0.0")
+        win._dismiss_update("99.0.0")
+        self.assertTrue(win.banner.isHidden())
+        # Still dismissed on the next launch…
+        self.assertTrue(self._advised(latest_version="99.0.0")
+                        .banner.isHidden())
+        # …until a newer one comes along.
+        self.assertFalse(self._advised(latest_version="99.1.0")
+                         .banner.isHidden())
+
+    def test_a_retired_build_is_told_to_update_and_cannot_wait(self):
+        """Below MIN_CLIENT_VERSION the server already refuses leases. The
+        banner says so in those words, with no "Not now" — waiting is not a
+        thing the customer can do about it."""
+        win = self._advised(min_supported_version="99.0.0",
+                            latest_version="99.1.0")
+        self.assertFalse(win.banner.isHidden())
+        text = win._banner_text.text()
+        self.assertIn("99.1.0", text)
+        self.assertIn("continue", text)
+        self.assertEqual(win._banner_btn.text(), "Download update")
+        self.assertTrue(win._banner_alt.isHidden())
+        win._banner_alt_clicked()                 # nothing to dismiss
+        self.assertFalse(win.banner.isHidden())
+
+    def test_a_licence_problem_outranks_an_update(self):
+        """A nudge must never sit on top of a problem: an ended licence
+        says "ended", whatever the server thinks about versions."""
+        self.grant(["core"], days=-1)
+        store.update(self.tmp, latest_version="99.0.0",
+                     min_supported_version="99.0.0")
+        licensing.reload()
+        win = self._window()
+        self.assertFalse(win.banner.isHidden())
+        self.assertNotIn("99.0.0", win._banner_text.text())
+        self.assertIn("ended", win._banner_text.text())
+        self.assertEqual(win._banner_btn.text(), "Enter a licence key")
+
+    def test_the_download_button_opens_the_fixed_address(self):
+        import app_meta
+        import main_window
+        win = self._advised(latest_version="99.0.0")
+        with mock.patch.object(main_window.QDesktopServices,
+                               "openUrl") as opened:
+            win._banner_clicked()
+        self.assertTrue(opened.called)
+        self.assertEqual(opened.call_args[0][0].toString(),
+                         app_meta.DOWNLOAD_URL)
+
+    def test_settings_offers_check_for_updates(self):
+        from PySide6.QtWidgets import QPushButton
+        win = self._advised()
+        win.settings_panel.show_section("diagnostics")
+        labels = [b.text() for b in win.settings_panel.findChildren(QPushButton)]
+        self.assertIn("Check for updates", labels)
+
+    def test_check_for_updates_lands_in_both_places(self):
+        """The round trip runs on the licensing worker thread; its answer has
+        to come back to the UI thread and redraw BOTH the settings page and
+        the window's banner."""
+        from PySide6.QtWidgets import QLabel
+        from licensing import client
+        win = self._advised()
+        self.assertTrue(win.banner.isHidden())
+        panel = win.settings_panel
+        panel.show_section("diagnostics")
+        with mock.patch.object(client, "_post",
+                               return_value={"latest_version": "99.0.0"}):
+            panel._check_for_updates()
+            self.assertEqual(panel._update_check, "checking")
+            for t in threading.enumerate():
+                if t.name == "prism-license-refresh":
+                    t.join(10)
+            # The Signal was emitted on the worker thread; Qt queued it.
+            for _ in range(40):
+                _app.processEvents()
+                if panel._update_check == "done":
+                    break
+                time.sleep(0.05)
+        self.assertEqual(panel._update_check, "done")
+        self.assertFalse(win.banner.isHidden())
+        self.assertIn("99.0.0", win._banner_text.text())
+        texts = [l.text() for l in panel.findChildren(QLabel)]
+        self.assertTrue(any("99.0.0" in t for t in texts), texts)

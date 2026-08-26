@@ -1523,6 +1523,8 @@ class EmailPanel(_AddonFrontDoor):
     ACTION_ICON = "pencil"
     KIND = "email"
 
+    change_account = Signal()
+
     STEPS = [
         ("user", "Say who it is for",
          "Attach a recipient CSV, or type the addresses straight into the "
@@ -1548,6 +1550,22 @@ class EmailPanel(_AddonFrontDoor):
     def build(self):
         self.HUE = theme.WARN
         super().build()
+
+    def header_actions(self):
+        """The base actions, plus a way back into the sending-account setup.
+
+        Without this the only door to EmailSetupDialog is the one MainWindow
+        opens automatically the first time — once an account is configured
+        there is nothing on screen that reopens it, so a wrong password or a
+        change of mailbox has no way in short of editing the config file.
+        Labelled "Change account" even before one is set up — same wording
+        either way, since _Page.refresh() does not re-ask header_actions()
+        for a fresh label after the dialog closes."""
+        actions = super().header_actions()
+        actions.insert(0, C.button(i18n.t("Change account"), "secondary",
+                                   icon_name="key",
+                                   on_click=self.change_account.emit))
+        return actions
 
     def tool_roles(self):
         """Mirrors EmailDialog._generate_draft() — the LAST of research,
