@@ -340,7 +340,7 @@ class PlanRow(QFrame):
         # ── line 2: why Prism suggests a different tool ────────────────────
         # Groq writes one sentence per suggestion. It was fetched, validated,
         # shipped across the thread boundary and then dropped on the floor.
-        self.why = QLabel()
+        self.why = QLabel(self)
         self.why.setObjectName("meta")
         self.why.setWordWrap(True)
         self.why.setContentsMargins(_LEAD, 0, 0, 0)
@@ -396,7 +396,7 @@ class PlanRow(QFrame):
         root.addLayout(actions)
 
         # ── the drawer: the engineered prompt itself, editable ────────────
-        self.drawer = QWidget()
+        self.drawer = QWidget(self)
         drawer = QVBoxLayout(self.drawer)
         drawer.setContentsMargins(_LEAD, 0, 0, 0)
         drawer.setSpacing(theme.SPACE_2)
@@ -422,7 +422,11 @@ class PlanRow(QFrame):
     def _tag(text: str, style: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setObjectName(style)
-        lbl.setVisible(bool(text))
+        # Only ever HIDE here (empty text). Calling setVisible(True) on this
+        # still-parentless label would flash it as a top-level OS window — the
+        # ghost-window flash; it shows on its own once added to a live parent.
+        if not text:
+            lbl.setVisible(False)
         return lbl
 
     # ── the prompt ────────────────────────────────────────────────────────
@@ -668,7 +672,7 @@ class AgentsPanel(QWidget):
         # readable inside a closed disclosure inside a 44px collapsed rail.
         # Reading it back is how you catch a misunderstanding BEFORE forty
         # minutes of browser automation, not after.
-        self.intent = QFrame()
+        self.intent = QFrame(self)
         self.intent.setObjectName("well")
         self.intent.setAttribute(Qt.WA_StyledBackground, True)
         intent = QVBoxLayout(self.intent)
@@ -702,7 +706,7 @@ class AgentsPanel(QWidget):
         # router asks for, and the file-reading pass ChatGPT does first when
         # something is attached. Both were entirely invisible, so the plan
         # under-reported the run.
-        self.extras = QLabel("")
+        self.extras = QLabel("", self)
         self.extras.setObjectName("note")
         self.extras.setWordWrap(True)
         self.extras.setVisible(False)
@@ -710,7 +714,7 @@ class AgentsPanel(QWidget):
 
         # Kept for compatibility with anything that poked at the old dashed
         # label; the real empty state is the centring one below it.
-        self.empty = QLabel("")
+        self.empty = QLabel("", self)
         self.empty.setVisible(False)
         root.addWidget(self.empty)
 
@@ -735,7 +739,7 @@ class AgentsPanel(QWidget):
         # configured for and the tool assigned to each. Every card is read
         # from the user's own config; a category with no tool assigned is not
         # drawn, because the router will not plan one either.
-        self.toolkit = QWidget()
+        self.toolkit = QWidget(self)
         kit = QVBoxLayout(self.toolkit)
         kit.setContentsMargins(0, 0, 0, 0)
         kit.setSpacing(theme.SPACE_3)
@@ -756,7 +760,7 @@ class AgentsPanel(QWidget):
         # absorbs the leftover window height. Without a named home the surplus
         # is distributed across whatever the layout thinks can grow, which is
         # how a 70%-empty screen happens by accident rather than by choice.
-        self._tail = QWidget()
+        self._tail = QWidget(self)
         self._tail.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self._tail.setVisible(False)
         root.addWidget(self._tail, stretch=1)
@@ -782,7 +786,7 @@ class AgentsPanel(QWidget):
         cta.setContentsMargins(0, 0, 0, 0)
         cta.setSpacing(theme.SPACE_2 + 1)
         cta.addWidget(self.run_btn, stretch=1)
-        self.discard_btn = QPushButton(f" {i18n.t('Discard')}")
+        self.discard_btn = QPushButton(f" {i18n.t('Discard')}", self)
         self.discard_btn.setCursor(Qt.PointingHandCursor)
         self.discard_btn.setMinimumHeight(44)
         self.discard_btn.setToolTip(i18n.t(

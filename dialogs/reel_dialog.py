@@ -116,7 +116,7 @@ class ReelDialog(PrismDialog):
 
         # A measured result ("your brand colours came off this logo"), not a
         # placeholder, so it stops wearing the dashed empty-state box.
-        self.brand_label = QLabel("")
+        self.brand_label = QLabel("", self)
         self.brand_label.setWordWrap(True)
         self.brand_label.setVisible(False)
         self.brand_label.setStyleSheet(

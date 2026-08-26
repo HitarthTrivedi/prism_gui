@@ -261,7 +261,7 @@ class LicenseDialog(PrismDialog):
         return row
 
     def _message_label(self) -> QLabel:
-        self.message = QLabel()
+        self.message = QLabel(self)
         self.message.setWordWrap(True)
         self.message.setVisible(False)
         return self.message

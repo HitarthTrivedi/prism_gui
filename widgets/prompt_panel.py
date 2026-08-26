@@ -57,7 +57,7 @@ class PromptPanel(QWidget):
         self.blurb.setWordWrap(True)
         root.addWidget(self.blurb)
 
-        self.view = QTextEdit()
+        self.view = QTextEdit(self)
         self.view.setReadOnly(True)
         self.view.setMinimumHeight(230)
         self.view.setVisible(False)

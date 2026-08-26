@@ -102,7 +102,11 @@ class DialogHeader(QFrame):
         self.title.setObjectName("pageTitle")
         C.track(self.title, -0.015)
         col.addWidget(self.title)
-        self.subtitle = QLabel(subtitle)
+        # Parented at creation: setVisible below runs before col.addWidget, and
+        # setVisible(True) on a parentless widget flashes it as a top-level OS
+        # window — the ghost-window flash on every dialog open. See
+        # controls.SectionHeader for the full note.
+        self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("pageSubtitle")
         self.subtitle.setWordWrap(True)
         self.subtitle.setVisible(bool(subtitle))

@@ -1055,7 +1055,10 @@ class PageHeader(QFrame):
         self.title.setObjectName("pageTitle")
         track(self.title, -0.015)
         col.addWidget(self.title)
-        self.subtitle = QLabel(subtitle)
+        # Parented at creation: setVisible below runs before col.addWidget, and
+        # setVisible(True) on a parentless widget flashes it as a top-level OS
+        # window — the ghost-window flash. See SectionHeader for the full note.
+        self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("pageSubtitle")
         self.subtitle.setVisible(bool(subtitle))
         col.addWidget(self.subtitle)
@@ -1100,7 +1103,12 @@ class SectionHeader(QWidget):
         self.title.setObjectName("sectionTitle")
         track(self.title, -0.015)
         col.addWidget(self.title)
-        self.subtitle = QLabel(subtitle)
+        # Parented to self at creation, NOT left parentless until col.addWidget
+        # below: setVisible(True) a few lines down runs before that add, and
+        # setVisible on a parentless widget promotes it to a top-level OS window
+        # for an instant — the ghost-window flash (Windows even draws its native
+        # shadow on it). A widget that already has a parent can never flash.
+        self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("sectionSubtitle")
         # Wrapping, and not as a nicety. A non-wrapping QLabel reports its
         # whole sentence as its minimum width, so a two-clause subtitle pushes
@@ -1448,7 +1456,10 @@ class EmptyState(QWidget):
         track(self.title, -0.015)
         col.addWidget(self.title)
 
-        self.body = QLabel(body)
+        # Parented at creation: setVisible(bool(body)) below runs before this
+        # label is put in a layout, and setVisible on a parentless widget flashes
+        # it as a top-level OS window (the ghost-window flash). See SectionHeader.
+        self.body = QLabel(body, self)
         self.body.setObjectName("emptyBody")
         self.body.setAlignment(Qt.AlignCenter)
         self.body.setWordWrap(True)
@@ -1521,7 +1532,7 @@ class MetricCard(Card):
         bottom = QHBoxLayout()
         bottom.setContentsMargins(0, 0, 0, 0)
         bottom.setSpacing(theme.SPACE_2)
-        self.detail = QLabel(detail)
+        self.detail = QLabel(detail, self)
         self.detail.setObjectName("meta")
         self.detail.setVisible(bool(detail))
         bottom.addWidget(self.detail, stretch=1)
@@ -1575,7 +1586,7 @@ class FileItem(QFrame):
         self.name.setStyleSheet(theme.type_css("SUPPORT", theme.TEXT))
         self.name.setToolTip(name)
         col.addWidget(self.name)
-        self.detail = QLabel(detail)
+        self.detail = QLabel(detail, self)
         self.detail.setObjectName("meta")
         self.detail.setVisible(bool(detail))
         col.addWidget(self.detail)
@@ -1646,7 +1657,7 @@ class StepRow(QFrame):
         self.title = QLabel(title)
         self.title.setStyleSheet(theme.type_css("CARD_TITLE"))
         col.addWidget(self.title)
-        self.subtitle = QLabel(subtitle)
+        self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("meta")
         self.subtitle.setWordWrap(True)
         self.subtitle.setVisible(bool(subtitle))

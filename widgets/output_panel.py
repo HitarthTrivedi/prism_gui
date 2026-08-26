@@ -401,7 +401,7 @@ class StageCard(QWidget):
         self.facts.setVisible(False)
         self.content.addWidget(self.facts)
 
-        self.body = QTextEdit()
+        self.body = QTextEdit(self)
         self.body.setObjectName("stageBody")
         self.body.setReadOnly(True)
         # Sized to its content, capped — a queued or waiting stage has nothing
@@ -415,7 +415,7 @@ class StageCard(QWidget):
         # Actions hide with the body: while a stage is queued or waiting there
         # is nothing to copy and no tab to open, and a row of dead buttons
         # under an empty box reads as broken rather than pending.
-        self.actions = QWidget()
+        self.actions = QWidget(self)
         self.actions.setVisible(False)
         row = QHBoxLayout(self.actions)
         row.setContentsMargins(0, theme.SPACE_1, 0, 0)

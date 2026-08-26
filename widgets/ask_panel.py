@@ -82,7 +82,7 @@ class AskPanel(QWidget):
         # names in a single wrapped label is unreadable at four files and
         # offers nothing to click. Same controls.FileItem the context rail
         # uses, so an attachment reads identically wherever it appears.
-        self.chips = QWidget()
+        self.chips = QWidget(self)
         self._chip_layout = QVBoxLayout(self.chips)
         self._chip_layout.setContentsMargins(0, 0, 0, 0)
         self._chip_layout.setSpacing(theme.SPACE_1 + 2)
@@ -204,7 +204,7 @@ class MoreOptions(QFrame):
         self.toggle.clicked.connect(self._toggled)
         root.addWidget(self.toggle, alignment=Qt.AlignLeft)
 
-        self.body = QWidget()
+        self.body = QWidget(self)
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(0, 4, 0, 0)
         self.body.setVisible(False)

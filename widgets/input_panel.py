@@ -158,7 +158,7 @@ class _StarterRow(QFrame):
         col.addWidget(title)
         detail = " · ".join([b for b in (
             ", ".join(record.get("tools") or []), record.get("when") or "") if b])
-        sub = QLabel(detail)
+        sub = QLabel(detail, self)
         sub.setObjectName("meta")
         sub.setVisible(bool(detail))
         col.addWidget(sub)
@@ -272,7 +272,7 @@ class InputPanel(Card):
         # Tasks the user lined up before starting. Prism plans and runs them in
         # order, so this list IS the running order — hence the numbers.
         self._queue: list[str] = []
-        self.queue_box = QWidget()
+        self.queue_box = QWidget(self)
         qv = QVBoxLayout(self.queue_box)
         qv.setContentsMargins(0, 0, 0, 0)
         qv.setSpacing(5)
@@ -326,7 +326,7 @@ class InputPanel(Card):
 
         # Voice feedback ("heard: …") — hidden until there's something to say,
         # so the card keeps its shape in the common case.
-        self.status = QLabel("")
+        self.status = QLabel("", self)
         self.status.setObjectName("meta")
         self.status.setWordWrap(True)
         self.status.setVisible(False)
@@ -334,7 +334,7 @@ class InputPanel(Card):
         self.content.addWidget(self.status)
 
         # ── context: what Prism is holding for this task ─────────────────
-        self.context_box = QWidget()
+        self.context_box = QWidget(self)
         ctx = QVBoxLayout(self.context_box)
         ctx.setContentsMargins(0, theme.SPACE_4, 0, 0)
         ctx.setSpacing(theme.SPACE_2)
@@ -363,7 +363,7 @@ class InputPanel(Card):
         cols = QHBoxLayout()
         cols.setSpacing(theme.SPACE_6)
 
-        self.recent_box = QWidget()
+        self.recent_box = QWidget(self)
         rc = QVBoxLayout(self.recent_box)
         rc.setContentsMargins(0, 0, 0, 0)
         rc.setSpacing(theme.SPACE_2)

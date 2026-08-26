@@ -829,7 +829,7 @@ class Sidebar(QFrame):
         icons.button_icon(toggle, "chevron-right", 15, theme.over(INK_CHROME))
         col.addWidget(toggle)
 
-        body = QWidget()
+        body = QWidget(self)
         body_col = QVBoxLayout(body)
         body_col.setContentsMargins(0, 0, 0, 0)
         body_col.setSpacing(theme.SPACE_1 // 2)
