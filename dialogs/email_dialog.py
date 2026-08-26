@@ -1,26 +1,35 @@
-"""Email — GUI equivalent of the CLI's /email setup and /email <goal>.
-Recipients come from an attached CSV and/or addresses typed in the goal
-text; if none are found, offers to search for the recipient's public
-contact email via the research/brains agent (same regex-based extraction
-the CLI uses). Drafting reuses automation.run() through a normal
-AutomationWorker so it's a real pipeline stage, not a special code path."""
+"""Email — sending from your own account, to one person or to a list.
+
+GUI equivalent of the CLI's /email setup and /email <goal>, rebuilt so the
+form reads like a letter: To, Subject, Message, top to bottom, all visible
+from the moment the window opens. The old window opened on a free-text box
+("What email do you want to send?") and folded the address list away under
+"Edit the recipient list (optional)" — an owner who wanted to write to one
+supplier could not find where the address went.
+
+Recipients come from the To line (typed, any separator), from a CSV
+(name, email), or from an attached CSV handed over by the workbench. The
+CSV is parsed on this machine and never shown to any AI. Drafting stays
+optional: a one-line brief and "Write it for me" runs the same pipeline
+stage as before through an ordinary AutomationWorker.
+"""
 from __future__ import annotations
+import os
 import re
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
-    QPushButton, QListWidget, QListWidgetItem, QMessageBox,
-    QDialogButtonBox, QGroupBox, QWidget,
+    QAbstractItemView, QDialog, QFileDialog, QFormLayout, QGridLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
 import i18n
-import wakeword
+import sent_log
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
-from workers import AutomationWorker, SendWorker, VerifyWorker, RecordWorker
-from widgets.ask_panel import AskPanel, MoreOptions
+from workers import AutomationWorker, SendWorker, VerifyWorker
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -210,317 +219,317 @@ class EmailSetupDialog(PrismDialog):
 
 
 class EmailComposeDialog(PrismDialog):
-    def __init__(self, cfg: dict, attachments: list, parent=None):
+    """To, Subject, Message — then Send. Everything else is optional and
+    says so.
+
+    `mode` is "one" (the default) or "list": the same window either way; a
+    list opens straight into the CSV picker so the second click the owner
+    made on the launcher is honoured.
+    """
+
+    def __init__(self, cfg: dict, attachments: list, parent=None,
+                 mode: str = "one"):
+        address = (cfg.get("email") or {}).get("address", "")
         super().__init__(
-            i18n.t("Email"),
-            i18n.t("Say what to send and who to. Prism writes the draft; you "
-                   "edit it and press Send."),
+            i18n.t("Send an email"),
+            i18n.t("From {address}. Fill in To, Subject and Message, then "
+                   "press Send. Nothing goes out until you press it."
+                   ).format(address=address or i18n.t("your account")),
             icon="mail", parent=parent, closable=False)
-        self.setWindowTitle("Compose Email")
-        self.resize(760, 760)
-        self.setMinimumSize(620, 660)
+        self.setWindowTitle(i18n.t("Send an email"))
+        self.resize(820, 760)
+        self.setMinimumSize(640, 620)
         self.cfg = cfg
-        self.attachments = attachments
-        self.recipients: list[dict] = []
-        # Split the attachments up front, not on a button press: CSVs are the
-        # recipient list, everything else rides along as a real attachment and
-        # feeds the draft. Doing this lazily meant a user who never pressed
-        # "Find recipients" silently sent an email with no files on it.
-        self._csvs, self.source_files = CB.mailer.split_attachments(attachments)
+        self.mode = mode
+        self._list: list[dict] = []          # recipients from a CSV
+        self._list_name = ""
+        self.source_files: list[dict] = []   # attached to every email
         self._worker = None
         self._send_worker = None
         self._draft_stage = ""
-        self._last_run: dict = {}   # routing/responses/links of the draft run
+        self._last_run: dict = {}
         self._sent_ok: list[str] = []
         self._sent_bad: list[tuple] = []
         self._subject = self._body = ""
-        self._rec = None
 
-        # The base class owns the header and footer; `root` is its body column.
+        self.header.add_action(C.button(
+            i18n.t("Change account"), "secondary", icon_name="key",
+            small=True, on_click=self._change_account))
+
         root = self.body
-        # A stacked form, not a grid of cards: the 16px card gutter
-        # between every row of a single column is what turns a short
-        # form into a tall one with bands of canvas through it.
         root.setSpacing(theme.ROW_GAP)
 
-        title = QLabel("What email do you want to send?")
-        title.setObjectName("h4")
-        root.addWidget(title)
+        # ── the letter: To / Subject / Message ────────────────────────────
+        form = QGridLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(theme.SPACE_3)
+        form.setVerticalSpacing(theme.SPACE_2)
+        form.setColumnMinimumWidth(0, 78)
+        form.setColumnStretch(1, 1)
 
-        # One box, the same as the home screen. Everything the old form asked
-        # for — who to send to, which file to write from — is read out of this
-        # sentence instead of out of six separate fields.
-        self.ask = AskPanel(
-            "Just say it — for example:\n"
-            "\"send all the clients in the CSV a note convincing them to buy "
-            "from us, use brochure.pdf so you know who we are\"")
-        self.ask.speak_clicked.connect(self._toggle_record)
-        self.ask.files_added.connect(self._on_files_added)
-        root.addWidget(self.ask)
+        to_row = QHBoxLayout()
+        to_row.setContentsMargins(0, 0, 0, 0)
+        to_row.setSpacing(theme.SPACE_2)
+        self.to_edit = QLineEdit()
+        self.to_edit.setPlaceholderText(i18n.t(
+            "rajesh@acme.in — for more than one, separate with commas"))
+        self.to_edit.textChanged.connect(self._sync)
+        to_row.addWidget(self.to_edit, stretch=1)
+        self.list_btn = C.button(i18n.t("Add a list (CSV)"), "secondary",
+                                 icon_name="list", small=True,
+                                 on_click=self._add_list)
+        to_row.addWidget(self.list_btn)
+        form.addWidget(self._field_label(i18n.t("To")), 0, 0)
+        form.addLayout(to_row, 0, 1)
 
-        # "Write the email" is a step, not the point of the window — Send is.
-        # It sits beside the prompt it acts on as a secondary, so the dialog
-        # keeps exactly one primary and it is the irreversible one.
-        go_row = QHBoxLayout()
-        go_row.setContentsMargins(0, 0, 0, 0)
-        go_row.setSpacing(theme.SPACE_2)
-        self.go_btn = C.button("Write the email", "secondary", "pencil",
-                               on_click=self._one_press)
-        go_row.addWidget(self.go_btn)
-        go_row.addStretch(1)
-        root.addLayout(go_row)
+        # Who this is going to, in words, right under the To line — and the
+        # list itself when there is one, so nobody has to open a panel to
+        # see who "42 people" are.
+        who_row = QHBoxLayout()
+        who_row.setContentsMargins(0, 0, 0, 0)
+        who_row.setSpacing(theme.SPACE_3)
+        self.who_label = C.label("", level="SUPPORT", wrap=True)
+        who_row.addWidget(self.who_label, stretch=1)
+        self.search_btn = C.button(i18n.t("Don't know the address? Search the web"),
+                                   "tertiary", icon_name="search", small=True,
+                                   on_click=self._discover_recipient)
+        who_row.addWidget(self.search_btn, alignment=Qt.AlignTop)
+        form.addLayout(who_row, 1, 1)
 
-        # Who this is going to. A standing fact about the draft, so it reads
-        # as an inset well rather than as a dashed "nothing here yet" box.
-        self.who_label = QLabel("", self)
-        self.who_label.setWordWrap(True)
-        self.who_label.setStyleSheet(
-            f"color: {theme.NEUTRAL[700]}; background: {theme.WELL};"
-            f" border: 1px solid {theme.HAIRLINE};"
-            f" border-radius: {theme.R_CONTROL}px;"
-            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
-        # Hidden while it has nothing to say. An empty inset strip under the
-        # prompt is a box waiting to be filled, which is not what "who this is
-        # going to" means before anybody has said anything.
-        self.who_label.setVisible(False)
-        root.addWidget(self.who_label)
+        self.list_box = QWidget()
+        list_col = QVBoxLayout(self.list_box)
+        list_col.setContentsMargins(0, 0, 0, 0)
+        list_col.setSpacing(theme.SPACE_2)
+        self.list_table = QTableWidget(0, 2)
+        self.list_table.setHorizontalHeaderLabels([i18n.t("Name"), i18n.t("Email")])
+        self.list_table.verticalHeader().setVisible(False)
+        self.list_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.list_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.list_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_table.setAlternatingRowColors(True)
+        head = self.list_table.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(1, QHeaderView.Stretch)
+        # Four rows visible, always; more scroll. A table that shows only
+        # its header is a table nobody can read.
+        row_h = self.list_table.verticalHeader().defaultSectionSize()
+        head_h = head.sizeHint().height()
+        self.list_table.setMinimumHeight(head_h + 4 * row_h + 4)
+        self.list_table.setMaximumHeight(head_h + 6 * row_h + 4)
+        list_col.addWidget(self.list_table)
+        list_btns = QHBoxLayout()
+        list_btns.setContentsMargins(0, 0, 0, 0)
+        list_btns.setSpacing(theme.SPACE_2)
+        self.remove_btn = C.button(i18n.t("Remove selected"), "secondary",
+                                   small=True, on_click=self._remove_selected)
+        list_btns.addWidget(self.remove_btn)
+        self.clear_list_btn = C.button(i18n.t("Clear the list"), "tertiary",
+                                       small=True, on_click=self._clear_list)
+        list_btns.addWidget(self.clear_list_btn)
+        list_btns.addStretch(1)
+        list_col.addLayout(list_btns)
+        self.list_box.setVisible(False)
+        form.addWidget(self.list_box, 2, 1)
 
-        # The old recipient controls still exist, for the rare user who wants
-        # to hand-edit the list. Shut by default.
-        self.more = MoreOptions("Edit the recipient list")
-        rec_holder = QWidget()
-        rec_layout = QVBoxLayout(rec_holder)
-        rec_layout.setContentsMargins(0, 0, 0, 0)
-        self.rec_empty = QLabel("No recipients yet.")
-        self.rec_empty.setObjectName("emptyState")
-        self.rec_empty.setWordWrap(True)
-        rec_layout.addWidget(self.rec_empty)
-        self.rec_list = QListWidget(self)
-        self.rec_list.setMaximumHeight(120)
-        self.rec_list.setVisible(False)
-        rec_layout.addWidget(self.rec_list)
-
-        add_row = QHBoxLayout()
-        self.add_edit = QLineEdit()
-        self.add_edit.setPlaceholderText("type an address and press Enter to add it")
-        self.add_edit.returnPressed.connect(self._add_recipient)
-        add_row.addWidget(self.add_edit, stretch=1)
-        self.remove_btn = QPushButton("Remove selected")
-        self.remove_btn.clicked.connect(self._remove_recipient)
-        add_row.addWidget(self.remove_btn)
-        rec_layout.addLayout(add_row)
-
-        rec_btns = QHBoxLayout()
-        find_btn = QPushButton("Re-read addresses from my words + CSV")
-        find_btn.clicked.connect(self._find_recipients)
-        rec_btns.addWidget(find_btn)
-        discover_btn = QPushButton("Search the web for their email")
-        discover_btn.clicked.connect(self._discover_recipient)
-        rec_btns.addWidget(discover_btn)
-        rec_layout.addLayout(rec_btns)
-        self.more.add(rec_holder)
-        root.addWidget(self.more)
-
-        draft_box = QGroupBox("Your draft — edit anything before it goes")
-        draft_layout = QVBoxLayout(draft_box)
-        files_note = QLabel(self._files_note())
-        files_note.setObjectName("dim")
-        files_note.setWordWrap(True)
-        draft_layout.addWidget(files_note)
-        # A secondary in its own row rather than a full-width bar: rewriting
-        # is an in-place action on the draft below it, and a button as wide as
-        # the card competes with Send for the eye.
-        draft_row = QHBoxLayout()
-        draft_row.setContentsMargins(0, 0, 0, 0)
-        draft_row.setSpacing(theme.SPACE_2)
-        draft_btn = C.button("Rewrite the draft", "secondary", "pencil",
-                             small=True, on_click=self._generate_draft)
-        draft_row.addWidget(draft_btn)
-        draft_row.addStretch(1)
-        draft_layout.addLayout(draft_row)
-        form = QFormLayout()
         self.subject_edit = QLineEdit()
-        form.addRow("Subject:", self.subject_edit)
-        draft_layout.addLayout(form)
+        self.subject_edit.setPlaceholderText(i18n.t("What the email is about"))
+        self.subject_edit.textChanged.connect(self._sync)
+        form.addWidget(self._field_label(i18n.t("Subject")), 3, 0)
+        form.addWidget(self.subject_edit, 3, 1)
+
         self.body_edit = C.PlainPasteTextEdit()
-        self.body_edit.setPlaceholderText(
-            "Draft body appears here — edit freely before sending.\n"
-            "Write {name} anywhere and each recipient gets their own name "
-            "(or 'there' when the list has no name for them).")
-        draft_layout.addWidget(self.body_edit)
-        root.addWidget(draft_box, stretch=1)
+        self.body_edit.setAcceptRichText(False)
+        self.body_edit.setPlaceholderText(i18n.t(
+            "Type the message here, or ask Prism to write it below.\n"
+            "Write {name} anywhere and each person gets their own name."))
+        self.body_edit.setMinimumHeight(160)
+        self.body_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.body_edit.textChanged.connect(self._sync)
+        form.addWidget(self._field_label(i18n.t("Message")), 4, 0,
+                       alignment=Qt.AlignTop)
+        form.addWidget(self.body_edit, 4, 1)
+        form.setRowStretch(4, 1)
+
+        files_row = QHBoxLayout()
+        files_row.setContentsMargins(0, 0, 0, 0)
+        files_row.setSpacing(theme.SPACE_2)
+        self.attach_btn = C.button(i18n.t("Attach a file"), "secondary",
+                                   icon_name="paperclip", small=True,
+                                   on_click=self._attach)
+        files_row.addWidget(self.attach_btn)
+        self.files_label = C.label(i18n.t("No files attached."), level="SUPPORT",
+                                   wrap=True)
+        files_row.addWidget(self.files_label, stretch=1)
+        self.clear_files_btn = C.button(i18n.t("Remove files"), "tertiary",
+                                        small=True, on_click=self._clear_files)
+        self.clear_files_btn.setVisible(False)
+        files_row.addWidget(self.clear_files_btn)
+        form.addWidget(self._field_label(i18n.t("Files")), 5, 0)
+        form.addLayout(files_row, 5, 1)
+        root.addLayout(form, stretch=1)
+
+        # ── optional: let Prism write it ──────────────────────────────────
+        card = C.Card()
+        card_col = card.body(margins=(theme.SPACE_4, theme.SPACE_3,
+                                      theme.SPACE_4, theme.SPACE_3),
+                             spacing=theme.SPACE_2)
+        card_col.addWidget(C.label(
+            i18n.t("Want Prism to write the message for you? (optional)"),
+            level="CARD_TITLE"))
+        brief_row = QHBoxLayout()
+        brief_row.setContentsMargins(0, 0, 0, 0)
+        brief_row.setSpacing(theme.SPACE_2)
+        self.brief_edit = QLineEdit()
+        self.brief_edit.setPlaceholderText(i18n.t(
+            "Say what it should say — e.g. introduce our spring range and "
+            "ask for a meeting next week"))
+        self.brief_edit.returnPressed.connect(self._write_for_me)
+        brief_row.addWidget(self.brief_edit, stretch=1)
+        self.write_btn = C.button(i18n.t("Write it for me"), "secondary",
+                                  icon_name="pencil", small=True,
+                                  on_click=self._write_for_me)
+        brief_row.addWidget(self.write_btn)
+        card_col.addLayout(brief_row)
+        card_col.addWidget(C.label(i18n.t(
+            "Attached files are read for the draft. The draft lands in the "
+            "Message box above; change anything before you send."),
+            level="SUPPORT", wrap=True))
+        root.addWidget(card)
 
         self.status = QLabel("")
         self.status.setObjectName("dim")
         self.status.setWordWrap(True)
-        # Some statuses hand back the tool's tab (see _on_draft_done) — a link
-        # you can't click is just an apology.
         self.status.setOpenExternalLinks(True)
         root.addWidget(self.status)
 
         self.footer.add_secondary(
             self.button(i18n.t("Close"), on_click=self.reject))
-        self.send_btn = self.button("Send to everyone", "primary",
+        self.send_btn = self.button(i18n.t("Send"), "primary",
                                     icon_name="mail", on_click=self._send)
         self.footer.set_primary(self.send_btn)
+        self.tab_chain(self.to_edit, self.subject_edit, self.body_edit,
+                       self.brief_edit)
 
-    # ── recipients ────────────────────────────────────────────────────────
-    def _one_press(self):
-        """One button does the whole job: read who from the sentence and the
-        attached CSV, then write the draft. The old screen made the user press
-        'Find recipients' and then 'Generate draft' and work out for themselves
-        that the order mattered."""
-        if not self.ask.text():
-            QMessageBox.information(self, "Email",
-                                    "Tell me what the email should say.")
+        # What the workbench handed over: a CSV is the list, the rest ride
+        # along as attachments.
+        if attachments:
+            self._take_attachments(attachments)
+        self._sync()
+        if mode == "list" and not self._list:
+            QTimer.singleShot(0, self._add_list)
+        else:
+            self.to_edit.setFocus()
+
+    # ── small builders ──────────────────────────────────────────────────
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        lbl = C.label(text, level="BODY", weight=600)
+        lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        return lbl
+
+    # ── recipients ──────────────────────────────────────────────────────
+    def _typed(self) -> list[dict]:
+        """Addresses in the To line, in order, deduplicated."""
+        seen, out = set(), []
+        for email in _EMAIL_RE.findall(self.to_edit.text()):
+            key = email.lower()
+            if key not in seen:
+                seen.add(key)
+                out.append({"email": key, "name": ""})
+        return out
+
+    @property
+    def recipients(self) -> list[dict]:
+        """The list first (it carries names), then the typed ones; one entry
+        per address."""
+        seen, out = set(), []
+        for r in list(self._list) + self._typed():
+            key = r["email"].lower()
+            if key not in seen:
+                seen.add(key)
+                out.append({"email": key, "name": (r.get("name") or "").strip()})
+        return out
+
+    def _add_list(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Choose the list of addresses"), "",
+            "CSV (*.csv);;All files (*)")
+        if path:
+            self._load_list(path)
+
+    def _load_list(self, path: str):
+        """Read a CSV of recipients on this machine. Adds to any list already
+        loaded; the first entry per address wins, so a name from the CSV is
+        never replaced by a bare address."""
+        try:
+            found = CB.mailer.parse_recipients(path)
+        except Exception as e:                                # noqa: BLE001
+            self.status.setText(i18n.t("Could not read {name}: {error}").format(
+                name=os.path.basename(path), error=e))
             return
-        self._find_recipients()
-        if not self.recipients:
-            # Nobody named and no CSV — offer the web search rather than
-            # stopping with an error the user can do nothing with.
-            self._discover_recipient()
+        if not found:
+            self.status.setText(i18n.t(
+                "{name} has no email addresses in it.").format(
+                name=os.path.basename(path)))
             return
-        self._generate_draft()
+        have = {r["email"].lower() for r in self._list}
+        for r in found:
+            if r["email"].lower() not in have:
+                have.add(r["email"].lower())
+                self._list.append({"email": r["email"].lower(),
+                                   "name": (r.get("name") or "").strip()})
+        self._list_name = os.path.basename(path)
+        self._fill_list_table()
+        self.status.setText(i18n.t("{n} addresses read from {name}.").format(
+            n=len(found), name=self._list_name))
+        self._sync()
 
-    def _on_files_added(self, paths: list):
-        """A CSV is the address list; anything else is source material for the
-        draft. The user should not have to know that distinction."""
-        for p in paths:
-            try:
-                att = CB.files.attach(p)
-            except Exception:
-                continue
-            self.attachments.append(att)
-            csvs, others = CB.mailer.split_attachments([att])
-            self._csvs += csvs
-            self.source_files += others
-        self._set_who(self._files_note())
+    def _fill_list_table(self):
+        self.list_table.setRowCount(0)
+        for r in self._list:
+            row = self.list_table.rowCount()
+            self.list_table.insertRow(row)
+            self.list_table.setItem(row, 0, QTableWidgetItem(r.get("name") or ""))
+            self.list_table.setItem(row, 1, QTableWidgetItem(r["email"]))
+        self.list_box.setVisible(bool(self._list))
 
-    def _toggle_record(self):
-        if getattr(self, "_rec", None):
-            self._rec.stop()
-            self.ask.set_recording(False)
-            return
-        if not CB.voice.available():
-            QMessageBox.information(
-                self, "Speak",
-                i18n.t("Voice needs PyAudio on this machine:\n\n"
-                       "    {hint}\n\n"
-                       "Everything else works — just type instead."
-                       ).format(hint=wakeword.install_hint()))
-            return
-        self.ask.set_recording(True)
-        self.status.setText("Listening — press Stop when you're done.")
-        self._rec = RecordWorker(self.cfg)
-        self._rec.done.connect(self._on_spoken)
-        self._rec.failed.connect(self._on_spoken_failed)
-        self._rec.start()
-
-    def _on_spoken(self, text: str, lang: str):
-        self._rec = None
-        self.ask.set_recording(False)
-        self.status.setText("")
-        if text:
-            self.ask.append_text(text)
-
-    def _on_spoken_failed(self, error: str):
-        self._rec = None
-        self.ask.set_recording(False)
-        self.status.setText("")
-        QMessageBox.information(self, "Speak", error)
-
-    def _set_who(self, text: str):
-        """Show the recipient summary only once there is one."""
-        self.who_label.setText(text)
-        self.who_label.setVisible(bool((text or "").strip()))
-
-    def _files_note(self) -> str:
-        names = ", ".join(f["name"] for f in self.source_files)
-        csvs = ", ".join(a["name"] for a in self._csvs)
-        parts = []
-        parts.append(f"Attached to every email: {names}" if names
-                     else "No files attached — the email goes out as text only.")
-        if csvs:
-            parts.append(f"{csvs} is read locally for addresses and never "
-                         "attached or shown to any AI.")
-        return "  ".join(parts)
-
-    def _find_recipients(self):
-        text = self.ask.text()
-        inline, remainder = CB.mailer.recipients_from_text(text)
-        self.ask.set_text(remainder)
-        found = list(inline)
-        for a in self._csvs:
-            found += CB.mailer.parse_recipients(a["path"])
-        self._merge_recipients(found)
-        if not self.recipients:
-            self.status.setText("No recipients found — type one in below, or "
-                                "search for their public email.")
-
-    def _merge_recipients(self, found: list[dict]):
-        """Add to what's already listed, first entry per address wins — the
-        CSV usually carries the name, so it must not be replaced by a bare
-        address picked up from the goal text."""
-        merged = list(self.recipients) + list(found)
-        seen = set()
-        self.recipients = [r for r in merged
-                           if not (r["email"] in seen or seen.add(r["email"]))]
-        self._refresh_recipients()
-
-    def _add_recipient(self):
-        typed = self.add_edit.text().strip()
-        addresses = _EMAIL_RE.findall(typed)
-        if not addresses:
-            self.status.setText("That isn't an email address.")
-            return
-        self.add_edit.clear()
-        self._merge_recipients([{"email": a.lower(), "name": ""} for a in addresses])
-
-    def _remove_recipient(self):
-        rows = sorted((i.row() for i in self.rec_list.selectedIndexes()), reverse=True)
+    def _remove_selected(self):
+        rows = sorted({i.row() for i in self.list_table.selectedIndexes()},
+                      reverse=True)
         if not rows:
-            self.status.setText("Select an address in the list first.")
+            self.status.setText(i18n.t("Click a row in the list first."))
             return
         for row in rows:
-            if 0 <= row < len(self.recipients):
-                del self.recipients[row]
-        self._refresh_recipients()
+            if 0 <= row < len(self._list):
+                del self._list[row]
+        if not self._list:
+            self._list_name = ""
+        self._fill_list_table()
+        self._sync()
 
-    def _refresh_recipients(self):
-        if self.recipients:
-            self.send_btn.setText(f"Send to all {len(self.recipients)}")
-        self.rec_list.clear()
-        for r in self.recipients:
-            name = (r.get("name") or "").strip()
-            self.rec_list.addItem(QListWidgetItem(
-                f"{name}  <{r['email']}>" if name else r["email"]))
-        has_recipients = bool(self.recipients)
-        self.rec_empty.setVisible(not has_recipients)
-        self.rec_list.setVisible(has_recipients)
-        # Say who this is going to in plain words, on the main screen — the
-        # user should never have to open a panel to find that out.
-        if not self.recipients:
-            self._set_who(self._files_note())
-            return
-        shown = ", ".join(r["email"] for r in self.recipients[:3])
-        more = f" and {len(self.recipients) - 3} more" if len(self.recipients) > 3 else ""
-        self._set_who(
-            f"Going to {len(self.recipients)} people — {shown}{more}."
-            f"  ·  {self._files_note()}")
+    def _clear_list(self):
+        self._list, self._list_name = [], ""
+        self._fill_list_table()
+        self._sync()
 
     def _discover_recipient(self):
-        goal = self.ask.text().strip()
+        """No address to hand: ask the research/leads tool to find the
+        public one, from the description in the brief box."""
+        goal = self.brief_edit.text().strip()
         if not goal:
-            QMessageBox.information(self, "Search", "Describe who the recipient is first.")
+            self.status.setText(i18n.t(
+                "Say who they are in the box at the bottom (for example "
+                "\"purchase manager at Acme Forgings, Rajkot\"), then press "
+                "this again."))
+            self.brief_edit.setFocus()
             return
         agents = CB.config.active_agents(self.cfg)
-        # Leads first — it is the stage meant for "who do I contact". Research
-        # and brains stay as the fallback for anyone who has not set one.
         finder = next((s for s in ("leads", "research", "brains")
                        if agents.get(s)), None)
         if not finder:
-            QMessageBox.warning(
-                self, "Search", "No leads/research/brains agent configured.")
+            self.status.setText(i18n.t(
+                "No research tool is set up, so Prism cannot search. Type "
+                "the address in To instead."))
             return
         routing = {finder: {"needed": True, "questions": [
             "Your ONLY task is: find the official, public contact email address for "
@@ -529,10 +538,11 @@ class EmailComposeDialog(PrismDialog):
             "is for (e.g. partnerships, support, general). Prefer official domains "
             "over aggregator sites. If none can be found, reply exactly NONE."
         ]}}
-        self.status.setText(f"Searching with {agents[finder]}…")
+        self.status.setText(i18n.t("Searching with {tool}…").format(tool=agents[finder]))
         self._worker = AutomationWorker(routing, self.cfg, [], goal)
         self._worker.done.connect(self._on_discovery_done)
-        self._worker.failed.connect(lambda e: self.status.setText(f"Search failed: {e}"))
+        self._worker.failed.connect(
+            lambda e: self.status.setText(i18n.t("Search failed: {error}").format(error=e)))
         self._worker.start()
 
     def _on_discovery_done(self, responses: dict, links: dict):
@@ -540,104 +550,201 @@ class EmailComposeDialog(PrismDialog):
         found = list(dict.fromkeys(_EMAIL_RE.findall(text)))
         found = [e for e in found if not e.lower().endswith("example.com")][:5]
         if not found:
-            self.status.setText("No email address found — enter one manually instead.")
+            self.status.setText(i18n.t(
+                "No address found — type one in To instead."))
             return
-        self._merge_recipients([{"email": e, "name": ""} for e in found])
-        self.status.setText(f"Found {len(found)} candidate address(es) — remove "
-                            "any you don't want with the button above.")
+        current = self.to_edit.text().strip()
+        joined = ", ".join(found)
+        self.to_edit.setText(f"{current}, {joined}" if current else joined)
+        self.status.setText(i18n.t(
+            "Found {n} address(es) and put them in To — delete any you do "
+            "not want.").format(n=len(found)))
 
-    # ── draft ─────────────────────────────────────────────────────────────
-    def _generate_draft(self):
-        goal = self.ask.text().strip()
+    # ── files ───────────────────────────────────────────────────────────
+    def _attach(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, i18n.t("Attach to every email"), "", "All files (*)")
+        if paths:
+            self._on_files_added(paths)
+
+    def _on_files_added(self, paths: list):
+        """A CSV is the list; anything else is attached to every email."""
+        atts = []
+        for p in paths:
+            try:
+                atts.append(CB.files.attach(p))
+            except Exception:                                 # noqa: BLE001
+                continue
+        self._take_attachments(atts)
+
+    def _take_attachments(self, attachments: list):
+        csvs, others = CB.mailer.split_attachments(attachments)
+        for a in csvs:
+            self._load_list(a["path"])
+        known = {f["path"] for f in self.source_files}
+        self.source_files += [f for f in others if f["path"] not in known]
+        self._sync()
+
+    def _clear_files(self):
+        self.source_files = []
+        self._sync()
+
+    # ── the one place the screen is kept truthful ─────────────────────────
+    def _sync(self, *_args):
+        recipients = self.recipients
+        n = len(recipients)
+        if n == 0:
+            who = ""
+        elif n == 1:
+            r = recipients[0]
+            who = i18n.t("Going to {who}.").format(
+                who=f"{r['name']} <{r['email']}>" if r["name"] else r["email"])
+        elif self._list_name:
+            who = i18n.t("Going to {n} people — {m} from {name}{extra}.").format(
+                n=n, m=len(self._list), name=self._list_name,
+                extra=(i18n.t(", the rest typed above")
+                       if n > len(self._list) else ""))
+        else:
+            who = i18n.t("Going to {n} people.").format(n=n)
+        self.who_label.setText(who)
+        self.who_label.setVisible(bool(who))
+
+        names = ", ".join(f["name"] for f in self.source_files)
+        self.files_label.setText(
+            i18n.t("Attached to every email: {names}").format(names=names)
+            if names else i18n.t("No files attached."))
+        self.clear_files_btn.setVisible(bool(self.source_files))
+
+        missing = []
+        if n == 0:
+            missing.append(i18n.t("an address in To"))
+        if not self.subject_edit.text().strip():
+            missing.append(i18n.t("a subject"))
+        if not self.body_edit.toPlainText().strip():
+            missing.append(i18n.t("the message"))
+        sending = bool(self._send_worker and self._send_worker.isRunning())
+        if sending:
+            return
+        if missing:
+            self.send_btn.setText(i18n.t("Send"))
+            self.send_btn.setEnabled(False)
+            self.send_btn.setToolTip(i18n.t("Still needed: {what}").format(
+                what=", ".join(missing)))
+        else:
+            self.send_btn.setEnabled(True)
+            self.send_btn.setToolTip("")
+            if n == 1:
+                self.send_btn.setText(i18n.t("Send to {who}").format(
+                    who=recipients[0]["email"]))
+            else:
+                self.send_btn.setText(i18n.t("Send to {n} people").format(n=n))
+
+    # ── draft ───────────────────────────────────────────────────────────
+    def _write_for_me(self):
+        goal = self.brief_edit.text().strip()
         if not goal:
-            QMessageBox.information(self, "Draft", "Say what the email is about first.")
+            self.status.setText(i18n.t(
+                "Say what the email should say in the box first."))
+            self.brief_edit.setFocus()
             return
         agents = CB.config.active_agents(self.cfg)
         avail = [s for s in ("research", "brains", "content") if agents.get(s)]
         if not avail:
-            QMessageBox.warning(self, "Draft", "No research/brains/content agent configured.")
+            self.status.setText(i18n.t(
+                "No writing tool is set up (Settings → AI tools), so Prism "
+                "cannot write this. Type the message yourself instead."))
             return
         draft_stage = avail[-1]
         self._draft_stage = draft_stage
         routing = {draft_stage: {
             "needed": True,
             "reason": "write the email draft — and ONLY the draft",
-            # Don't call the answer finished until the draft's own marker is on
-            # the page: these tools pause mid-answer, and a pause used to be
-            # read as "done" and scraped into the subject/body half-written.
             "expect": "SUBJECT:",
             "questions": [CB.mailer.draft_question(goal)]}}
         self._last_run = {"routing": routing, "agent": agents[draft_stage]}
-        self.status.setText(f"Drafting with {agents[draft_stage]}…")
-        self._worker = AutomationWorker(routing, self.cfg, self.source_files, f"write an email: {goal}")
+        self.write_btn.setEnabled(False)
+        self.status.setText(i18n.t("Writing with {tool}… this takes a minute or "
+                                   "two.").format(tool=agents[draft_stage]))
+        self._worker = AutomationWorker(routing, self.cfg, self.source_files,
+                                        f"write an email: {goal}")
         self._worker.done.connect(self._on_draft_done)
-        self._worker.failed.connect(lambda e: self.status.setText(f"Draft failed: {e}"))
+        self._worker.failed.connect(self._on_draft_failed)
         self._worker.start()
 
+    def _on_draft_failed(self, error: str):
+        self.write_btn.setEnabled(True)
+        self.status.setText(i18n.t("Could not write it: {error}").format(error=error))
+
     def _on_draft_done(self, responses: dict, links: dict):
+        self.write_btn.setEnabled(True)
         texts = responses.get(self._draft_stage) or []
-        # Kept for the run record written after the send, so an /email from the
-        # GUI lands in History with the same shape the CLI writes.
         self._last_run.update({"responses": responses, "links": links})
-        # Belt and braces: automation already drops prompt echoes, but a tool
-        # that restates the brief before answering must never become the email.
         usable = [t for t in texts if not CB.mailer.is_prompt_echo(t)]
         draft = CB.mailer.parse_draft(usable[0] if usable else "")
         if not draft:
-            # The tool may simply have been slower than Prism's wait — its tab
-            # is where the finished draft shows up, so hand it over.
             url = (links or {}).get(self._draft_stage, "")
-            note = ("Couldn't read a SUBJECT/BODY draft back — the tool may "
-                    "still be writing it. ")
+            note = i18n.t("Could not read a finished draft back — the tool may "
+                          "still be writing it. ")
             if url:
                 note += (f'<a href="{url}" style="color:{theme.ACCENT_RAMP[700]}">'
-                         "Open the draft in the tool</a> and paste it in here.")
+                         + i18n.t("Open it in the tool") + "</a> "
+                         + i18n.t("and paste the text into Message."))
             else:
-                note += "Write the email manually instead."
+                note += i18n.t("Type the message yourself instead.")
             self.status.setText(note)
             return
         subject, body = draft
         self.subject_edit.setText(subject)
         self.body_edit.setPlainText(body)
-        self.status.setText("Draft ready — review before sending.")
+        self.status.setText(i18n.t(
+            "Draft ready — read it, change anything, then press Send."))
 
-    # ── send ──────────────────────────────────────────────────────────────
+    # ── send ────────────────────────────────────────────────────────────
+    def _change_account(self):
+        dlg = EmailSetupDialog(self.cfg, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.cfg = dlg.cfg
+            address = (self.cfg.get("email") or {}).get("address", "")
+            self.header.set_subtitle(i18n.t(
+                "From {address}. Fill in To, Subject and Message, then press "
+                "Send. Nothing goes out until you press it.").format(address=address))
+
     def _send(self):
         # Second press while a blast is running means stop, not send again.
         if self._send_worker and self._send_worker.isRunning():
             self._send_worker.stop()
             self.send_btn.setEnabled(False)
-            self.send_btn.setText("Stopping…")
+            self.send_btn.setText(i18n.t("Stopping…"))
             return
-
         if not CB.mailer.is_configured(self.cfg):
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
                 return
             self.cfg = dlg.cfg
-        if not self.recipients:
-            QMessageBox.warning(self, "Send", "No recipients — find or add some first.")
-            return
+        recipients = self.recipients
         subject = self.subject_edit.text().strip()
         body = self.body_edit.toPlainText().strip()
-        if not subject or not body:
-            QMessageBox.warning(self, "Send", "Generate (or write) a subject and body first.")
+        if not recipients or not subject or not body:
+            self._sync()
             return
-
-        names = ", ".join(r["email"] for r in self.recipients[:5])
-        more = ", …" if len(self.recipients) > 5 else ""
-        files = ", ".join(f["name"] for f in self.source_files) or "none"
+        files = ", ".join(f["name"] for f in self.source_files) or i18n.t("none")
+        if len(recipients) == 1:
+            question = i18n.t(
+                "Send this email to {to}?\n\nSubject: {subject}\n"
+                "Files: {files}\nFrom: {sender}").format(
+                to=recipients[0]["email"], subject=subject, files=files,
+                sender=self.cfg["email"]["address"])
+        else:
+            shown = ", ".join(r["email"] for r in recipients[:5])
+            more = ", …" if len(recipients) > 5 else ""
+            question = i18n.t(
+                "Send to {n} people?\n\nTo: {to}\nSubject: {subject}\n"
+                "Files: {files}\nFrom: {sender}\n\nEach person gets their own "
+                "copy. This cannot be undone.").format(
+                n=len(recipients), to=f"{shown}{more}", subject=subject,
+                files=files, sender=self.cfg["email"]["address"])
         confirm = QMessageBox.question(
-            self, "Confirm send",
-            i18n.t("Send to {n} recipient(s)?\n\n"
-                   "To: {to}\n"
-                   "Subject: {subject}\n"
-                   "Attachments: {files}\n"
-                   "From: {sender}\n\n"
-                   "Each address gets its own message — this can't be undone."
-                   ).format(n=len(self.recipients), to=f"{names}{more}",
-                            subject=subject, files=files,
-                            sender=self.cfg["email"]["address"]),
+            self, i18n.t("Send"), question,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No)   # nobody should send a blast by pressing Enter
         if confirm != QMessageBox.Yes:
@@ -645,27 +752,29 @@ class EmailComposeDialog(PrismDialog):
 
         self._sent_ok, self._sent_bad = [], []
         self._subject, self._body = subject, body
+        self._recipients_sent = recipients
         self._set_sending(True)
-        self.status.setText(f"Signing in to {self.cfg['email']['host']}…")
-        self._send_worker = SendWorker(self.cfg, list(self.recipients),
-                                       subject, body, self.source_files)
+        self.status.setText(i18n.t("Signing in to {host}…").format(
+            host=self.cfg["email"]["host"]))
+        self._send_worker = SendWorker(self.cfg, list(recipients), subject,
+                                       body, self.source_files)
         self._send_worker.progress.connect(self._on_send_progress)
         self._send_worker.done.connect(self._on_send_done)
         self._send_worker.failed.connect(self._on_send_failed)
         self._send_worker.start()
 
     def _set_sending(self, sending: bool):
-        """A blast is minutes long — everything that would change what is being
+        """A list takes minutes. Everything that would change what is being
         sent is locked while it runs, and Send becomes the way to stop."""
-        # self.ask is the compose box (an AskPanel); it replaced the old
-        # goal_edit line when this dialog was rebuilt, but this lock list kept
-        # the dead name — so every Send raised AttributeError before a single
-        # mail went out. Lock the box that actually exists.
-        for w in (self.subject_edit, self.body_edit, self.ask,
-                  self.add_edit, self.remove_btn):
+        for w in (self.to_edit, self.subject_edit, self.body_edit,
+                  self.brief_edit, self.list_btn, self.attach_btn,
+                  self.remove_btn, self.clear_list_btn, self.write_btn):
             w.setEnabled(not sending)
         self.send_btn.setEnabled(True)
-        self.send_btn.setText("Stop sending" if sending else "Send")
+        if sending:
+            self.send_btn.setText(i18n.t("Stop sending"))
+        else:
+            self._sync()
 
     def _on_send_progress(self, i: int, total: int, email: str, ok: bool, error: str):
         (self._sent_ok if ok else self._sent_bad).append(
@@ -675,47 +784,59 @@ class EmailComposeDialog(PrismDialog):
             i=i, total=total, email=email,
             state=i18n.t("sent") if ok else i18n.t("FAILED")) + tail
         if self._sent_bad and ok:
-            line += "  " + i18n.t("({n} failed so far)").format(
-                n=len(self._sent_bad))
+            line += "  " + i18n.t("({n} failed so far)").format(n=len(self._sent_bad))
         self.status.setText(line)
 
     def _on_send_done(self, sent: list, failed: list):
         self._set_sending(False)
         stopped = bool(self._send_worker and self._send_worker.stopped)
+        recipients = getattr(self, "_recipients_sent", self.recipients)
+        try:
+            sent_log.record(
+                self.cfg, to=recipients, subject=self._subject, body=self._body,
+                sent=sent, failed=failed,
+                attachments=[f["name"] for f in self.source_files],
+                list_name=self._list_name, stopped=stopped)
+        except Exception as e:                                # noqa: BLE001
+            self.status.setText(i18n.t(
+                "Sent, but could not write it down in {path}: {error}").format(
+                path=sent_log.path(self.cfg), error=e))
         self._save_run(sent, failed)
-        msg = f"Sent to {len(sent)}/{len(self.recipients)} recipient(s)."
+        if len(recipients) == 1 and sent and not failed:
+            msg = i18n.t("Sent to {who}.").format(who=sent[0])
+        else:
+            msg = i18n.t("Sent to {n} of {total}.").format(
+                n=len(sent), total=len(recipients))
         if stopped:
-            msg += "\nStopped early — the rest were not attempted."
+            msg += "\n" + i18n.t("Stopped early — the rest were not attempted.")
         if failed:
             shown = "\n".join(f"· {email} — {err[:120]}" for email, err in failed[:8])
-            msg += f"\n\n{len(failed)} failed:\n{shown}"
-            hint = CB.mailer.explain_error(failed[0][1],
-                                           self.cfg["email"]["address"])
+            msg += "\n\n" + i18n.t("{n} failed:").format(n=len(failed)) + "\n" + shown
+            hint = CB.mailer.explain_error(failed[0][1], self.cfg["email"]["address"])
             if hint != failed[0][1]:
                 msg += f"\n\n{hint}"
         self.status.setText(msg.split("\n")[0])
-        QMessageBox.information(self, "Email", msg)
+        QMessageBox.information(self, i18n.t("Email"), msg)
         if sent and not failed and not stopped:
             self.accept()
 
     def _on_send_failed(self, error: str):
-        """Login/connection died — nothing went out at all."""
+        """Login or connection died — nothing went out at all."""
         self._set_sending(False)
         hint = CB.mailer.explain_error(error, self.cfg["email"]["address"])
-        self.status.setText(f"Couldn't send: {hint}")
+        self.status.setText(i18n.t("Could not send: {hint}").format(hint=hint))
         again = QMessageBox.question(
-            self, "Send failed",
+            self, i18n.t("Send failed"),
             i18n.t("{hint}\n\nThe server said: {error}\n\n"
                    "Open account setup now?").format(hint=hint, error=error))
         if again == QMessageBox.Yes:
-            dlg = EmailSetupDialog(self.cfg, self)
-            if dlg.exec() == QDialog.Accepted:
-                self.cfg = dlg.cfg
+            self._change_account()
 
     def _save_run(self, sent: list, failed: list):
-        """Same record the CLI's /email writes, so the blast shows up in
-        History next to every other run instead of vanishing."""
-        goal = self.ask.text().strip()
+        """The same record the CLI's /email writes, so the send also shows
+        in History. The "/email " prefix is what History and the old front
+        door key on — keep it."""
+        goal = self.brief_edit.text().strip() or self._subject
         record = {
             "query": f"/email {goal}",
             "routing": self._last_run.get("routing") or {},
@@ -723,49 +844,37 @@ class EmailComposeDialog(PrismDialog):
             "links": self._last_run.get("links") or {},
             "attachments": [f["name"] for f in self.source_files],
             "email": {"subject": self._subject, "sent": sent, "failed": failed,
-                      "recipients": len(self.recipients)},
+                      "recipients": len(getattr(self, "_recipients_sent", []))},
         }
         if self._draft_stage and self._last_run.get("agent"):
             record["agents"] = {self._draft_stage: self._last_run["agent"]}
         try:
             CB.config.save_run(record)
-        except Exception as e:
-            self.status.setText(f"Sent, but couldn't save to History: {e}")
+        except Exception as e:                                # noqa: BLE001
+            self.status.setText(i18n.t(
+                "Sent, but could not save to History: {error}").format(error=e))
 
     def closeEvent(self, event):
-        """Wind up every worker before this dialog is destroyed.
-
-        A QThread destroyed while still running aborts the whole process — Qt
-        calls qFatal() from ~QThread. This dialog owns four: a mailbox verify,
-        a voice recorder, a browser draft that runs for MINUTES, and the send.
-        The old handler stopped only the send, so closing mid-draft (the long
-        one) crashed. Modelled on InquiryDialog.closeEvent.
-        """
-        # The send is the one worth interrupting the user for — a blast that is
-        # part-way out is a real thing to stop on purpose.
+        """Wind up every worker before this dialog is destroyed — a QThread
+        destroyed while running aborts the whole process."""
         if self._send_worker and self._send_worker.isRunning():
             leave = QMessageBox.question(
-                self, "Still sending",
-                "Emails are still going out. Stop the blast and close?")
+                self, i18n.t("Still sending"),
+                i18n.t("Emails are still going out. Stop and close?"))
             if leave != QMessageBox.Yes:
                 event.ignore()
                 return
-        # Stop and JOIN every worker, send included. Order: ask all to stop,
-        # then wait each, terminating only a thread that overruns its wait.
-        for worker in (self._worker, self._send_worker, self._rec):
+        for worker in (self._worker, self._send_worker):
             if worker is None:
                 continue
             try:
                 if not worker.isRunning():
                     continue
+                if hasattr(worker, "stop"):
+                    worker.stop()
+                if not worker.wait(8000):
+                    worker.terminate()
+                    worker.wait(1000)
             except RuntimeError:
-                continue        # already deleted; nothing to wait for
-            stop = getattr(worker, "stop", None)
-            if callable(stop):
-                stop()
-            # The browser draft sits in a Selenium poll seconds wide, so a
-            # short wait would expire and terminate a thread about to finish.
-            if not worker.wait(10_000):
-                worker.terminate()
-                worker.wait(1000)
+                pass
         super().closeEvent(event)

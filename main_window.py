@@ -344,7 +344,8 @@ class MainWindow(QMainWindow):
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
-        self.email_panel.opened.connect(self._open_email_dialog)
+        self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
+        self.email_panel.open_compose.connect(self._open_email_dialog)
         self.email_panel.change_account.connect(self._open_email_setup)
         # The screens that now offer a way onward. Same pattern as
         # settings_panel.navigate — the payload is a _handle_command key, so
@@ -1171,13 +1172,17 @@ class MainWindow(QMainWindow):
         self._authorized_then("email", "addon",
                               lambda: self._show_screen("email"))
 
-    def _open_email_dialog(self):
+    def _open_email_dialog(self, mode: str = "one"):
         if not CB.mailer.is_configured(self.cfg):
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
                 return
             self.cfg = dlg.cfg
-        EmailComposeDialog(self.cfg, self.attachments, self).exec()
+            self.email_panel.cfg = self.cfg
+        EmailComposeDialog(self.cfg, self.attachments, self,
+                           mode=mode if isinstance(mode, str) else "one").exec()
+        # A send that just went out must be on the screen behind the window.
+        self.email_panel.refresh()
 
     def _open_email_setup(self):
         """The only door back into the sending-account setup once one is
