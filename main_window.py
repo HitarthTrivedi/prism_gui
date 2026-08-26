@@ -34,6 +34,7 @@ from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.home_panel import HomePanel
 from widgets.inquiry_panel import InquiryPanel
+from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
@@ -69,6 +70,10 @@ GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT, GERBER = 4, 5, 6, 7, 8, 9, 10
 # _first_run(), never from the rail, so it has no entry in _show_screen()'s
 # name->index table.
 WIZARD = 11
+# Appended after WIZARD rather than inserted earlier, so nothing above
+# renumbers — unlike WIZARD, this one IS reachable from the rail and DOES
+# have an entry in _show_screen()'s table below.
+ARTIFACTS = 12
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -305,6 +310,8 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.gerber_panel)          # GERBER
         self.wizard_panel = WizardPanel(self.cfg)
         self.screens.addWidget(self.wizard_panel)          # WIZARD
+        self.artifacts_panel = ArtifactsPanel(self.cfg)
+        self.screens.addWidget(self.artifacts_panel)        # ARTIFACTS
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -371,8 +378,8 @@ class MainWindow(QMainWindow):
         index = {"home": HOME, "workbench": WORKBENCH,
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
-                 "email": EMAIL, "support": SUPPORT,
-                 "gerber": GERBER}.get(name, HOME)
+                 "email": EMAIL, "support": SUPPORT, "gerber": GERBER,
+                 "artifacts": ARTIFACTS}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -386,6 +393,8 @@ class MainWindow(QMainWindow):
             self.settings_panel.refresh()
         elif index == HISTORY:
             self.history_panel.refresh()
+        elif index == ARTIFACTS:
+            self.artifacts_panel.refresh()
         elif index == CATALOG:
             self.catalog_panel.cfg = self.cfg
             self.catalog_panel.refresh()
@@ -403,7 +412,8 @@ class MainWindow(QMainWindow):
             HOME: "home", WORKBENCH: "workbench", INQUIRY: "inquiry",
             SETTINGS: "config", GUIDE: "guide", CATALOG: "catalog",
             HISTORY: "runs", BOQ: "boq", EMAIL: "email",
-            SUPPORT: "support", GERBER: "gerber"}.get(index, "home"))
+            SUPPORT: "support", GERBER: "gerber",
+            ARTIFACTS: "artifacts"}.get(index, "home"))
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
@@ -962,6 +972,8 @@ class MainWindow(QMainWindow):
             self._open_login_tabs()
         elif key == "runs":
             self._show_screen("runs")
+        elif key == "artifacts":
+            self._show_screen("artifacts")
         elif key == "email":
             self._open_email()
         elif key == "boq":

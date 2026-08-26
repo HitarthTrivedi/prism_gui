@@ -900,6 +900,7 @@ class SettingsPanel(QWidget):
         shared = workspace.is_shared(self.cfg)
         prism_dir = self._safe(paths.user_dir) or ""
         logs = self._safe(self._log_dir) or ""
+        artifacts_dir = CB.config.ARTIFACTS_DIR
 
         col.addWidget(self._facts([
             (i18n.t("Your work is written to"), self._path(root or "—")),
@@ -909,6 +910,8 @@ class SettingsPanel(QWidget):
                   "accent" if shared else "quiet")),
             (i18n.t("Filed under"), self._mono(me.get("mid") or "—")),
             (i18n.t("Prism's own folder"), self._path(prism_dir or "—")),
+            (i18n.t("Generated files (Reel, images, documents)"),
+             self._path(artifacts_dir)),
             (i18n.t("Logs"), self._path(logs or "—")),
             (i18n.t("Log files on disk"), self._safe(self._log_size) or "—"),
             (i18n.t("Licence server"),
@@ -947,6 +950,13 @@ class SettingsPanel(QWidget):
             buttons.append(C.button(
                 i18n.t("Open Prism's folder"), "secondary",
                 on_click=lambda: self._open_folder(prism_dir)))
+        # Always offered, not gated on the folder already existing — it is
+        # created lazily on the first generated file (same as Gerber's own
+        # Desktop folder), and a button that only appears after something has
+        # already been saved into it is no help finding it beforehand.
+        buttons.append(C.button(
+            i18n.t("Open the artifacts folder"), "secondary",
+            on_click=lambda: self._open_artifacts_folder(artifacts_dir)))
         buttons.append(self._edit_button("Change the workspace folder",
                                          "team"))
         col.addWidget(self._buttons(buttons))
@@ -991,6 +1001,13 @@ class SettingsPanel(QWidget):
 
     def _open_folder(self, path: str):
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _open_artifacts_folder(self, path: str):
+        """Unlike _open_folder's other callers, this one may not exist yet —
+        nothing has necessarily been generated this session — so it is made
+        first rather than failing silently on a folder nobody has seen."""
+        os.makedirs(path, exist_ok=True)
+        self._open_folder(path)
 
     # ── updates (Phase 0 — a check, a line, a link; see updater.py) ───────
     def _version_row(self) -> QWidget:

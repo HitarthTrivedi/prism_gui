@@ -15,9 +15,9 @@ Three constraints shape it and none of them may be traded away:
 * **The budget is twelve controls and two headings, fitting at 768px with no
   scroll.** The rail had grown to twenty-odd controls across six headed groups
   — more choices than the screen it navigates to — and was cut back
-  deliberately. It is at eleven here: New task, Home, History, four live
-  add-ons, Settings, Favourites, the wake row, the profile row — one slot of
-  the twelve still free. Anything new beyond that has to displace something.
+  deliberately. It is at twelve here: New task, Home, History, Artifacts,
+  four live add-ons, Settings, Favourites, the wake row, the profile row.
+  Anything new has to displace something.
 * **`theme.over()` for every white-at-alpha.** The rail's glyphs are rendered
   by handing a colour string to QSvgRenderer, and `rgba()` there is not
   dependable across Qt's SVG backends — a nav icon that silently renders black
@@ -53,18 +53,30 @@ from widgets.controls import Avatar, ToggleSwitch, elevate, kicker, track
 
 _PATH_ROLE = 1000
 
-# (key, label, icon, tip) — the WORK group: the two destinations that bracket a
-# run. Home answers "where do things stand", History answers "what happened".
+# (key, label, icon, tip) — the WORK group: the destinations that bracket a
+# run. Home answers "where do things stand", History answers "what happened",
+# Artifacts answers "what did it actually make".
 #
 # History came back into the rail in this pass. It is the fifth step of the
 # app's own mental model (describe → plan → review → execute → RESULTS), and
 # with it in Settings → More the rail had no way at all to say "review your
 # work" — one of the five things the grouping has to make legible. It is paid
 # for by BOM & Stock, which stopped being a button (see ADDONS).
+#
+# Artifacts is paid for by the slot Reel/Studio's own row freed when it was
+# pulled from ADDONS — the budget is back to twelve of twelve. A generated
+# file used to exist only as a path a dialog held in memory (gone once it
+# closed) or a link into a tool's own hosted session (gone once that session
+# ended); this is where it actually lives once Prism has saved a findable
+# copy, and it needed a way in that survives every dialog that ever produced
+# one — not just Reel's.
 PRIMARY = [
     ("home", "Home", "home",
      "Where things stand — recent runs, and what is waiting on you"),
     ("runs", "History", "clock", "Every past run, re-rendered from its record"),
+    ("artifacts", "Artifacts", "folder",
+     "Every file Prism has generated for you — reels, images, documents — "
+     "kept here even after you close it"),
 ]
 
 # Sentinel for a shelf item that isn't built yet, as opposed to one the

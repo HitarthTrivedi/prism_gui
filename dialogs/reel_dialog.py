@@ -49,6 +49,10 @@ class ReelDialog(PrismDialog):
         self.brand: dict = {}
         self.spec: dict | None = None
         self.out_path = ""
+        # The findable copy — see config.ARTIFACTS_DIR. `out_path` is where
+        # the render actually lands (~/.prism/runs, hidden), which is why
+        # Play/Show always prefer this one once it exists.
+        self.artifact_path = ""
         self._worker = None
         self._rec = None
 
@@ -405,12 +409,27 @@ class ReelDialog(PrismDialog):
         self.progress.setValue(int(done / max(1, total) * 100))
 
     def _on_rendered(self, path: str):
-        self._busy(False, f"Done — {os.path.basename(path)}")
         self.play_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
+        # A closed Prism used to leave no way back to this file — it only
+        # ever lived in ~/.prism/runs (hidden on macOS) or in this dialog's
+        # own memory. Copying it out to a named, visible folder is what
+        # makes "check it later" possible at all.
+        try:
+            self.artifact_path = CB.config.save_artifact(
+                path, self.request, kind="reel")
+        except Exception:                               # noqa: BLE001
+            self.artifact_path = ""
+        if self.artifact_path:
+            self._busy(False, i18n.t(
+                "Done — saved to Desktop/Prism Artifacts/{name}").replace(
+                "{name}", os.path.basename(self.artifact_path)))
+        else:
+            self._busy(False, f"Done — {os.path.basename(path)}")
         CB.config.save_run({
             "query": f"reel — {self.request}",
-            "reel": {"mp4": path, "brand": self.brand},
+            "reel": {"mp4": path, "brand": self.brand,
+                     "artifact": self.artifact_path},
         })
 
     def closeEvent(self, event):
@@ -443,26 +462,32 @@ class ReelDialog(PrismDialog):
         self.status.setText(message)
 
     # ── output ──────────────────────────────────────────────────────────
-    # The file lands in ~/.prism/runs, which is hidden on macOS — so the
-    # dialog opens it directly rather than telling the user a path they
-    # cannot find in Finder.
+    # The render itself lands in ~/.prism/runs, which is hidden on macOS —
+    # so these open the Desktop/Prism Artifacts copy instead wherever one
+    # exists (see _on_rendered), and fall back to the hidden path only if
+    # that copy could not be made.
 
     def _play(self):
-        if not self.out_path:
+        path = self.artifact_path or self.out_path
+        if not path:
             return
         if sys.platform == "darwin":
-            subprocess.Popen(["open", self.out_path])
+            subprocess.Popen(["open", path])
         elif os.name == "nt":
-            os.startfile(self.out_path)  # noqa: F821
+            os.startfile(path)  # noqa: F821
         else:
-            subprocess.Popen(["xdg-open", self.out_path])
+            subprocess.Popen(["xdg-open", path])
 
     def _reveal(self):
-        if not self.out_path:
+        # The artifact copy first: it sits in Desktop/Prism Artifacts, a
+        # folder the owner can find again without Prism open, unlike
+        # ~/.prism/runs.
+        path = self.artifact_path or self.out_path
+        if not path:
             return
         if sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", self.out_path])
+            subprocess.Popen(["open", "-R", path])
         elif os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", self.out_path])
+            subprocess.Popen(["explorer", "/select,", path])
         else:
-            subprocess.Popen(["xdg-open", os.path.dirname(self.out_path)])
+            subprocess.Popen(["xdg-open", os.path.dirname(path)])
