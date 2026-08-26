@@ -346,3 +346,58 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleaningOutsideTheBorder(unittest.TestCase):
+    """The "Clean outside the border" button: off until a job is loaded,
+    runs the cleaner off the UI thread, writes the cleaned layers under the
+    reports folder, and prints the report into the window. Opening the
+    folder in Finder is stubbed — a test must not pop windows."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.isdir(REAL):
+            raise unittest.SkipTest("sample jobs not on this machine")
+
+    def setUp(self):
+        self._reports_dir = tempfile.mkdtemp(prefix="prism-test-gerber-clean-")
+        self._reports_patch = mock.patch.object(GD, "REPORTS_DIR", self._reports_dir)
+        self._reports_patch.start()
+        self._open_patch = mock.patch.object(GD.QDesktopServices, "openUrl")
+        self._open_patch.start()
+
+    def tearDown(self):
+        self._open_patch.stop()
+        self._reports_patch.stop()
+
+    def test_the_button_waits_for_a_job(self):
+        dlg = _dialog()
+        self.assertFalse(dlg.clean_btn.isEnabled())
+        dlg._on_files_added([os.path.join(REAL, "layer 1.zip")])
+        self.assertTrue(dlg.clean_btn.isEnabled())
+        worker = getattr(dlg, "_worker", None)
+        if worker is not None:
+            worker.wait(15000)
+
+    def test_it_cleans_the_real_job_into_the_reports_folder(self):
+        src = os.path.join(REAL, "layer 1.zip")
+        if not os.path.exists(src):
+            self.skipTest("sample missing")
+        dlg = _dialog()
+        if not _measure_and_join(dlg, [src]):
+            self.skipTest("measuring did not finish in time on this machine")
+        dlg._clean()
+        deadline = time.monotonic() + 30
+        while dlg._clean_worker.isRunning() and time.monotonic() < deadline:
+            _app.processEvents()
+            time.sleep(0.02)
+        dlg._clean_worker.wait(5000)
+        _app.processEvents()
+        folders = [f for f in os.listdir(self._reports_dir) if "cleaned" in f]
+        self.assertEqual(len(folders), 1, os.listdir(self._reports_dir))
+        out = os.path.join(self._reports_dir, folders[0])
+        self.assertTrue(os.path.exists(os.path.join(out, "cleaning_report.txt")))
+        self.assertIn("CLEANED OUTSIDE THE BOARD OUTLINE", dlg.meas_view.toPlainText())
+        self.assertIn("removed outside the border", dlg.status.text())
+        self.assertTrue(dlg.clean_btn.isEnabled())
+        GD.QDesktopServices.openUrl.assert_called_once()

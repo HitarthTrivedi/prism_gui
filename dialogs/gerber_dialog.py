@@ -16,7 +16,8 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
     QPlainTextEdit, QMessageBox, QProgressBar,
@@ -26,7 +27,7 @@ import core_bridge as CB
 import i18n
 import theme
 from dialogs.base import PrismDialog
-from workers import AutomationWorker, GerberWorker
+from workers import AutomationWorker, GerberCleanWorker, GerberWorker
 from widgets import icons
 from widgets.ask_panel import AskPanel
 
@@ -60,6 +61,7 @@ class GerberDialog(PrismDialog):
         self.jobs: list = []          # [(name, job_dict), ...] once measured
         self._worker = None
         self._agent_worker = None
+        self._clean_worker = None
         self._links: dict = {}
 
         # The base class owns the header and footer; `root` is its body column.
@@ -146,6 +148,15 @@ class GerberDialog(PrismDialog):
         self.result.setMinimumHeight(100)
         root.addWidget(self.result)
 
+        self.clean_btn = self.button(i18n.t("Clean outside the border"),
+                                     "secondary", icon_name="file", small=True)
+        self.clean_btn.setToolTip(i18n.t(
+            "Remove everything that lies outside the board outline and save "
+            "the cleaned layers on the Desktop, with a report of what went"))
+        self.clean_btn.setEnabled(False)
+        self.clean_btn.clicked.connect(self._clean)
+        self.footer.add_utility(self.clean_btn)
+
         self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
                                     icon_name="external", small=True,
                                     on_click=self._open_link)
@@ -169,6 +180,7 @@ class GerberDialog(PrismDialog):
         if not new:
             return
         self.paths += new
+        self.clean_btn.setEnabled(True)
         known = self.ask.paths()
         self.ask.add_paths([p for p in new if p not in known])
         self._measure()
@@ -303,6 +315,47 @@ class GerberDialog(PrismDialog):
         self._set_busy(False, "")
         QMessageBox.warning(self, "Gerber", error)
 
+    # ── cleaning outside the border ─────────────────────────────────────
+
+    def _clean(self):
+        """Write a copy of the job with everything outside the board
+        outline removed, next to the reports on the Desktop, so the CAM
+        operator can put it beside their own cleaned files and compare."""
+        if not self.paths:
+            return
+        stem = os.path.splitext(os.path.basename(self.paths[0]))[0]
+        stem = "".join(c if c.isalnum() or c in "-_ " else "_"
+                       for c in stem).strip()[:40] or "job"
+        out_dir = os.path.join(REPORTS_DIR,
+                               f"{stem} cleaned {time.strftime('%Y-%m-%d %H%M')}")
+        self._set_busy(True, "Cleaning outside the border — nothing leaves "
+                             "this machine…")
+        self.clean_btn.setEnabled(False)
+        self._clean_worker = GerberCleanWorker(list(self.paths), out_dir)
+        self._clean_worker.progress.connect(self._on_progress)
+        self._clean_worker.done.connect(self._on_cleaned)
+        self._clean_worker.failed.connect(self._on_clean_failed)
+        self._clean_worker.start()
+
+    def _on_cleaned(self, report: dict):
+        text = CB.get_gerber_clean().report_text(report)
+        self.meas_view.appendPlainText("\n\n" + text)
+        self.meas_box.setVisible(True)
+        removed = sum(l["removed"] for l in report["layers"])
+        crossing = sum(l["crossing"] for l in report["layers"])
+        self._set_busy(False,
+                       f"Cleaned: {removed} object(s) removed outside the "
+                       f"border, {crossing} crossing it kept for you to "
+                       f"decide. Saved to {report['out_dir']}")
+        self.clean_btn.setEnabled(True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(
+            report.get("compare_html") or report["out_dir"]))
+
+    def _on_clean_failed(self, error: str):
+        self._set_busy(False, "")
+        self.clean_btn.setEnabled(bool(self.paths))
+        QMessageBox.warning(self, "Gerber", error)
+
     def _set_busy(self, busy: bool, message: str):
         self.progress.setVisible(busy)
         self.run_btn.setEnabled(not busy and bool(self.jobs))
@@ -313,7 +366,8 @@ class GerberDialog(PrismDialog):
         the whole process, so ask each worker to stop and wait for it rather
         than let Qt tear it down underneath."""
         for worker in (getattr(self, "_worker", None),
-                       getattr(self, "_agent_worker", None)):
+                       getattr(self, "_agent_worker", None),
+                       getattr(self, "_clean_worker", None)):
             if worker is None or not worker.isRunning():
                 continue
             if hasattr(worker, "stop"):

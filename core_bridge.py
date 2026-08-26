@@ -182,6 +182,11 @@ def get_gerber():
     return gerber
 
 
+def get_gerber_clean():
+    from core import gerber_clean
+    return gerber_clean
+
+
 # ── Inquiry automation ───────────────────────────────────────────────────────
 # Imported on demand like the rest: the engine's mail modules pull in imaplib
 # and the CSV machinery, and a customer who never buys this add-on should not

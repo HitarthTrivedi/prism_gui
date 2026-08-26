@@ -287,6 +287,29 @@ class GerberWorker(QThread):
             self.failed.emit(str(e))
 
 
+class GerberCleanWorker(QThread):
+    """Clean a job outside its board outline, off the UI thread — a
+    twelve-layer job is a few seconds of reading and writing, which is
+    enough to look frozen inline."""
+    progress = Signal(str)
+    done = Signal(dict)              # the cleaning report
+    failed = Signal(str)
+
+    def __init__(self, paths: list[str], out_dir: str):
+        super().__init__()
+        self.paths = paths
+        self.out_dir = out_dir
+
+    def run(self):
+        try:
+            cleaner = CB.get_gerber_clean()
+            report = cleaner.clean_job(self.paths, self.out_dir,
+                                       on_progress=self.progress.emit)
+            self.done.emit(report)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class ReelWorker(QThread):
     """Render the reel off the UI thread.
 
