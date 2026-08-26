@@ -59,6 +59,7 @@ from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
 from dialogs.boq_dialog import BoqDialog
 from dialogs.gerber_dialog import GerberDialog
 from dialogs.reel_dialog import ReelDialog
+from dialogs.motion_dialog import MotionDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
@@ -1025,6 +1026,19 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, i18n.t("Reel"), err)
             return
         ReelDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_motion(self):
+        self._open_motion_dialog()
+
+    def _open_motion_dialog(self):
+        ok, err = CB.motion_available()
+        if not ok:
+            if "ffmpeg" in err.lower():
+                self._offer_ffmpeg(then=self._open_motion_dialog)
+                return
+            QMessageBox.information(self, "Motion Graphics", err)
+            return
+        MotionDialog(self.cfg, self).exec()
 
     def _offer_ffmpeg(self, then=None):
         """Offer to fetch FFmpeg, then carry on with what they were doing.

@@ -339,6 +339,27 @@ class ReelWorker(QThread):
             self.failed.emit(str(e))
 
 
+class MotionWorker(QThread):
+    """Render a Motion Graphics project to MP4 off the UI thread."""
+    progress = Signal(int, int)  # frames done, total
+    done = Signal(str)           # output path
+    failed = Signal(str)
+
+    def __init__(self, spec: dict, out_path: str):
+        super().__init__()
+        self.spec = spec
+        self.out_path = out_path
+
+    def run(self):
+        try:
+            motion = CB.get_motion()
+            motion.render(self.spec, self.out_path,
+                          on_progress=lambda d, t: self.progress.emit(d, t))
+            self.done.emit(self.out_path)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 # ── Email automation ──────────────────────────────────────────────────────────
 
 class InboxVerifyWorker(QThread):

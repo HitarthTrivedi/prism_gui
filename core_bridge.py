@@ -287,3 +287,18 @@ def get_assets():
 def get_ffmpeg():
     from core import ffmpeg
     return ffmpeg
+
+
+def motion_available() -> tuple[bool, str]:
+    """Probes whether FFmpeg and the browser runtime are available."""
+    try:
+        from core import motion
+    except Exception as e:
+        return False, f"Motion Graphics engine not installed ({e})."
+    return motion.is_available()
+
+
+def get_motion():
+    from core import motion
+    return motion
+
