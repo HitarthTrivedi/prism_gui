@@ -76,6 +76,32 @@ of decisions already argued through. Do not duplicate them; link to them.
 
 ---
 
+## Word copies
+
+Everything here is also generated as Word documents in
+[`word/`](word/) — nine individual files plus
+`Prism-Architecture-Complete.docx`, which carries all nine behind a contents
+page. They are for people who will never open a repository.
+
+**The Markdown is the master.** The `.docx` files are output: they are
+regenerated, not edited. If you edit one by hand, the next build overwrites it.
+
+```bash
+python docs/architecture/build_docx.py
+```
+
+Real Word heading styles (so the navigation pane and the contents field both
+work), native tables, and every diagram rendered to an image — wide ones on
+their own landscape page. Diagrams need `node`; the build fetches
+`@mermaid-js/mermaid-cli` through `npx` on demand and caches the results. With
+no `node` on the machine, diagrams fall back to their source text in a
+captioned box rather than failing the build.
+
+Word's contents page opens empty by design: right-click it and choose **Update
+Field → Update entire table** to fill in the page numbers.
+
+---
+
 ## Maintaining this set
 
 - **Each document names the files it describes**, so a change to the code has
