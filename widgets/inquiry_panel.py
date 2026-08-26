@@ -171,6 +171,7 @@ class InquiryPanel(QWidget):
             item = row.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()   # before setParent(None): avoids ghost-window flash
                 widget.setParent(None)
                 widget.deleteLater()
 
@@ -179,6 +180,7 @@ class InquiryPanel(QWidget):
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()   # before setParent(None): avoids ghost-window flash
                 widget.setParent(None)
                 widget.deleteLater()
             elif item.layout():

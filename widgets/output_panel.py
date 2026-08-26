@@ -490,6 +490,7 @@ class StageCard(QWidget):
         fresh = C.ToolBadge(agent, 20, theme.R_CHIP)
         old = self._head.replaceWidget(self.tool_badge, fresh)
         if old is not None:
+            self.tool_badge.hide()   # before setParent(None): avoids ghost-window flash
             self.tool_badge.setParent(None)
             self.tool_badge.deleteLater()
         self.tool_badge = fresh
@@ -1074,6 +1075,7 @@ class OutputPanel(QWidget):
 
     def clear(self):
         for stage in list(self._cards):
+            self._cards[stage].hide()   # before setParent(None): avoids ghost-window flash
             self._cards[stage].setParent(None)
             self._cards[stage].deleteLater()
         self._cards = {}

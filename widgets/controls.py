@@ -1719,6 +1719,7 @@ class CardGrid(QWidget):
     def clear(self):
         for widget in self._items:
             self._grid.removeWidget(widget)
+            widget.hide()   # before setParent(None): avoids ghost-window flash
             widget.setParent(None)
             widget.deleteLater()
         self._items = []

@@ -461,6 +461,10 @@ class HomePanel(QWidget):
             item = self._col.takeAt(0)
             widget = item.widget()
             if widget is self._active_host:
+                # Hidden first so setParent(None) can't flash it as a
+                # top-level window; _fill_active() re-asserts visibility
+                # right after the host is re-added below.
+                widget.hide()
                 widget.setParent(None)      # persistent — re-added below
             elif widget:
                 widget.deleteLater()

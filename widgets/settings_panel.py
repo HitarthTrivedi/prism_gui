@@ -290,6 +290,12 @@ class SettingsPanel(QWidget):
             item = layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Hide BEFORE unparenting: setParent(None) on a visible widget
+                # promotes it to a top-level OS window for the instant before
+                # deleteLater() lands — on Windows that's a real titled window
+                # plus DWM's open animation, seen as a ghost-window flash on
+                # every Settings navigation. A hidden widget promotes silently.
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
             elif item.layout():

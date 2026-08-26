@@ -498,6 +498,9 @@ class _Page(QWidget):
             # rebuild.
             widget = item.widget()
             if widget is not None:
+                # Hidden first: setParent(None) on a visible widget makes it a
+                # top-level OS window for a frame — the ghost-window flash.
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
                 continue

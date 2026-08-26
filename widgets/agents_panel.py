@@ -1032,6 +1032,7 @@ class AgentsPanel(QWidget):
             return
         self._rows.remove(row)
         self.rows_box.removeWidget(row)
+        row.hide()   # before setParent(None): avoids ghost-window flash
         row.setParent(None)
         row.deleteLater()
         self._refresh_count()

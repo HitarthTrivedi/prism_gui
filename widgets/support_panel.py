@@ -633,8 +633,10 @@ class SupportPanel(QWidget):
         """Redraw the column: the ten topics, or what a search matched."""
         while self._nav_box.count():
             item = self._nav_box.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
+            widget = item.widget()
+            if widget:
+                widget.hide()   # before setParent(None): avoids ghost-window flash
+                widget.setParent(None)
                 item.widget().deleteLater()
         self._nav_rows = {}
         query = (query or "").strip()
@@ -842,6 +844,7 @@ class SupportPanel(QWidget):
         """
         for group in self._live:
             self._thread_box.removeWidget(group)
+            group.hide()   # before setParent(None): avoids ghost-window flash
             group.setParent(None)
             group.deleteLater()
         self._live = []
@@ -1171,6 +1174,7 @@ class SupportPanel(QWidget):
             self._thinking_timer = None
         if self._thinking is not None:
             self._thread_box.removeWidget(self._thinking)
+            self._thinking.hide()   # before setParent(None): avoids ghost-window flash
             self._thinking.setParent(None)
             self._thinking.deleteLater()
             self._thinking = None
