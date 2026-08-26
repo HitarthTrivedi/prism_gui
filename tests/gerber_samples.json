@@ -8,12 +8,12 @@
     "",
     "Two tiers, and the difference matters.",
     "",
-    "  witnessed  \u2014 a human or a machine outside Prism says so. The",
+    "  witnessed  — a human or a machine outside Prism says so. The",
     "               customer's own check sheet, or the CAM report shipped",
     "               inside the job. These are CORRECTNESS: if one breaks,",
     "               Prism is wrong.",
     "",
-    "  locked     \u2014 no outside witness, so this is only what Prism reads",
+    "  locked     — no outside witness, so this is only what Prism reads",
     "               today. These are REGRESSION: if one moves, something",
     "               changed and somebody has to say whether it improved.",
     "",
@@ -22,7 +22,14 @@
     "A job marked `slow` is skipped unless PRISM_SLOW_TESTS=1 is set. The",
     "twelve-layer board takes five minutes to measure, which is fine for a",
     "customer waiting on an answer and not fine on every test run. Run the",
-    "slow ones before shipping a change to the geometry."
+    "slow ones before shipping a change to the geometry.",
+    "",
+    "2026-08-26: four figures were added (array size, PCBs per array, min",
+    "pad pitch, min SMT pad) and pinned as `locked` on the fast jobs — no",
+    "witness yet; Keyur bhai's CAM reading of each job is the witness to",
+    "get. The panel job's pcb_size moved from 196 x 195 (the whole panel,",
+    "with the score-line overhang) to 184 x 39 (one board): its own",
+    "description always said it was a panel of many copies."
   ],
   "layer 1.zip": {
     "what": "2013 single-sided, job 101942. Drill arrives as a Gerber of flashed pads; copper is G36 regions; four-digit D-codes.",
@@ -45,7 +52,11 @@
     },
     "locked": {
       "layers": 1,
-      "plane_layers": 0
+      "plane_layers": 0,
+      "pcbs_per_array": 1,
+      "min_pitch_mm": 5.0,
+      "min_smt_pad_mm": null,
+      "smt_pad_count": 0
     }
   },
   "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar": {
@@ -69,7 +80,10 @@
     },
     "locked": {
       "layers": 4,
-      "plane_layers": 2
+      "plane_layers": 2,
+      "pcbs_per_array": 1,
+      "min_pitch_mm": 0.4826,
+      "min_smt_pad_mm": 0.254
     }
   },
   "2-547-161A_Gerber.zip": {
@@ -88,11 +102,14 @@
       "min_track_spacing_mm": 0.0937,
       "layers": 8,
       "routed_layers": 4,
-      "plane_layers": 4
+      "plane_layers": 4,
+      "pcbs_per_array": 1,
+      "min_pitch_mm": 0.4386,
+      "min_smt_pad_mm": 0.28
     }
   },
   "CT-TT-CAP12-V1.1-FAB (1).zip": {
-    "what": "A PANEL, not a board \u2014 196x195mm carrying many copies. 4 routed layers, 2855 holes. Read clean on the first attempt, the only job so far that did.",
+    "what": "A PANEL: five boards of 184 x 39 mm in a column on a 184 x 195 mm V-scored frame. 4 routed layers, 2855 holes, every pad through-hole. Read as one 196 x 195 mm board until 2026-08-26.",
     "witness": "the job's own .DRR report: 2855 holes",
     "witnessed": {
       "min_drill_mm": 0.508,
@@ -100,14 +117,22 @@
     },
     "locked": {
       "pcb_size_mm": [
-        196.0,
-        195.0
+        184.0,
+        39.0
       ],
       "min_track_width_mm": 1.016,
       "min_track_spacing_mm": 1.0159,
       "layers": 4,
       "routed_layers": 4,
-      "plane_layers": 0
+      "plane_layers": 0,
+      "array_size_mm": [
+        184.0,
+        195.0
+      ],
+      "pcbs_per_array": 5,
+      "min_pitch_mm": 1.524,
+      "min_smt_pad_mm": null,
+      "smt_pad_count": 0
     }
   },
   "MIE V2.2 GERBER with STACKUP 250502 1701.rar": {
@@ -131,7 +156,7 @@
     }
   },
   "PCB-219920263564-00 PCB FAB PKG.zip": {
-    "what": "PADS export, 12 copper layers, 187,674 traces on one of them \u2014 the job that made speed matter. Drill file has no M48 header at all.",
+    "what": "PADS export, 12 copper layers, 187,674 traces on one of them — the job that made speed matter. Drill file has no M48 header at all.",
     "witness": "its Drill Sizes Report: 3501 holes across 11 tools",
     "slow": true,
     "witnessed": {

@@ -201,12 +201,14 @@ class RefusingToDestroyALayer(unittest.TestCase):
         out = tempfile.mkdtemp()
         with open(os.path.join(src, "board.gko"), "w") as f:
             f.write(_outline())
-        strokes = "".join(_line(-3, 1 + i * 0.3, -1.5, 1.2 + i * 0.3)
+        # Lettering: 120 hairline strokes 0.8 mm long. Board: 30 pads of 2 mm.
+        strokes = "".join(_line(-3, 1 + i * 0.3, -2.2, 1.2 + i * 0.3)
                           for i in range(120))
+        pads = "".join(_flash(5 + 5 * (i % 10), 8 + 8 * (i // 10))
+                       for i in range(30))
         with open(os.path.join(src, "board.gtl"), "w") as f:
-            f.write(HEADER + "%ADD10C,0.250*%\n%ADD11R,1.000X1.000*%\nD10*\n"
-                    + strokes + "D11*\n" + _flash(10, 10) + _flash(50, 30)
-                    + "M02*\n")
+            f.write(HEADER + "%ADD10C,0.100*%\n%ADD11R,2.000X2.000*%\nD10*\n"
+                    + strokes + "D11*\n" + pads + "M02*\n")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             report = CLEAN.clean_job([os.path.join(src, "board.gko"),
@@ -214,7 +216,52 @@ class RefusingToDestroyALayer(unittest.TestCase):
         copper = report["layers"][0]
         self.assertFalse(copper["suspicious"])
         self.assertEqual(copper["removed"], 120)
-        self.assertEqual(copper["kept"], 2)
+        self.assertEqual(copper["kept"], 30)
+
+    def test_a_panel_is_cleaned_against_the_whole_panel(self):
+        """Three boards of 100 x 30 on a 100 x 90 frame, copper on all
+        three, and a legend outside the frame. The first run on the real
+        panel took ONE board as the outline and removed the other four."""
+        src = tempfile.mkdtemp()
+        out = tempfile.mkdtemp()
+        with open(os.path.join(src, "board.gko"), "w") as f:
+            f.write(HEADER + "%ADD10C,0.100*%\nD10*\n"
+                    + _line(0, 0, 100, 0) + _line(100, 0, 100, 90)
+                    + _line(100, 90, 0, 90) + _line(0, 90, 0, 0)
+                    + _line(-3, 30, 103, 30) + _line(-3, 60, 103, 60) + "M02*\n")
+        copper = "".join(_line(10, 5 + 30 * k, 90, 5 + 30 * k) for k in range(3))
+        with open(os.path.join(src, "board.gtl"), "w") as f:
+            f.write(HEADER + "%ADD10C,0.250*%\nD10*\n" + copper
+                    + _line(110, 5, 120, 5) + "M02*\n")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            report = CLEAN.clean_job([os.path.join(src, "board.gko"),
+                                      os.path.join(src, "board.gtl")], out)
+        copper_row = report["layers"][0]
+        self.assertFalse(copper_row["suspicious"])
+        self.assertEqual(copper_row["kept"], 3)
+        self.assertEqual(copper_row["removed"], 1)
+        self.assertIn("panel of 3 boards", report["outline"]["source"])
+        self.assertAlmostEqual(report["outline"]["height_mm"], 90.0, 2)
+
+    def test_an_outline_that_would_take_a_third_of_the_copper_is_refused(self):
+        """A 20 x 20 'outline' over a board whose copper spans 60 x 40: the
+        outline is wrong, not the copper. Nothing goes."""
+        src = tempfile.mkdtemp()
+        out = tempfile.mkdtemp()
+        with open(os.path.join(src, "board.gko"), "w") as f:
+            f.write(_outline(20, 20))
+        tracks = "".join(_line(2, 2 + 3 * k, 58, 2 + 3 * k) for k in range(12))
+        with open(os.path.join(src, "board.gtl"), "w") as f:
+            f.write(HEADER + "%ADD10C,0.250*%\nD10*\n" + tracks + "M02*\n")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            report = CLEAN.clean_job([os.path.join(src, "board.gko"),
+                                      os.path.join(src, "board.gtl")], out)
+        copper = report["layers"][0]
+        self.assertTrue(copper["suspicious"])
+        self.assertEqual(copper["removed"], 0)
+        self.assertTrue(any("BY AREA" in w for w in report["warnings"]))
 
     def test_no_outline_is_a_sentence_not_a_guess(self):
         src = tempfile.mkdtemp()
@@ -227,6 +274,20 @@ class RefusingToDestroyALayer(unittest.TestCase):
 
 @unittest.skipUnless(HAVE and os.path.isdir(REAL), "sample jobs not here")
 class TheRealSampleJob(unittest.TestCase):
+
+    def test_the_real_panel_keeps_all_five_boards(self):
+        src = os.path.join(REAL, "CT-TT-CAP12-V1.1-FAB (1).zip")
+        if not os.path.exists(src):
+            self.skipTest("sample missing")
+        out = tempfile.mkdtemp(prefix="prism-clean-panel-")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            report = CLEAN.clean_job([src], out)
+        self.assertAlmostEqual(report["outline"]["width_mm"], 184.0, 1)
+        self.assertAlmostEqual(report["outline"]["height_mm"], 195.0, 1)
+        top = next(l for l in report["layers"] if l["name"].endswith(".GTL"))
+        self.assertFalse(top["suspicious"])
+        self.assertGreater(top["kept"], 0.9 * top["objects"])
 
     def test_every_layer_survives_the_round_trip(self):
         src = os.path.join(REAL, "layer 1.zip")

@@ -8,10 +8,14 @@ left.
 **One sentence first.** The diagram describes a complete *DFM* product —
 "design for manufacturing" — that reads a customer's PCB job and tells the
 factory everything that could go wrong in production. The customer we have
-asked for something much smaller: **five numbers** (board size, minimum
-track width, minimum track spacing, minimum drill size, number of drills).
-Those five are built, tested on real jobs, and verified. The rest of the
-diagram is what the add-on could grow into.
+asked for something much smaller: **nine numbers** (board size, array size,
+boards per array, minimum track width, minimum track spacing, minimum
+drill size, number of drills, minimum pad pitch, minimum SMT pad size).
+All nine are built and tested on real jobs; the first five are verified
+against the customers' own sheets, the last four against an independent
+reader and await a CAM operator's confirmation (see `docs/GERBER_STATUS.md`
+for the full ledger). The rest of the diagram is what the add-on could grow
+into.
 
 ---
 
@@ -90,12 +94,14 @@ Legend: ✅ built and tested on real customer jobs · 🟡 partly · ⬜ not sta
 | 5A | Board size | ✅ | from the outline layer, not from the ink |
 | 5A | Track width, track spacing | ✅ | |
 | 5A | Drill analysis | ✅ | count, minimum size, tool table |
+| 5A | Pad pitch, SMT pad size | ✅ | added 2026-08-26; nearest separate pads centre to centre; a pad with no drill hit under it is SMT |
 | 5A | Annular ring | ⬜ | |
 | 5A | Copper to edge | ⬜ | |
 | 5A | Solder-mask clearance | ⬜ | |
 | 5A | Acid-trap detection | ⬜ | |
 | 5A | Short / open check | ⬜ | |
-| 5A | Panelisation analysis | 🟡 | several jobs in one archive are told apart; a *panel* of one board is still read as one big board (listed as an open risk) |
+| 5A | Panelisation analysis | ✅ | several jobs in one archive are told apart; an array on the outline layer is read as one board x count on a panel (fixed 2026-08-26 on the real panel job) |
+| 5A | Copper outside the board edge (CAM clean-up) | ✅ | "Clean outside the border": every object wholly outside the outline removed, layers written back through gerbonara, before/after pictures and a report for the CAM operator to compare |
 | 5B | AI engine — all six boxes | ⬜ | deliberately not started: **no AI ever sees a Gerber file**, only the measured numbers. Reading the fab drawing PDF and notes with AI would be allowed — that is text, not the board — but is not built |
 | 6 | Rule engine | 🟡 | the job's own design-rule file is compared against the measurements and a warning raised when a rule is broken; no customer / company / IPC rule sets |
 | 7 | Pass / Warning / Fail, confidence | 🟡 | warnings are raised and shown; `crosscheck()` compares the drill count and tool table against the job's own CAM report (`.DRR` / `.REP`), which is the closest thing to a confidence check we have; no Pass/Fail classification, no dedupe |
@@ -106,11 +112,12 @@ Legend: ✅ built and tested on real customer jobs · 🟡 partly · ⬜ not sta
 | 10 | Job archive (JSON) | 🟡 | a run record is kept in History |
 | 10 | PDF summary, detailed PDF/HTML, annotated board viewer | ⬜ | |
 
-**By the boxes:** about 20 of the diagram's ~50 boxes are built, 8 are
+**By the boxes:** about 23 of the diagram's ~50 boxes are built, 7 are
 partly there, and the rest are not started — roughly **a third to 40 %** of
 the diagram. **By what the customer asked for:** 100 % — the five figures,
 verified on both real sample jobs, with a second independent implementation
-(`gerbonara`) agreeing layer for layer.
+(`gerbonara`) agreeing layer for layer — and the four figures added on
+2026-08-26 pinned but not yet confirmed by a person.
 
 ---
 
@@ -128,9 +135,9 @@ verified on both real sample jobs, with a second independent implementation
    "a check". Small.
 3. **A readable report (10).** The CSV exists; a one-page PDF with the
    verdicts and the workings is what gets emailed to a customer.
-4. **Panel vs board (5A).** Recognise a step-and-repeat panel and report
-   the single board — currently an open risk that would give a wrong size
-   silently.
+4. **Polygon management (CAM).** The second of the three CAM jobs after
+   "clean outside the border" — needs Keyur bhai's list of what he does
+   to polygons by hand before it can be specified.
 5. **Reading the fab drawing and notes (5B).** OCR of the PDF and language
    reading of the notes. This is the first place AI enters, and it is
    allowed — the drawing is instructions, not the board. Medium.

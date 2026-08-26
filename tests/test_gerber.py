@@ -972,3 +972,326 @@ class TheJobsOwnCamReportIsAWitness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── the four figures added 2026-08-26: array, pitch, SMT pad ─────────────────
+
+# A routed panel: four 20 x 15 mm boards, two across and two up, inside
+# 60 x 40 mm rails. Every unit is drawn as its own closed rectangle.
+PANEL_RAILS = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10C,0.100*%
+    D10*
+    X0Y0D02*
+    X600000Y0D01*
+    X600000Y400000D01*
+    X0Y400000D01*
+    X0Y0D01*
+    X50000Y50000D02*
+    X250000Y50000D01*
+    X250000Y200000D01*
+    X50000Y200000D01*
+    X50000Y50000D01*
+    X350000Y50000D02*
+    X550000Y50000D01*
+    X550000Y200000D01*
+    X350000Y200000D01*
+    X350000Y50000D01*
+    X50000Y220000D02*
+    X250000Y220000D01*
+    X250000Y370000D01*
+    X50000Y370000D01*
+    X50000Y220000D01*
+    X350000Y220000D02*
+    X550000Y220000D01*
+    X550000Y370000D01*
+    X350000Y370000D01*
+    X350000Y220000D01*
+    M02*
+    """
+
+# A V-scored panel the way the real one is drawn: a 100 x 90 mm frame, three
+# 100 x 30 mm boards tiling it, and score lines that run PAST the frame edge
+# without sharing a vertex with it — which is what defeats an un-noded
+# polygonize.
+PANEL_VSCORE = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10C,0.100*%
+    D10*
+    X0Y0D02*
+    X1000000Y0D01*
+    X1000000Y900000D01*
+    X0Y900000D01*
+    X0Y0D01*
+    X-30000Y300000D02*
+    X1030000Y300000D01*
+    X-30000Y600000D02*
+    X1030000Y600000D01*
+    M02*
+    """
+
+# Four 0.5 mm-pitch pads in a row, one pad drawn as two overlapping
+# circles (an oval built in pieces — NOT a 0.3 mm pitch), and a lone pad
+# far away.
+PADS_PITCH = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10R,0.250X1.200*%
+    %ADD11C,0.600*%
+    D10*
+    X100000Y100000D03*
+    X105000Y100000D03*
+    X110000Y100000D03*
+    X115000Y100000D03*
+    D11*
+    X300000Y300000D03*
+    X303000Y300000D03*
+    X400000Y400000D03*
+    M02*
+    """
+
+# Three pads: a 1.0 mm square SMT pad, a 0.4 x 1.2 mm SMT pad, and a 2.0
+# mm round pad sitting on the drill hit at (2.54, 2.54) — through-hole.
+PADS_SMT = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10R,1.000X1.000*%
+    %ADD11R,0.400X1.200*%
+    %ADD12C,2.000*%
+    D10*
+    X50000Y50000D03*
+    D11*
+    X100000Y50000D03*
+    D12*
+    X25400Y25400D03*
+    M02*
+    """
+
+# One hole at X001000Y001000 in Excellon's default 2.4 inch format — 0.1000
+# in, 2.54 mm — under the round pad above.
+DRILL_ONE = """
+    M48
+    INCH
+    T1C0.0400
+    %
+    T01
+    X001000Y001000
+    M30
+    """
+
+# An outline drawn as a chain of strokes whose ends miss each other by a
+# few hundredths of a millimetre — the way one real export arrived.
+OUTLINE_GAPPY = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10C,0.100*%
+    D10*
+    X0Y0D02*
+    X499500Y0D01*
+    X500000Y400D02*
+    X500000Y300000D01*
+    X499400Y300000D02*
+    X0Y300000D01*
+    X0Y299500D02*
+    X0Y500D01*
+    M02*
+    """
+
+
+class AnArrayIsSeveralBoardsNotOneBigOne(unittest.TestCase):
+    """The customer's word is "array". Five boards on a panel priced as one
+    196 x 195 mm board is the wrong price, and that is what the reader did
+    on the one real panel it has been given."""
+
+    def test_a_routed_panel_reports_the_unit_the_count_and_the_panel(self):
+        d = tempfile.mkdtemp()
+        _write(d, "p.gko", PANEL_RAILS)
+        _write(d, "p.gtl", COPPER)
+        a = G.analyse(G.gather([d]))["answers"]
+        self.assertAlmostEqual(a["pcb_size_mm"][0], 20.0, places=3)
+        self.assertAlmostEqual(a["pcb_size_mm"][1], 15.0, places=3)
+        self.assertEqual(a["pcbs_per_array"], 4)
+        self.assertEqual(a["array_grid"], "2 x 2")
+        self.assertAlmostEqual(a["array_size_mm"][0], 60.0, places=3)
+        self.assertAlmostEqual(a["array_size_mm"][1], 40.0, places=3)
+
+    def test_a_v_scored_panel_closes_even_though_the_score_lines_overhang(self):
+        d = tempfile.mkdtemp()
+        _write(d, "p.gko", PANEL_VSCORE)
+        _write(d, "p.gtl", COPPER)
+        job = G.analyse(G.gather([d]))
+        a = job["answers"]
+        self.assertEqual(a["pcbs_per_array"], 3)
+        self.assertAlmostEqual(a["pcb_size_mm"][0], 100.0, places=3)
+        self.assertAlmostEqual(a["pcb_size_mm"][1], 30.0, places=3)
+        self.assertAlmostEqual(a["array_size_mm"][1], 90.0, places=3)
+        self.assertEqual(a["array_grid"], "1 x 3")
+        self.assertTrue(any("ARRAY" in w for w in job["warnings"]))
+
+    def test_a_single_board_with_a_legend_box_is_not_an_array(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", COPPER)
+        a = G.analyse(G.gather([d]))["answers"]
+        self.assertEqual(a["pcbs_per_array"], 1)
+        self.assertIsNone(a["array_size"])
+        self.assertAlmostEqual(a["pcb_size_mm"][0], 50.0, places=3)
+
+    def test_the_sheet_and_the_text_carry_the_array(self):
+        d = tempfile.mkdtemp()
+        _write(d, "p.gko", PANEL_RAILS)
+        _write(d, "p.gtl", COPPER)
+        job = G.analyse(G.gather([d]))
+        text = G.answers_text(job)
+        self.assertIn("2. Array size           60.00 x 40.00 mm", text)
+        self.assertIn("3. PCBs in the array    4", text)
+        out = os.path.join(tempfile.mkdtemp(), "s.csv")
+        G.write_summary_csv([("p", job)], out)
+        header = open(out).readline()
+        for col in ("ARRAY SIZE (mm)", "PCBS PER ARRAY", "MIN PITCH (mil)",
+                    "MIN SMT PAD (mil)"):
+            self.assertIn(col, header)
+        self.assertIn("60.00 x 40.00", open(out).read())
+
+
+class PitchIsBetweenSeparatePads(unittest.TestCase):
+
+    def setUp(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", PADS_PITCH)
+        self.job = G.analyse(G.gather([d]))
+
+    def test_the_pitch_is_centre_to_centre(self):
+        self.assertAlmostEqual(self.job["answers"]["min_pitch_mm"], 0.5, places=4)
+
+    def test_a_pad_drawn_in_two_overlapping_pieces_is_not_a_pitch(self):
+        """The two 0.6 mm circles 0.3 mm apart are one oval pad."""
+        self.assertGreater(self.job["answers"]["min_pitch_mm"], 0.3)
+
+    def test_it_says_how_many_pairs_sit_at_that_pitch(self):
+        self.assertEqual(self.job["answers"]["min_pitch_pairs"], 3)
+        self.assertIn("8. Min pad pitch        0.500 mm", G.answers_text(self.job))
+
+
+class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):
+
+    def test_the_narrow_side_of_the_smallest_pad_without_a_hole(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", PADS_SMT)
+        _write(d, "a.drl", DRILL_ONE)
+        a = G.analyse(G.gather([d]))["answers"]
+        self.assertAlmostEqual(a["min_smt_pad_mm"], 0.4, places=4)
+        self.assertEqual(a["min_smt_pad"], "0.40 x 1.20 mm")
+        self.assertEqual(a["smt_pad_count"], 2)         # the round one has a hole
+
+    def test_with_no_drill_file_every_pad_counts_and_it_says_so(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", PADS_SMT)
+        job = G.analyse(G.gather([d]))
+        self.assertEqual(job["answers"]["smt_pad_count"], 3)
+        self.assertTrue(any("through-hole pads could not be told" in w
+                            for w in job["warnings"]))
+
+    def test_a_board_whose_pads_all_have_holes_says_no_smt(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", """
+            %FSLAX34Y34*%
+            %MOMM*%
+            %ADD12C,2.000*%
+            D12*
+            X25400Y25400D03*
+            M02*
+            """)
+        _write(d, "a.drl", DRILL_ONE)
+        job = G.analyse(G.gather([d]))
+        self.assertIsNone(job["answers"]["min_smt_pad_mm"])
+        self.assertIn("every pad has a hole", G.answers_text(job))
+
+
+class AnOutlineThatDoesNotQuiteClose(unittest.TestCase):
+
+    def test_gaps_of_a_few_hundredths_are_joined_and_named(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_GAPPY)
+        _write(d, "a.gtl", COPPER)
+        job = G.analyse(G.gather([d]))
+        self.assertAlmostEqual(job["board"]["width_mm"], 50.0, delta=0.06)
+        self.assertAlmostEqual(job["board"]["height_mm"], 30.0, delta=0.06)
+        self.assertIn("joined", job["board"]["method"])
+        self.assertTrue(job["board"]["confident"])
+
+
+class PadsAgainstAnIndependentImplementation(unittest.TestCase):
+    """gerbonara reads the pads and the drill with none of our code. Its
+    nearest-neighbour pad distance and its smallest hole-free pad must
+    agree with ours on the real jobs, or one of us is wrong."""
+
+    def setUp(self):
+        if not os.path.isdir(REAL):
+            self.skipTest("sample jobs not on this machine")
+        try:
+            import gerbonara            # noqa: F401
+        except ImportError:
+            self.skipTest("gerbonara not installed")
+        import warnings
+        warnings.simplefilter("ignore")
+
+    def _flashes(self, path):
+        from gerbonara import GerberFile
+        from gerbonara.graphic_objects import Flash
+        gf = GerberFile.open(path)
+        out = []
+        for o in gf.objects:
+            if isinstance(o, Flash):
+                (x0, y0), (x1, y1) = o.bounding_box(unit="mm")
+                out.append(((x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0))
+        return out
+
+    def _nearest(self, pts):
+        import math
+        best = None
+        for i, (x, y) in enumerate(pts):
+            for (u, v) in pts[i + 1:]:
+                d = math.hypot(x - u, y - v)
+                if d > 0.01 and (best is None or d < best):
+                    best = d
+        return best
+
+    def test_pitch_on_the_2013_job(self):
+        src = os.path.join(REAL, "layer 1.zip")
+        if not os.path.exists(src):
+            self.skipTest("sample missing")
+        job = G.analyse(G.gather([src]))
+        copper = next(f for f in job["files"] if f["role"] == "copper_bottom")
+        theirs = self._nearest([(x, y) for x, y, _, _ in self._flashes(copper["path"])])
+        self.assertAlmostEqual(job["answers"]["min_pitch_mm"], theirs, delta=0.002)
+
+    def test_smt_pad_on_the_2018_job(self):
+        src = os.path.join(REAL, "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
+        if not os.path.exists(src):
+            self.skipTest("sample missing")
+        from gerbonara import ExcellonFile
+        job = G.analyse(G.gather([src]))
+        drill = next(f for f in job["files"] if f["role"] == "drill")
+        holes = []
+        for o in ExcellonFile.open(drill["path"]).objects:
+            (x0, y0), (x1, y1) = o.bounding_box(unit="mm")
+            holes.append(((x0 + x1) / 2, (y0 + y1) / 2))
+        import math
+        narrow = []
+        for f in job["files"]:
+            if f["role"] not in ("copper_top", "copper_bottom"):
+                continue
+            for x, y, w, h in self._flashes(f["path"]):
+                if not any(math.hypot(x - hx, y - hy) <= max(w, h) / 2
+                           for hx, hy in holes):
+                    narrow.append(min(w, h))
+        self.assertAlmostEqual(job["answers"]["min_smt_pad_mm"], min(narrow),
+                               delta=0.002)
+        self.assertEqual(len(holes), job["answers"]["drill_count"])

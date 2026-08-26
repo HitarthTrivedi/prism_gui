@@ -6,7 +6,7 @@ this document.
 
 **Keep it updated.** Add an entry the day a bug is found, before fixing it.
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-26
 
 ---
 
@@ -26,8 +26,8 @@ this document.
 | **101942** (`layer 1.zip`) | 2013, single-sided, 60x73mm, 80 holes | 4 bugs |
 | **EI-500DT** (`.rar`) | 2018 Altium, 4 layers, 218 holes | 1 bug |
 | **2-547-161A** (`.zip`) | 8 layers, 592 holes, 3 drill files | 4 bugs |
-| **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL` | 2 bugs |
-| **CT-TT-CAP12** (`.zip`) | a PANEL — 196x195mm, 2855 holes | clean first time |
+| **2580043B** (`.zip`) | 2 layers, 7 holes, carries a `.RUL`; outline does not close | 2 bugs, 1 open question |
+| **CT-TT-CAP12** (`.zip`) | a PANEL — 5 boards of 184x39mm on a 184x195mm frame, 2855 holes | 1 bug (#21) |
 | **MIE V2.2** (`.rar`) | PADS export, 10 copper layers, `art001.pho` names | 4 bugs |
 | **PCB-2199…** (`.zip`) | PADS export, 12 copper layers, 187k traces a layer | 3 bugs |
 
@@ -342,6 +342,32 @@ witness in its own right: machine-written and independent, the same role the
 
 ---
 
+## 21. A panel read as one board
+
+**Found by:** CT-TT-CAP12 · **Severity:** Silent · **Fixed:** engine, 2026-08-26
+
+The job is a V-scored panel: five boards of 184 x 39 mm stacked in a column
+on a 184 x 195 mm frame. It reported **one board of 196 x 195 mm** — the
+whole panel, plus the 6 mm the score lines overhang the frame — and that
+number was pinned in `gerber_samples.json` as "locked", which is exactly
+what "locked" is for: it moved, and somebody had to say whether that was an
+improvement. It was.
+
+Two things were wrong. `polygonize` was fed the raw strokes, and the score
+lines cross the frame without sharing a vertex with it, so on this layer it
+closed **nothing** and the size fell through to the extents of the ink. The
+strokes are now noded (`unary_union`) first, and the layer closes into
+exactly five 184 x 39 faces. Then nothing looked for repeats: `panel()`
+now groups the closed faces by size, and several non-overlapping copies of
+one size adding up to most of the drawn area are an array — unit size,
+count, grid, and panel size are all reported, and the PCB size is one board.
+
+The same noding lets the loose ends of a hair-open outline be joined
+(0.15 mm), which one export needed — but see open item 10 below for the
+one that is open by millimetres, not microns.
+
+---
+
 # Open — not fixed
 
 ## A. What will break next — predicted from the pattern
@@ -361,6 +387,8 @@ likelihood x damage.
   parse loop and reproduced the modal D-code bug inside itself. A test that
   reimplements the thing it tests will inherit its bugs and invent new ones.)
 - **Aperture macros** (60 files), **G36 regions** (15), **modal codes**.
+- **Panel vs board** — was item 4 here; fixed 2026-08-26 (#21). An array
+  on the outline layer is now read as unit x count x panel.
 
 ### 1. Negative image `%IPNEG` — SILENT, catastrophic
 
@@ -382,11 +410,12 @@ silkscreen, paste or mechanical — layers we do not measure — so it has cost
 nothing yet. **A copper layer in that form would produce no geometry and no
 error.** Three jobs ship a `.apr` we ignore.
 
-### 4. Panel vs board — SILENT, and arguably live now
+### 4. A panel whose outline layer shows only the frame — SILENT
 
-`CT-TT-CAP12-V1.1-PANEL` reports 196 x 195 mm. That is the PANEL, carrying
-many copies. A fab quoting per board needs the board. Nothing distinguishes
-them, and the answer looks perfectly reasonable either way.
+Fixed for the panel we have (#21), which draws every unit. A panel that
+draws only the frame and puts the repetition in `%SR` or in the copper
+alone would still read as one big board; `%SR` now at least raises a
+warning when the outline shows one board.
 
 ### 5. Excellon slots `G85` — SILENT
 
@@ -410,6 +439,23 @@ backplane could be fifteen. It all sits in memory, too.
 Untried: 7-zip, tar.gz, a password-protected archive, an archive nested three
 deep, two different boards sharing a filename stem in one folder, non-ASCII
 filenames.
+
+### 10. An outline open by millimetres — LOUD, and unresolved
+
+`2580043B.GM1` is a chain of 147 strokes whose ends miss each other by
+3–6 mm in five places (drawn with a 1.6 mm pen, so it *looks* closed on
+screen). Nothing can close that honestly. The size comes from the extents
+of the ink, marked not confident, 23.49 x 44.06 mm — and the job carries
+no check sheet to say what the customer calls it. Needs a person: Keyur
+bhai reads it in CAM and the true size goes into `gerber_samples.json` as
+witnessed.
+
+### 11. Pitch and SMT pad — new figures, no witness yet
+
+Added 2026-08-26 and pinned as `locked` on the four fast jobs. They agree
+with an independent reading (gerbonara) on the two jobs tested, but no
+human has yet said "yes, that board's finest pitch is 0.48 mm". Same ask
+as item 10: one CAM reading per job.
 
 ### 9. `.gbrjob` — a missed opportunity rather than a bug
 
