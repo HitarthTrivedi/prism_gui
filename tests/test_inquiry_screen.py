@@ -134,9 +134,13 @@ class NoRegisterYet(unittest.TestCase):
         self.assertNotIn("Set up Email automation", labels)
         check_btn = next(b for b in buttons if b.text() == "Check my mail now")
         fired = []
-        panel.open_dialog.connect(lambda tab: fired.append(tab))
+        # "Check my mail now" fires check_requested, not open_dialog — the
+        # main window wires check_requested to open the dialog AND kick off
+        # check_now() immediately (auto_check=True), so the panel-level
+        # contract is the more specific signal.
+        panel.check_requested.connect(lambda: fired.append(True))
         check_btn.click()
-        self.assertEqual(fired, [0])
+        self.assertEqual(fired, [True])
 
     def test_an_unconfigured_mailbox_still_offers_setup(self):
         panel = InquiryPanel({})
@@ -264,6 +268,9 @@ class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
         from widgets.inquiry_panel import OPEN_LABEL
         panel = InquiryPanel(self.cfg)
         fired = []
+        # OPEN_LABEL ("Open Email automation") hands off with no check
+        # implied — see InquiryPanel.check_requested for the one button
+        # that's different (the front door's "Check my mail now").
         panel.open_dialog.connect(lambda tab: fired.append(tab))
         opener = next((b for b in panel.findChildren(QPushButton)
                       if b.text() == OPEN_LABEL), None)

@@ -52,6 +52,12 @@ _DEFAULT: dict[str, Any] = {
     "last_refresh_attempt": 0,
     "payload_etag": "",
     "server": "",
+    # The server's last word on versions, copied off the lease/authorize
+    # response so the banner can be drawn at launch with no network. Advisory
+    # (see status.LicenseState) — a hand-edited value here changes what the
+    # banner says and nothing else.
+    "latest_version": "",
+    "min_supported_version": "",
     # The member's designation key (licensing/designation.py). Beside the
     # licence rather than in config.json for the same reason as the token:
     # config.py rewrites the whole dict from whatever the caller holds, and a
@@ -68,18 +74,48 @@ _DEFAULT: dict[str, Any] = {
 def read_json(target: str, default: dict[str, Any]) -> dict[str, Any]:
     """Read a state file, resolving every failure to `default`.
 
-    Missing, unreadable, truncated, or not JSON — all the same to us, and none
-    of them may raise: these files are user-writable, and refusing to launch
-    over a corrupt cache is a worse outcome than starting fresh.
+    Missing, unreadable, truncated, or not JSON — all the same to the CALLER,
+    and none of them may raise: these files are user-writable, and refusing to
+    launch over a corrupt cache is a worse outcome than starting fresh.
+
+    They are not the same to SUPPORT, though. A missing file is what "never
+    activated" and "deactivated" look like, and that one stays silent on
+    purpose — it is the expected, everyday case. Anything else — permission
+    denied, a lock held by a scanner or a sync client, a truncated write from
+    a crash, a directory where a file should be — means a customer who really
+    did activate is being told the same thing as one who never did, with
+    nothing anywhere to tell the two apart afterwards. Logging those (and only
+    those) does not change what gets returned; it only leaves a trail for the
+    one case worth diagnosing.
     """
     try:
         with open(target, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
+            _log_read_failure(target, "content is valid JSON but not an object")
             return dict(default)
         return {**default, **data}
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return dict(default)
+    except (OSError, ValueError) as e:
+        _log_read_failure(target, str(e))
+        return dict(default)
+
+
+def _log_read_failure(target: str, reason: str) -> None:
+    """Best-effort note that a state file exists but could not be trusted.
+
+    Never raises and never blocks — a broken log must not turn a recoverable
+    read failure into a startup failure — and the caller's fallback to
+    `default` happens exactly as it would without this.
+    """
+    try:
+        import diagnostics
+        diagnostics.write(
+            "WARN", f"licence store: could not read {target} ({reason}) — "
+                    "treating it as absent for this launch.")
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def write_json(target: str, data: dict[str, Any]) -> None:

@@ -16,7 +16,7 @@ import os
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QMenu, QFrame,
 )
 
@@ -53,7 +53,7 @@ class AskPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
 
-        self.edit = QTextEdit()
+        self.edit = C.PlainPasteTextEdit()
         self.edit.setPlaceholderText(placeholder)
         self.edit.setFixedHeight(92)
         root.addWidget(self.edit)

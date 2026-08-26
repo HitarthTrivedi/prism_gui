@@ -56,7 +56,49 @@ def resource(*parts: str) -> str:
 
 def user_dir(*parts: str) -> str:
     """Absolute path inside ~/.prism — the user's own state, never bundled."""
-    return os.path.join(os.path.expanduser("~"), ".prism", *parts)
+    return os.path.join(_home_dir(), ".prism", *parts)
+
+
+def _home_dir() -> str:
+    """The user's home directory — guaranteed absolute, guaranteed stable.
+
+    os.path.expanduser("~") can silently fail to expand. On Windows that
+    happens when neither USERPROFILE nor HOMEPATH is set — a scheduled task, a
+    service account, some app-virtualisation and remote-execution wrappers
+    that never load a profile. On POSIX it happens when HOME is unset AND the
+    passwd database has no entry for the running uid — some sandboxed or
+    containerised desktop environments. Either way expanduser returns the
+    literal two characters "~", unchanged, and nothing downstream notices:
+    os.path.join treats "~" as an ordinary folder NAME, not a substitution
+    that failed. ~/.prism then silently becomes a RELATIVE folder that
+    follows the current working directory — launch Prism from two different
+    places (two shortcuts, a scheduled autostart entry vs. a desktop icon, an
+    updater relaunching it from its own folder) and it is two different
+    folders, with two different licence files and two different device ids.
+    A customer who definitely activated once keeps being asked for the key,
+    on every launch that does not happen to share the first one's working
+    directory — which reads as "the licence just isn't checked".
+
+    The fallbacks below are the same sources expanduser itself tries on
+    Windows, checked directly, and — failing all of them — an anchor beside
+    the app rather than the working directory. That last one may not be
+    where a real home directory would have been, but it is at least the SAME
+    place on every launch, which is the actual property this function exists
+    to guarantee.
+    """
+    home = os.path.expanduser("~")
+    if home != "~" and os.path.isabs(home):
+        return home
+    for var in ("USERPROFILE", "HOME"):
+        value = os.environ.get(var)
+        if value and os.path.isabs(value):
+            return value
+    homepath = os.environ.get("HOMEPATH")
+    if homepath:
+        candidate = os.environ.get("HOMEDRIVE", "") + homepath
+        if os.path.isabs(candidate):
+            return candidate
+    return os.path.join(app_root(), ".prism-home")
 
 
 def ensure_user_dir() -> str:

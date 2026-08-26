@@ -747,7 +747,8 @@ def open_in_file_manager(path: str) -> None:
 
 class InquiryDialog(PrismDialog):
 
-    def __init__(self, cfg: dict, parent=None, tab: int = 0):
+    def __init__(self, cfg: dict, parent=None, tab: int = 0, *,
+                 auto_check: bool = False):
         # No subtitle: the sentence at the top of each tab says what THAT
         # list is for, which is the only sentence the owner needs, and the
         # header band's 20px are worth more as table rows.
@@ -791,6 +792,12 @@ class InquiryDialog(PrismDialog):
         # that check ends, so a later failure the owner DID ask for still gets
         # a dialog rather than disappearing into the status line.
         self._quiet = False
+        # Set when this dialog was opened by pressing "Check my mail now" on
+        # the report screen behind it, rather than by clicking a row or
+        # "Edit setup" — see _first_look(). Without this, that button opened
+        # an otherwise-idle dialog and the owner had to find the second
+        # button of the same name inside it before anything actually ran.
+        self._auto_check_on_open = auto_check
 
         self._build_header_actions()
 
@@ -955,6 +962,18 @@ class InquiryDialog(PrismDialog):
                                      icon_name="inbox",
                                      on_click=self.check_now)
         self.header.add_action(self.check_btn)
+        # Hidden until a check is actually running — InboxCheckWorker has no
+        # cooperative stop(), so a dead mail server used to leave the button
+        # disabled and progress spinning with no way out short of closing the
+        # whole dialog (which falls back to the same hard terminate() this
+        # calls directly — see closeEvent).
+        self.reset_btn = self.button(
+            i18n.t("Reset"), "secondary", icon_name="x", small=True,
+            on_click=self._reset_check,
+            tooltip=i18n.t("Cancel a check that has stopped responding, so "
+                           "you can try again."))
+        self.reset_btn.setVisible(False)
+        self.header.add_action(self.reset_btn)
 
     def _settings(self) -> dict:
         return settings_of(self.cfg)
@@ -1582,6 +1601,9 @@ class InquiryDialog(PrismDialog):
             if answer == QMessageBox.Yes:
                 self.open_setup()
             return
+        if self._auto_check_on_open:
+            self.check_now()
+            return
         self.status.setText(i18n.t("Ready. Press Check my mail now."))
 
     def open_setup(self):
@@ -1635,9 +1657,35 @@ class InquiryDialog(PrismDialog):
         self._queue = accounts
         self._queue_pos = 0
         self._partial = []
-        self.check_btn.setEnabled(False)
+        self._set_checking(True)
         self.progress.setVisible(True)
         self._check_account()
+
+    def _set_checking(self, running: bool):
+        self.check_btn.setEnabled(not running)
+        self.reset_btn.setVisible(running)
+
+    def _reset_check(self):
+        """Give up on the check in progress and let the owner try again.
+
+        Hard termination, not a cooperative stop — InboxCheckWorker has none
+        to call, so this is the same fallback closeEvent() already reaches
+        for when a worker will not finish on its own. It is the whole story
+        here rather than a last resort, because the owner asked for it.
+        """
+        self._queue = []
+        worker, self._worker = self._worker, None
+        if worker is not None:
+            try:
+                if worker.isRunning():
+                    worker.terminate()
+                    worker.wait(1000)
+            except RuntimeError:
+                pass        # already deleted; nothing to wait for
+        self._quiet = False
+        self._set_checking(False)
+        self.status.setText(i18n.t(
+            "Check cancelled. Press Check my mail now to try again."))
 
     def _check_account(self):
         """Start the check for the account the walk is standing on."""
@@ -1832,7 +1880,7 @@ class InquiryDialog(PrismDialog):
     AUTH_FAILURES_BEFORE_STOP = 3
 
     def _check_failed(self, message: str):
-        self.check_btn.setEnabled(True)
+        self._set_checking(False)
         self.progress.setVisible(False)
         self.status.setText("")
         self._note_failure(message)
@@ -1879,7 +1927,7 @@ class InquiryDialog(PrismDialog):
         bookmark here); the account walk passes False because it has already
         banked every account's bookmark as it went.
         """
-        self.check_btn.setEnabled(True)
+        self._set_checking(False)
         self.progress.setVisible(False)
         self._result = result
 
@@ -3076,7 +3124,7 @@ class _ReminderDialog(PrismDialog):
             layout.addWidget(caption)
         self._subject = QLineEdit(subject)
         layout.addWidget(self._subject)
-        self._body = QTextEdit(body)
+        self._body = C.PlainPasteTextEdit(body)
         layout.addWidget(self._body, stretch=1)
         self.footer.add_secondary(
             self.button(i18n.t("Cancel"), on_click=self.reject))
@@ -3430,10 +3478,67 @@ class QuotationDialog(PrismDialog):
 
         layout = self.body
         layout.setSpacing(theme.ROW_GAP)
-        asked = QLabel(i18n.t("They asked for: {what}").replace(
-            "{what}", row.get("Product asked", "")[:120]))
+
+        self._confident = quoting.is_confident(self.matches)
+
+        # Side by side, because the one judgement this whole dialog exists
+        # for is comparing these two: what the customer wrote, against what
+        # Prism is about to put a price on. Burying the ask in a one-line
+        # label above a plain form made that comparison something the owner
+        # had to hold in their head; here it stays on screen the whole time.
+        compare = QHBoxLayout()
+        compare.setSpacing(theme.SPACE_4)
+
+        ask_card = C.Card()
+        ask_col = ask_card.body(margins=(16, 14, 16, 16), spacing=theme.SPACE_1)
+        ask_title = QLabel(i18n.t("They asked for"))
+        ask_title.setObjectName("h6")
+        ask_col.addWidget(ask_title)
+        asked = QLabel(row.get("Product asked", "")[:220]
+                       or i18n.t("(no detail given)"))
         asked.setWordWrap(True)
-        layout.addWidget(asked)
+        ask_col.addWidget(asked)
+        ask_qty = QLabel(i18n.t("Quantity: {n}").replace(
+            "{n}", row.get("Quantity", "") or _quantity_of(row)))
+        ask_qty.setObjectName("meta")
+        ask_col.addWidget(ask_qty)
+        ask_col.addStretch(1)
+        compare.addWidget(ask_card, stretch=1)
+
+        quote_card = C.Card(stripe=True)
+        quote_col = quote_card.body(margins=(16, 14, 16, 16),
+                                    spacing=theme.SPACE_1)
+        quote_head = QHBoxLayout()
+        quote_title = QLabel(i18n.t("You're quoting"))
+        quote_title.setObjectName("h6")
+        quote_head.addWidget(quote_title, stretch=1)
+        # Pill, not a plain label: this is the one signal in the dialog that
+        # tells the owner whether to slow down and check Prism's pick, and it
+        # needs to read at a glance the way every other status in the app
+        # does.
+        self.verdict = C.Pill(
+            i18n.t("Confident match") if self._confident
+            else i18n.t("Check this"),
+            "ok" if self._confident else "warn")
+        quote_head.addWidget(self.verdict)
+        quote_col.addLayout(quote_head)
+        self.verdict_detail = QLabel(i18n.t(
+            "Two rows on your rate list are close — check the one Prism "
+            "picked before this goes out."))
+        self.verdict_detail.setWordWrap(True)
+        self.verdict_detail.setStyleSheet(_warning_css())
+        self.verdict_detail.setVisible(not self._confident)
+        quote_col.addWidget(self.verdict_detail)
+        self.quote_line_label = QLabel(i18n.t("Pick an item to see the price."))
+        self.quote_line_label.setWordWrap(True)
+        quote_col.addWidget(self.quote_line_label)
+        self.total_label = QLabel("")
+        self.total_label.setStyleSheet(theme.type_css("PAGE_TITLE", theme.ACCENT))
+        quote_col.addWidget(self.total_label)
+        quote_col.addStretch(1)
+        compare.addWidget(quote_card, stretch=1)
+
+        layout.addLayout(compare)
 
         form = QFormLayout()
 
@@ -3501,18 +3606,6 @@ class QuotationDialog(PrismDialog):
         form.addRow(i18n.t("Quantity:"), self.quantity)
         layout.addLayout(form)
 
-        confident = quoting.is_confident(self.matches)
-        self.verdict = QLabel(i18n.t(
-            "Prism is confident about this match." if confident else
-            "Two rows on your rate list are close — check the one Prism "
-            "picked before this goes out."))
-        self.verdict.setWordWrap(True)
-        if confident:
-            self.verdict.setObjectName("meta")
-        else:
-            self.verdict.setStyleSheet(_warning_css())
-        layout.addWidget(self.verdict)
-
         self.workings = QPlainTextEdit()
         self.workings.setReadOnly(True)
         self.workings.setFixedHeight(160)
@@ -3524,6 +3617,9 @@ class QuotationDialog(PrismDialog):
         recalc.clicked.connect(self._recalculate)
         layout.addWidget(recalc)
 
+        preview_title = QLabel(i18n.t("The quotation document:"))
+        preview_title.setObjectName("h6")
+        layout.addWidget(preview_title)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setObjectName("mono")
@@ -3539,7 +3635,7 @@ class QuotationDialog(PrismDialog):
         # `mail_body`, not `body`: PrismDialog owns `self.body` (the content
         # layout), and quietly rebinding it here would break any later use of
         # the scaffold from this class.
-        self.mail_body = QTextEdit()
+        self.mail_body = C.PlainPasteTextEdit()
         self.mail_body.setFixedHeight(130)
         layout.addWidget(self.mail_body)
 
@@ -3590,6 +3686,7 @@ class QuotationDialog(PrismDialog):
         for widget in (self.weight, self.weight_label):
             widget.setVisible(cost)
         self.verdict.setVisible(not cost)
+        self.verdict_detail.setVisible(not cost and not self._confident)
         self.workings.setVisible(cost)
         self._recalculate()
 
@@ -3646,6 +3743,11 @@ class QuotationDialog(PrismDialog):
             lines=[line], terms=terms)
         self.preview.setPlainText(
             quoting.render_text(self.quote, settings.get("company", "")))
+        self.quote_line_label.setText(
+            f"{description[:80]}\n{line.quantity} {line.unit} × "
+            f"₹{quoting.indian_currency(line.rate)} = "
+            f"₹{quoting.indian_currency(line.amount)}")
+        self.total_label.setText(f"₹{quoting.indian_currency(self.quote.total)}")
         if not self.subject.text().strip():
             self.subject.setText(
                 f"{i18n.t('Quotation')} {self.quote.number} — {description[:50]}")
@@ -3656,6 +3758,8 @@ class QuotationDialog(PrismDialog):
         quoting = CB.get_quoting()
         item = self.item_picker.currentData()
         if item is None:
+            self.total_label.setText("")
+            self.quote_line_label.setText(i18n.t("Pick an item to see the price."))
             return
         quantity = quoting.to_decimal(self.quantity.text()) or Decimal(1)
         suggested = item.rate_for(quantity)
@@ -3711,6 +3815,9 @@ class QuotationDialog(PrismDialog):
                 "anything out — or type a rate below yourself."))
             self.preview.setPlainText("")
             self.quote = None
+            self.total_label.setText("")
+            self.quote_line_label.setText(
+                i18n.t("Enter the weight to see the price."))
             return
 
         breakdown = quoting.cost_sheet(self.cost_lines, weight_kg=weight,

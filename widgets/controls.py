@@ -38,7 +38,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
     QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QPushButton,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import theme
@@ -1250,6 +1250,24 @@ class FlowLayout(QLayout):
             x = next_x
             line_height = max(line_height, hint.height())
         return y + line_height - rect.y() + bottom
+
+
+class PlainPasteTextEdit(QTextEdit):
+    """A QTextEdit that pastes as plain text, always.
+
+    Qt's default paste inserts the richest format the clipboard offers, and a
+    terminal window — or any other dark, monospace editor — commonly puts an
+    HTML copy on the clipboard next to the plain one, carrying its own font,
+    background colour and whatever ANSI colour codes became inline styles.
+    Pasted into one of Prism's free-text boxes that showed up as a font
+    change mid-sentence, a coloured block, or a line break landing somewhere
+    it never was in the source. Every box someone composes a task or a brief
+    into should get back exactly the characters they copied, nothing else.
+    """
+
+    def insertFromMimeData(self, source):
+        if source.hasText():
+            self.insertPlainText(source.text())
 
 
 class SearchField(QLineEdit):

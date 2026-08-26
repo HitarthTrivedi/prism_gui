@@ -1,151 +1,126 @@
-"""Updates — Phase 0: a banner and a link, nothing fetched, nothing run.
+"""In-app updates — Phase 0: know that a newer Prism exists, and say so.
 
-The decision behind this module was taken out loud: Prism will never
-download or execute an update by itself. Giving an app permission to open
-a terminal and run whatever a server hands it is the exact pattern
-antivirus flags, and one bad update on a factory owner's only laptop, with
-no undo, breaks his machine instead of helping him. So the owner is TOLD,
-and the owner clicks: the banner says a newer Prism exists, the button opens
-the download page in the browser, and installing it is the same thing they
-did the first time.
+Prism has no self-update yet. What exists today is the licence server telling
+every client, on every lease, two things it already knew:
 
-Two levels, both read off the licence server's answer (`LicenseState`):
+    latest_version          the newest build we have shipped        (advisory)
+    min_supported_version   the oldest build it will still lease to (enforced
+                            SERVER-side: an older client keeps opening, keeps
+                            its History, and cannot start new protected work)
 
-  * **available** — a newer version exists. Advisory; dismissible per
-    version ("Not now"), and a newer one brings the banner back.
-  * **required** — the server has stopped leasing to this build, so new
-    work is already refused. Not dismissible; outranks everything else on
-    the banner.
+Until 1.3.1 the client dropped both on the floor. This module is what reads
+them: it turns the pair into a banner with a Download button, and remembers
+which version the customer has already said "not now" to. That is the whole
+of Phase 0 in update-plan.md §2. The real updater — a signed manifest, a
+staged copy of the new build, a swap on restart, a rollback — is Phase 1 and
+grows in this file, which is why it is not three functions inside
+main_window.py.
 
-The server's advice arrives in the licence file (`latest_version`,
-`min_supported_version`, written by the licensing round trip) and is read
-from there — `LicenseState` itself does not carry version fields. Until the
-server sends them, both answer "no", which is honest: there is no update to
-report. The comparison is a plain dotted-number compare so "1.10.0" is
-newer than "1.9.0".
+Kept free of Qt, like licensing/, so the CLI and the tests can use it.
 
-This file was written to unblock `main` — the commit that added the two
-call sites (main_window.py, widgets/settings_panel.py) did not include it.
-If a fuller updater.py lands from that work, it should replace this one
-wholesale; every name the callers use is defined here and nowhere else.
+Trust
+─────
+Everything here is advisory. The two strings arrive UNSIGNED beside the
+signed lease, so a tampered server answer, a proxy, or a hand-edited
+license.json can make Prism *suggest* an update — it cannot make Prism fetch
+or run anything. The Download button opens a fixed vendor address
+(app_meta.DOWNLOAD_URL), never a URL the server handed us; the day this
+module downloads code, that code is verified against a key that ships in the
+build (update-research.md §5), not against anything in a response.
 """
 from __future__ import annotations
 
-import json
 import os
+import time
+from typing import Any
 
 import app_meta
 import licensing
 from licensing import store
+from licensing.status import LicenseState, newer
 
-# Per-version "Not now" answers live beside the licence file (never in
-# config.json — a config rewrite must not quietly forget them), under the
-# same user_dir the licensing tests redirect, so a test never touches the
-# developer's real ~/.prism.
-_DISMISSALS = "updates.json"
+STATE_FILENAME = "update_state.json"
 
-LATEST_FIELDS = ("latest_version", "latest", "update_available")
-FLOOR_FIELDS = ("min_supported_version", "min_version", "minimum_version",
-                "required_version")
-
-
-# ── versions ──────────────────────────────────────────────────────────────────
-
-def _parts(version: str) -> tuple:
-    out = []
-    for piece in str(version or "").strip().split("."):
-        digits = "".join(ch for ch in piece if ch.isdigit())
-        out.append(int(digits) if digits else 0)
-    return tuple(out) or (0,)
+_DEFAULT: dict[str, Any] = {
+    # The version the customer pressed "Not now" on. Compared exactly: a
+    # newer release than the one dismissed shows the banner again, which is
+    # the point — "not now" means this one, not for ever.
+    "dismissed": "",
+    "dismissed_at": 0,
+}
 
 
-def is_newer(candidate: str, than: str = app_meta.VERSION) -> bool:
-    """True when `candidate` is a strictly higher dotted version."""
-    if not (candidate or "").strip():
-        return False
-    return _parts(candidate) > _parts(than)
+# ── the state file ─────────────────────────────────────────────────────────
+def state_path() -> str:
+    """~/.prism/update_state.json. Beside license.json, through the same
+    user_dir() the tests redirect, so a test can never dismiss a real
+    customer's banner."""
+    return os.path.join(licensing.user_dir(), STATE_FILENAME)
 
 
-def _field(state, names) -> str:
-    """The first of `names` found — on the state object, in a payload dict
-    it may carry, or in the licence file on disk, which is where the
-    licensing round trip actually writes the server's version advice."""
-    for name in names:
-        value = getattr(state, name, None)
-        if value:
-            return str(value)
-    payload = getattr(state, "payload", None)
-    if isinstance(payload, dict):
-        for name in names:
-            if payload.get(name):
-                return str(payload[name])
-    try:
-        data = store.load(licensing.user_dir())
-    except Exception:                          # noqa: BLE001 — advice only
-        return ""
-    for name in names:
-        if data.get(name):
-            return str(data[name])
-    return ""
+def _load() -> dict[str, Any]:
+    return store.read_json(state_path(), _DEFAULT)
 
 
-# ── what the callers ask ──────────────────────────────────────────────────────
-
-def available(state) -> str | None:
-    """The newest version the server knows of, if it is newer than this
-    build; else None."""
-    latest = _field(state, LATEST_FIELDS)
-    return latest if is_newer(latest) else None
+def _save(data: dict[str, Any]) -> None:
+    store.write_json(state_path(), {**_DEFAULT, **data})
 
 
-def required(state) -> bool:
-    """True when the server says this build may no longer start new work."""
-    return is_newer(_field(state, FLOOR_FIELDS))
+# ── what the server said, against what is running ──────────────────────────
+def available(state: LicenseState | None = None,
+              running: str | None = None) -> str:
+    """The newer version the server knows about, or "" if this IS the newest
+    (or nobody has told us otherwise). Never raises: an unparseable answer
+    is "no advice", not "update now"."""
+    state = licensing.state() if state is None else state
+    running = app_meta.VERSION if running is None else running
+    latest = (state.latest_version or "").strip()
+    return latest if newer(latest, running) else ""
 
 
-def target(state) -> str:
-    """The version a required update is to: the newest the server names,
-    else the floor it insists on, else this build."""
-    return (available(state) or _field(state, FLOOR_FIELDS)
-            or app_meta.VERSION)
+def required(state: LicenseState | None = None,
+             running: str | None = None) -> bool:
+    """Has the server's floor moved above this build?
+
+    True means the server has ALREADY stopped leasing to this build — the
+    refusal is theirs, this only repeats it. The app still opens and History
+    still works; what changes is the banner's wording, from "there is a newer
+    one" to "update to continue".
+    """
+    state = licensing.state() if state is None else state
+    running = app_meta.VERSION if running is None else running
+    return newer((state.min_supported_version or "").strip(), running)
 
 
-def download_url() -> str:
-    return app_meta.DOWNLOAD_URL
+def target(state: LicenseState | None = None,
+           running: str | None = None) -> str:
+    """The version to tell the customer to get: the newest we know of, or
+    failing that the floor itself — a floor with no `latest` beside it is a
+    misconfigured server, and the banner should still name a number."""
+    state = licensing.state() if state is None else state
+    return (available(state, running)
+            or (state.min_supported_version or "").strip())
 
 
-# ── "Not now" ─────────────────────────────────────────────────────────────────
-
-def _dismissals_path() -> str:
-    return os.path.join(licensing.user_dir(), _DISMISSALS)
-
-
-def _load() -> dict:
-    try:
-        with open(_dismissals_path(), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
+# ── "Not now" ──────────────────────────────────────────────────────────────
 def dismissed(version: str) -> bool:
-    """Has "Not now" been pressed for exactly this version?"""
-    return str(version or "").strip() in set(_load().get("dismissed") or [])
+    """Has the customer already waved THIS version away?"""
+    version = (version or "").strip()
+    return bool(version) and _load().get("dismissed") == version
 
 
 def dismiss(version: str) -> None:
-    version = str(version or "").strip()
+    """Hide the banner for this version. Never raises — a full disk must not
+    turn "Not now" into a crash; the worst case is the banner coming back."""
+    version = (version or "").strip()
     if not version:
         return
-    data = _load()
-    done = list(data.get("dismissed") or [])
-    if version not in done:
-        done.append(version)
-    data["dismissed"] = done
     try:
-        os.makedirs(licensing.user_dir(), exist_ok=True)
-        with open(_dismissals_path(), "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-    except OSError:
-        pass        # a nudge that comes back tomorrow is not worth an error
+        _save({"dismissed": version, "dismissed_at": int(time.time())})
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+def download_url() -> str:
+    """Where the Download button goes. Fixed at build time on purpose."""
+    return app_meta.DOWNLOAD_URL

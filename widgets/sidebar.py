@@ -15,9 +15,9 @@ Three constraints shape it and none of them may be traded away:
 * **The budget is twelve controls and two headings, fitting at 768px with no
   scroll.** The rail had grown to twenty-odd controls across six headed groups
   — more choices than the screen it navigates to — and was cut back
-  deliberately. It is at twelve here: New task, Home, History, five live
-  add-ons, Settings, Favourites, the wake row, the profile row. Anything new
-  has to displace something.
+  deliberately. It is at eleven here: New task, Home, History, four live
+  add-ons, Settings, Favourites, the wake row, the profile row — one slot of
+  the twelve still free. Anything new beyond that has to displace something.
 * **`theme.over()` for every white-at-alpha.** The rail's glyphs are rendered
   by handing a colour string to QSvgRenderer, and `rgba()` there is not
   dependable across Qt's SVG backends — a nav icon that silently renders black
@@ -103,9 +103,6 @@ ADDONS = [
      "boq", theme.ACCENT),
     ("email", "Email", "mail",
      "Draft & send an email from attached files", "email", theme.WARN),
-    ("reel", "Reel / Studio", "video",
-     "Turn a task into a short video, drawn and rendered automatically",
-     "reel", theme.ACCENT_RAMP[600]),
     # Shown but NOT a button. The shelf should look like a product line, and a
     # visible "next one" is worth more in a client demo than an empty gap — but
     # a disabled control that cannot be clicked, focused or activated is not a

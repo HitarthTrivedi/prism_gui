@@ -451,6 +451,12 @@ class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
         self.assertIn("PICTURE art1:", asked)
         self.assertIn("PICTURE art2:", asked)
 
+    def test_generated_images_are_requested_as_reusable_assets_not_frames(self):
+        asked = RW.imagery_instructions("x")
+        self.assertIn("raw visual ingredients, NOT finished reel frames", asked)
+        self.assertIn("storyboard, contact sheet, carousel, poster", asked)
+        self.assertIn("contain no baked-in copy", asked)
+
     def test_it_is_told_what_to_write_when_it_cannot_see_one(self):
         asked = RW.imagery_instructions("x", True, attached=["art1"])
         self.assertIn("write NONE", asked)

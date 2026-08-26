@@ -9,7 +9,7 @@ import re
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel,
-    QPushButton, QTextEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QPushButton, QListWidget, QListWidgetItem, QMessageBox,
     QDialogButtonBox, QGroupBox, QWidget,
 )
 
@@ -342,7 +342,7 @@ class EmailComposeDialog(PrismDialog):
         self.subject_edit = QLineEdit()
         form.addRow("Subject:", self.subject_edit)
         draft_layout.addLayout(form)
-        self.body_edit = QTextEdit()
+        self.body_edit = C.PlainPasteTextEdit()
         self.body_edit.setPlaceholderText(
             "Draft body appears here — edit freely before sending.\n"
             "Write {name} anywhere and each recipient gets their own name "

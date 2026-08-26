@@ -4,7 +4,62 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **813 passing**, plus 148 scenario checks (`devtools/scenarios.py`).
+Tests: **1075 passing** (16 skipped, 1 deselected — see
+`.claude/agents/prism-test-doctor.md`), plus 148 scenario checks
+(`devtools/scenarios.py`).
+
+---
+
+# Round 10 — Prism knows when a newer Prism exists (1.3.1)
+
+The licence server has sent `latest_version` and `min_supported_version` on
+every lease since the authorisation-lease round, and every client dropped
+both on the floor. Customers learned about a release from an email and then
+went looking for the download. This round is Phase 0 of `../update-plan.md`:
+read the two values, say so, and ship that as **1.3.1** — because every later
+phase of the updater needs customers on a build that can *see* an update.
+
+## The advice reaches the state
+
+**Was:** `_store_lease()` kept the lease and nothing else. The two version
+strings beside it were never read.
+
+**Is:** `LicenseState.latest_version` / `.min_supported_version`, persisted in
+`license.json` off every lease and authorize response — and off the `detail`
+of a `CLIENT_TOO_OLD` refusal, which is the only lease answer a retired build
+ever gets, so it can say "update" rather than "can't reach the server". Drawn
+at launch with no network. A field the server stops sending is left alone; one
+it sends EMPTY is cleared, which is how a banner is withdrawn without a client
+release. Neither string is signed, so neither can do more than change wording
+— `updater.py`'s docstring is the trust statement.
+
+## The banner, and where it sits
+
+Third in the pecking order, behind a licence problem and an unreachable
+shared folder: "Prism 1.4.0 is available. You have 1.3.1." with **Download**
+(opens `app_meta.DOWNLOAD_URL`, a fixed address, never one from the response)
+and **Not now**, remembered per version in `~/.prism/update_state.json` — so
+the next release brings it back. A build below the server's floor gets "can
+no longer start new work — update to continue" with no Not-now, and that one
+outranks the shared-folder banner because new work is already refused.
+
+## Settings › Diagnostics › This installation
+
+The Version row grew **Check for updates**. `licensing.refresh()` gained
+`on_done`, called on its worker thread once both round trips have landed; the
+panel hands it a Signal's `emit`, Qt queues that back to the UI thread, and
+both the page and the window's banner redraw. It says "You have the latest
+version" only after a check — never as a standing pat on the back.
+
+## Release runbook
+
+`SHIPPING.md` §1.3: once the Release is up, set `LATEST_CLIENT_VERSION` in
+Render. `render.yaml` now declares it `sync: false`; `MIN_CLIENT_VERSION`
+stays the enforcing lever and stays unset.
+
+Tests: `tests/test_updater.py` (version compare, state, `on_done`, Not-now)
+and `tests/test_gates.py::UpdateBanner` (pecking order, dismiss, Download,
+the Check-now round trip).
 
 ---
 

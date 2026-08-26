@@ -469,7 +469,7 @@ class PlanRow(QFrame):
         if self._editors or not self._questions:
             return
         for text in self._questions:
-            edit = QTextEdit()
+            edit = C.PlainPasteTextEdit()
             edit.setObjectName("promptEdit")
             edit.setPlainText(text)
             edit.setMinimumHeight(96)

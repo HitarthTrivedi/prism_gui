@@ -314,6 +314,8 @@ class MainWindow(QMainWindow):
         self.home_panel.open_addon.connect(self._handle_command)
         self.home_panel.open_history.connect(lambda: self._handle_command("runs"))
         self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
+        self.inquiry_panel.check_requested.connect(
+            lambda: self._open_inquiry_dialog(auto_check=True))
         self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
         self.wizard_panel.finished.connect(self._on_wizard_finished)
         self.wizard_panel.guide_requested.connect(self._open_guide)
@@ -1093,12 +1095,14 @@ class MainWindow(QMainWindow):
             self.inquiry_panel.refresh()
             self.home_panel.refresh()
 
-    def _open_inquiry_dialog(self, tab: int = 0):
+    def _open_inquiry_dialog(self, tab: int = 0, auto_check: bool = False):
         """The working window, opened on the tab the owner asked for — the
         launcher's "Quote them" lands on To quote, "Read the answer" on
-        They answered, and so on."""
+        They answered, and so on. `auto_check` is set only for the front
+        door's "Check my mail now" — see InquiryPanel.check_requested."""
         from dialogs.inquiry_dialog import InquiryDialog
-        dialog = InquiryDialog(self.cfg, self, tab=int(tab or 0))
+        dialog = InquiryDialog(self.cfg, self, tab=int(tab or 0),
+                               auto_check=auto_check)
         dialog.exec()
         # The dialog saves its own settings and its reading bookmark, so pick
         # up whatever it wrote rather than overwriting it from a stale copy on

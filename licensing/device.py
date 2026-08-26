@@ -18,6 +18,7 @@ import hashlib
 import os
 import subprocess
 import sys
+import time
 import uuid
 
 # Bump only if the fingerprinting scheme itself changes — every existing
@@ -93,20 +94,61 @@ def _mac_address() -> str:
 
 
 def _persisted_random(user_dir: str) -> str:
+    """A random id, written once and read back on every later launch.
+
+    The write is retried and verified rather than fired-and-forgotten: on this
+    tier there is no OS-given identity to fall back to, so if this id does not
+    actually make it to disk, the NEXT launch cannot find it either, mints a
+    fresh uuid4 of its own, and this machine's fingerprint changes on every
+    single start — which is indistinguishable, from the customer's chair, from
+    "Prism keeps asking for the licence key". That failure mode is worth a
+    retry and a log line; it is not worth refusing to start over.
+    """
     path = os.path.join(user_dir, "device_id")
     existing = _read_first(path)
     if existing:
         return existing
     value = uuid.uuid4().hex
+    last_error = ""
+    # Two attempts, with a short pause between them: the usual cause of a
+    # failure here is something transient holding the file for a moment — an
+    # antivirus scan, a backup agent, a sync client — not a genuinely
+    # unwritable directory, and those clear up in well under a second.
+    for attempt in range(2):
+        try:
+            os.makedirs(user_dir, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(value)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(path, 0o600)
+        except OSError as e:
+            last_error = str(e)
+        else:
+            # Read it back rather than trusting the write call succeeding —
+            # a redirected or virtualised filesystem can accept a write and
+            # silently not persist it, which a bare `except OSError` would
+            # never catch.
+            if _read_first(path) == value:
+                return value
+            last_error = "file did not read back with the value just written"
+        if attempt == 0:
+            time.sleep(0.1)
+    # Both attempts failed. Returning the value anyway keeps THIS launch
+    # working — refusing to start over a storage problem would be a worse bug
+    # than the one being worked around — but every future launch will mint
+    # ANOTHER new random id and see this as a new device, silently spending a
+    # seat each time. Unlike the old silent `except OSError: pass`, that is
+    # now at least knowable after the fact rather than a mystery support
+    # ticket with no trail.
     try:
-        os.makedirs(user_dir, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(value)
-        os.chmod(path, 0o600)
-    except OSError:
-        # Unwritable home directory. Returning the value anyway keeps this
-        # launch working; the next one gets a new seat, which is bad but far
-        # better than refusing to start.
+        import diagnostics
+        diagnostics.write(
+            "WARN",
+            f"device id: could not persist {path} ({last_error}) — this "
+            "machine's licence fingerprint will change on every launch, "
+            "which looks like the licence needing re-entry each time.")
+    except Exception:                                   # noqa: BLE001
         pass
     return value
 

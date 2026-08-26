@@ -167,7 +167,15 @@ startup over a version would turn one bad release into every customer's
 problem at once.
 
 `LATEST_CLIENT_VERSION` is advisory. A newer version existing is never a
-reason to stop someone working.
+reason to stop someone working. Since client 1.3.1 both values are kept in
+`license.json` off every lease/authorize response (and off the `detail` of a
+`CLIENT_TOO_OLD` refusal, which is the only lease answer a retired build gets)
+and surface as `LicenseState.latest_version` / `.min_supported_version`.
+`updater.py` turns them into the banner: "Prism X is available" with Download
+and Not-now for `latest_version`, and "update to continue" for a build below
+`min_supported_version`. Neither string is signed, so neither can do more
+than change wording — the Download button opens the fixed
+`app_meta.DOWNLOAD_URL`, never an address from the response.
 
 Both are read at call time (`config.SETTINGS`, not a from-import), so the
 floor can be raised without a redeploy.

@@ -80,6 +80,13 @@ class InquiryPanel(QWidget):
     # The tab index of the working window to open on — see
     # dialogs.inquiry_dialog.TABS. 0 is "To quote".
     open_dialog = Signal(int)
+    # The front door's "Check my mail now" specifically: open the working
+    # window AND start a check immediately, rather than leaving the owner to
+    # find the second button of the same name once the window is up. Every
+    # other button that opens the window (the header's "Open Email
+    # automation", each "what needs you today" line) hands off without
+    # forcing a fetch nobody asked for.
+    check_requested = Signal()
     set_up = Signal()               # no register yet — open setup
 
     def __init__(self, cfg: dict, parent=None):
@@ -342,7 +349,7 @@ class InquiryPanel(QWidget):
                 i18n.t("Your mailbox is set up. Run a check and anything "
                        "waiting there gets a number, a quote and a chase."),
                 i18n.t("Check my mail now"), i18n.t("Edit setup"))
-            door.clicked.connect(lambda: self.open_dialog.emit(0))
+            door.clicked.connect(self.check_requested.emit)
             door.secondary.connect(self.set_up.emit)
             return door
         door = _FrontDoor(

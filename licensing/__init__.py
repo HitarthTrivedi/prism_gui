@@ -78,6 +78,7 @@ protected work for half an hour, and the network happens in the background.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import threading
 from typing import Any, Callable
@@ -167,7 +168,14 @@ def _compute() -> LicenseState:
     except TokenError as e:
         return _status.tampered(str(e))
 
-    return _status.resolve(claims)
+    # Version advice rides on the state rather than living in its own cache so
+    # the banner is drawn from the same object as everything else — one read,
+    # one repaint, no second file to fall out of step. Not claims: see
+    # LicenseState for why that is fine.
+    return dataclasses.replace(
+        _status.resolve(claims),
+        latest_version=str(data.get("latest_version") or ""),
+        min_supported_version=str(data.get("min_supported_version") or ""))
 
 
 def state() -> LicenseState:
@@ -298,6 +306,48 @@ def _store_lease(response: dict[str, Any]) -> bool:
     return True
 
 
+# What the server volunteers about versions on every lease and authorize
+# response — and inside the `detail` of a CLIENT_TOO_OLD refusal, which is the
+# one answer a build that has fallen below the floor will ever get from those
+# endpoints. Reading it from the refusal is what lets that build say "update"
+# instead of "can't reach the server".
+VERSION_FIELDS = ("latest_version", "min_supported_version")
+
+
+def _versions_in(response: Any) -> dict[str, str]:
+    """The version advice in a response or error detail. Only keys that are
+    actually present: a server that has stopped sending a field must not
+    wipe what we knew, and one that sends it EMPTY must — that is how the
+    banner is withdrawn without a client release."""
+    found: dict[str, str] = {}
+    if not isinstance(response, dict):
+        return found
+    for name in VERSION_FIELDS:
+        if name in response:
+            value = response[name]
+            found[name] = value.strip() if isinstance(value, str) else ""
+    return found
+
+
+def _store_versions(response: Any) -> bool:
+    """Remember the server's version advice. True if anything changed.
+
+    Its own write rather than a ride on _apply(), because the lease refresh —
+    the call that runs every ten minutes for as long as the window is open —
+    does not go through _apply() at all, and that is the call whose answer a
+    customer who has left Prism running all week will actually see.
+    """
+    wanted = _versions_in(response)
+    if not wanted:
+        return False
+    data = store.load(user_dir())
+    if all(data.get(name, "") == value for name, value in wanted.items()):
+        return False
+    store.update(user_dir(), **wanted)
+    reload()
+    return True
+
+
 # ── talking to the server ──────────────────────────────────────────────────
 def _apply(response: dict[str, Any], *, key: str = "") -> LicenseState:
     """Persist whatever the server just told us, and re-read."""
@@ -315,6 +365,7 @@ def _apply(response: dict[str, Any], *, key: str = "") -> LicenseState:
         if response.get(field):
             data[field] = str(response[field])
     data["server"] = client.server_url()
+    data.update(_versions_in(response))
     store.save(user_dir(), data)
     store.touch_clock(user_dir())
     if key:
@@ -367,6 +418,7 @@ def _refresh_once() -> LicenseState:
                                   app_version=app_meta.VERSION,
                                   payload_etag=data.get("payload_etag") or "")
     except ServerError as e:
+        _store_versions(e.detail)
         if e.code == "DEVICE_NOT_ACTIVATED" and stored_key:
             # Someone released this seat, probably by accident. We still hold
             # the key, so re-activate and heal it without troubling anyone.
@@ -490,6 +542,10 @@ def _refresh_lease_once() -> bool:
                                 app_version=app_meta.VERSION,
                                 scopes=_scopes_wanted())
     except ServerError as e:
+        # A CLIENT_TOO_OLD refusal is the only lease answer this build will
+        # get once it is below the floor — and it names the floor. Keep it,
+        # so the banner can say "update" rather than "can't reach the server".
+        _store_versions(e.detail)
         if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
                       "DEVICE_NOT_ACTIVATED"):
             # A definite withdrawal. Drop the cached lease so protected work
@@ -502,10 +558,12 @@ def _refresh_lease_once() -> bool:
     except Unreachable:
         authorization.note_attempt(user_dir())
         return False
+    _store_versions(response)
     return _store_lease(response)
 
 
-def refresh(blocking: bool = False, on_done=None) -> LicenseState | None:
+def refresh(blocking: bool = False,
+            on_done: Callable[[], None] | None = None) -> LicenseState | None:
     """Renew the token and the lease. Returns immediately unless `blocking`.
 
     Called at launch and periodically. Never surfaces an error: an unreachable
@@ -516,24 +574,33 @@ def refresh(blocking: bool = False, on_done=None) -> LicenseState | None:
     token carries) and neither is urgent, so one background thread doing both
     in sequence is both correct and cheaper than two racing.
 
-    `on_done()` — "Check for updates" needs to know when the round trip has
-    landed. It is called ON THE WORKER THREAD, with no arguments, once both
-    refreshes are through (or have given up); pass a Qt signal's `emit` and
-    Qt queues it back to the UI thread by itself, where the caller reads
-    state() afresh. Never called for a blocking refresh, whose caller
-    already has the result.
+    `on_done` is called once both calls have finished, whatever they answered
+    — ON THE WORKER THREAD. It exists for "Check for updates", which needs to
+    know when the answer has landed and has no other way to find out; a Qt
+    caller passes a Signal's emit, which Qt queues back to the UI thread.
+    Never touch a widget from it directly.
     """
     store.touch_clock(user_dir())
     if blocking:
         result = _refresh_once()
         _refresh_lease_once()
+        _call_quietly(on_done)
         return result
     threading.Thread(target=_safe_refresh, args=(on_done,),
                      name="prism-license-refresh", daemon=True).start()
     return None
 
 
-def _safe_refresh(on_done=None) -> None:
+def _call_quietly(fn: Callable[[], None] | None) -> None:
+    if fn is None:
+        return
+    try:
+        fn()
+    except Exception:                               # noqa: BLE001
+        pass
+
+
+def _safe_refresh(on_done: Callable[[], None] | None = None) -> None:
     try:
         _refresh_once()
     except Exception:                               # noqa: BLE001
@@ -542,11 +609,7 @@ def _safe_refresh(on_done=None) -> None:
         _refresh_lease_once()
     except Exception:                               # noqa: BLE001
         pass
-    if on_done is not None:
-        try:
-            on_done()
-        except Exception:                           # noqa: BLE001
-            pass                                    # a UI nicety, never a fault
+    _call_quietly(on_done)
 
 
 # ── live authorisation & metering ──────────────────────────────────────────
@@ -760,6 +823,7 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
         return Authorization(True, run_id=response.get("run_id", ""),
                              state=authorization.FRESH)
     except ServerError as e:
+        _store_versions(e.detail)
         if e.code == "DEVICE_NOT_ACTIVATED" and stored_key:
             # A seat released by mistake. Heal it and try once more.
             try:

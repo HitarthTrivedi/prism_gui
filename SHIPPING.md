@@ -152,6 +152,16 @@ run on an Intel Mac. Anyone still on one needs that leg added back first.
 Push any other branch and you still get artifacts on the run — useful for
 testing without cutting a release.
 
+**Once the Release is up, tell the licence server about it.** In the Render
+dashboard set `LATEST_CLIENT_VERSION` to the version you just tagged (e.g.
+`1.3.1`). Every client 1.3.1 or newer reads that value off its next lease
+refresh — within ten minutes for a window that is open, at launch otherwise —
+and shows an "update available" banner with a Download button that opens the
+Releases page. Nothing is enforced by it: it is a nudge, and each customer can
+dismiss it per version. `MIN_CLIENT_VERSION` is the enforcing lever and stays
+unset unless a shipped build has to be retired (see
+`docs/licensing/07-authorization-lease.md` §7).
+
 **Before the first tag, check `licensing/keys.py` has your production key under
 `PRODUCTION`.** The build refuses to run without one, because a frozen Prism
 would otherwise reject every licence you ever issue — and nothing else catches

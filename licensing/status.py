@@ -70,6 +70,13 @@ class LicenseState:
     payload_key: str = ""
     payload_etag: str = ""
     message: str = ""
+    # What the server last said about versions. NOT claims — they ride along
+    # unsigned on every lease and authorize response, so they are advisory by
+    # construction: a forged `latest_version` can make the app *suggest* an
+    # update, never install one. `min_supported_version` is the floor the
+    # server itself enforces on lease issuance; the client only repeats it.
+    latest_version: str = ""
+    min_supported_version: str = ""
 
     @property
     def usable(self) -> bool:
@@ -155,6 +162,38 @@ def none(message: str = "") -> LicenseState:
 
 def tampered(message: str) -> LicenseState:
     return LicenseState(status=TAMPERED, message=message)
+
+
+def version_tuple(text: str) -> tuple[int, ...]:
+    """"1.10.2" → (1, 10, 2). Anything unparseable → ().
+
+    The same parser the licence server uses (license_server/app/config.py),
+    kept in step by hand because the two are separate deployables. Hand-rolled
+    rather than `packaging.version` because it has to be total: the input is a
+    string off the network, and a banner must never be able to crash the
+    window. A leading "v" and a "-beta" suffix are tolerated; "1.10" sorts
+    above "1.9", which is the whole reason this is not a string compare.
+    """
+    parts: list[int] = []
+    for chunk in (text or "").strip().split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def newer(candidate: str, than: str) -> bool:
+    """Is `candidate` a strictly newer version than `than`?
+
+    False whenever either side does not parse. An unreadable server value
+    means "no advice", never "update now" — the failure mode of a parser bug
+    must be a missing banner, not a permanent one.
+    """
+    left, right = version_tuple(candidate), version_tuple(than)
+    if not left or not right:
+        return False
+    return left > right
 
 
 def clock_rolled_back(last_seen: int, now: int | None = None) -> bool:

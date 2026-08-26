@@ -270,6 +270,115 @@ class TheRetryPass(unittest.TestCase):
         self.assertIn("stage_unrecovered", [k for k, _ in self.events])
 
 
+# ── 4. a recovered stage feeding a renderer that already ran ────────────────
+#
+# `media` (Prism Reel/Studio) runs as one function call, in its own turn — so
+# if `visual` failed there and only came back through the retry above, the
+# renderer already finished without the images `visual` was going to hand it.
+# A plain text/URL handoff can't make an already-rendered video notice new
+# pictures showed up afterwards, so the renderer has to be called again.
+
+class ARendererThatAlreadyRan(unittest.TestCase):
+
+    def setUp(self):
+        self._real_run = AU.run
+        self._real_run_local = AU._run_local
+
+    def tearDown(self):
+        AU.run = self._real_run
+        AU._run_local = self._real_run_local
+
+    def _fake_run(self, success_text="recovered", images=None):
+        """Succeeds on whichever alternative gets tried first — these tests
+        are about what happens AFTER a stage recovers, not about which tool
+        does the recovering, so which name `alternatives_for` picks first is
+        not something they should have to track."""
+        def fake(routing, cfg, **kw):
+            stage, _agent, _q = kw["custom_stages"][0]
+            out = kw.get("pipeline_files_out")
+            if images and out is not None:
+                out.extend(images)
+            return {stage: [success_text]}, {stage: "https://x/1"}
+        return fake
+
+    def test_the_renderer_is_called_again_with_the_recovered_images(self):
+        rerender_calls = []
+
+        def fake_run_local(kind, prior_text, attachments, cfg, stage, brand=None):
+            rerender_calls.append((kind, stage, list(attachments)))
+            return "/runs/reel_2.mp4", "reel rendered — reel_2.mp4"
+
+        AU.run = self._fake_run(
+            "some images",
+            images=[{"name": "grid.png", "path": "/tmp/grid.png", "kind": "image"}])
+        AU._run_local = fake_run_local
+
+        stages = [("content", "Claude", ["write it"]),
+                  ("visual", "ChatGPT", ["make images"]),
+                  ("media", "Prism Reel", ["render it"])]
+        responses = {"content": ["the script"]}
+        links = {"media": "/runs/reel_1.mp4"}       # media already rendered once
+        pipeline_files = []
+
+        AU._retry_failed_stages(
+            {"visual": {"agent": "DALL-E", "questions": ["make images"],
+                       "reason": "quota", "exhausted": True}},
+            {}, responses, links, attachments=[], query="q",
+            emit=lambda *a: None, should_stop=None,
+            stages=stages, pipeline_files=pipeline_files, brand={})
+
+        self.assertEqual(len(rerender_calls), 1, rerender_calls)
+        kind, stage, attachments_seen = rerender_calls[0]
+        self.assertEqual(kind, "reel")
+        self.assertEqual(stage, "media")
+        self.assertIn({"name": "grid.png", "path": "/tmp/grid.png", "kind": "image"},
+                      attachments_seen)
+        self.assertEqual(links["media"], "/runs/reel_2.mp4")
+
+    def test_a_renderer_with_nothing_recovered_upstream_is_left_alone(self):
+        """`audio` sits AFTER `media` in this plan — its recovery has nothing
+        to do with what the renderer already drew, so re-running the render
+        would just cost minutes for an identical result. (`content`, which
+        genuinely feeds the render, is covered by the test above — recovering
+        it SHOULD trigger a re-render, and does.)"""
+        rerender_calls = []
+        AU._run_local = lambda *a, **kw: rerender_calls.append(a) or ("x", "y")
+        AU.run = self._fake_run("the narration")
+
+        stages = [("content", "Claude", ["write it"]),
+                  ("media", "Prism Reel", ["render it"]),
+                  ("audio", "ElevenLabs", ["voice it"])]
+        links = {"media": "/runs/reel_1.mp4"}
+
+        AU._retry_failed_stages(
+            {"audio": {"agent": "ElevenLabs", "questions": ["voice it"],
+                      "reason": "quota", "exhausted": True}},
+            {}, {}, links, attachments=[], query="q",
+            emit=lambda *a: None, should_stop=None,
+            stages=stages, pipeline_files=[], brand={})
+
+        self.assertEqual(rerender_calls, [])
+
+    def test_a_renderer_that_never_ran_is_not_conjured_into_existing(self):
+        """`media` isn't in `all_links` at all here — it was never reached, so
+        there is nothing to redo."""
+        rerender_calls = []
+        AU._run_local = lambda *a, **kw: rerender_calls.append(a) or ("x", "y")
+        AU.run = self._fake_run("images")
+
+        stages = [("visual", "ChatGPT", ["make images"]),
+                  ("media", "Prism Reel", ["render it"])]
+
+        AU._retry_failed_stages(
+            {"visual": {"agent": "DALL-E", "questions": ["make images"],
+                       "reason": "quota", "exhausted": True}},
+            {}, {}, {}, attachments=[], query="q",
+            emit=lambda *a: None, should_stop=None,
+            stages=stages, pipeline_files=[], brand={})
+
+        self.assertEqual(rerender_calls, [])
+
+
 class WiredIntoTheRun(unittest.TestCase):
     """The units above are worthless if run() never calls them."""
 

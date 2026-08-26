@@ -238,7 +238,7 @@ class InputPanel(Card):
         # A drawn, focusable well rather than a line of placeholder text on a
         # white card. The complaint the redesign starts from is that the most
         # important input in the product did not look like an input at all.
-        self.text = QTextEdit()
+        self.text = C.PlainPasteTextEdit()
         self.text.setObjectName("taskEdit")
         self.text.setFrameShape(QTextEdit.NoFrame)
         self.text.setPlaceholderText(i18n.t(
