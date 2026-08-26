@@ -457,6 +457,20 @@ class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
         self.assertIn("storyboard, contact sheet, carousel, poster", asked)
         self.assertIn("contain no baked-in copy", asked)
 
+    def test_studio_design_requires_a_readable_layer_contract(self):
+        asked = RW.design_instructions(request="make a reel", assets="asset:art1")
+        self.assertIn("THE LAYER CONTRACT", asked)
+        self.assertIn("required script words 50", asked)
+        self.assertIn("A panel may sit behind copy, never across it", asked)
+
+    def test_each_scene_is_told_to_keep_copy_above_artwork(self):
+        asked = RW.scene_instructions(
+            0, 1, {"job": "hook", "look": "dark", "motion": "rise"},
+            {"role": "hook", "headline": "Make it clear", "seconds": 4},
+            "asset:art1")
+        self.assertIn("Required copy must be the top readable layer", asked)
+        self.assertIn("explicit z-index", asked)
+
     def test_it_is_told_what_to_write_when_it_cannot_see_one(self):
         asked = RW.imagery_instructions("x", True, attached=["art1"])
         self.assertIn("write NONE", asked)
