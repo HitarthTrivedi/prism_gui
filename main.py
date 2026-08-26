@@ -30,6 +30,28 @@ from widgets import icons
 # failure looks like one stubbornly English string with no obvious cause.
 
 
+def _force_utf8_streams() -> None:
+    """Make stdout/stderr encode UTF-8, whatever console Windows attached.
+
+    The engine narrates its whole run through print() — and one of those lines
+    carries an emoji (the 🍪 profile message). On Windows a redirected or
+    console-launched process gets a cp1252 stream, and print()ing a character
+    cp1252 can't encode raises UnicodeEncodeError — which, uncaught in the
+    engine's loop, takes the entire run down. errors="replace" is the belt to
+    reconfigure's braces: even a glyph outside the target codec degrades to a
+    '?' instead of crashing. A windowed (console=False) build may have no
+    stdout at all, so each stream is guarded independently.
+
+    Must run before anything prints — the engine imports happen in main()
+    right after this returns.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:                               # noqa: BLE001
+            pass    # None (windowed build) or a stream that can't reconfigure
+
+
 def _selftest(app) -> int:
     """Prove a packaged build is whole: every bundled resource present, the
     engine importable, the window constructible. Run by packaging/smoke_test.py
@@ -43,13 +65,10 @@ def _selftest(app) -> int:
     import wakeword
 
     # The checks below print ✓/✗ to whatever stdout the harness attached. On
-    # Windows that pipe defaults to cp1252, which can't encode them — and a
-    # windowed (console=False) build may have no stdout at all, hence the guard.
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+    # Windows that pipe defaults to cp1252, which can't encode them — main()
+    # already forced UTF-8 before us, but PRISM_SELFTEST can be entered on a
+    # path that hasn't, so this stays as a cheap idempotent guard.
+    _force_utf8_streams()
 
     # Selenium + undetected_chromedriver are the product's whole point, and
     # they are also the most fragile thing to freeze (dynamic imports, a
@@ -173,6 +192,12 @@ def _selftest(app) -> int:
 
 
 def main():
+    # First line of the program: guarantee our text streams speak UTF-8 before
+    # any engine code can print() the emoji that used to crash a whole run on a
+    # cp1252 Windows console. Cheap, side-effect-free, must come before the
+    # core_bridge import below.
+    _force_utf8_streams()
+
     app = QApplication(sys.argv)
     app.setApplicationName(app_meta.NAME)
     app.setApplicationDisplayName(app_meta.NAME)
