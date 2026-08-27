@@ -1126,7 +1126,7 @@ class MainWindow(QMainWindow):
             if name not in seen:
                 urls.append(CB.agents.AGENT_REGISTRY[name]["url"])
                 seen.add(name)
-        automation.open_login_tabs(urls)
+        automation.open_login_tabs(urls, cfg=self.cfg)
         self.statusBar().showMessage(
             i18n.t("Opened {n} login tab(s) in Chrome.").format(n=len(urls)),
             4000)

@@ -784,6 +784,17 @@ class SetupDialog(PrismDialog):
         row.addWidget(detect_btn)
         s.content.addLayout(row)
 
+        # WHICH of the customer's Chrome profiles to copy. Everything below
+        # used to assume one called "Default", and Chrome does not have to
+        # have one: a machine with eleven profiles and eight signed-in
+        # accounts had no "Default" at all, so nothing was ever copied and
+        # every run opened a blank, logged-out browser.
+        self.profile_combo = QComboBox()
+        self.profile_combo.setCursor(Qt.PointingHandCursor)
+        self._fill_profile_combo()
+        s.content.addWidget(QLabel("Which Chrome profile to copy your logins from"))
+        s.content.addWidget(self.profile_combo)
+
         # Prism drives its own Chrome profile so that logins survive between
         # runs. That also means a login done in the everyday browser doesn't
         # reach it — hence this.
@@ -801,6 +812,47 @@ class SetupDialog(PrismDialog):
         reseed_btn.clicked.connect(self._reseed_profile)
         s.content.addWidget(reseed_btn)
         return s
+
+    def _fill_profile_combo(self):
+        """Every real Chrome profile, named the way the customer knows them.
+
+        The account address is what identifies a profile to a person — "Work",
+        "Profile 20" and "Personal" all look the same in a list until you can
+        see which Google account is signed into each.
+        """
+        self.profile_combo.clear()
+        ok, _err = CB.automation_available()
+        if not ok:
+            self.profile_combo.addItem("Chrome automation unavailable", "")
+            self.profile_combo.setEnabled(False)
+            return
+        automation = CB.get_automation()
+        try:
+            profiles = automation.chrome_profiles()
+        except Exception:
+            profiles = []
+        if not profiles:
+            self.profile_combo.addItem("No Chrome profile found", "")
+            self.profile_combo.setEnabled(False)
+            return
+        # Blank = "whichever Chrome used last", which is right for the many
+        # people who only have one.
+        self.profile_combo.addItem(
+            f"Use the one Chrome opened last "
+            f"({automation.describe_profile(profiles[0])})", "")
+        for profile in profiles:
+            self.profile_combo.addItem(
+                automation.describe_profile(profile), profile["dir"])
+        saved = str(self.cfg.get("chrome_profile") or "").strip()
+        if saved:
+            index = self.profile_combo.findData(saved)
+            if index < 0:
+                # Chosen once, then removed from Chrome. Say so rather than
+                # silently falling back to somebody else's account.
+                self.profile_combo.addItem(f"{saved} (not in Chrome any more)",
+                                           saved)
+                index = self.profile_combo.count() - 1
+            self.profile_combo.setCurrentIndex(index)
 
     def _refresh_profile_note(self):
         ok, err = CB.automation_available()
@@ -908,7 +960,7 @@ class SetupDialog(PrismDialog):
             if name not in seen:
                 urls.append(CB.agents.AGENT_REGISTRY[name]["url"])
                 seen.add(name)
-        automation.open_login_tabs(urls)
+        automation.open_login_tabs(urls, cfg=self.cfg)
         QMessageBox.information(
             self, "Login tabs",
             i18n.t("Opened {n} tab(s) in Chrome — sign in, then close this "
@@ -938,6 +990,14 @@ class SetupDialog(PrismDialog):
         self.cfg["premium"] = [n for n, cb in self._premium_boxes.items() if cb.isChecked()]
         v = CB.automation_available()[0] and CB.get_automation().parse_chrome_version(self.chrome_edit.text())
         self.cfg["chrome_version"] = str(v) if v else ""
+        # Which real Chrome profile to copy logins from. "" means "whichever
+        # Chrome used last", which is what almost everybody wants and what a
+        # single-profile machine needs. seed_profile() notices when this
+        # changes and re-copies, so choosing a different account here takes
+        # effect on the next run.
+        chosen = getattr(self, "profile_combo", None)
+        if chosen is not None and chosen.isEnabled():
+            self.cfg["chrome_profile"] = chosen.currentData() or ""
         self.cfg["onboarded"] = True
         CB.config.save(self.cfg)
         self.accept()

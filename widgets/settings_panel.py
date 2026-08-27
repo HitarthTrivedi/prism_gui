@@ -869,6 +869,18 @@ class SettingsPanel(QWidget):
         folder = getattr(automation, "PROFILE_DIR", "") or ""
         rows.append((i18n.t("Prism's browser profile"),
                      self._path(folder) if folder else "—"))
+        # Which of the customer's real Chrome profiles the copy came from.
+        # Worth its own row: a machine with eight signed-in Google accounts
+        # copied the wrong one silently, and the only symptom was every tool
+        # asking to sign in again on every run.
+        chosen = self._safe(lambda: automation.preferred_profile(self.cfg))
+        if chosen:
+            rows.append((i18n.t("Copied from"),
+                         self._safe(lambda: automation.describe_profile(chosen))
+                         or "—"))
+        else:
+            rows.append((i18n.t("Copied from"),
+                         Pill(i18n.t("No Chrome profile found"), "warn")))
         seeded = self._safe(automation.profile_is_seeded)
         rows.append((i18n.t("Your logins copied in"),
                      Pill(i18n.t("Yes") if seeded else i18n.t("Not yet"),
