@@ -69,10 +69,15 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import sys
+import tempfile
 import threading
 import warnings
+from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "prism_terminal"))
 
 _OFFLINE_DEV = "PRISM_LICENSE_OFFLINE_DEV"
 
@@ -159,6 +164,35 @@ def _the_suite_must_not_touch_the_real_home():
           "cfg['runs_dir'] does NOT isolate dashboard_data._run_files, and "
           "that a licensing daemon thread outliving its patch will write "
           "wherever user_dir() points when it finishes.")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _keep_the_suite_out_of_the_users_prism():
+    """Send the mail-check log somewhere disposable for the whole run.
+
+    `checklog` writes one plain-text file per day into ~/.prism/logs so a
+    customer can open it after a slow check and see what happened. The tests
+    exercise the same code with a fake mailbox, so a developer's real log
+    filled up with checks against "sales@acme.co.in" on "imap.example.com"
+    that never happened — which is worse than untidy, because that file is
+    evidence. It is the first thing read when somebody reports a slow check,
+    and it now has invented runs in it.
+
+    The module reads LOG_DIR at call time, so pointing it elsewhere is enough;
+    nothing in production changes.
+    """
+    try:
+        from core import checklog
+    except Exception:                      # pragma: no cover - engine absent
+        yield
+        return
+    real = checklog.LOG_DIR
+    with tempfile.TemporaryDirectory(prefix="prism-test-logs-") as tmp:
+        checklog.LOG_DIR = tmp
+        try:
+            yield
+        finally:
+            checklog.LOG_DIR = real
 
 
 @pytest.fixture(autouse=True)
