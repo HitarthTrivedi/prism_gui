@@ -50,7 +50,7 @@ from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
-                     FFmpegWorker, FollowupRouteWorker)
+                     FFmpegWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
@@ -2167,123 +2167,6 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("All done — saved to History.", 6000)
         self._finish_queue()
-        self._offer_followup(responses)
-
-    # ── post-completion follow-up ─────────────────────────────────────────
-    def _offer_followup(self, responses: dict):
-        """After a whole task finishes, offer a refinement. Prism reads the
-        note, works out which step it is about, and sends it to THAT step's
-        assigned agent (auto-routed) — folding in any new attachments. The
-        re-done result comes back and this can offer another follow-up.
-
-        Skipped silently when there is nothing to refine or no Groq key to
-        route with — the follow-up is a bonus, never a blocker.
-        """
-        if not responses or not self.cfg.get("api_key"):
-            return
-        from dialogs.followup_dialog import FollowupDialog
-        dlg = FollowupDialog(self._result_summary(responses), self)
-        dlg.exec()
-        if not dlg.submitted():
-            return
-        self._followup_text = dlg.followup_text()
-        self._followup_responses = responses
-        # Turn any added file paths into real attachment records, the same way
-        # the composer does, so the engine can upload them to the agent.
-        atts = []
-        for p in dlg.file_paths():
-            try:
-                atts.append(CB.files.attach(p))
-            except Exception:                           # noqa: BLE001
-                pass
-        self._followup_attachments = atts
-        # Auto-route: which finished step is this follow-up about?
-        info = [{"stage": s,
-                 "agent": self._stage_agents.get(s, ""),
-                 "summary": (texts[0][:160].replace("\n", " ") if texts else "")}
-                for s, texts in responses.items()]
-        self.statusBar().showMessage(
-            i18n.t("Working out which step your follow-up is for…"), 0)
-        worker = FollowupRouteWorker(self._followup_text, info, self.cfg)
-        worker.done.connect(self._on_followup_routed)
-        worker.failed.connect(lambda _e: self._on_followup_routed(""))
-        self._workers.append(worker)
-        worker.start()
-
-    def _on_followup_routed(self, target_stage: str):
-        """The classifier picked the step; send the follow-up to its agent by
-        re-running just that one stage (custom_stages) with the prior output as
-        context plus any new attachments."""
-        responses = getattr(self, "_followup_responses", {})
-        if not responses:
-            return
-        if target_stage not in responses:              # unsure → the last step
-            target_stage = list(responses.keys())[-1]
-        agent = self._stage_agents.get(target_stage, "")
-        prior = "\n\n".join(responses.get(target_stage) or [])
-        att_note = (" New file(s) are attached to this chat — use them."
-                    if getattr(self, "_followup_attachments", None) else "")
-        prompt = (
-            f"Earlier, for this task, you produced:\n\n{prior}\n\n"
-            f"The person now wants this change: {self._followup_text}\n\n"
-            f"Redo your part with that change and give the full updated "
-            f"result.{att_note}")
-        self._set_stage("run")
-        self._start_followup_run(target_stage, agent, prompt,
-                                 getattr(self, "_followup_attachments", []))
-
-    def _start_followup_run(self, stage: str, agent: str, prompt: str,
-                            attachments: list):
-        """Run exactly one stage — the follow-up — reusing the run surface, so
-        a follow-up shows and finishes like any other run (and can itself offer
-        another follow-up when it completes)."""
-        run_agents = {stage: agent}
-        cfg_for_run = dict(self.cfg)
-        cfg_for_run["agents"] = {**self._stage_agents, **run_agents}
-        self.output_panel.clear()
-        self.output_panel.set_plan(run_agents)
-        self.output_panel.set_task(self._followup_text)
-        self.input_panel.set_state("running")
-        self._run_finished = False
-        self.output_panel.set_finished(False)
-        self.output_panel.set_running(True)
-        self.work_stack.setCurrentIndex(RUNNING)
-        worker = AutomationWorker(
-            self.routing, cfg_for_run, attachments, self._followup_text,
-            custom_stages=[(stage, agent, [prompt])])
-        awake.acquire()
-        self._active_run = worker
-        worker.stage_event.connect(self._on_stage_event)
-        worker.done.connect(self._on_run_done)
-        worker.failed.connect(self._on_run_failed)
-        self._workers.append(worker)
-        worker.start()
-
-    def _result_summary(self, responses: dict) -> str:
-        """Recap for the follow-up dialog: the FINAL result first, then the
-        earlier steps — each labelled by what it did, in the run's real
-        execution order. Earlier this showed whichever step happened to be
-        first non-empty, which surfaced the research step instead of the
-        finished deliverable; and a task with several outputs must show them
-        all, not just one."""
-        from widgets.agents_panel import STAGE_COPY
-        # `_stage_agents` is filled in execution order from stage_start events;
-        # its last key is the final step. Fall back to the responses' own order.
-        order = list(self._stage_agents.keys()) or list(responses.keys())
-        # Any responded step not in that order (defensive) goes first-run-order.
-        for s in responses:
-            if s not in order:
-                order.append(s)
-        parts = []
-        for stage in reversed(order):               # final step leads
-            body = "\n\n".join(t for t in (responses.get(stage) or [])
-                               if t and t.strip())
-            if not body:
-                continue
-            title = (STAGE_COPY.get(stage) or (None, stage.title()))[1]
-            clip = body[:900] + ("…" if len(body) > 900 else "")
-            parts.append(f"▸ {title}\n{clip}")
-        return "\n\n".join(parts)
 
     def _on_run_failed(self, error: str):
         awake.release()

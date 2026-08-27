@@ -115,45 +115,6 @@ class AutomationWorker(QThread):
             self.failed.emit(str(e))
 
 
-class FollowupRouteWorker(QThread):
-    """Work out which finished step a post-completion follow-up is about, so the
-    note goes to that step's assigned agent — Prism's "assign it automatically"
-    rule, applied to refinements. A quick Groq classify (JSON mode)."""
-    done = Signal(str)      # target stage key ("" = unsure/none)
-    failed = Signal(str)
-
-    def __init__(self, followup: str, stages_info: list, cfg: dict):
-        super().__init__()
-        self.followup = followup
-        self.stages_info = stages_info   # [{"stage","agent","summary"}]
-        self.cfg = cfg
-
-    def run(self):
-        try:
-            import json
-            lines = "\n".join(
-                f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
-                for s in self.stages_info)
-            keys = ", ".join(f'"{s["stage"]}"' for s in self.stages_info)
-            prompt = (
-                "A multi-step task just finished. The steps that ran, each with "
-                "its category key, the tool that did it, and a snippet of its "
-                f"output:\n\n{lines}\n\n"
-                f'The user now says: "{self.followup}"\n\n'
-                "Which ONE step should handle this follow-up? Choose the step "
-                "whose work the follow-up is about. Reply with ONLY a JSON "
-                'object: {"stage": "<one of the keys above>"}. Valid keys: '
-                f"{keys}. If genuinely unsure, use the last key."
-            )
-            out = CB.router.groq_chat(
-                self.cfg.get("api_key", ""), self.cfg.get("model", ""),
-                prompt, json_mode=True, timeout=45)
-            data = json.loads(out)
-            self.done.emit(str(data.get("stage", "")).strip())
-        except Exception as e:
-            self.failed.emit(str(e))
-
-
 class RecordWorker(QThread):
     """Push-to-talk: recording starts as soon as this thread runs, and stops
     the instant .stop() is called from the GUI thread (e.g. a toggle
