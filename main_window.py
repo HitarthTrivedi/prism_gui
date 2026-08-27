@@ -962,6 +962,8 @@ class MainWindow(QMainWindow):
             self._show_screen("catalog")
         elif key == "reel":
             self._open_reel()
+        elif key == "motion":
+            self._open_motion()
         elif key == "guide":
             self._show_screen("guide")
         elif key == "support":
@@ -1036,7 +1038,10 @@ class MainWindow(QMainWindow):
         ReelDialog(self.cfg, self.attachments, self).exec()
 
     def _open_motion(self):
-        self._open_motion_dialog()
+        # Same licence feature as Reel/Studio — Motion is the same "media"
+        # capability tier, not a separate purchase, matching AGENT_FEATURES'
+        # existing "Prism Reel"/"Prism Studio" -> "reel" mapping.
+        self._authorized_then("reel", "addon", self._open_motion_dialog)
 
     def _open_motion_dialog(self):
         ok, err = CB.motion_available()
@@ -1046,7 +1051,7 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, "Motion Graphics", err)
             return
-        MotionDialog(self.cfg, self).exec()
+        MotionDialog(self.cfg, self.attachments, self).exec()
 
     def _offer_ffmpeg(self, then=None):
         """Offer to fetch FFmpeg, then carry on with what they were doing.

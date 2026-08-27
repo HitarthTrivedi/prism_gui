@@ -79,6 +79,7 @@ ADDONS = {
     "gerber": "Gerber",
     "email": "Email",
     "reel": "Reel",
+    "motion": "Motion",
 }
 
 # History's date groups, coarsest last. Returned by _bucket() and translated
@@ -110,6 +111,7 @@ _RUN_PREFIXES = (
     ("gerber", ("Gerber — ", "/gerber ")),
     ("email", ("/email ",)),
     ("reel", ("/reel ",)),
+    ("motion", ("motion — ", "/motion ")),
 )
 
 # dashboard_data.recent_runs() substitutes this when a record carries no query

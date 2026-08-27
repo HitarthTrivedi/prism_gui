@@ -302,3 +302,11 @@ def get_motion():
     from core import motion
     return motion
 
+
+def get_motion_generate():
+    """The scene-at-a-time generation loop — storyboard turn, then one
+    browser turn per scene. See core.reel_web's build_spec() for the
+    pattern this mirrors."""
+    from core.motion import generate
+    return generate
+

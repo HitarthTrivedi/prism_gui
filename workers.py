@@ -63,7 +63,7 @@ class AutomationWorker(QThread):
 
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
                  custom_stages=None, chatgpt_analysis: bool = True,
-                 reel_design_stage: str = ""):
+                 reel_design_stage: str = "", motion_design_stage: str = ""):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
@@ -77,6 +77,10 @@ class AutomationWorker(QThread):
         # built its own stages names the stage that does it; a routed run
         # works it out from the renderer in its plan.
         self.reel_design_stage = reel_design_stage
+        # Same idea for core.motion — its storyboard stage becomes a
+        # scene-at-a-time conversation the same way. Motion has no routed-run
+        # auto-detection, so every caller names this stage explicitly.
+        self.motion_design_stage = motion_design_stage
         self._stop = threading.Event()
 
     def stop(self):
@@ -105,6 +109,8 @@ class AutomationWorker(QThread):
                 kwargs["chatgpt_analysis"] = self.chatgpt_analysis
             if self.reel_design_stage:
                 kwargs["reel_design_stage"] = self.reel_design_stage
+            if self.motion_design_stage:
+                kwargs["motion_design_stage"] = self.motion_design_stage
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),

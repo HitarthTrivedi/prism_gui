@@ -1161,7 +1161,8 @@ class SettingsPanel(QWidget):
         out = []
         probes = [("Browser automation", CB.automation_available),
                   ("BOQ measuring", CB.boq_available),
-                  ("Reel & Studio", CB.reel_available)]
+                  ("Reel & Studio", CB.reel_available),
+                  ("Motion Graphics", CB.motion_available)]
         try:
             import wakeword
             probes.append(("Voice input", wakeword.available))

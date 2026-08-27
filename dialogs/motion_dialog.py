@@ -1,299 +1,341 @@
-"""
-Prism Desktop Motion Graphics Studio Dialog
-────────────────────────────────────────────
-Visual workspace for previewing, inspecting, editing, and rendering
-programmatic Motion Graphics projects with real-time feedback.
+"""Motion — say what it's about, get a scene-graph video with a real camera.
+
+Same shape as Reel (dialogs/reel_dialog.py): one prompt and one button.
+Attach a logo or business card and the brand colours are measured off it,
+the agent writes a storyboard and then each scene in turn, and the
+renderer draws every frame locally from a JSON scene graph — a real
+camera, charts, diagrams and UI mockups, not an HTML page filmed.
 """
 from __future__ import annotations
-
 import json
 import os
+import subprocess
+import sys
 import time
-from typing import Any, Dict, Optional
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QFont
-from PySide6.QtWidgets import (
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QSplitter,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QMessageBox, QProgressBar, QLabel, QPlainTextEdit
 
 import core_bridge as CB
+import i18n
+import theme
+import wakeword
 from dialogs.base import PrismDialog
-from workers import MotionWorker
-
-
-PRESET_TEMPLATES: Dict[str, Dict[str, Any]] = {
-    "SaaS Product UI & Feature Demo": {
-        "project": { "width": 1080, "height": 1920, "fps": 30, "duration": 6.0, "background": "#090D16" },
-        "camera": {
-            "tracks": [
-                { "time": 0.0, "zoom": 1.0, "position": [540, 960] },
-                { "time": 1.4, "duration": 1.2, "easing": "easeInOutCubic", "position": [540, 920], "zoom": 1.35 },
-                { "time": 4.5, "duration": 1.0, "easing": "easeOutExpo", "position": [540, 960], "zoom": 1.0 }
-            ]
-        },
-        "scenes": [
-            {
-                "nodes": [
-                    { "type": "text", "content": "Intelligent Automation", "position": [540, 420], "font_size": 52, "font_weight": 800, "fill": "#F8FAFC" },
-                    {
-                        "type": "domain_ui_mockup",
-                        "position": [540, 920],
-                        "width": 900,
-                        "height": 520,
-                        "title": "Prism Studio · Live Engine",
-                        "url": "engine.alphakore.in",
-                        "elements": [
-                            { "type": "card", "x": 40, "y": 30, "w": 380, "h": 160, "title": "Engine Health: 99.98%" },
-                            { "type": "card", "x": 460, "y": 30, "w": 380, "h": 160, "title": "Active Jobs: 1,420" },
-                            { "type": "button", "x": 260, "y": 230, "w": 360, "h": 60, "label": "Trigger Pipeline", "color": "#38BDF8" }
-                        ],
-                        "cursor_actions": [{ "time": 1.5, "duration": 1.0, "from": [-300, -100], "to": [0, 90], "click": True }]
-                    },
-                    {
-                        "type": "group", "position": [540, 1420],
-                        "animation": { "enter": { "type": "pop_in", "time": 2.8, "duration": 0.6, "easing": "back.out" } },
-                        "children": [
-                            { "type": "shape_rect", "width": 780, "height": 130, "radius": 20, "fill": "rgba(30, 41, 59, 0.88)", "stroke": "rgba(56, 189, 248, 0.3)", "stroke_width": 2 },
-                            { "type": "text", "content": "Real-Time Hardware Render in 1080p", "position": [0, 0], "font_size": 32, "font_weight": 700, "fill": "#38BDF8" }
-                        ]
-                    }
-                ]
-            }
-        ]
-    },
-    "Growth Chart & Financial KPI": {
-        "project": { "width": 1080, "height": 1920, "fps": 30, "duration": 6.0, "background": "#0B111E" },
-        "camera": {
-            "tracks": [
-                { "time": 0.0, "zoom": 1.0, "position": [540, 960] },
-                { "time": 1.5, "duration": 1.5, "easing": "easeInOutCubic", "position": [540, 920], "zoom": 1.25 },
-                { "time": 4.5, "duration": 1.2, "easing": "easeOutExpo", "position": [540, 960], "zoom": 1.0 }
-            ]
-        },
-        "scenes": [
-            {
-                "nodes": [
-                    { "type": "text", "content": "Quarterly Revenue Surge", "position": [540, 420], "font_size": 48, "font_weight": 800, "fill": "#FFFFFF" },
-                    { "type": "domain_chart", "chart_type": "metric", "position": [540, 680], "value_prefix": "₹", "value_suffix": " Cr", "data": [{ "label": "Annual Gross Run-Rate (+142%)", "value": 88000, "color": "#10B981" }], "start_time": 0.6, "duration": 1.8 },
-                    { "type": "domain_chart", "chart_type": "bar", "position": [540, 1140], "width": 840, "height": 420, "value_prefix": "₹", "value_suffix": "k", "start_time": 1.8, "duration": 1.4, "data": [{ "label": "Q1 24", "value": 240, "color": "#38BDF8" }, { "label": "Q2 24", "value": 390, "color": "#38BDF8" }, { "label": "Q3 24", "value": 580, "color": "#38BDF8" }, { "label": "Q4 24", "value": 880, "color": "#10B981" }] }
-                ]
-            }
-        ]
-    },
-    "System Architecture & Flow": {
-        "project": { "width": 1080, "height": 1920, "fps": 30, "duration": 6.0, "background": "#0A0E17" },
-        "camera": {
-            "tracks": [
-                { "time": 0.0, "zoom": 1.0, "position": [540, 960] },
-                { "time": 1.5, "duration": 1.4, "easing": "easeInOutCubic", "position": [540, 980], "zoom": 1.3 },
-                { "time": 4.5, "duration": 1.2, "easing": "easeOutExpo", "position": [540, 960], "zoom": 1.0 }
-            ]
-        },
-        "scenes": [
-            {
-                "nodes": [
-                    { "type": "text", "content": "Distributed Pipeline", "position": [540, 420], "font_size": 48, "font_weight": 800, "fill": "#FFFFFF" },
-                    {
-                        "type": "domain_diagram",
-                        "position": [540, 980],
-                        "nodes": [
-                            { "id": "client", "label": "Client UI", "x": -280, "y": -160, "w": 180, "h": 70, "color": "#1E293B", "stroke": "#38BDF8" },
-                            { "id": "gateway", "label": "API Gateway", "x": 0, "y": -160, "w": 200, "h": 70, "color": "#1E293B", "stroke": "#818CF8" },
-                            { "id": "orchestrator", "label": "AI Orchestrator", "x": 280, "y": -160, "w": 200, "h": 70, "color": "#1E293B", "stroke": "#C084FC" },
-                            { "id": "engine", "label": "Motion Runtime", "x": 140, "y": 140, "w": 220, "h": 75, "color": "#1E293B", "stroke": "#34D399" },
-                            { "id": "ffmpeg", "label": "FFmpeg Muxer", "x": -140, "y": 140, "w": 200, "h": 75, "color": "#1E293B", "stroke": "#FB7185" }
-                        ],
-                        "edges": [
-                            { "from": "client", "to": "gateway", "glow_color": "#38BDF8", "speed": 1.2 },
-                            { "from": "gateway", "to": "orchestrator", "glow_color": "#818CF8", "speed": 1.5 },
-                            { "from": "orchestrator", "to": "engine", "glow_color": "#C084FC", "speed": 1.0 },
-                            { "from": "engine", "to": "ffmpeg", "glow_color": "#34D399", "speed": 1.4 },
-                            { "from": "ffmpeg", "to": "client", "glow_color": "#FB7185", "speed": 1.1 }
-                        ]
-                    }
-                ]
-            }
-        ]
-    }
-}
+from workers import AutomationWorker, RecordWorker, MotionWorker
+from widgets.ask_panel import AskPanel
 
 
 class MotionDialog(PrismDialog):
-    def __init__(self, cfg: dict, parent: Optional[QWidget] = None):
-        super().__init__(parent)
+    def __init__(self, cfg: dict, attachments: list, parent=None):
+        super().__init__(
+            i18n.t("Make a Motion Graphic"),
+            i18n.t("A scene-graph video with a real camera — charts, "
+                   "diagrams and UI mockups, drawn frame by frame on this "
+                   "machine."),
+            icon="video", parent=parent, closable=False)
+        self.setWindowTitle("Make a Motion Graphic")
+        self.resize(780, 700)
+        self.setMinimumSize(620, 620)
         self.cfg = cfg
-        self.worker: Optional[MotionWorker] = None
-        self.last_output_path: Optional[str] = None
+        self.motion_generate = CB.get_motion_generate()
 
-        self.setWindowTitle("Prism Motion Graphics Studio")
-        self.setMinimumSize(920, 680)
-        self._build_ui()
+        self.images: list[dict] = []
+        self.brand: dict = {}
+        self.spec: dict | None = None
+        self.out_path = ""
+        # The findable copy — see config.ARTIFACTS_DIR. `out_path` is where
+        # the render actually lands (~/.prism/runs, hidden), which is why
+        # Play/Show always prefer this one once it exists.
+        self.artifact_path = ""
+        self._worker = None
+        self._render_worker = None
+        self._rec = None
 
-    def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        root = self.body
+        root.setSpacing(theme.ROW_GAP)
 
-        # Header
-        header_row = QHBoxLayout()
-        title = QLabel("Motion Graphics Studio")
-        title.setFont(QFont("Inter", 18, QFont.Bold))
-        title.setStyleSheet("color: #F8FAFC;")
-        header_row.addWidget(title)
-        header_row.addStretch()
+        title = QLabel("What should the motion graphic show?")
+        title.setObjectName("h4")
+        root.addWidget(title)
 
-        self.preset_combo = QComboBox()
-        self.preset_combo.setStyleSheet("""
-            QComboBox {
-                background: #1E293B;
-                color: #F8FAFC;
-                border: 1px solid #334155;
-                border-radius: 8px;
-                padding: 6px 14px;
-                font-weight: 600;
-            }
-        """)
-        for name in PRESET_TEMPLATES.keys():
-            self.preset_combo.addItem(name)
-        self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
-        header_row.addWidget(self.preset_combo)
-        layout.addLayout(header_row)
+        self.ask = AskPanel(
+            'Just say it — for example:\n'
+            '"an animated architecture diagram of our distributed crawler"\n\n'
+            "Attach a logo or business card and the brand colours are taken "
+            "straight from it.")
+        self.ask.speak_clicked.connect(self._toggle_record)
+        self.ask.files_added.connect(self._on_files_added)
+        root.addWidget(self.ask)
 
-        # Editor Frame
-        self.editor = QTextEdit()
-        self.editor.setFont(QFont("JetBrains Mono, monospace", 12))
-        self.editor.setStyleSheet("""
-            QTextEdit {
-                background: #090D16;
-                color: #38BDF8;
-                border: 1px solid #1E293B;
-                border-radius: 12px;
-                padding: 14px;
-            }
-        """)
-        layout.addWidget(self.editor, 1)
+        # A measured result ("your brand colours came off this logo"), not a
+        # placeholder — same convention as ReelDialog's brand_label.
+        self.brand_label = QLabel("", self)
+        self.brand_label.setWordWrap(True)
+        self.brand_label.setVisible(False)
+        self.brand_label.setStyleSheet(
+            f"color: {theme.OK_INK}; background: {theme.OK_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px;"
+            f" font-size: 13px;")
+        root.addWidget(self.brand_label)
 
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFixedHeight(8)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background: #1E293B; border-radius: 4px; }
-            QProgressBar::chunk { background: #38BDF8; border-radius: 4px; }
-        """)
-        self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        root.addWidget(self.progress)
 
-        # Status Label
-        self.status_label = QLabel("Ready to render 1080x1920 broadcast video.")
-        self.status_label.setStyleSheet("color: #94A3B8; font-size: 13px;")
-        layout.addWidget(self.status_label)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        root.addWidget(self.status)
 
-        # Footer Actions
-        footer = QHBoxLayout()
-        self.play_btn = QPushButton("Open Video")
-        self.play_btn.setStyleSheet("background: #334155; color: white; padding: 10px 18px; border-radius: 8px; font-weight: 600;")
-        self.play_btn.clicked.connect(self._play_output)
-        self.play_btn.hide()
-        footer.addWidget(self.play_btn)
+        self.script_view = QPlainTextEdit()
+        self.script_view.setReadOnly(True)
+        self.script_view.setPlaceholderText(
+            "The scenes will be listed here once written.")
+        self.script_view.setMinimumHeight(150)
+        root.addWidget(self.script_view, stretch=1)
 
-        self.reveal_btn = QPushButton("Show in Files")
-        self.reveal_btn.setStyleSheet("background: #334155; color: white; padding: 10px 18px; border-radius: 8px; font-weight: 600;")
-        self.reveal_btn.clicked.connect(self._reveal_output)
-        self.reveal_btn.hide()
-        footer.addWidget(self.reveal_btn)
+        self.play_btn = self.button(i18n.t("Play"), "secondary",
+                                    icon_name="play", small=True,
+                                    on_click=self._play)
+        self.play_btn.setEnabled(False)
+        self.footer.add_utility(self.play_btn)
+        self.folder_btn = self.button(i18n.t("Show file"), "secondary",
+                                      icon_name="folder", small=True,
+                                      on_click=self._reveal)
+        self.folder_btn.setEnabled(False)
+        self.footer.add_utility(self.folder_btn)
+        self.footer.add_secondary(
+            self.button(i18n.t("Close"), on_click=self.reject))
+        self.run_btn = self.button(i18n.t("Make my motion graphic"), "primary",
+                                   icon_name="video", on_click=self._run)
+        self.footer.set_primary(self.run_btn)
 
-        footer.addStretch()
+        if attachments:
+            self._absorb([a["path"] for a in attachments])
 
-        self.render_btn = QPushButton("Export Broadcast MP4")
-        self.render_btn.setStyleSheet("""
-            QPushButton {
-                background: #38BDF8;
-                color: #090D16;
-                padding: 12px 24px;
-                border-radius: 8px;
-                font-weight: 700;
-                font-size: 14px;
-            }
-            QPushButton:hover { background: #7DD3FC; }
-            QPushButton:disabled { background: #475569; color: #94A3B8; }
-        """)
-        self.render_btn.clicked.connect(self._start_render)
-        footer.addWidget(self.render_btn)
-        layout.addLayout(footer)
+    # ── inputs ──────────────────────────────────────────────────────────
 
-        self._on_preset_changed(self.preset_combo.currentText())
+    def _on_files_added(self, paths: list):
+        self._absorb(paths)
 
-    def _on_preset_changed(self, name: str):
-        preset = PRESET_TEMPLATES.get(name, {})
-        self.editor.setPlainText(json.dumps(preset, indent=2))
+    def _absorb(self, paths: list):
+        """Only images matter here — they carry the brand and become
+        `image` nodes the AI can place by name. Anything else is ignored
+        rather than refused."""
+        for p in paths:
+            if not p.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                continue
+            try:
+                att = CB.files.attach(p)
+            except Exception:
+                continue
+            if att["path"] not in [i["path"] for i in self.images]:
+                self.images.append(att)
+        if not self.images:
+            return
+        # Same pixel-level measurement Reel/Studio use — no Motion-specific
+        # brand sampling exists or needs to.
+        self.brand = CB.get_reel().sample_brand(
+            [i["path"] for i in self.images]) or {}
+        if self.brand:
+            self.brand_label.setText(
+                f"Brand colours read from {', '.join(i['name'] for i in self.images)} — "
+                f"accent {self.brand.get('accent')}, deep {self.brand.get('deep')}. "
+                "Measured from the artwork, not guessed.")
+            self.brand_label.setVisible(True)
 
-    def _start_render(self):
-        text = self.editor.toPlainText()
-        try:
-            from core.motion.schema import validate_motion_spec
-            spec = validate_motion_spec(text)
-        except Exception as e:
-            QMessageBox.warning(self, "Invalid Specification", f"JSON validation failed:\n{e}")
+    def _toggle_record(self):
+        if self._rec:
+            self._rec.stop()
+            self.ask.set_recording(False)
+            return
+        if not CB.voice.available():
+            QMessageBox.information(
+                self, "Speak",
+                "Voice needs PyAudio on this machine:\n\n"
+                f"    {wakeword.install_hint()}\n\n"
+                "Everything else works — just type instead.")
+            return
+        self.ask.set_recording(True)
+        self._rec = RecordWorker(self.cfg)
+        self._rec.done.connect(self._on_spoken)
+        self._rec.failed.connect(lambda e: self._on_spoken("", ""))
+        self._rec.start()
+
+    def _on_spoken(self, text: str, lang: str):
+        self._rec = None
+        self.ask.set_recording(False)
+        if text:
+            self.ask.append_text(text)
+
+    # ── the run ─────────────────────────────────────────────────────────
+    # One turn names the storyboard; every scene's nodes are then asked for
+    # on their own turn, in the same tab, checked before the next is asked
+    # for. See core.motion.generate.build_spec() — same shape as Studio's
+    # design conversation, for the same reason: a whole motion graphic
+    # asked for in one reply starves every scene of room to have real
+    # motion in it.
+
+    def _run(self):
+        request = self.ask.text()
+        if not request:
+            QMessageBox.information(self, "Motion Graphics",
+                                    "Tell me what the motion graphic is about.")
             return
 
-        out_dir = os.path.expanduser("~/Desktop/Prism Artifacts")
-        os.makedirs(out_dir, exist_ok=True)
+        active = CB.config.active_agents(self.cfg)
+        # "media" is deliberately excluded — that category holds the local
+        # Reel/Studio renderers, which render video and cannot hold a text
+        # conversation. Same precedent as /motion's own CLI agent choice.
+        writer = (self.cfg.get("motion_agent") or active.get("brains")
+                 or active.get("content"))
+        if not writer:
+            QMessageBox.warning(self, "Motion Graphics",
+                                "No writing agent set up yet — open Agents first.")
+            return
+        self.request = request
+
+        self._busy(True, f"{writer} is planning the storyboard…")
+        prompt = self.motion_generate.storyboard_instructions(request, self.brand)
+        self._worker = AutomationWorker(
+            {}, self.cfg, self.images, f"motion graphic — {request}",
+            custom_stages=[("storyboard", writer, [prompt])],
+            chatgpt_analysis=False,
+            motion_design_stage="storyboard")
+        self._worker.stage_event.connect(self._on_motion_event)
+        self._worker.done.connect(self._on_storyboard)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.start()
+
+    def _on_motion_event(self, kind: str, payload: dict):
+        if kind == "motion_scene":
+            n, total = payload.get("index", 0) + 1, payload.get("total", 0)
+            self._busy(True, f"Writing scene {n} of {total} — "
+                             "each one is written and checked on its own.")
+            if total:
+                self.progress.setRange(0, total)
+                self.progress.setValue(n - 1)
+
+    def _on_storyboard(self, responses: dict, links: dict):
+        # By the time this fires, automation.run()'s motion_feeder block has
+        # already run the whole per-scene conversation and left the fully
+        # assembled, validated spec — as JSON text — in responses["storyboard"].
+        texts = [t for t in (responses.get("storyboard") or []) if t.strip()]
+        if not texts:
+            self._busy(False, "")
+            QMessageBox.warning(self, "Motion Graphics",
+                                "The agent returned nothing.")
+            return
+        try:
+            spec = json.loads(texts[-1])
+        except (ValueError, json.JSONDecodeError) as e:
+            self._busy(False, "")
+            QMessageBox.warning(
+                self, "Motion Graphics",
+                f"Could not parse the assembled motion graphic: {e}"
+                + ("\n\nIts tab: " + links["storyboard"]
+                   if links.get("storyboard") else ""))
+            return
+        self.spec = spec
+        self._start_render(spec)
+
+    def _start_render(self, spec: dict):
+        scenes = spec.get("scenes", [])
+        lines = [f"{i + 1}. scene  ·  {sc.get('duration', 0):.1f}s   "
+                 f"{len(sc.get('nodes', []))} node(s)"
+                 for i, sc in enumerate(scenes)]
+        self.script_view.setPlainText("\n".join(lines))
+
+        dur = float((spec.get("project") or {}).get("duration", 8.0))
+        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
         stamp = int(time.time())
-        out_path = os.path.join(out_dir, f"motion_{stamp}.mp4")
+        self.out_path = os.path.join(CB.config.RUNS_DIR, f"motion_{stamp}.mp4")
+        # Saved beside the video and complete in itself — assets inlined —
+        # so it re-renders identically next year without an AI in the loop.
+        json.dump(spec, open(
+            os.path.join(CB.config.RUNS_DIR, f"motion_{stamp}.json"), "w"),
+            indent=2)
 
-        self.render_btn.setEnabled(False)
-        self.progress_bar.show()
-        self.progress_bar.setValue(0)
-        self.play_btn.hide()
-        self.reveal_btn.hide()
-        self.status_label.setText("Rendering frames deterministically to FFmpeg…")
+        self.progress.setRange(0, 100)
+        self._busy(True, f"Rendering {len(scenes)} scenes, {dur:.0f}s, "
+                         "1080x1920…")
+        self._render_worker = MotionWorker(spec, self.out_path)
+        self._render_worker.progress.connect(self._on_frames)
+        self._render_worker.done.connect(self._on_rendered)
+        self._render_worker.failed.connect(self._on_failed)
+        self._render_worker.start()
 
-        self.worker = MotionWorker(spec, out_path)
-        self.worker.progress.connect(self._on_progress)
-        self.worker.done.connect(self._on_done)
-        self.worker.failed.connect(self._on_failed)
-        self.worker.start()
+    def _on_frames(self, done: int, total: int):
+        self.progress.setValue(int(done / max(1, total) * 100))
 
-    def _on_progress(self, current: int, total: int):
-        pct = int((current / max(1, total)) * 100)
-        self.progress_bar.setValue(pct)
-        self.status_label.setText(f"Rendering frame {current}/{total} ({pct}%)…")
+    def _on_rendered(self, path: str):
+        self.play_btn.setEnabled(True)
+        self.folder_btn.setEnabled(True)
+        try:
+            self.artifact_path = CB.config.save_artifact(
+                path, self.request, kind="motion")
+        except Exception:                               # noqa: BLE001
+            self.artifact_path = ""
+        if self.artifact_path:
+            self._busy(False, i18n.t(
+                "Done — saved to Desktop/Prism Artifacts/{name}").replace(
+                "{name}", os.path.basename(self.artifact_path)))
+        else:
+            self._busy(False, f"Done — {os.path.basename(path)}")
+        CB.config.save_run({
+            "query": f"motion — {self.request}",
+            "motion": {"mp4": path, "brand": self.brand,
+                      "artifact": self.artifact_path},
+        })
 
-    def _on_done(self, out_path: str):
-        self.last_output_path = out_path
-        self.render_btn.setEnabled(True)
-        self.progress_bar.hide()
-        self.status_label.setText(f"Complete: {out_path}")
-        self.play_btn.show()
-        self.reveal_btn.show()
+    def closeEvent(self, event):
+        """Wind up any worker before this dialog is destroyed.
+
+        A QThread destroyed while still running aborts the whole process —
+        see ReelDialog.closeEvent() for the same fix, applied there first.
+        """
+        for worker in (getattr(self, "_worker", None),
+                       getattr(self, "_render_worker", None),
+                       getattr(self, "_rec", None)):
+            if worker is None or not worker.isRunning():
+                continue
+            if hasattr(worker, "stop"):
+                worker.stop()
+            if not worker.wait(8000):
+                worker.terminate()
+                worker.wait(1000)
+        super().closeEvent(event)
 
     def _on_failed(self, error: str):
-        self.render_btn.setEnabled(True)
-        self.progress_bar.hide()
-        self.status_label.setText(f"Render failed: {error}")
-        QMessageBox.critical(self, "Render Failed", error)
+        self._busy(False, "")
+        QMessageBox.warning(self, "Motion Graphics", error)
 
-    def _play_output(self):
-        if self.last_output_path and os.path.exists(self.last_output_path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(self.last_output_path))
+    def _busy(self, busy: bool, message: str):
+        self.progress.setVisible(busy)
+        if busy and self.progress.maximum() == 0:
+            self.progress.setRange(0, 0)
+        self.run_btn.setEnabled(not busy)
+        self.status.setText(message)
 
-    def _reveal_output(self):
-        if self.last_output_path and os.path.exists(self.last_output_path):
-            folder = os.path.dirname(self.last_output_path)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+    # ── output ──────────────────────────────────────────────────────────
+
+    def _play(self):
+        path = self.artifact_path or self.out_path
+        if not path:
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        elif os.name == "nt":
+            os.startfile(path)  # noqa: F821
+        else:
+            subprocess.Popen(["xdg-open", path])
+
+    def _reveal(self):
+        path = self.artifact_path or self.out_path
+        if not path:
+            return
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", path])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(path)])

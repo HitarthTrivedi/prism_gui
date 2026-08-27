@@ -90,6 +90,7 @@ ADDONS = [
     ("gerber", "Gerber", "Measured off the Gerber files", "grid", None),
     ("email", "Email", "Draft & send, your account", "mail", theme.WARN),
     ("reel", "Reel / Studio", "A short video from a task", "video", None),
+    ("motion", "Motion Graphics", "A scene-graph video with camera, charts & diagrams", "video", None),
     # Shown but disabled, exactly as the rail shows it: the shelf should read
     # as a product line, and a visible "next one" beats an empty gap.
     ("bom", "BOM & Stock", "Coming soon", "list", theme.NEUTRAL[400]),
