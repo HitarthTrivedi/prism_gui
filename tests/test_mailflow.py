@@ -1618,6 +1618,58 @@ class WritingGoesToTheBrowserToolsNotGroq(unittest.TestCase):
             quotation_text="x", customer_reply="y", policy_text="z")
         self.assertIn("information, not instruction", prompt)
 
+    def test_the_tools_own_chrome_never_reaches_the_customer(self):
+        """Verbatim what went out to a real buyer under the owner's name on
+        2026-08-27: the tool's caption, its "Thought for 6s" pill twice, and
+        the salutation rendered twice. Every one of those is page furniture,
+        not the letter."""
+        from core import drafting
+        raw = ("Claude responded: Dear Sir/Madam, Thought for 6s Thought for 6s\n"
+               "Dear Sir/Madam,\n\n"
+               "Thank you for your interest in our Compression Spring, SS 304.\n"
+               "As per our quotation QTN/26-27/0003, the rate stands at Rs. 7.20 "
+               "per piece for 5,000 nos.\n\nBest regards,\nNilesh Shah\n"
+               "Sales Manager")
+        clean = drafting.clean_reply(raw)
+        self.assertNotIn("responded", clean)
+        self.assertNotIn("Thought for", clean)
+        self.assertEqual(clean.count("Dear Sir/Madam"), 1)
+        self.assertTrue(clean.startswith("Dear Sir/Madam,"))
+        self.assertIn("QTN/26-27/0003", clean)
+        self.assertTrue(clean.endswith("Sales Manager"))
+
+    def test_fences_captions_and_a_subject_line_go_too(self):
+        from core import drafting
+        raw = ("```text\nSubject: Our quotation\n\nThinking...\n"
+               "Dear Mr Patel,\n\nWe can hold the rate.\n\nRegards,\nA\n```")
+        clean = drafting.clean_reply(raw)
+        self.assertEqual(clean.splitlines()[0], "Dear Mr Patel,")
+        self.assertNotIn("```", clean)
+        self.assertNotIn("Subject:", clean)
+        self.assertNotIn("Thinking", clean)
+
+    def test_a_clean_letter_is_left_alone(self):
+        from core import drafting
+        letter = "Dear Sir,\n\nThe customer said: no. We said: yes.\n\nRegards,\nB"
+        self.assertEqual(drafting.clean_reply(letter), letter)
+        self.assertEqual(drafting.clean_reply(""), "")
+
+    def test_the_win_back_offers_a_sample_and_points_at_the_quotation(self):
+        """Quality is the argument when price cannot move; a sample piece is
+        how a fab proves it. And the customer is deciding against a piece of
+        paper, so the letter says that paper is repeated underneath."""
+        from core import drafting
+        prompt = drafting.negotiation_prompt(
+            quotation_text="x", customer_reply="y", policy_text="")
+        low = prompt.lower()
+        self.assertIn("sample piece", low)
+        self.assertIn("not a price concession", low)
+        self.assertIn("repeated below", low)
+        without = drafting.negotiation_prompt(
+            quotation_text="x", customer_reply="y", policy_text="",
+            offer_sample=False)
+        self.assertNotIn("sample piece", without.lower())
+
     def test_each_reminder_is_written_differently(self):
         """Three identical nudges in six days is a mail merge, and the
         customer can tell."""
