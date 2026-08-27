@@ -40,6 +40,12 @@ VALID = "valid"
 GRACE = "grace"
 STALE = "stale"
 EXPIRED = "expired"
+
+# How long a STALE licence — token past its expiry, licence itself in date —
+# keeps working before the machine must reach the server. Seven days: the
+# offline window the design documents describe, and the tokens the server
+# actually issues live one hour, which is not an offline window at all.
+STALE_ALLOWANCE = 7 * 24 * 3600
 TAMPERED = "tampered"
 
 DAY = 86400
@@ -82,12 +88,30 @@ class LicenseState:
     def usable(self) -> bool:
         """May the customer start new work?
 
-        STALE is excluded on purpose: the server is meant to authorise every
-        run, so a machine that has not reached it inside its offline window
-        stops until it does. That is the trade being made — live control in
-        exchange for our availability mattering.
+        VALID and GRACE, and STALE for up to STALE_ALLOWANCE after the token
+        ran out. The server issues one-hour tokens, so "stale" is the normal
+        state of every launch more than an hour after the last one — and the
+        first click after such a launch used to land on the paywall's "Enter
+        a key" while the renewal was still in flight (or had timed out on a
+        cold server). Being asked for a key you have already paid for, every
+        morning, is not live control; it is a bug. The trade the old rule
+        wanted — our availability mattering — still holds, over days: a
+        machine that has not reached the server for a week stops. Protected
+        work is policed separately by authorize(), which never trusts a token
+        alone.
         """
-        return self.status in (VALID, GRACE)
+        if self.status in (VALID, GRACE):
+            return True
+        if self.status == STALE and self.token_expires:
+            return time.time() - self.token_expires < STALE_ALLOWANCE
+        return False
+
+    @property
+    def stale_days_left(self) -> int:
+        """Days, rounded up, until a STALE licence stops being usable."""
+        if self.status != STALE or not self.token_expires:
+            return 0
+        return max(math.ceil((self.token_expires + STALE_ALLOWANCE - time.time()) / DAY), 0)
 
     @property
     def days_left(self) -> int:

@@ -59,6 +59,14 @@ AUTHORIZE_TIMEOUT = 45
 # up — and the second one lands on a warm instance a moment later.
 AUTHORIZE_RETRIES = 1
 
+# Renewing the token happens on a background thread that nobody is waiting on,
+# so it can afford to wait out a cold server too. At 8s it could not: a host
+# waking up ate the only attempt, the token stayed stale, and the customer's
+# first click of the morning landed on "Enter a key" for a licence they had
+# already paid for.
+REFRESH_TIMEOUT = AUTHORIZE_TIMEOUT
+REFRESH_RETRIES = AUTHORIZE_RETRIES
+
 # Activation is the most expensive call we make — look up the licence, count
 # seats, insert the device, commit — and the one the customer least forgives
 # failing, because it is their first impression and they cannot get past it.
@@ -182,7 +190,8 @@ def refresh(license_id: str, device_fp: str, *, app_version: str,
         "device_fp": device_fp,
         "app_version": app_version,
         "payload_etag": payload_etag,
-    }, app_version=app_version)
+    }, app_version=app_version, timeout=REFRESH_TIMEOUT,
+        retries=REFRESH_RETRIES)
 
 
 def deactivate(license_id: str, device_fp: str, *, app_version: str,

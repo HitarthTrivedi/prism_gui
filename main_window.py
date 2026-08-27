@@ -513,11 +513,18 @@ class MainWindow(QMainWindow):
             self.banner.setVisible(False)
             return
 
-        if state.status == licensing.STALE:
+        if state.status == licensing.STALE and state.usable:
             tone, icon_name = theme.NEUTRAL[600], "clock"
-            text = ("Prism hasn't been able to reach the licence server. "
-                    "New work is paused until it can — History and everything "
-                    "you've already made are still here.")
+            days = state.stale_days_left
+            text = ("Prism couldn't reach the licence server just now. "
+                    f"Everything keeps working for about {days} more "
+                    f"day{'s' if days != 1 else ''} — check this computer's "
+                    "internet connection if this stays.")
+        elif state.status == licensing.STALE:
+            tone, icon_name = theme.NEUTRAL[600], "clock"
+            text = ("Prism hasn't been able to reach the licence server for a "
+                    "week. New work is paused until it can — History and "
+                    "everything you've already made are still here.")
         elif state.status == licensing.GRACE:
             tone, icon_name = theme.NEUTRAL[600], "clock"
             days = max(state.days_left + state.grace_days, 0)

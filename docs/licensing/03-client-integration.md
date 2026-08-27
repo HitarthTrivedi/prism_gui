@@ -85,7 +85,7 @@ class LicenseState:
     seats: int
     days_left: int     # negative once inside grace
     @property
-    def usable(self) -> bool:   # status in ('valid', 'grace')
+    def usable(self) -> bool:   # 'valid', 'grace', or 'stale' for < 7 days
 ```
 
 ---
@@ -292,6 +292,8 @@ still died on a customer's machine).
 | Token with one byte flipped | `TAMPERED` |
 | Token for a different `device_fp` | `TAMPERED` |
 | Expired by 1 day, grace 3 | `GRACE`, app usable |
+| Token past its expiry by 3 hours, licence in date, server unreachable | `STALE`, app usable, soft banner (tokens live one hour) |
+| Token past its expiry by 8 days, server unreachable | `STALE`, locked until it reaches the server |
 | Expired by 5 days, grace 3 | `EXPIRED`, read-only |
 | Clock set back 40 days | `TAMPERED` until an online refresh |
 | Server unreachable, token valid | `VALID`, no visible error |

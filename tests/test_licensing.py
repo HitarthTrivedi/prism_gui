@@ -161,6 +161,30 @@ class StateResolution(unittest.TestCase):
         self.assertEqual(st.status, S.GRACE)
         self.assertTrue(st.usable)
 
+    def test_stale_within_a_week_is_still_usable(self):
+        """The token the server issues lives ONE HOUR. Every launch more than
+        an hour after the last one therefore opens on a stale token, and
+        locking the app for that — padlocks on the rail, the paywall's
+        "Enter a key" on the first click — was the bug reported as "I have
+        to enter the key every time I open Prism". Stale, licence in date,
+        less than a week old: usable, with a banner."""
+        now = int(time.time())
+        st = S.resolve(_claims(exp=now - 3 * 3600, lend=now + 300 * DAY))
+        self.assertEqual(st.status, S.STALE)
+        self.assertTrue(st.usable)
+        self.assertTrue(st.has("boq"))
+        self.assertEqual(st.stale_days_left, 7)
+
+    def test_stale_for_over_a_week_stops(self):
+        """The trade the old rule wanted still holds, over days: a machine
+        that has not reached the server for a week stops until it does."""
+        now = int(time.time())
+        st = S.resolve(_claims(exp=now - 8 * DAY, lend=now + 300 * DAY))
+        self.assertEqual(st.status, S.STALE)
+        self.assertFalse(st.usable)
+        self.assertFalse(st.has("boq"))
+        self.assertEqual(st.stale_days_left, 0)
+
     def test_past_grace_is_expired(self):
         now = int(time.time())
         st = S.resolve(_claims(exp=now - 5 * DAY, lend=now - 5 * DAY, grace=3))
@@ -194,11 +218,14 @@ class StateResolution(unittest.TestCase):
 
     def test_stale_is_not_expired(self):
         """In date, but we have not reached the server inside its offline
-        window. Blocked — but the copy must not say the licence ended."""
+        window. Still STALE, never EXPIRED — and, since the tokens the server
+        issues live one hour, a minute past expiry is what every launch looks
+        like, so it stays usable (see the two tests below for the week-long
+        allowance and its end)."""
         now = int(time.time())
         st = S.resolve(_claims(exp=now - 60, lend=now + 20 * DAY))
         self.assertEqual(st.status, S.STALE)
-        self.assertFalse(st.usable)
+        self.assertTrue(st.usable)
         self.assertNotEqual(st.status, S.EXPIRED)
 
     def test_clock_rollback_detected(self):
