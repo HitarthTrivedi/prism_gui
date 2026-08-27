@@ -32,6 +32,7 @@ from email.message import EmailMessage
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
@@ -373,9 +374,63 @@ class TheScreen(unittest.TestCase):
         for key in ("inquiry", "promotion", "other", "unsorted"):
             self.assertNotIn(key, shown, f"the raw key {key!r} reached the screen")
 
+    def test_the_screen_is_actually_styled(self):
+        """Every widget on this screen asked for its look with
+        setProperty("class", …) — and style.qss has no [class=…] selector
+        anywhere, so not one of those 34 requests did anything. The title was
+        not a heading, the price previews were not monospaced, and "Check now"
+        — the main button on the screen — drew as an ordinary grey button.
+
+        The rest of the app styles by object name, which is what the
+        stylesheet matches on. This keeps the two from drifting apart again.
+
+        Parsed rather than grepped: the file now explains this bug in its own
+        comments, and a test that greps its source cannot tell a call from a
+        sentence about the call.
+        """
+        import ast
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "dialogs", "inquiry_dialog.py"),
+                  encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        offenders = [
+            node.lineno for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "setProperty"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "class"]
+        self.assertEqual(offenders, [],
+                         "style.qss matches on object names, not a class "
+                         "property — this silently does nothing")
+
+    def test_every_object_name_it_asks_for_exists_in_the_stylesheet(self):
+        import re
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "dialogs", "inquiry_dialog.py"),
+                  encoding="utf-8") as f:
+            wanted = set(re.findall(r'setObjectName\("([A-Za-z][\w]*)"\)', f.read()))
+        with open(os.path.join(root, "style.qss"), encoding="utf-8") as f:
+            qss = f.read()
+        for name in sorted(wanted):
+            with self.subTest(name=name):
+                self.assertRegex(qss, rf"#{name}\b",
+                                 f"#{name} is asked for but never defined")
+
+    def test_the_check_button_is_the_primary_one(self):
+        self.assertEqual(self.dialog.check_btn.objectName(), "primaryBtn")
+
     def test_a_correction_is_remembered(self):
         self.dialog._fill_arrived(self._result())
-        self.dialog.arrived.setCurrentCell(1, 0)          # the newsletter
+        # Found by sender rather than by row number: the table is ordered by
+        # what needs a person, so a newsletter is no longer the second row and
+        # which row it lands on is not what this test is about.
+        rows = [r for r in range(self.dialog.arrived.rowCount())
+                if self.dialog.arrived.item(r, 0).data(Qt.UserRole)
+                == "promo@x.example"]
+        self.assertTrue(rows, "the newsletter should be somewhere in the table")
+        self.dialog.arrived.setCurrentCell(rows[0], 0)
         index = self.dialog.recategorise.findData("inquiry")
         self.dialog.recategorise.setCurrentIndex(index)
         with _NoSave():

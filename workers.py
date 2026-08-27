@@ -356,12 +356,15 @@ class InboxCheckWorker(QThread):
 
     def __init__(self, cfg: dict, root: str, *, state=None, knowledge=None,
                  local_only: bool = False, followup_days: int = 2,
-                 max_reminders: int = 3):
+                 max_reminders: int = 3, catch_up_with_new: bool = True):
         super().__init__()
         self.cfg, self.root, self.state = cfg, root, state
         self.knowledge = knowledge
         self.local_only, self.followup_days = local_only, followup_days
         self.max_reminders = max_reminders
+        # False while somebody is watching the spinner: new mail first, the
+        # older backlog only when there is nothing new to show.
+        self.catch_up_with_new = catch_up_with_new
 
     def run(self):
         try:
@@ -370,7 +373,8 @@ class InboxCheckWorker(QThread):
                 self.cfg, mailflow.Paths(self.root), state=self.state,
                 knowledge=self.knowledge, local_only=self.local_only,
                 followup_days=self.followup_days,
-                max_reminders=self.max_reminders)
+                max_reminders=self.max_reminders,
+                catch_up_with_new=self.catch_up_with_new)
             self.done.emit(result)
         except Exception as e:
             self.failed.emit(str(e))

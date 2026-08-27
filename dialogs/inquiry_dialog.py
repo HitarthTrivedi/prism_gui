@@ -1036,7 +1036,15 @@ class InquiryDialog(PrismDialog):
             engine_cfg, self._root(), state=state, knowledge=knowledge,
             local_only=bool(settings.get("local_only")),
             followup_days=int(settings.get("followup_days", 2) or 2),
-            max_reminders=int(settings.get("max_reminders", 3) or 3))
+            max_reminders=int(settings.get("max_reminders", 3) or 3),
+            # Somebody pressed the button and is watching the spinner, so
+            # new mail is shown without waiting on a month-old backlog. That
+            # catching-up still has to happen — a timer tick does it, and so
+            # does a press that found nothing new, because the timer is off
+            # until somebody turns it on and the backlog cannot depend on
+            # that. A first check on a busy mailbox took three minutes and
+            # this screen exists so it does not.
+            catch_up_with_new=bool(self._quiet))
         self._worker.done.connect(self._account_checked)
         self._worker.failed.connect(self._account_failed)
         self._worker.start()
@@ -1312,8 +1320,21 @@ class InquiryDialog(PrismDialog):
         self.cfg["inquiry"] = settings
         CB.config.save(self.cfg)
 
+    # What a person is looking for, in the order they are looking for it.
+    # Everything else keeps its place below.
+    _ARRIVED_ORDER = {"order": 0, "inquiry": 1, "unsorted": 2, "payment": 3,
+                      "vendor": 4, "internal": 5, "other": 6, "promotion": 7}
+
     def _fill_arrived(self, result):
         rows = list(getattr(result, "sorted_mail", None) or [])
+        # A real check on a real mailbox returned 260 messages, 221 of them
+        # mailshots, with two genuine inquiries somewhere in the middle. In
+        # arrival order that is a wall of marketing with the business hidden
+        # in it — which is what "the results I get are from the promotions
+        # section" actually meant. Sorted by what needs a person, the two
+        # inquiries are the first two rows. Stable, so arrival order still
+        # decides within each group, and nothing is hidden or dropped.
+        rows.sort(key=lambda pair: self._ARRIVED_ORDER.get(pair[1].category, 6))
         self.arrived.setRowCount(len(rows))
         for index, (message, verdict) in enumerate(rows):
             who = message.from_name or message.from_addr

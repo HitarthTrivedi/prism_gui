@@ -53,6 +53,26 @@ _app = QApplication.instance() or QApplication([])
 REG = CB.get_register()
 MAILFLOW = CB.get_mailflow()
 
+# The docstring above promises the config is built by hand rather than loaded.
+# It was not quite true: MainWindow() calls config.load(), so the tests that
+# build one were reading whoever is running them. On a machine where Prism has
+# actually been used — which is every machine that matters — the inquiry panel
+# came up holding that person's real register, and the test asserting a fresh
+# screen starts empty failed for a reason that had nothing to do with the code.
+#
+# Pointing CONFIG_PATH at a file that does not exist makes load() return its
+# defaults, which is what "built by hand" was always meant to mean.
+_REAL_CONFIG_PATH = CB.config.CONFIG_PATH
+_SCRATCH = tempfile.mkdtemp(prefix="prism-test-screen-")
+
+
+def setUpModule():
+    CB.config.CONFIG_PATH = os.path.join(_SCRATCH, "config.json")
+
+
+def tearDownModule():
+    CB.config.CONFIG_PATH = _REAL_CONFIG_PATH
+
 
 def blank(**values) -> dict:
     """An empty register row with only the named columns filled."""
