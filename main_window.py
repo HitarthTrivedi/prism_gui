@@ -123,7 +123,8 @@ def _retire_listener(listener, wait_ms: int = 3000) -> None:
 # Routed agents that belong to a paid add-on. The rail gate alone would miss
 # these: the router can put Prism Reel into a plan without the customer ever
 # touching the Reel item in the sidebar.
-AGENT_FEATURES = {"Prism Reel": "reel", "Prism Studio": "reel"}
+AGENT_FEATURES = {"Prism Reel": "reel", "Prism Studio": "reel",
+                  "Prism Motion": "reel"}
 
 
 class MainWindow(QMainWindow):
@@ -1800,6 +1801,23 @@ class MainWindow(QMainWindow):
                 run_agents = {k: ("Prism Reel" if v == "Prism Studio" else v)
                               for k, v in run_agents.items()}
                 run_steps = [(label, "Prism Reel" if agent == "Prism Studio"
+                              else agent, questions)
+                             for label, agent, questions in run_steps]
+        # Same idea for Prism Motion — its own browser/Electron/FFmpeg needs,
+        # same fallback to the one renderer with none of those dependencies.
+        if "Prism Motion" in run_agents.values():
+            ok, why = CB.motion_available()
+            if not ok:
+                answer = QMessageBox.question(
+                    self, "Prism Motion",
+                    i18n.t("{why}\n\nRun with the fixed house style "
+                           "(Prism Reel) instead?").format(why=why),
+                    QMessageBox.Yes | QMessageBox.Cancel)
+                if answer != QMessageBox.Yes:
+                    return
+                run_agents = {k: ("Prism Reel" if v == "Prism Motion" else v)
+                              for k, v in run_agents.items()}
+                run_steps = [(label, "Prism Reel" if agent == "Prism Motion"
                               else agent, questions)
                              for label, agent, questions in run_steps]
 

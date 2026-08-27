@@ -93,7 +93,8 @@ ARG_SLOTS = {
 # the product name in every language; the rest are formats and placeholders
 # the user is meant to read literally.
 NEVER = {
-    "Prism", "PRISM", "Prism Setup", "Prism Studio", "Prism Reel", "Groq",
+    "Prism", "PRISM", "Prism Setup", "Prism Studio", "Prism Reel",
+    "Prism Motion", "Groq",
     "Chrome", "Canva", "Apollo", "ChatGPT", "Claude", "Perplexity", "Gmail",
     "PRSM-XXXXX-XXXXX-XXXXX-XXXXX", "gsk_…", "tagAccent", "tagOutline",
     # Language names in the picker stay in their own script, always. The one
