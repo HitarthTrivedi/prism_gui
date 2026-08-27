@@ -31,6 +31,7 @@ is absent, which is how CI sees them.
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 import tempfile
@@ -1156,6 +1157,39 @@ class AnArrayIsSeveralBoardsNotOneBigOne(unittest.TestCase):
         self.assertIn("60.00 x 40.00", open(out).read())
 
 
+class EveryFigureIsShownToTwoDecimals(unittest.TestCase):
+    """The customer's instruction: two decimal places, everywhere a figure
+    is shown or written. Their check lists are kept that way, and a third
+    digit is noise when a person diffs Prism against a CAM reading."""
+
+    def _job(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", COPPER)
+        _write(d, "a.drl", DRILL_EXCELLON)
+        return G.analyse(G.gather([d]))
+
+    def test_the_text_and_the_brief(self):
+        job = self._job()
+        for text in (G.answers_text(job), G.agent_brief(job), G.summary_text(job)):
+            for number in re.findall(r"\d+\.(\d+)", text):
+                self.assertLessEqual(len(number), 2, text)
+
+    def test_the_csvs(self):
+        import csv as _csv
+        job = self._job()
+        d = tempfile.mkdtemp()
+        G.write_report_csv(job, os.path.join(d, "r.csv"))
+        G.write_summary_csv([("a", job)], os.path.join(d, "s.csv"))
+        for name in ("r.csv", "s.csv"):
+            with open(os.path.join(d, name), encoding="utf-8") as f:
+                for row in _csv.reader(f):
+                    for cell in row:
+                        if re.fullmatch(r"-?\d+\.\d+", cell):
+                            self.assertLessEqual(len(cell.split(".")[1]), 2,
+                                                 (name, row))
+
+
 class PitchIsBetweenSeparatePads(unittest.TestCase):
 
     def setUp(self):
@@ -1173,7 +1207,7 @@ class PitchIsBetweenSeparatePads(unittest.TestCase):
 
     def test_it_says_how_many_pairs_sit_at_that_pitch(self):
         self.assertEqual(self.job["answers"]["min_pitch_pairs"], 3)
-        self.assertIn("8. Min pad pitch        0.500 mm", G.answers_text(self.job))
+        self.assertIn("8. Min pad pitch        0.50 mm", G.answers_text(self.job))
 
 
 class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):

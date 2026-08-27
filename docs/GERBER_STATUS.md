@@ -47,6 +47,11 @@ writing tool is given — numbers only), the per-job CSV, and the one-sheet
 summary CSV (four new columns after TOTAL DRILL; his original column order
 is untouched).
 
+**Two decimal places, everywhere a figure is shown or written** (the
+customer's instruction; their check lists are kept that way). The maths
+underneath keeps full precision — only the rendering rounds, and a test
+scans every output for a third digit.
+
 ---
 
 ## 2. The three CAM features
