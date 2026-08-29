@@ -111,7 +111,7 @@ class WiredIntoEveryStage(unittest.TestCase):
         this is the part that must not be the bit that gets skimmed past."""
         src = self._run_source()
         i = src.index("context = _intent_block(query)")
-        j = src.index("context += attach_ctx", i)
+        j = src.index("context += F.context_block(attachments", i)
         self.assertLess(i, j)
 
     def test_the_cap_is_generous_enough_for_a_real_request(self):
