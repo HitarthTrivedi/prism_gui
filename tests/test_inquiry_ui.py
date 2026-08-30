@@ -759,16 +759,43 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.mkdtemp()
         self.cfg = ready_cfg(self.folder)
+        self._dialogs: list[UI.InquiryDialog] = []
+
+    def tearDown(self):
+        # Every test here builds its own throwaway InquiryDialog and never
+        # shows it, so nothing local ever called .close(). Left alone, each
+        # one's __init__-time `QTimer.singleShot(0, self._first_look)` sits
+        # posted against a live object forever, and fires the next time ANY
+        # test anywhere calls processEvents() — including, when the config
+        # here is the deliberately-incomplete one in
+        # test_it_does_not_run_when_the_mailbox_is_not_set_up, a genuinely
+        # modal QMessageBox that hangs whatever unrelated test collects it.
+        # Closing here sets InquiryDialog._closed, which _first_look() now
+        # checks before doing anything (see InquiryDialog.closeEvent).
+        # `test_a_tick_is_skipped_while_a_check_is_already_running` swaps in a
+        # fake `_worker` (a bare `Busy` stand-in, not a real QThread) purely to
+        # make `isRunning()` answer True — closeEvent's real-worker drain path
+        # calls `.wait()` on it, which `Busy` does not have. None of these
+        # tests exercise closeEvent's worker teardown, so clear the slot
+        # before closing rather than teach the fake to impersonate a QThread.
+        for dialog in self._dialogs:
+            dialog._worker = None
+            dialog.close()
+
+    def _make(self, cfg):
+        dialog = UI.InquiryDialog(cfg)
+        self._dialogs.append(dialog)
+        return dialog
 
     def test_off_by_default(self):
         """Nobody's mail server gets polled because they opened a screen."""
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         self.assertFalse(dialog._auto.isActive())
         self.assertFalse(dialog.auto_box.isChecked())
 
     def test_a_saved_interval_starts_the_timer(self):
         self.cfg["inquiry"]["auto_minutes"] = 10
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         self.assertTrue(dialog._auto.isActive())
         self.assertEqual(dialog._auto.interval(), 10 * 60_000)
         self.assertTrue(dialog.auto_box.isChecked())
@@ -777,11 +804,11 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
         """A timer firing against a half-configured account produces a login
         failure every ten minutes forever."""
         cfg = {"inquiry": {"auto_minutes": 10, "folder": self.folder}}
-        dialog = UI.InquiryDialog(cfg)
+        dialog = self._make(cfg)
         self.assertFalse(dialog._auto.isActive())
 
     def test_turning_it_on_picks_a_sane_interval_rather_than_zero(self):
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         with _NoSave():
             dialog.auto_box.setChecked(True)
         self.assertTrue(dialog._auto.isActive())
@@ -789,7 +816,7 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
 
     def test_turning_it_off_stops_it_and_is_remembered(self):
         self.cfg["inquiry"]["auto_minutes"] = 10
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         with _NoSave() as saver:
             dialog.auto_box.setChecked(False)
         self.assertFalse(dialog._auto.isActive())
@@ -798,7 +825,7 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
     def test_a_tick_is_skipped_while_a_check_is_already_running(self):
         """Two IMAP fetches racing on one bookmark is how the same inquiry
         gets registered twice."""
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         calls = []
         dialog.check_now = lambda **kw: calls.append(kw)
 
@@ -815,7 +842,7 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
         """A modal appearing over somebody's work every ten minutes because
         the mail server had a bad afternoon is how the feature gets switched
         off for good."""
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         shown = []
         dialog._quiet = True
         with _Patched(UI, "QMessageBox", _Recording(shown)):
@@ -824,7 +851,7 @@ class CheckingWithoutBeingAsked(unittest.TestCase):
         self.assertIn("Couldn't reach", dialog.status.text())
 
     def test_a_failure_the_owner_asked_for_still_gets_a_dialog(self):
-        dialog = UI.InquiryDialog(self.cfg)
+        dialog = self._make(self.cfg)
         dialog._quiet = False
         seen = []
         dialog._explain = lambda m: seen.append(m)   # sanity: path is reachable

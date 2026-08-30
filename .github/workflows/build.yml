@@ -113,6 +113,41 @@ jobs:
       - name: Smoke-test the bundle
         run: python packaging/smoke_test.py
 
+      # Unsigned, on purpose — see devtools/sign_manifest.py's docstring.
+      # CI produces the (public, harmless) file list + hashes; the ACTUAL
+      # trust decision (signing it) only ever happens on a human's offline
+      # machine, never here. update-research-inapp-download.md §5.2
+      # requirement #2 is what this step must never violate: nothing that
+      # touches this workflow's secrets can also produce a valid update
+      # signature.
+      #
+      # `platform_tag` mirrors updater.py's own platform_tag() (same
+      # os-arch string it uses to build the URLs it fetches) so the human
+      # signing this knows which of the three unsigned manifests in the
+      # release corresponds to which client platform.
+      - name: Generate the (unsigned) update manifest
+        shell: bash
+        run: |
+          set -e
+          PLATFORM_TAG=$(python -c "import sys; sys.path.insert(0, '.'); import updater; print(updater.platform_tag())")
+          VERSION=$(python -c "import sys; sys.path.insert(0, '.'); import app_meta; print(app_meta.VERSION)")
+          ARCHIVE=$(ls dist/*.tar.gz dist/*.zip dist/*.dmg 2>/dev/null | head -1)
+          python packaging/manifest.py dist/Prism "$VERSION" \
+            -o "dist/manifest.${PLATFORM_TAG}.unsigned.json" \
+            --archive "$ARCHIVE"
+          echo "PLATFORM_TAG=${PLATFORM_TAG}" >> "$GITHUB_ENV"
+
+      # Flattened per-file copies, named exactly how updater.py's
+      # _file_url() expects to fetch them (<platform>__<path with / as __>)
+      # — this is what makes the file-level diff (update-research.md §1/§3)
+      # possible: a code-only release only needs the handful of files that
+      # actually changed uploaded/downloaded, not the whole archive again.
+      - name: Flatten update assets for hosting
+        shell: bash
+        run: |
+          set -e
+          python packaging/flatten_update_assets.py dist/Prism dist/update-assets "$PLATFORM_TAG"
+
       - uses: actions/upload-artifact@v4
         with:
           name: prism-${{ matrix.os }}
@@ -121,6 +156,23 @@ jobs:
             dist/*.zip
             dist/*.dmg
             dist/*.AppImage
+            dist/manifest.*.unsigned.json
+          if-no-files-found: error
+          retention-days: 14
+
+      # Deliberately NAMED WITHOUT THE "prism-" PREFIX, and deliberately a
+      # separate artifact from the one above: the `release` job below only
+      # downloads artifacts matching `prism-*`, so these thousands of small
+      # per-file assets are never swept into `artifacts/**/*` and published
+      # automatically. They stay a plain 14-day workflow artifact until a
+      # human runs the signing step and publishes them by hand — see
+      # RELEASING-UPDATES.md. (Getting this naming wrong would mean every
+      # tagged push silently attaches ~1300+ unsigned files per platform to
+      # a public release — check this if you ever touch the naming here.)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: update-assets-${{ matrix.os }}
+          path: dist/update-assets/
           if-no-files-found: error
           retention-days: 14
 
@@ -130,9 +182,15 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # `pattern: prism-*` deliberately excludes the `update-assets-*`
+      # artifacts (see their upload step's comment) — this release gets the
+      # archives + unsigned manifests only. Nothing update-related that a
+      # client could fetch and run is published here automatically; that is
+      # a separate, human-run step. See RELEASING-UPDATES.md.
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: prism-*
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
@@ -150,3 +208,10 @@ jobs:
             `./install.sh`.
 
             Prism drives **Google Chrome**, which must be installed separately.
+
+            ---
+            _In-app update assets (`manifest.*.unsigned.json` above, plus the
+            `update-assets-*` workflow artifacts on this run) are unsigned and
+            not yet usable by the app's updater. See RELEASING-UPDATES.md for
+            the one remaining manual step (sign + publish) before this
+            release is fetchable by Prism's in-app updater._

@@ -287,8 +287,9 @@ class TheSecondPrompt(unittest.TestCase):
 
     def run_it(self, stage="visual", query="make it in canva",
                responses=("here is your image",)):
-        return self.AU._make_editable(None, CHATGPT, stage, query,
-                                      list(responses))
+        out, _ = self.AU._make_editable(None, CHATGPT, stage, query,
+                                        list(responses))
+        return out
 
     def test_it_asks_canva_after_the_image_exists(self):
         out = self.run_it()
@@ -360,6 +361,28 @@ class TheSecondPrompt(unittest.TestCase):
         self.reply = []
         out = self.run_it()
         self.assertEqual(out, ["here is your image"])
+
+    def test_the_design_url_is_pulled_out_of_the_reply(self):
+        """The saved artifact's link should open the Canva design itself,
+        not the ChatGPT tab it was requested from."""
+        _, canva_url = self.AU._make_editable(
+            None, CHATGPT, "visual", "make it in canva",
+            ["here is your image"])
+        self.assertEqual(canva_url, "https://canva.com/design/abc")
+
+    def test_no_url_when_canva_never_answers(self):
+        self.reply = []
+        _, canva_url = self.AU._make_editable(
+            None, CHATGPT, "visual", "make it in canva",
+            ["here is your image"])
+        self.assertEqual(canva_url, "")
+
+    def test_no_url_when_canva_is_not_connected(self):
+        self.reply = ["CANVA LINK: none"]
+        _, canva_url = self.AU._make_editable(
+            None, CHATGPT, "visual", "make it in canva",
+            ["here is your image"])
+        self.assertEqual(canva_url, "")
 
 
 if __name__ == "__main__":

@@ -12,22 +12,24 @@ VERSION = "1.3.1"
 DESCRIPTION = "One task in, a whole pipeline of AI tools out."
 PUBLISHER = "Alphakore"
 
-# Where the "Download" button on the update banner sends people. A fixed
-# vendor address baked into the build — never a URL the licence server hands
-# us, so nothing that can talk to the client can redirect it (updater.py).
-# The GitHub Releases page always shows the newest build; the CI workflow
-# publishes every tag there.
+# Where the "Download" button on the update banner sends people, and where a
+# person downloads a newer Prism from manually. A fixed vendor address baked
+# into the build — never a URL the licence server hands us, so nothing that
+# can talk to the client can redirect it (updater.py). The GitHub Releases
+# page always shows the newest build; the CI workflow publishes every tag
+# there.
 # TODO(alphakore): point at WEBSITE + "/prism/download" once that page exists.
 DOWNLOAD_URL = "https://github.com/HitarthTrivedi/prism_gui/releases/latest"
 
 # Shown on every licence screen — when a trial ends, when an add-on is locked,
 # when activation fails. This is the only route a stuck customer has back to
 # us, so it must be an address someone actually reads.
-# TODO(alphakore): confirm these before the first client build ships.
-SUPPORT_EMAIL = "hello@alphakore.in"
-WEBSITE = "https://alphakore.in"
-
-# Where a person downloads a newer Prism. Fixed, and opened in the browser —
-# Prism never fetches or runs an update itself (see updater.py). The
-# releases page, so the same address serves every version that follows.
-DOWNLOAD_URL = "https://github.com/HitarthTrivedi/prism_gui/releases/latest"
+# Confirmed 2026-08-30 for the first client build.
+SUPPORT_EMAIL = "contactus@alphakore.org"
+SUPPORT_PHONE = "798476995"
+# Who a customer is actually reaching — not surfaced everywhere SUPPORT_EMAIL
+# is (most of those are a single compact line), but available for anywhere a
+# named contact reads better than a bare address (e.g. a signed email, a
+# license-issue notice).
+SUPPORT_CONTACT = "Parth Soni — CTO, Alphakore"
+WEBSITE = "https://alphakore.org"

@@ -197,6 +197,18 @@ class BoqDialog(PrismDialog):
         self.csv_path = os.path.join(
             CB.config.RUNS_DIR, f"boq_quantities_{int(time.time())}.csv")
         self.boq.write_quantities_csv(q, self.csv_path)
+        # A real, usable file — the numbers a customer or estimator would
+        # want to keep even if they never open the formatted deck. RUNS_DIR
+        # is a hidden working folder; Artifacts is where a copy survives.
+        # `task` matches the query _write() below gives the "format" stage,
+        # so the quantities CSV and the written-up deck land in the same
+        # Artifacts subfolder rather than two differently-named ones.
+        try:
+            CB.config.save_artifact(
+                self.csv_path, os.path.basename(self.cad_path), kind="boq",
+                task=f"Bill of Quantities — {self.request}")
+        except Exception:                               # noqa: BLE001
+            pass
         note = "  ".join(notes)
         self.csv_label.setText(
             f"Saved so you can check every number → {self.csv_path}"

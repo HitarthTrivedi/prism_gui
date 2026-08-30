@@ -208,6 +208,10 @@ class GerberDialog(PrismDialog):
         G = self.gerber
         blocks = []
         csv_paths = []
+        # (path, task) — each job's own CSV is grouped under that job's name;
+        # the summary below covers every job at once, so it has none to
+        # belong to and stays ungrouped rather than picking one arbitrarily.
+        to_save = []
         os.makedirs(REPORTS_DIR, exist_ok=True)
         for name, job in results:
             label = name if len(results) > 1 else ""
@@ -227,6 +231,7 @@ class GerberDialog(PrismDialog):
             csv_path = os.path.join(REPORTS_DIR, csv_name)
             G.write_report_csv(job, csv_path)
             csv_paths.append(csv_path)
+            to_save.append((csv_path, name))
         self.meas_view.setPlainText("\n\n".join(blocks))
 
         note = ""
@@ -235,7 +240,17 @@ class GerberDialog(PrismDialog):
                 REPORTS_DIR, f"gerber_summary_{int(time.time())}.csv")
             G.write_summary_csv(results, summary_path)
             csv_paths.append(summary_path)
+            to_save.append((summary_path, ""))
             note = f"{len(results)} jobs measured separately. "
+        # These CSVs are the real, checkable numbers this whole panel exists
+        # to produce — worth a copy in Artifacts, not only in the Desktop
+        # reports folder this dialog already writes them to.
+        for p, task in to_save:
+            try:
+                CB.config.save_artifact(p, os.path.basename(p), kind="gerber",
+                                        task=task)
+            except Exception:                           # noqa: BLE001
+                pass
         self.csv_label.setText(
             note + "Saved so every number can be checked → "
             + "; ".join(csv_paths))
@@ -326,6 +341,7 @@ class GerberDialog(PrismDialog):
         stem = os.path.splitext(os.path.basename(self.paths[0]))[0]
         stem = "".join(c if c.isalnum() or c in "-_ " else "_"
                        for c in stem).strip()[:40] or "job"
+        self._clean_stem = stem
         out_dir = os.path.join(REPORTS_DIR,
                                f"{stem} cleaned {time.strftime('%Y-%m-%d %H%M')}")
         self._set_busy(True, "Cleaning outside the border — nothing leaves "
@@ -348,6 +364,20 @@ class GerberDialog(PrismDialog):
                        f"border, {crossing} crossing it kept for you to "
                        f"decide. Saved to {report['out_dir']}")
         self.clean_btn.setEnabled(True)
+        # The cleaned layers, the report and its comparison page are the
+        # actual deliverable this button exists to produce — a whole folder,
+        # not one file, so it goes to Artifacts by copying the tree rather
+        # than through save_artifact()'s single-file copy.
+        try:
+            import shutil
+            task_dir = CB.config.artifact_task_dir(
+                getattr(self, "_clean_stem", "") or "Gerber cleaned")
+            shutil.copytree(report["out_dir"],
+                            os.path.join(task_dir, os.path.basename(
+                                report["out_dir"])),
+                            dirs_exist_ok=True)
+        except Exception:                               # noqa: BLE001
+            pass
         QDesktopServices.openUrl(QUrl.fromLocalFile(
             report.get("compare_html") or report["out_dir"]))
 

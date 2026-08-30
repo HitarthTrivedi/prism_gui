@@ -417,7 +417,7 @@ class ReelDialog(PrismDialog):
         # makes "check it later" possible at all.
         try:
             self.artifact_path = CB.config.save_artifact(
-                path, self.request, kind="reel")
+                path, self.request, kind="reel", task=self.request)
         except Exception:                               # noqa: BLE001
             self.artifact_path = ""
         if self.artifact_path:

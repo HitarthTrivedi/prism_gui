@@ -272,7 +272,7 @@ class MotionDialog(PrismDialog):
         self.folder_btn.setEnabled(True)
         try:
             self.artifact_path = CB.config.save_artifact(
-                path, self.request, kind="motion")
+                path, self.request, kind="motion", task=self.request)
         except Exception:                               # noqa: BLE001
             self.artifact_path = ""
         if self.artifact_path:

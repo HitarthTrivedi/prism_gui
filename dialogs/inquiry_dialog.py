@@ -870,6 +870,9 @@ class InquiryDialog(PrismDialog):
         # Rejected sign-ins are counted PER ADDRESS: one mailbox's dead
         # password must not stop the others being read — see _note_failure.
         self._auth_failures: dict[str, int] = {}
+        # Guards the deferred _first_look() singleShot below against firing
+        # after this dialog has been closed — see closeEvent().
+        self._closed = False
         self._auto = QTimer(self)
         self._auto.timeout.connect(self._auto_check)
         self._apply_auto_interval()
@@ -906,7 +909,27 @@ class InquiryDialog(PrismDialog):
 
         The timer is stopped first. Otherwise it can fire while the waits are
         running and start a fresh check on a dialog that is closing.
+
+        `QTimer.singleShot(0, self._first_look)` in `__init__` posts a
+        zero-delay callback that Qt does not deliver until the event loop
+        next turns — which a caller that never spins the loop after closing
+        (every test in tests/test_inquiry_ui.py, deliberately: see its own
+        comments) never gives it the chance to do before moving on. Left
+        unguarded, that callback survives the close and fires whenever ANYONE
+        next drives the event loop — in a completely unrelated test, possibly
+        dozens of modules later — and if this dialog's config was not "ready"
+        (a case a test exists specifically to cover), `_first_look` opens a
+        genuinely modal, blocking `QMessageBox.question` with nothing in a
+        headless test able to answer it: a hang, not a failure, in whatever
+        test happened to call `processEvents()` next.
+
+        `QCoreApplication.removePostedEvents(self)` looks like the fix and
+        is not one: Qt's `QTimer.singleShot` free function runs the timer on
+        an internal helper object it owns, not on `self`, so nothing posted
+        against this dialog is ever waiting to be removed. The `_closed`
+        flag `_first_look` checks below is the actual guard.
         """
+        self._closed = True
         self._auto.stop()
         # Stop the mailbox walk as well as the workers: a queue with accounts
         # left in it would otherwise start a fresh worker from the done-signal
@@ -1592,6 +1615,8 @@ class InquiryDialog(PrismDialog):
 
     # ── running a check ───────────────────────────────────────────────────
     def _first_look(self):
+        if self._closed:
+            return
         if not is_ready(self.cfg):
             answer = QMessageBox.question(
                 self, i18n.t("Email automation"),
@@ -3872,6 +3897,18 @@ class QuotationDialog(PrismDialog):
         except Exception as e:
             parent._explain(str(e))
             return
+        # The quotation is the literal deliverable this dialog exists to
+        # produce — it belongs in Artifacts the same way a rendered reel
+        # does, not only in the inquiry's own job folder. Grouped under the
+        # inquiry number rather than the quote number: the inquiry number is
+        # the stable thread ID across quote → order → payment, so a chase or
+        # revision later lands in the SAME folder as the original quote.
+        try:
+            task = self.row.get("Inquiry no", "") or self.quote.number
+            CB.config.save_artifact(written, self.quote.number, kind="quote",
+                                    task=task)
+        except Exception:                               # noqa: BLE001
+            pass
 
         if send:
             address = self.row.get("Email", "")

@@ -17,7 +17,7 @@ from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
-    QMenu,
+    QMenu, QApplication, QProgressDialog,
 )
 
 import app_meta
@@ -27,6 +27,7 @@ import diagnostics
 import i18n
 import identity
 import licensing
+import paths
 import theme
 import updater
 import workspace
@@ -50,7 +51,7 @@ from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
-                     FFmpegWorker)
+                     FFmpegWorker, UpdateWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
@@ -589,10 +590,80 @@ class MainWindow(QMainWindow):
             f"border-bottom: 1px solid {theme.DIVIDER}; }}")
         self.banner.setVisible(True)
 
-    # ── updates (Phase 0: a banner and a link — see updater.py) ─────────────
+    # ── updates (Phase 1: a real in-app download+install, see updater.py) ──
     def _open_download(self):
-        """Send them to the fixed download address. The browser, not the
-        app: nothing is fetched or run by Prism itself until Phase 1."""
+        """Try the real in-app update first; fall back to the fixed download
+        page whenever Phase 1 can't run — running from source, no verified
+        manifest available, or anything in between failing. The fallback is
+        never a worse outcome than Phase 0's status quo, only ever the same
+        one, so trying Phase 1 first costs nothing.
+        """
+        if not paths.is_frozen():
+            self._open_download_fallback()
+            return
+        self._download_progress = QProgressDialog(
+            i18n.t("Checking for an update…"), i18n.t("Cancel"), 0, 0, self)
+        self._download_progress.setWindowTitle(i18n.t("Update"))
+        self._download_progress.setAutoClose(False)
+        self._download_progress.setMinimumDuration(0)
+        self._download_progress.canceled.connect(self._download_progress.hide)
+
+        def moved(done: int, total: int):
+            box = self._download_progress
+            if box.wasCanceled():
+                return
+            if total:
+                box.setMaximum(total)
+                box.setValue(done)
+                box.setLabelText(i18n.t("Downloading update… {done}/{total} "
+                                        "files").format(done=done, total=total))
+            else:
+                box.setMaximum(0)
+
+        def staged(update):
+            self._download_progress.close()
+            answer = QMessageBox.question(
+                self, i18n.t("Update"),
+                i18n.t("Prism {version} is ready to install. Restart now to "
+                       "finish updating — everything you've made stays "
+                       "right where it is.").format(version=update.version),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if answer != QMessageBox.Yes:
+                return
+            try:
+                updater.begin_apply(update, updater.install_dir())
+            except Exception:                       # noqa: BLE001
+                self._explain(i18n.t(
+                    "Couldn't start the update. Try the download page "
+                    "instead."), "run")
+                return
+            QApplication.instance().quit()
+
+        def none_available():
+            # The banner said a newer version exists (Phase 0's advisory,
+            # unsigned string from the licence lease); Phase 1's own signed
+            # manifest disagreed, is missing, or is for a version this
+            # machine already has — any of those means "nothing this flow
+            # can safely act on", not "something is wrong".
+            self._download_progress.close()
+            self._open_download_fallback()
+
+        def broke(_message: str):
+            self._download_progress.close()
+            self._open_download_fallback()
+
+        worker = UpdateWorker()
+        worker.progress.connect(moved)
+        worker.staged.connect(staged)
+        worker.none.connect(none_available)
+        worker.failed.connect(broke)
+        self._workers.append(worker)
+        self._download_progress.show()
+        worker.start()
+
+    def _open_download_fallback(self):
+        """Phase 0's original behaviour: send them to the fixed download
+        page. The browser, not the app — nothing is fetched or run here."""
         try:
             QDesktopServices.openUrl(QUrl(updater.download_url()))
         except Exception:                          # noqa: BLE001

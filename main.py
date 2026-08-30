@@ -22,6 +22,7 @@ import diagnostics
 import i18n
 import paths
 import theme
+import updater
 from widgets import icons
 
 # MainWindow is imported inside main(), after i18n.start() has patched Qt.
@@ -227,6 +228,35 @@ def main():
     # ~/.prism/logs instead of on a stdout a windowed build does not have.
     diagnostics.install()
 
+    # Rollback check for the in-app updater (Phase 1) — as early as possible,
+    # before anything else assumes the files on disk are the ones the last
+    # launch actually finished starting. Only meaningful for a packaged
+    # build (see updater.install_dir()); a source checkout was never swapped
+    # by apply_update.py in the first place, so there is nothing to check.
+    if paths.is_frozen():
+        try:
+            import apply_update
+            _dir = updater.install_dir()
+            if apply_update.check_and_rollback_if_pending(_dir, _dir + ".old"):
+                # The version that was just swapped in never confirmed it
+                # started — the backup has already been restored to disk by
+                # the call above, but THIS process already has the broken
+                # new version's modules loaded in memory. Record which
+                # version failed, then relaunch fresh (now-restored old
+                # code) rather than limp on with what's already loaded —
+                # continuing this process would mean "rolled back" but still
+                # running the thing that just failed to start.
+                updater.note_rollback(app_meta.VERSION)
+                apply_update.spawn_detached(updater.relaunch_argv())
+                sys.exit(0)
+        except SystemExit:
+            raise
+        except Exception:                            # noqa: BLE001
+            # A rollback CHECK failing must never stop Prism starting — the
+            # one thing worse than "an update silently didn't roll back"
+            # is "Prism won't open at all because its own safety net threw."
+            pass
+
     import core_bridge as CB
     import identity
     cfg = CB.config.load()
@@ -269,6 +299,21 @@ def main():
     from main_window import MainWindow
     win = MainWindow()
     win.show()
+
+    # The window is up — this version is good enough to trust. Clear the
+    # pending-update marker and drop the one-launch-kept backup, so the NEXT
+    # launch's check_and_rollback_if_pending() (above) has nothing to roll
+    # back and simply starts normally. Never allowed to stop the app: a
+    # customer's session must not fail because tidying up an old update's
+    # backup did.
+    if paths.is_frozen():
+        try:
+            import apply_update
+            _dir = updater.install_dir()
+            apply_update.confirm_startup_success(_dir, _dir + ".old")
+        except Exception:                            # noqa: BLE001
+            pass
+
     sys.exit(app.exec())
 
 
@@ -349,4 +394,16 @@ def _licence_gate() -> bool:
 
 
 if __name__ == "__main__":
+    # The detached update-apply helper (see apply_update.py's module
+    # docstring and updater.begin_apply()) — a fresh, separate process the
+    # OLD Prism spawned right before quitting. Never the normal launch path:
+    # this waits for the old PID to exit, performs the file swap, and
+    # relaunches the real app. Checked before QApplication or any other Qt
+    # object is touched, since this invocation may have nothing to show.
+    if len(sys.argv) >= 6 and sys.argv[1] == "--prism-apply-update":
+        import apply_update
+        _pid, _install, _staged, _backup = (
+            int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5])
+        sys.exit(apply_update.perform_apply_and_relaunch(
+            _pid, _install, _staged, _backup, updater.relaunch_argv()))
     main()

@@ -41,3 +41,53 @@ def public_keys() -> dict[str, str]:
     if paths.is_frozen():
         return dict(PRODUCTION)
     return {**PRODUCTION, **DEVELOPMENT}
+
+
+# ── update-manifest keys (see update_manifest.py) ──────────────────────────
+#
+# A SEPARATE key pair from the licence keys above, on purpose — this is
+# update-research-inapp-download.md §5.2 requirement #2, the single most
+# important property of the whole in-app-update design. The licence signing
+# key (`k1`'s private half) lives in the licence server's environment
+# (Render), which is reachable by anything that can reach or compromise that
+# server. A key that can make every customer's Prism download-and-swap-in
+# new files must NOT be that key, or a license-server compromise becomes a
+# supply-chain compromise. UPDATE_PRODUCTION's private half must be generated
+# offline, on a machine that never runs the licence server or a CI job that
+# can also cut a release, and stored the way `prod-signing-key.hex` is stored
+# today (password manager + a sealed paper copy) — never pasted into Render,
+# never into a CI secret.
+#
+# UPDATE_PRODUCTION is intentionally EMPTY. Filling it in is a one-time human
+# ceremony (generate the pair, sign nothing with it from any networked
+# machine, publish only the public half here), not something to do from a
+# coding session. Until it holds a real key, no frozen build can verify any
+# manifest — see update_public_keys() below — which is the correct default
+# posture: a build that can't verify a manifest simply can't self-update, the
+# same fail-closed behaviour public_keys() already gives an unknown `kid`.
+UPDATE_PRODUCTION: dict[str, str] = {
+    # Generated offline 2026-08-30. The matching private half lives only in
+    # the release engineer's password manager — it must never appear in this
+    # repo, in a CI secret, or in Render's environment.
+    "u1": "f246b128bf245e0cc7a748c4d30113a2f74dea3c2547e04acd5637fa95bc2b74",
+}
+
+# Development update-signing key. Same rule as DEVELOPMENT above: usable only
+# from source, invisible to a frozen build. Generated 2026-08-30 for testing
+# the in-app updater end to end; this key's PRIVATE half is not a secret
+# worth protecting the way the production one is (it can only ever sign a
+# manifest that non-frozen, from-source Prisms will accept), but it must
+# never be treated as good enough to sign a real release with.
+UPDATE_DEVELOPMENT: dict[str, str] = {
+    "udev1": "b6f1c8e924c63c5631d5e317156a15c12cf24904b29ce01a5c9f6f425300a569",
+}
+
+
+def update_public_keys() -> dict[str, str]:
+    """The keys this build will accept an update manifest from. Same
+    frozen/dev split as public_keys(), and the same fail-closed shape: an
+    empty UPDATE_PRODUCTION means a frozen build accepts no manifest at all
+    until a real production key is generated and published here."""
+    if paths.is_frozen():
+        return dict(UPDATE_PRODUCTION)
+    return {**UPDATE_PRODUCTION, **UPDATE_DEVELOPMENT}

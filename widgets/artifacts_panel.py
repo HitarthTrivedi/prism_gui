@@ -17,17 +17,17 @@ like every other screen here.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import QLabel
 
 import core_bridge as CB
 import i18n
+import theme
 from widgets import controls as C
 from widgets.files_panel import kind_label, size_label
-from widgets.simple_panels import _Page
+from widgets.simple_panels import _Page, _bucket
 
 # Extension -> the same "kind" vocabulary core.files.attach() uses, so
 # kind_label() (built for attachment chips) reads correctly here too without
@@ -49,6 +49,51 @@ _KINDS = {
 # "presentation" word yet) — fall back to "file" rather than an untranslated
 # label reaching the screen.
 _ICON_FOR_KIND = {"image": "image", "video": "video", "code": "code"}
+
+_THUMB = 30   # matches IconPad's own default size — drop-in for the same slot
+
+
+def _thumbnail(path: str):
+    """A real rounded-corner crop of the image itself, for the row's leading
+    slot — a generic file glyph can't tell two pictures apart, and in a
+    folder that's mostly pictures, telling them apart at a glance is most of
+    what looking at the list is for. Returns None (falls back to the usual
+    glyph) for anything that isn't a real, decodable image."""
+    src = QPixmap(path)
+    if src.isNull():
+        return None
+    src = src.scaled(_THUMB, _THUMB, Qt.KeepAspectRatioByExpanding,
+                     Qt.SmoothTransformation)
+    x = max(0, (src.width() - _THUMB) // 2)
+    y = max(0, (src.height() - _THUMB) // 2)
+    src = src.copy(x, y, _THUMB, _THUMB)
+    out = QPixmap(_THUMB, _THUMB)
+    out.fill(Qt.transparent)
+    painter = QPainter(out)
+    painter.setRenderHint(QPainter.Antialiasing)
+    clip = QPainterPath()
+    clip.addRoundedRect(0, 0, _THUMB, _THUMB, theme.R_CONTROL, theme.R_CONTROL)
+    painter.setClipPath(clip)
+    painter.drawPixmap(0, 0, src)
+    painter.end()
+    label = QLabel()
+    label.setFixedSize(_THUMB, _THUMB)
+    label.setPixmap(out)
+    return label
+
+
+def _chat_link(path: str) -> str:
+    """The AI conversation this artifact came from, if save_artifact() had
+    one to record — see config.save_artifact's `link` param. Empty for a
+    local render (Reel, Motion) that was never a chat to begin with."""
+    sidecar = path + ".link.txt"
+    if not os.path.isfile(sidecar):
+        return ""
+    try:
+        with open(sidecar, "r", encoding="utf-8") as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
 
 
 class ArtifactsPanel(_Page):
@@ -72,6 +117,12 @@ class ArtifactsPanel(_Page):
         paths = []
         if os.path.isdir(folder):
             for name in os.listdir(folder):
+                # A ".link.txt" is the sidecar save_artifact() writes next to
+                # the file it belongs to (see config.save_artifact) — the
+                # chat's URL, not a deliverable of its own, so it rides along
+                # on its artifact's row (_row, below) instead of getting one.
+                if name.endswith(".link.txt"):
+                    continue
                 path = os.path.join(folder, name)
                 if os.path.isfile(path):
                     paths.append(path)
@@ -83,10 +134,25 @@ class ArtifactsPanel(_Page):
                        "named after what you asked for.")), stretch=1)
             return
         # Newest first: the thing you just generated is the thing you came
-        # here to check.
+        # here to check. Grouped by day, with the same bucket labels History
+        # already uses — a flat mtime-sorted dump was the actual complaint,
+        # and this is the app's own established pattern for a date-ordered
+        # list, not a second, divergent one invented just for this screen.
         paths.sort(key=os.path.getmtime, reverse=True)
+        groups: list[tuple[str, list]] = []
         for path in paths:
-            self._col.addWidget(self._row(path))
+            bucket = _bucket("", os.path.getmtime(path))
+            if not groups or groups[-1][0] != bucket:
+                groups.append((bucket, []))
+            groups[-1][1].append(path)
+
+        for bucket, items in groups:
+            self._col.addWidget(C.SectionHeader(
+                i18n.t(bucket),
+                i18n.t("1 file") if len(items) == 1
+                else i18n.t("{n} files").format(n=len(items))))
+            for path in items:
+                self._col.addWidget(self._row(path))
         self._col.addStretch(1)
 
     def _row(self, path: str) -> C.FileItem:
@@ -99,20 +165,29 @@ class ArtifactsPanel(_Page):
         # already tried to derive from it.
         detail = " · ".join(p for p in (kind_label({"kind": kind, "name": name}),
                                         size_label(path)) if p)
-        open_btn = C.icon_button(
+        actions = [C.icon_button(
             "external", i18n.t("Open"),
-            lambda _=False, p=path: self._open_file(p))
+            lambda _=False, p=path: self._open_file(p))]
+        link = _chat_link(path)
+        if link:
+            actions.append(C.icon_button(
+                "globe", i18n.t("Open the chat that made this"),
+                lambda _=False, u=link: self._open_link(u)))
+        leading = _thumbnail(path) if kind == "image" else None
         row = C.FileItem(name, detail, _ICON_FOR_KIND.get(kind, "file"),
-                         [open_btn])
+                         actions, leading=leading)
         row.setToolTip(path)
         row.activated.connect(lambda p=path: self._open_file(p))
         return row
 
     @staticmethod
     def _open_file(path: str):
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        elif os.name == "nt":
-            os.startfile(path)  # noqa: F821
-        else:
-            subprocess.Popen(["xdg-open", path])
+        # Qt's own cross-platform "open with the OS default app" — already
+        # proven by _open_folder() above; opening one file used to reimplement
+        # the same platform dispatch by hand with subprocess/os.startfile
+        # instead of the mechanism already sitting right here.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    @staticmethod
+    def _open_link(url: str):
+        QDesktopServices.openUrl(QUrl(url))

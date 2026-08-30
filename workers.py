@@ -537,6 +537,41 @@ class DraftWorker(QThread):
             self.progress.emit("Reading the answer…")
 
 
+class UpdateWorker(QThread):
+    """Check for, and if one exists download+stage, a Phase 1 in-app update
+    — off the UI thread, same reasoning as FFmpegWorker above (a manifest
+    fetch plus however many changed files add up to real seconds, and a
+    frozen window for that long reads as a crash).
+
+    Deliberately does the check AND the staging in one worker run rather than
+    two separate button presses: by the time a customer has clicked
+    "Download", they've already committed to getting the update, and
+    updater.check_for_update()'s own verification (signature, expiry,
+    monotonic version) is what decides whether `staged` or `none` fires —
+    nothing here weakens or skips any of that; see updater.py's docstring.
+    """
+    progress = Signal(int, int)      # files done, files total
+    staged = Signal(object)          # updater.StagedUpdate
+    none = Signal()                  # no verified update newer than running
+    failed = Signal(str)
+
+    def run(self):
+        import updater
+        try:
+            check = updater.check_for_update()
+            if check is None:
+                self.none.emit()
+                return
+            staged = updater.stage_update(
+                check, updater.install_dir(),
+                on_progress=lambda done, total: self.progress.emit(done, total))
+            self.staged.emit(staged)
+        except updater.UpdateError as e:
+            self.failed.emit(str(e))
+        except Exception as e:                        # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class FFmpegWorker(QThread):
     """Download and install FFmpeg, off the UI thread.
 

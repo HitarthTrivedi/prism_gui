@@ -1582,7 +1582,7 @@ class FileItem(QFrame):
     activated = Signal()
 
     def __init__(self, name: str, detail: str = "", icon: str = "file",
-                 actions: list = None, parent=None):
+                 actions: list = None, parent=None, leading: QWidget = None):
         super().__init__(parent)
         self.setObjectName("listRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -1594,7 +1594,11 @@ class FileItem(QFrame):
         row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
                                theme.SPACE_2, theme.SPACE_2)
         row.setSpacing(theme.SPACE_3)
-        row.addWidget(IconPad(icon, theme.ACCENT, 30, theme.R_CONTROL, 15))
+        # `leading` lets a caller show the file's own content (e.g. a real
+        # image thumbnail) instead of a generic glyph — everything else about
+        # the row stays identical, so Artifacts can look like a gallery
+        # without becoming a second, divergent row implementation.
+        row.addWidget(leading or IconPad(icon, theme.ACCENT, 30, theme.R_CONTROL, 15))
 
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)

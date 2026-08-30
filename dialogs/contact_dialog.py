@@ -82,7 +82,8 @@ class ContactDialog(PrismDialog):
         told.setWordWrap(True)
         root.addWidget(told)
 
-        where = QLabel(f"{app_meta.SUPPORT_EMAIL}   ·   {app_meta.WEBSITE}")
+        where = QLabel(f"{app_meta.SUPPORT_EMAIL}   ·   {app_meta.SUPPORT_PHONE}"
+                      f"   ·   {app_meta.WEBSITE}")
         where.setTextInteractionFlags(Qt.TextSelectableByMouse)
         where.setStyleSheet(
             f"color: {theme.ACCENT_RAMP[700]}; font-size: 13px;"

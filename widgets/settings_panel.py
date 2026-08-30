@@ -1277,9 +1277,28 @@ class SettingsPanel(QWidget):
         col.addWidget(self._head(i18n.t("Still stuck?")))
         col.addWidget(self._facts([
             (i18n.t("Email us"), app_meta.SUPPORT_EMAIL),
+            (i18n.t("Call us"), app_meta.SUPPORT_PHONE),
             (i18n.t("Website"), app_meta.WEBSITE),
             (i18n.t("Version"), app_meta.VERSION),
         ]))
+
+        col.addWidget(self._head(i18n.t("Legal")))
+        col.addWidget(self._buttons([
+            C.button(i18n.t("Terms of Use"), "secondary", small=True,
+                     on_click=lambda: self._open_legal(
+                         i18n.t("Terms of Use"), "TERMS_OF_USE.md")),
+            C.button(i18n.t("Privacy Policy"), "secondary", small=True,
+                     on_click=lambda: self._open_legal(
+                         i18n.t("Privacy Policy"), "PRIVACY_POLICY.md")),
+        ]))
+
+    def _open_legal(self, title: str, resource_name: str):
+        # Local import, same convention support_panel.py's _open_contact()
+        # uses for ContactDialog: dialogs/ imports from widgets/ (controls,
+        # icons), so a widgets/ module importing a dialogs/ class at module
+        # scope risks a circular import — importing at point-of-use avoids it.
+        from dialogs.legal_dialog import LegalDialog
+        LegalDialog(title, resource_name, self.window()).exec()
 
     def _door_card(self, key: str, label: str, blurb: str) -> Card:
         card = Card()

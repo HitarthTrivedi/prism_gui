@@ -774,7 +774,11 @@ class HomePanel(QWidget):
         return card
 
     def _addon_row(self, key, label, desc, icon_name, hue, badge) -> QWidget:
-        soon = key == "bom"
+        # "motion" joins "bom" here 2026-08-30: the render pipeline has a
+        # known bug (see core.motion.render's kill-switch), so the tile stays
+        # visible — a visible "next one" beats an empty gap — but not
+        # clickable, same as "bom" already is, until the bug is fixed.
+        soon = key in ("bom", "motion")
         wrap = _Row(enabled=not soon)
         if not soon:
             wrap.clicked.connect(
