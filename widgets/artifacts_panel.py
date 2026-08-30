@@ -3,9 +3,12 @@ still find it once the app that made it is closed.
 
 Reel renders, and any pipeline stage that produces a real image, document,
 deck or code file, save a copy into config.ARTIFACTS_DIR (see that module) —
-named after the prompt that made them, not a run id. Before this screen, that
-folder only existed on disk: the one way to know it was there was to be told,
-or to stumble on it in Finder/Explorer. This is Prism saying so.
+named after the prompt that made them, not a run id. When a caller passes
+`task=`, everything that one New Task (or BOQ/Gerber/quote job) produced
+lands in its own subfolder there instead — one row here, opened in
+Finder/Explorer rather than browsed inline. Before this screen, that folder
+only existed on disk: the one way to know it was there was to be told, or to
+stumble on it in Finder/Explorer. This is Prism saying so.
 
 Read straight off the folder each time the screen is shown — it is plain
 files on disk, and the user's own Finder/Explorer can add to or remove from
@@ -82,6 +85,30 @@ def _thumbnail(path: str):
     return label
 
 
+def _folder_stats(path: str) -> tuple[int, str]:
+    """File count and total size of everything under a task subfolder —
+    config.artifact_task_dir()'s folders can themselves hold nested folders
+    (Gerber's cleaned-copy output keeps its own "previews/" subfolder), so
+    this walks rather than assuming one flat level."""
+    count, total = 0, 0.0
+    for root, _dirs, names in os.walk(path):
+        for name in names:
+            if name.endswith(".link.txt"):
+                continue
+            count += 1
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    size = ""
+    for unit in ("B", "KB", "MB", "GB"):
+        if total < 1024 or unit == "GB":
+            size = f"{total:.0f} {unit}" if unit == "B" else f"{total:.1f} {unit}"
+            break
+        total /= 1024.0
+    return count, size
+
+
 def _chat_link(path: str) -> str:
     """The AI conversation this artifact came from, if save_artifact() had
     one to record — see config.save_artifact's `link` param. Empty for a
@@ -124,7 +151,14 @@ class ArtifactsPanel(_Page):
                 if name.endswith(".link.txt"):
                     continue
                 path = os.path.join(folder, name)
-                if os.path.isfile(path):
+                # A directory is one New Task's (or one BOQ/Gerber/quote
+                # job's) own subfolder — config.artifact_task_dir() groups
+                # everything one run produced there instead of scattering it
+                # loose. It gets one row in this same newest-first list,
+                # same as a single file would; opening it hands browsing its
+                # contents to Finder/Explorer rather than Prism reimplementing
+                # a folder tree inline.
+                if os.path.isfile(path) or os.path.isdir(path):
                     paths.append(path)
         if not paths:
             self._col.addWidget(C.EmptyState(
@@ -156,6 +190,8 @@ class ArtifactsPanel(_Page):
         self._col.addStretch(1)
 
     def _row(self, path: str) -> C.FileItem:
+        if os.path.isdir(path):
+            return self._folder_row(path)
         name = os.path.basename(path)
         ext = os.path.splitext(name)[1].lower()
         kind = _KINDS.get(ext, "")
@@ -176,6 +212,20 @@ class ArtifactsPanel(_Page):
         leading = _thumbnail(path) if kind == "image" else None
         row = C.FileItem(name, detail, _ICON_FOR_KIND.get(kind, "file"),
                          actions, leading=leading)
+        row.setToolTip(path)
+        row.activated.connect(lambda p=path: self._open_file(p))
+        return row
+
+    def _folder_row(self, path: str) -> C.FileItem:
+        name = os.path.basename(path)
+        count, size = _folder_stats(path)
+        files_word = (i18n.t("1 file") if count == 1
+                     else i18n.t("{n} files").format(n=count))
+        detail = " · ".join(p for p in (files_word, size) if p)
+        actions = [C.icon_button(
+            "external", i18n.t("Open the folder"),
+            lambda _=False, p=path: self._open_file(p))]
+        row = C.FileItem(name, detail, "folder", actions)
         row.setToolTip(path)
         row.activated.connect(lambda p=path: self._open_file(p))
         return row
