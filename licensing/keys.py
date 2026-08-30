@@ -69,7 +69,7 @@ UPDATE_PRODUCTION: dict[str, str] = {
     # Generated offline 2026-08-30. The matching private half lives only in
     # the release engineer's password manager — it must never appear in this
     # repo, in a CI secret, or in Render's environment.
-    "u1": "f246b128bf245e0cc7a748c4d30113a2f74dea3c2547e04acd5637fa95bc2b74",
+    "u1": "49f27ccbfba0e52b62f1244ba63c2a54bf81fa3ff13d9d88be802dbc68496d4e",
 }
 
 # Development update-signing key. Same rule as DEVELOPMENT above: usable only
