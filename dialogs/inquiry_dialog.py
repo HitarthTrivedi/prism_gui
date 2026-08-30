@@ -2904,6 +2904,75 @@ class InquiryDialog(PrismDialog):
                 .replace("{when}", row.get("Quotation date", ""))
                 .replace("{value}", row.get("Quotation value", "")))
 
+    def _winback_body(self, row: dict, reply: str) -> str:
+        """The letter, cleaned of anything the page scrape dragged along,
+        with our quotation repeated underneath exactly as it was sent — the
+        customer is deciding against a piece of paper, and this puts that
+        paper back in front of them."""
+        drafting = CB.get_drafting()
+        clean = getattr(drafting, "clean_reply", lambda t: t)(reply or "")
+        quotation = self._quotation_as_sent(row)
+        if not quotation:
+            return clean
+        return (clean.rstrip() + "\n\n" + "-" * 40 + "\n"
+                + i18n.t("Our quotation, as sent") + "\n" + quotation)
+
+    def _quotation_as_sent(self, row: dict) -> str:
+        """The quotation the customer is holding, as readable lines, from the
+        CSV written when it went out. Empty when there is none on disk."""
+        folder = row.get("Folder", "")
+        number = (row.get("Quotation no", "") or "").replace("/", "-")
+        if not folder or not number:
+            return ""
+        path = os.path.join(folder, f"{number}.csv")
+        if not os.path.exists(path):
+            return ""
+        quoting = CB.get_quoting()
+        try:
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                rows = list(csv.reader(f))
+        except OSError:
+            return ""
+        head: dict[str, str] = {}
+        items: list[str] = []
+        totals: list[str] = []
+        in_items = False
+        for cells in rows:
+            if not any(c.strip() for c in cells):
+                continue
+            if cells[0] == "Sr":
+                in_items = True
+                continue
+            if not in_items and len(cells) >= 2:
+                head[cells[0]] = cells[1]
+                continue
+            if in_items and cells[0].strip().isdigit() and len(cells) >= 7:
+                try:
+                    rate = quoting.indian_currency(quoting.to_decimal(cells[5]))
+                    amount = quoting.indian_currency(quoting.to_decimal(cells[6]))
+                except Exception:                           # noqa: BLE001
+                    rate, amount = cells[5], cells[6]
+                items.append(f"  {cells[0]}. {cells[1]} — {cells[3]} {cells[4]} "
+                             f"x Rs.{rate} = Rs.{amount}")
+            elif in_items and len(cells) >= 7 and cells[5].strip():
+                try:
+                    value = quoting.indian_currency(
+                        quoting.to_decimal(cells[6].lstrip("-")))
+                    value = ("-" if cells[6].startswith("-") else "") + value
+                except Exception:                           # noqa: BLE001
+                    value = cells[6]
+                totals.append(f"{cells[5]}: Rs.{value}")
+        if not items and not head:
+            return ""
+        lines = [f"Quotation {head.get('Quotation no', row.get('Quotation no', ''))}"
+                 f" dated {head.get('Date', row.get('Quotation date', ''))}"]
+        if head.get("Inquiry no"):
+            lines[0] += f" (against your inquiry {head['Inquiry no']})"
+        lines += items
+        if totals:
+            lines.append("  " + " · ".join(totals))
+        return "\n".join(lines)
+
     def _last_reply_text(self, row: dict) -> str:
         """Their own words, from this check if we have them.
 
@@ -2933,7 +3002,8 @@ class InquiryDialog(PrismDialog):
         row = getattr(self, "_draft_row", None) or {}
         subject = (i18n.t("Regarding our quotation {no}")
                    .replace("{no}", row.get("Quotation no", "")))
-        dialog = _ReminderDialog(subject, result.text, row.get("Email", ""),
+        dialog = _ReminderDialog(subject, self._winback_body(row, result.text),
+                                 row.get("Email", ""),
                                  self, note=i18n.t(
                                      "Written by {agent}. Read it before it "
                                      "goes — it is your name on it.")

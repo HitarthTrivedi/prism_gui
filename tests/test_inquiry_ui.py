@@ -2345,6 +2345,38 @@ class WinningBackACustomerWhoSaidNo(unittest.TestCase):
         text = self.dialog._quotation_text(self.dialog._register_rows[0])
         self.assertIn("Spring 2mm", text)
 
+    def test_the_quotation_as_sent_travels_under_the_letter(self):
+        """The customer is deciding against a piece of paper; the win-back
+        puts that paper back in front of them, in readable lines, from the
+        CSV written when it went out — never rebuilt from today's rates."""
+        row = self.dialog._register_rows[0]
+        folder = mailflow.Paths(self.folder).folder_for(row["Inquiry no"])
+        row["Folder"] = folder
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "QTN-26-27-0001.csv"), "w",
+                  encoding="utf-8-sig", newline="") as f:
+            f.write("Quotation no,QTN/26-27/0001\nDate,24-08-2026\n"
+                    "Customer,Shreeji Auto\nInquiry no,INQ/26-27/0002\n\n"
+                    "Sr,Description,HSN,Quantity,Unit,Rate,Amount,Rate source\n"
+                    "1,Compression spring SS 304,7320,5000,nos,7.20,36000,rate list\n\n"
+                    ",,,,,Subtotal,36000\n,,,,,GST 18%,6480\n,,,,,Total,42480\n")
+        block = self.dialog._quotation_as_sent(row)
+        self.assertIn("QTN/26-27/0001 dated 24-08-2026", block)
+        self.assertIn("Compression spring SS 304 — 5000 nos x Rs.7.20", block)
+        self.assertIn("Total: Rs.42,480", block)
+        body = self.dialog._winback_body(
+            row, "Claude responded: Dear Sir, Thought for 6s\nDear Sir,\n\n"
+                 "We can hold the rate.\n\nRegards,\nNilesh")
+        self.assertTrue(body.startswith("Dear Sir,\n\nWe can hold"))
+        self.assertNotIn("Thought for", body)
+        self.assertIn("Our quotation, as sent", body)
+        self.assertTrue(body.rstrip().endswith("Total: Rs.42,480.00"))
+
+    def test_with_no_quotation_on_disk_the_letter_stands_alone(self):
+        body = self.dialog._winback_body(self.dialog._register_rows[0],
+                                         "Dear Sir,\n\nHello.")
+        self.assertEqual(body, "Dear Sir,\n\nHello.")
+
     def test_it_falls_back_to_the_recorded_figures(self):
         text = self.dialog._quotation_text(self.dialog._register_rows[0])
         self.assertIn("QTN/26-27/0001", text)
