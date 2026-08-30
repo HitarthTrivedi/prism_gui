@@ -131,7 +131,13 @@ jobs:
           set -e
           PLATFORM_TAG=$(python -c "import sys; sys.path.insert(0, '.'); import updater; print(updater.platform_tag())")
           VERSION=$(python -c "import sys; sys.path.insert(0, '.'); import app_meta; print(app_meta.VERSION)")
-          ARCHIVE=$(ls dist/*.tar.gz dist/*.zip dist/*.dmg 2>/dev/null | head -1)
+          # `|| true` matters: GNU/BSD `ls` exits nonzero when some (not all)
+          # of several glob patterns match — exactly the normal case here,
+          # since only one of .tar.gz/.zip/.dmg exists per platform. Without
+          # it, `set -e` + bash's default `pipefail` abort the whole script
+          # right here, silently (no traceback — this failed in CI on every
+          # push tonight before this fix, always at this exact line).
+          ARCHIVE=$(ls dist/*.tar.gz dist/*.zip dist/*.dmg 2>/dev/null | head -1 || true)
           python packaging/manifest.py dist/Prism "$VERSION" \
             -o "dist/manifest.${PLATFORM_TAG}.unsigned.json" \
             --archive "$ARCHIVE"
