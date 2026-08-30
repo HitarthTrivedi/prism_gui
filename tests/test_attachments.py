@@ -126,6 +126,17 @@ class ThePipelineBuildsTheBlockAfterTheUpload(unittest.TestCase):
     """A source check: the block used to be built once, before any stage,
     so it could not know whether the upload had happened."""
 
+    def test_every_stage_gets_the_files_not_a_paragraph_about_them(self):
+        """The rule that bit the owner twice in one day: attachments went
+        only to the first stage, so whether the writer saw the CSV depended
+        on whether the analysis stage before it happened to fail."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "prism_terminal", "core", "automation.py"),
+                  encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("include_attachment = bool(attachments)\n", source)
+        self.assertNotIn("stage_idx == 0 or not prior or producer", source)
+
     def test_context_block_is_asked_per_stage_with_the_upload_result(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "prism_terminal", "core", "automation.py"),
