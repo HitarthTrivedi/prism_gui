@@ -67,7 +67,8 @@ _rule(r"couldn't reach the licence server|licence server|unreachable",
           ask_support=True))
 
 _rule(r"check your internet|connection|network is unreachable|getaddrinfo|"
-      r"name or service not known|timed out",
+      r"name or service not known|temporary failure in name resolution|"
+      r"timed out",
       Problem(
           "No internet connection",
           "Prism needs the internet for everything it does — it plans your "
@@ -119,6 +120,41 @@ _rule(r"no groq api key|set your groq api key",
            "Open API Keys → Create API Key.",
            "Copy it and paste it into Settings → Groq API key."),
           action="settings:key", action_label="Open Settings"))
+
+# prism_terminal/core/mailer.explain_error()'s own timeout message —
+# workers.SendWorker/VerifyWorker route their smtplib failures through it
+# now (a real bug: they used to emit the bare exception text instead), so
+# this rule exists to give ITS wording a proper title/steps rather than
+# also falling through to _GENERIC, same reasoning as the rate-list rule
+# below. Matched on stable prose, not the embedded port numbers.
+_rule(r"mail server didn't answer|blocking outbound mail",
+      Problem(
+          "Your mail server couldn't be reached",
+          "This is very rarely the mail account itself — it almost always "
+          "means something on this network is blocking outbound mail "
+          "traffic entirely, which is common on ISPs and office firewalls.",
+          ("Open Email → Change account and try the other port (465 ↔ "
+           "587) — some networks block one but not the other.",
+           "If you can, send from a different network (a phone hotspot is "
+           "the fastest way to test) — if it works there, the network is "
+           "the cause, not the account.",
+           "On a company network, ask whoever runs IT whether outbound "
+           "SMTP (ports 587/465) is blocked.")))
+
+# Written as an already-actionable sentence at the call site
+# (dialogs/inquiry_dialog.py's quotation flow) — without this rule it fell
+# through every pattern above to _GENERIC and threw that specific, already-
+# correct message away in favour of "Something went wrong", the one outcome
+# this whole module exists to avoid (see the module docstring).
+_rule(r"rate list or.*cost sheet",
+      Problem(
+          "Nothing to price from yet",
+          "This inquiry needs your rate list or your cost sheet before Prism "
+          "can work out a quotation.",
+          ("Open Email automation → Setup → Files.",
+           "Add a rate list (a price per item) or a cost sheet (your own "
+           "pricing formulas) — either one is enough.",
+           "Come back and press Prepare a quotation again.")))
 
 # ── the browser ───────────────────────────────────────────────────────────
 # BEFORE the version-mismatch rule below, and the order is the whole point.

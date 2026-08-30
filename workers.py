@@ -195,8 +195,15 @@ class SendWorker(QThread):
         except Exception as e:
             # Raised out of the login/connect, before any message went out —
             # nothing was sent, so this is a failure of the account, not of a
-            # recipient.
-            self.failed.emit(str(e))
+            # recipient. explain_error() is the same translator
+            # mailer.verify() already runs its caught exceptions through —
+            # without it, a bare "timed out" reaches friendly.py and reads as
+            # "no internet", when the actual, more useful answer
+            # (mailer.explain_error already knows this) is "some networks
+            # block SMTP ports — try the other one".
+            email_cfg = self.cfg.get("email") or {}
+            self.failed.emit(CB.mailer.explain_error(
+                str(e), email_cfg.get("address", ""), email_cfg.get("port", "")))
 
 
 class VerifyWorker(QThread):
@@ -211,7 +218,13 @@ class VerifyWorker(QThread):
         try:
             self.done.emit(CB.mailer.verify(self.cfg))
         except Exception as e:
-            self.done.emit(str(e))
+            # verify() already runs its own caught exceptions through
+            # explain_error() — this is only the defensive fallback for
+            # something verify() itself didn't catch, so it must not skip
+            # the same translation.
+            email_cfg = self.cfg.get("email") or {}
+            self.done.emit(CB.mailer.explain_error(
+                str(e), email_cfg.get("address", ""), email_cfg.get("port", "")))
 
 
 class FindWorker(QThread):

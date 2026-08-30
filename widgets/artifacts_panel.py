@@ -230,13 +230,13 @@ class ArtifactsPanel(_Page):
         row.activated.connect(lambda p=path: self._open_file(p))
         return row
 
-    @staticmethod
-    def _open_file(path: str):
-        # Qt's own cross-platform "open with the OS default app" — already
-        # proven by _open_folder() above; opening one file used to reimplement
-        # the same platform dispatch by hand with subprocess/os.startfile
-        # instead of the mechanism already sitting right here.
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+    def _open_file(self, path: str):
+        # In-app, not handed to the OS — see dialogs/preview_dialog.py's own
+        # note on why an Artifact gets different treatment than an ordinary
+        # attachment chip. Only a real chat URL (_open_link, below) still
+        # leaves the window.
+        from dialogs.preview_dialog import open_preview
+        open_preview(path, self)
 
     @staticmethod
     def _open_link(url: str):

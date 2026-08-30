@@ -50,6 +50,14 @@ REAL_ERRORS = [
     ("licence", "Your licence has ended."),
     ("run", "KeyError: 'unexpected'"),
     ("run", ""),
+    ("inquiry", "Prism needs either your rate list or your cost sheet "
+                "before it can price anything. Add one under Setup → Files."),
+    ("send", "[Errno -3] Temporary failure in name resolution"),
+    ("send", "The mail server didn't answer on port 587. This usually means "
+             "a network is blocking outbound mail — some ISPs and office "
+             "firewalls block it entirely. Try port 465 instead in Setup, "
+             "or send from a different network (e.g. a phone hotspot) to "
+             "check whether it's the network rather than the account."),
 ]
 
 # Words a business owner should never be shown. Checked against the friendly
@@ -104,6 +112,16 @@ class EveryErrorIsAnswerable(unittest.TestCase):
         self.assertTrue(problem.steps)
         self.assertTrue(problem.ask_support,
                         "when we don't know, the honest step is 'send it to us'")
+
+    def test_the_no_rate_list_message_keeps_its_own_words_not_the_generic_one(self):
+        """dialogs/inquiry_dialog.py's quotation flow already writes an
+        actionable sentence for this; it must not be thrown away for
+        "Something went wrong" just because no rule recognised it."""
+        problem = friendly.explain(
+            "Prism needs either your rate list or your cost sheet before it "
+            "can price anything. Add one under Setup → Files.")
+        self.assertNotEqual(problem.title, "Something went wrong")
+        self.assertFalse(problem.ask_support)
 
     def test_support_is_offered_only_when_it_is_the_real_next_step(self):
         """Offering it every time trains people to send a file instead of
