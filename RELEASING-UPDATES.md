@@ -66,12 +66,17 @@ a bug.
    ```
 
    This refuses outright if the version isn't newer than the last one this
-   machine signed (`devtools/.last_signed_update_version`, gitignored,
-   per-machine) — that's the downgrade guard working, not a bug to work
-   around with `--allow-downgrade` (that flag is for test fixtures only).
+   machine signed **for that platform** (`devtools/.last_signed_update_
+   version.<platform>`, gitignored, one file per platform, per-machine) —
+   that's the downgrade guard working, not a bug to work around with
+   `--allow-downgrade` (that flag is for test fixtures only). It's scoped
+   per platform deliberately: step 3 below signs THIS SAME version three
+   times over, once per platform, and a guard that couldn't tell that
+   apart from a real downgrade would refuse the second and third signs —
+   it did, on the first real 3-platform release, until that got fixed.
 3. Repeat steps 1–2 for every platform in the release (Linux, Windows,
    macOS each get their own manifest and signature — one key, three signed
-   files).
+   files, all for the identical version).
 4. Publish, by hand, to the same release:
 
    ```bash
