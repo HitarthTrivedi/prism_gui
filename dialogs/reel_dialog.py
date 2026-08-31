@@ -16,7 +16,8 @@ import subprocess
 import sys
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QMessageBox, QProgressBar, QRadioButton, QButtonGroup,
@@ -33,6 +34,12 @@ from widgets.ask_panel import AskPanel
 
 
 class ReelDialog(PrismDialog):
+    # Emitted by the layout editor's local server (from its own thread —
+    # Qt queues them onto the UI thread) when the browser presses Save or
+    # Save & render.
+    edits_saved = Signal(list)
+    edits_rendered = Signal(list)
+
     def __init__(self, cfg: dict, attachments: list, parent=None):
         super().__init__(
             i18n.t("Make a Reel"),
@@ -55,6 +62,13 @@ class ReelDialog(PrismDialog):
         self.artifact_path = ""
         self._worker = None
         self._rec = None
+        # The browser layout editor: stop() for its server, and whether the
+        # last render was Studio's (the editor edits a web page, so the
+        # template renderer has nothing for it to open).
+        self._edit_stop = None
+        self._studio_last = False
+        self.edits_saved.connect(self._on_edits_saved)
+        self.edits_rendered.connect(self._on_edits_rendered)
 
         # The base class owns the header and footer; `root` is its body column.
         root = self.body
@@ -145,6 +159,15 @@ class ReelDialog(PrismDialog):
         self.script_view.setMinimumHeight(150)
         root.addWidget(self.script_view, stretch=1)
 
+        self.edit_btn = self.button(i18n.t("Edit the layout"), "secondary",
+                                    icon_name="pencil", small=True,
+                                    on_click=self._edit_layout)
+        self.edit_btn.setEnabled(False)
+        self.edit_btn.setToolTip(i18n.t(
+            "Open the reel in your browser: drag anything into place, "
+            "resize it, retype it or delete it, then render again. "
+            "Studio reels only."))
+        self.footer.add_utility(self.edit_btn)
         self.play_btn = self.button(i18n.t("Play"), "secondary",
                                     icon_name="play", small=True,
                                     on_click=self._play)
@@ -343,6 +366,7 @@ class ReelDialog(PrismDialog):
         self._start_render(spec, studio=True)
 
     def _start_render(self, spec: dict, studio: bool = False):
+        self._studio_last = studio
         lines = [f"{i + 1}. {sc.get('type') or 'scene'}  ·  "
                  f"{sc.get('seconds', 4)}s"
                  f"   {sc.get('heading') or sc.get('name') or ''}"
@@ -411,6 +435,7 @@ class ReelDialog(PrismDialog):
     def _on_rendered(self, path: str):
         self.play_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
+        self._refresh_edit_btn()
         # A closed Prism used to leave no way back to this file — it only
         # ever lived in ~/.prism/runs (hidden on macOS) or in this dialog's
         # own memory. Copying it out to a named, visible folder is what
@@ -438,6 +463,7 @@ class ReelDialog(PrismDialog):
         A QThread destroyed while still running aborts the whole process, so
         closing this window mid-render took Prism down with it.
         """
+        self._stop_editor()
         for worker in (getattr(self, "_worker", None),
                        getattr(self, "_render_worker", None),
                        getattr(self, "_rec", None)):
@@ -459,7 +485,70 @@ class ReelDialog(PrismDialog):
         if busy and self.progress.maximum() == 0:
             self.progress.setRange(0, 0)
         self.run_btn.setEnabled(not busy)
+        if busy:
+            self.edit_btn.setEnabled(False)
+        else:
+            self._refresh_edit_btn()
         self.status.setText(message)
+
+    # ── the browser layout editor ───────────────────────────────────────
+    def _refresh_edit_btn(self):
+        self.edit_btn.setEnabled(bool(self.spec) and self._studio_last)
+
+    def _edit_layout(self):
+        """Open the finished reel in the browser with the edit layer on.
+
+        The page is the SAME page the renderer films — fix a text by eye
+        there, press Save & render, and the film cannot come out different.
+        """
+        if not self.spec or not self._studio_last:
+            return
+        self._stop_editor()
+        edit = CB.get_reel_edit()
+        try:
+            url, self._edit_stop = edit.serve(
+                self.spec,
+                on_save=self.edits_saved.emit,
+                on_render=self.edits_rendered.emit)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, "Reel", i18n.t(
+                "Could not open the editor: {error}").format(error=e))
+            return
+        QDesktopServices.openUrl(QUrl(url))
+        self.status.setText(i18n.t(
+            "The reel is open in your browser. Click a thing, drag it into "
+            "place, then press Save & render there — the new video renders "
+            "here."))
+
+    def _keep_edits(self, edits: list):
+        """The edits into the spec, and the spec back onto disk, so the
+        saved copy re-renders with the fixes even next year."""
+        self.spec["edits"] = edits
+        if self.out_path.endswith(".mp4"):
+            try:
+                json.dump(self.spec, open(self.out_path[:-4] + ".json", "w"),
+                          indent=2)
+            except OSError:
+                pass    # the render still carries the edits in memory
+
+    def _on_edits_saved(self, edits: list):
+        self._keep_edits(edits)
+        self.status.setText(i18n.t(
+            "Layout saved — {n} change(s). Press Save & render in the "
+            "browser when you are happy with it.").format(n=len(edits)))
+
+    def _on_edits_rendered(self, edits: list):
+        self._keep_edits(edits)
+        self._stop_editor()
+        self._start_render(self.spec, studio=True)
+
+    def _stop_editor(self):
+        if self._edit_stop is not None:
+            try:
+                self._edit_stop()
+            except Exception:                           # noqa: BLE001
+                pass
+            self._edit_stop = None
 
     # ── output ──────────────────────────────────────────────────────────
     # The render itself lands in ~/.prism/runs, which is hidden on macOS —

@@ -278,6 +278,12 @@ def get_studio():
     return reel_web
 
 
+def get_reel_edit():
+    """The browser layout editor for Studio reels."""
+    from core import reel_edit
+    return reel_edit
+
+
 def get_assets():
     """Brand marks and artwork, cut out of whatever the client attached."""
     from core import assets
