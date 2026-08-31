@@ -409,6 +409,41 @@ if _pw_dropped_data or _pw_dropped_bin:
           f"playwright headless-shell/ffmpeg files from the bundle "
           f"({_pw_dropped_data} data, {_pw_dropped_bin} binaries)")
 
+if IS_MAC:
+    # Chromium's macOS build is "Google Chrome for Testing.app" — a full
+    # NESTED .app bundle (its own Contents/MacOS, Contents/Frameworks, the
+    # works) sitting inside playwright's own directory tree. COLLECT()
+    # ad-hoc re-signs every entry left in a.binaries one file at a time
+    # (osxutils.sign_binary, called from process_collected_binary), and
+    # codesign refuses to sign a bundle's inner executable that way:
+    # "bundle format unrecognized, invalid, or unsuitable" — it needs the
+    # OUTER .app signed as one unit (codesign --deep), not its raw Mach-O
+    # binary signed in isolation. That crashed the whole build here, first
+    # time this shipped for a real macOS CI run.
+    #
+    # The fix isn't to sign it correctly at this point — it's to not sign
+    # it at all: Google already ships this build with its own valid Apple
+    # signature, so PyInstaller's ad-hoc "-s -" was replacing a real
+    # signature with a broken attempt at one, not adding a needed one.
+    # Reclassifying these entries as DATA makes COLLECT() copy the bytes
+    # (mode bits included, so the executable stays executable) with no
+    # codesign call at all. packaging/codesign.py's own later pass over the
+    # finished .app DOES use --deep, which is bundle-aware and is what
+    # actually re-signs this correctly for a real release build.
+    _pw_browser_dir = os.sep.join(
+        ("playwright", "driver", "package", ".local-browsers"))
+    _kept_binaries = []
+    for t in a.binaries:
+        if _pw_browser_dir in t[0] or _pw_browser_dir in t[1]:
+            a.datas.append((t[0], t[1], "DATA"))
+        else:
+            _kept_binaries.append(t)
+    _pw_moved = len(a.binaries) - len(_kept_binaries)
+    a.binaries = _kept_binaries
+    if _pw_moved:
+        print(f"[prism] {_pw_moved} playwright browser binaries moved to "
+              f"datas so PyInstaller's ad-hoc signer skips them")
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
