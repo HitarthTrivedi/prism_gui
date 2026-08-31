@@ -13,6 +13,7 @@ Three things this defends:
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -254,6 +255,35 @@ class TheArrivedLogNeverTrimsForBeingOld(unittest.TestCase):
         worklist.append(folder, "arrived", [{"message_id": "<a@x>"}])
         data = worklist.load(folder)
         self.assertNotIn("resolved", data["arrived"][0])
+
+
+class WhatTheWorkingFileCapEvictsIsArchivedNotDeleted(unittest.TestCase):
+    """The bug this guards against: the working file's cap used to just
+    drop the oldest rows once a mailbox had sorted enough mail — "All mail"
+    quietly showed fewer messages than had ever arrived. Now the cap still
+    keeps the working file small, but nothing it evicts is gone."""
+
+    def test_arrived_evictions_land_in_the_archive_file(self):
+        folder = tempfile.mkdtemp()
+        entries = [{"message_id": f"<{i}@x>", "date": "2026-08-01"}
+                   for i in range(worklist.ARRIVED_KEEP + 5)]
+        worklist.append(folder, "arrived", entries)
+
+        data = worklist.load(folder)
+        self.assertEqual(len(data["arrived"]), worklist.ARRIVED_KEEP)
+        # The oldest 5 are the ones evicted — still present, just moved.
+        self.assertTrue(worklist.has_archive(folder, "arrived"))
+        archive_path = worklist.archive_path_for(folder, "arrived")
+        with open(archive_path, "r", encoding="utf-8") as f:
+            archived = [json.loads(line) for line in f if line.strip()]
+        self.assertEqual(len(archived), 5)
+        self.assertEqual([r["message_id"] for r in archived],
+                         [f"<{i}@x>" for i in range(5)])
+
+    def test_no_archive_file_before_the_cap_is_reached(self):
+        folder = tempfile.mkdtemp()
+        worklist.append(folder, "arrived", [{"message_id": "<a@x>"}])
+        self.assertFalse(worklist.has_archive(folder, "arrived"))
 
 
 if __name__ == "__main__":

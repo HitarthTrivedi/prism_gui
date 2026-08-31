@@ -34,7 +34,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
 from core import inbox, mailflow, register, triage  # noqa: E402
@@ -931,6 +931,100 @@ class WhatTheCustomerSaidBack(unittest.TestCase):
         self.dialog._fill_replies(self._result())
         self.assertIn("go ahead", self.dialog.reply_text.toPlainText())
 
+    def _two_replies(self):
+        """A decline, then a change of heart — both still waiting to be
+        applied, exactly the shape a real customer produces by replying
+        twice before either mail is dealt with."""
+        result = mailflow.Result()
+        row = self.dialog._register_rows[0]
+        result.replies = [
+            mailflow.Item("reply", message("Re: Enquiry — first",
+                                           body="Too expensive for us."),
+                         row, intent="rejected"),
+            mailflow.Item("reply", message("Re: Enquiry — second",
+                                           body="Actually, please proceed."),
+                         row, intent="accepted"),
+        ]
+        self.dialog._fill_replies(result)
+
+    def test_applying_an_older_reply_warns_when_a_newer_one_is_waiting(self):
+        """Found from a real report: applying the older of two pending
+        replies used to silently overwrite whatever the newer one had
+        decided, with nothing on screen to say it had happened."""
+        self._two_replies()
+        self.assertEqual(self.dialog.replies_table.rowCount(), 2)
+        self.dialog.replies_table.setCurrentCell(0, 0)   # the older reply
+        asked = []
+
+        class Box:
+            Yes, No = UI.QMessageBox.Yes, UI.QMessageBox.No
+
+            @staticmethod
+            def question(*a, **k):
+                asked.append(True)
+                return Box.No
+
+        with _Patched(UI, "QMessageBox", Box):
+            self.dialog._apply_reply()
+        self.assertTrue(asked, "should warn before applying the older reply")
+        self.assertEqual(self.dialog._register_rows[0]["Status"],
+                         register.QUOTED,
+                         "declining the warning must change nothing")
+
+    def test_saying_yes_to_the_warning_still_applies_it(self):
+        self._two_replies()
+        self.dialog.replies_table.setCurrentCell(0, 0)
+
+        class Box:
+            Yes, No = UI.QMessageBox.Yes, UI.QMessageBox.No
+
+            @staticmethod
+            def question(*a, **k):
+                return Box.Yes
+
+        with _Patched(UI, "QMessageBox", Box):
+            self.dialog._apply_reply()
+        self.assertEqual(self.dialog._register_rows[0]["Status"],
+                         register.NOT_CONVERTED)
+
+    def test_applying_the_newest_reply_first_needs_no_warning(self):
+        self._two_replies()
+        self.dialog.replies_table.setCurrentCell(1, 0)   # the newer reply
+        asked = []
+
+        class Box:
+            @staticmethod
+            def question(*a, **k):
+                asked.append(True)
+                return UI.QMessageBox.No
+
+        with _Patched(UI, "QMessageBox", Box):
+            self.dialog._apply_reply()
+        self.assertFalse(asked)
+        self.assertEqual(self.dialog._register_rows[0]["Status"],
+                         register.ACCEPTED)
+
+    def test_a_reply_row_survives_a_register_reload(self):
+        """Found from a real report: pick a reply, then anything that
+        reloads the register — a save, a mail check — replaces
+        _register_rows with fresh dicts. _refresh_register() only
+        re-syncs the to_quote/waiting/register tables (_reselect()), so
+        _focus_row was left pointing at the old, now-orphaned dict, and a
+        button on the replies tab — still showing the row as selected —
+        reported "pick an inquiry from the list first". Re-anchoring by
+        inquiry number (_focus_key) is the fix this guards."""
+        self.dialog._fill_replies(self._result())
+        inquiry_no = self.dialog._focus_key
+        self.assertTrue(inquiry_no)
+        self.assertIsNotNone(self.dialog._current_row())
+        # What _refresh_register() does to _register_rows: reload from disk
+        # into brand new dict objects, without touching the replies tab.
+        self.dialog._register_rows = register.load(
+            mailflow.Paths(self.folder).register_csv)
+        row = self.dialog._current_row()
+        self.assertIsNotNone(row, "the row must still resolve after reload")
+        self.assertEqual(row["Inquiry no"], inquiry_no)
+
     def test_a_reply_arriving_opens_that_tab(self):
         self.dialog._quiet = False
         # _checked -> _remember -> config.save. This is the test that wrote a
@@ -1096,19 +1190,20 @@ class OnlyTheRightButtonsForTheRow(unittest.TestCase):
         self.assertEqual(A(register.ACCEPTED)[0], "record_po")
         self.assertEqual(A(register.NOT_CONVERTED)[0], "win_back")
         self.assertEqual(A(register.CONVERTED, has_drawing=False),
-                         ["edit", "folder", "delete"])
+                         ["edit", "folder", "history", "delete"])
         self.assertEqual(A("")[0], "prepare")            # blank = New
 
     def test_every_row_can_be_edited_opened_and_deleted(self):
         for status in register.STATUSES + ("",):
             keys = UI.actions_for(status)
-            self.assertEqual(keys[-3:], ["edit", "folder", "delete"], status)
+            self.assertEqual(keys[-4:], ["edit", "folder", "history", "delete"],
+                             status)
 
     def test_never_more_than_three_boxed_buttons(self):
         for status in register.STATUSES + ("",):
             for drawing in (False, True):
                 keys = UI.actions_for(status, has_drawing=drawing)
-                self.assertLessEqual(len(keys) - 3, 3, (status, drawing))
+                self.assertLessEqual(len(keys) - 4, 3, (status, drawing))
 
 
 class ThePanelUnderTheTable(unittest.TestCase):
@@ -1155,7 +1250,7 @@ class ThePanelUnderTheTable(unittest.TestCase):
         self.dialog.followups.setCurrentCell(0, 0)
         shown = self._visible("waiting")
         self.assertEqual({"remind", "phone", "lost", "edit", "folder",
-                          "delete"}, shown)
+                          "history", "delete"}, shown)
         self.assertEqual(self.dialog._selected_row()["Inquiry no"],
                          self.quoted["Inquiry no"])
 
@@ -1183,6 +1278,68 @@ class ThePanelUnderTheTable(unittest.TestCase):
         self.dialog.followups.setCurrentCell(0, 0)
         self.assertFalse(self.dialog.remind_btn.isEnabled())
         self.assertIn("Call them", self.dialog.remind_btn.toolTip())
+
+
+class TheWholeStoryWindow(unittest.TestCase):
+    """"See the whole story" — the button that reads history.txt back in
+    the app, one card per event, instead of sending the owner to the file
+    manager for it."""
+
+    @staticmethod
+    def _labels(dialog) -> list[str]:
+        return [w.text() for w in dialog.findChildren(QLabel)]
+
+    def test_shows_the_recorded_event_as_a_card(self):
+        folder = tempfile.mkdtemp()
+        row = {"Inquiry no": "INQ/26-27/0001", "Customer": "Acme",
+              "Folder": folder}
+        history = CB.get_history()
+        history.append(folder, "Enquiry received",
+                       who="Acme <buyer@acme.example>", body="Please quote.")
+        dialog = UI._HistoryDialog(row, folder)
+        labels = self._labels(dialog)
+        self.assertTrue(any("Enquiry received" in t for t in labels))
+        self.assertTrue(any("buyer@acme.example" in t for t in labels))
+        self.assertTrue(any("Please quote." in t for t in labels))
+
+    def test_two_events_render_in_the_order_they_happened(self):
+        folder = tempfile.mkdtemp()
+        history = CB.get_history()
+        history.append(folder, "Enquiry received", body="first thing")
+        history.append(folder, "Quotation sent", body="second thing")
+        dialog = UI._HistoryDialog(
+            {"Inquiry no": "INQ/26-27/0001", "Folder": folder}, folder)
+        labels = self._labels(dialog)
+        first = next(i for i, t in enumerate(labels) if "first thing" in t)
+        second = next(i for i, t in enumerate(labels) if "second thing" in t)
+        self.assertLess(first, second)
+
+    def test_an_inquiry_with_nothing_recorded_says_so_plainly(self):
+        dialog = UI._HistoryDialog(
+            {"Inquiry no": "INQ/26-27/0001", "Customer": "Acme"},
+            tempfile.mkdtemp())
+        self.assertTrue(any("Nothing recorded here yet" in t
+                           for t in self._labels(dialog)))
+
+    def test_the_button_reaches_the_folders_own_history(self):
+        folder = tempfile.mkdtemp()
+        row = register.from_message(message())
+        row["Folder"] = folder
+        register.save([row], mailflow.Paths(folder).register_csv)
+        dialog = UI.InquiryDialog(ready_cfg(folder))
+        dialog.register_table.setCurrentCell(0, 0)
+        CB.get_history().append(folder, "Enquiry received", body="hello")
+        created = []
+        real = UI._HistoryDialog
+
+        class _Capturing(real):
+            def exec(self):
+                created.append(self)
+
+        with _Patched(UI, "_HistoryDialog", _Capturing):
+            dialog._show_history()
+        self.assertEqual(len(created), 1)
+        self.assertTrue(any("hello" in t for t in self._labels(created[0])))
 
 
 class AnsweringByPhone(unittest.TestCase):
@@ -1653,6 +1810,36 @@ class ChasingAQuietQuotation(unittest.TestCase):
         row = dict(self.row)
         row["Reminders sent"] = "3"
         self.assertEqual(register.awaiting_followup([row]), [])
+
+
+class TheWaitingBadgeMatchesItsOwnTable(unittest.TestCase):
+    """Found from a real report: the "No answer yet" tab read "(0)" with a
+    row plainly sitting in the table underneath it. The badge was counting
+    _followup_rows — quotations due a reminder TODAY — while the table
+    (_render_waiting()) shows every quotation still unanswered, due or
+    not. A quotation quoted this morning is correctly "not yet due" and
+    correctly still in the table; the badge must count the same rows the
+    table shows, the way every other tab's badge already does."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.row = register.from_message(message())
+        register.mark_quoted(self.row, "QTN/26-27/0001", "50000")
+        self.row["Last contact"] = date.today().strftime("%d-%m-%Y")
+        register.save([self.row], mailflow.Paths(self.folder).register_csv)
+        self.dialog = UI.InquiryDialog(ready_cfg(self.folder))
+        self.dialog._refresh_register()
+
+    def test_a_not_yet_due_quotation_is_not_in_the_reminder_list(self):
+        """Confirms the scenario is set up right: nothing is due today."""
+        self.assertEqual(self.dialog._followup_rows, [])
+
+    def test_but_it_is_still_in_the_waiting_table(self):
+        self.assertEqual(len(self.dialog._waiting_rows), 1)
+        self.assertEqual(self.dialog.followups.rowCount(), 1)
+
+    def test_the_tab_badge_counts_the_table_not_the_reminder_list(self):
+        self.assertIn("(1)", self.dialog.tabs.tabText(UI.TAB_INDEX["waiting"]))
 
 
 class StartingFromARegisterTheyAlreadyKeep(unittest.TestCase):

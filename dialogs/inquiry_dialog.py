@@ -36,8 +36,8 @@ import sys
 from datetime import date, timedelta
 from decimal import Decimal
 
-from PySide6.QtCore import QDate, QRect, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QDate, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog,
     QDialogButtonBox,
@@ -127,6 +127,17 @@ SOURCE_LABELS = {
     "ai": "sorted by Prism's brain",
     "none": "not sorted",
 }
+
+ARRIVED_SENTENCE = (
+    "Every mail Prism has read and how it sorted it. If one is in the "
+    "wrong column, correct it here and Prism will remember that sender.")
+# Shown once the log has ever grown past its working-file cap — see
+# worklist.has_archive(). The cap moves the oldest rows to an archive file
+# instead of deleting them, so this sentence must say so rather than let
+# the tab look like it quietly lost mail.
+ARRIVED_ARCHIVE_NOTE = (
+    "Older mail beyond the most recent few thousand has moved to this "
+    "inquiry folder's archive file — nothing is deleted.")
 
 # ── colour ───────────────────────────────────────────────────────────────────
 # A tinted background and a dark ink for each category and each status, so a
@@ -275,6 +286,7 @@ ROW_ACTIONS = [
     ("revise", "Send a revised quotation", "secondary"),
     ("edit", "Edit details", "tertiary"),
     ("folder", "Open this inquiry's folder", "tertiary"),
+    ("history", "See the whole story", "tertiary"),
     ("delete", "Delete this inquiry", "destructive"),
 ]
 
@@ -310,11 +322,12 @@ def actions_for(status: str, tab: str = "register",
         keys = ["win_back"]
     else:
         keys = []
-    # Every row can be edited, opened, and — the owner asked for this on
-    # every row, not only new ones — deleted, with the "block this sender?"
-    # question that follows. A newsletter that got itself registered is the
-    # commonest reason, and it can be sitting at any status.
-    return keys + ["edit", "folder", "delete"]
+    # Every row can be edited, opened, read back as its own story, and — the
+    # owner asked for this on every row, not only new ones — deleted, with
+    # the "block this sender?" question that follows. A newsletter that got
+    # itself registered is the commonest reason, and it can be sitting at
+    # any status.
+    return keys + ["edit", "folder", "history", "delete"]
 
 
 class _RoomyTabBar(QTabBar):
@@ -602,6 +615,93 @@ class _PhoneReplyDialog(PrismDialog):
         return self._note.text().strip()
 
 
+# One tone per event this feature can ever write — see core/history.py's
+# writers (mailflow.py's _log_history, and every _log_sent/_mark_lost/
+# _mark_already_quoted/_phone_reply/_po_accepted call in this file).
+# Anything not listed (a future event, or one written in another language)
+# reads as "neutral" rather than guessing.
+_HISTORY_TONES = {
+    "Enquiry received": "info",
+    "Order received (no prior quotation)": "info",
+    "Purchase order received": "info",
+    "Quotation sent": "accent",
+    "Revised quotation sent": "accent",
+    "Reminder sent": "quiet",
+    "Win-back mail sent": "accent",
+    "Reply received": "neutral",
+    "Reply received — by phone": "neutral",
+    "Quoted outside Prism — recorded by hand": "quiet",
+    "Order accepted — converted": "ok",
+    "Marked lost": "err",
+    "Marked lost — by phone": "err",
+    "Register corrected": "warn",
+}
+
+
+class _HistoryDialog(PrismDialog):
+    """The whole story for one inquiry, read back in order — the enquiry,
+    every quotation and reminder sent, every reply, and how it closed, each
+    as its own card instead of a wall of plain text. The record itself is
+    history.txt in the inquiry's own folder (see core/history.py) — this
+    window reads it back with entries(), it does not hold a second copy."""
+
+    def __init__(self, row: dict, folder: str, parent=None):
+        who = row.get("Customer", "") or row.get("Email", "")
+        super().__init__(
+            i18n.t("The whole story"),
+            i18n.t("Everything that happened on {no}, in the order it "
+                   "happened.").replace("{no}", row.get("Inquiry no", "")),
+            icon="clock", parent=parent, closable=True, scrollable=True)
+        self.setWindowTitle(i18n.t("The whole story"))
+        self.resize(720, 680)
+        self.setMinimumSize(480, 360)
+        self.body.addWidget(C.label(
+            f"{row.get('Inquiry no', '')} · {who}", level="CARD_TITLE",
+            wrap=True))
+        events = CB.get_history().entries(folder)
+        if not events:
+            self.body.addWidget(C.label(i18n.t(
+                "Nothing recorded here yet. This inquiry's story starts "
+                "filling in from the next thing that happens to it — a "
+                "quotation sent, a reply, a purchase order."),
+                level="SUPPORT", wrap=True))
+        for entry in events:
+            self.body.addWidget(self._card(entry))
+        self.body.addStretch(1)
+        self.footer.set_primary(
+            self.button(i18n.t("Close"), "primary", on_click=self.accept))
+
+    @staticmethod
+    def _card(entry: dict) -> QWidget:
+        card = C.Card()
+        col = card.body(margins=(16, 14, 16, 14), spacing=theme.SPACE_1)
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACE_2)
+        head.addWidget(C.Pill(i18n.t(entry["event"]) or entry["event"],
+                              _HISTORY_TONES.get(entry["event"], "neutral")))
+        # Already "DD-MM-YYYY HH:MM" — history.append() writes it in the
+        # same day-month-year convention the rest of the screen uses, so
+        # unlike a worklist date (_dmy()'s job) this needs no reformatting.
+        when = QLabel(entry["when"])
+        when.setObjectName("meta")
+        head.addWidget(when)
+        head.addStretch(1)
+        col.addLayout(head)
+        meta = " · ".join(p for p in (entry.get("who"), entry.get("subject"))
+                          if p)
+        if meta:
+            meta_label = QLabel(meta)
+            meta_label.setObjectName("meta")
+            meta_label.setWordWrap(True)
+            col.addWidget(meta_label)
+        if entry.get("body"):
+            body_label = QLabel(entry["body"])
+            body_label.setWordWrap(True)
+            body_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            col.addWidget(body_label)
+        return card
+
+
 def _warning_css() -> str:
     """The tinted "check this before you send it" note.
 
@@ -745,23 +845,53 @@ def open_in_file_manager(path: str) -> None:
         pass
 
 
-class InquiryDialog(PrismDialog):
+class InquiryDialog(QWidget):
+    """The working screen — embedded in the main window's stack, not a
+    popup. It used to be a modal PrismDialog opened with .exec(); the
+    customer did not want a working window that blocks the rest of the app,
+    so this is now a plain screen you navigate to and away from, the same
+    way Home/Workbench/Settings/the launcher panel already work. `enter()`
+    is what a fresh `.exec()` used to do (load the latest state, land on a
+    tab, maybe check mail right away) — call it every time the screen is
+    navigated to, not just once at construction. `on_leave()` is the light
+    teardown for navigating away (stop the auto-check timer only); the full
+    worker teardown in `closeEvent` below still exists as a last-resort
+    safety net if this widget is ever actually closed/destroyed outright."""
 
-    def __init__(self, cfg: dict, parent=None, tab: int = 0, *,
-                 auto_check: bool = False):
+    # Emitted to ask the main window to switch screens — "inquiry" for the
+    # launcher panel this screen was opened from. Same convention as the
+    # BOQ/Gerber/Email/History/Catalog/Settings panels' own `navigate`.
+    navigate = Signal(str)
+
+    def __init__(self, cfg: dict, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
         # No subtitle: the sentence at the top of each tab says what THAT
         # list is for, which is the only sentence the owner needs, and the
         # header band's 20px are worth more as table rows.
-        super().__init__(i18n.t("Email automation"), "",
-                         icon="inbox", parent=parent, closable=False)
-        self.setWindowTitle(i18n.t("Email automation"))
-        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
-        self._size_to_screen()
+        self.header = C.PageHeader(i18n.t("Email automation"), "")
+        root.addWidget(self.header)
+
+        self.body = QVBoxLayout()
+        root.addLayout(self.body, stretch=1)
+
+        self._closed = False
         self.cfg = dict(cfg)
         # The row the owner last picked, in ANY table — the one every
-        # action button acts on. Always one of the dicts in _register_rows,
-        # never a copy, so a change lands on the row register.save() writes.
+        # action button acts on. Meant to always be one of the dicts in
+        # _register_rows, never a copy, so a change lands on the row
+        # register.save() writes — but _refresh_register() reloads that list
+        # with fresh dicts and only re-syncs the to_quote/waiting/register
+        # tables (see _reselect()), not the replies/orders tabs. _focus_key
+        # is the inquiry number behind whatever _focus_row was, so
+        # _current_row() can re-anchor to the live dict instead of reporting
+        # "nothing is selected" the moment the register underneath it turns
+        # over.
         self._focus_row = None
+        self._focus_key = ""
         self._to_quote_rows: list[dict] = []
         self._waiting_rows: list[dict] = []
         self._pages: dict[str, _TabPage] = {}
@@ -792,12 +922,6 @@ class InquiryDialog(PrismDialog):
         # that check ends, so a later failure the owner DID ask for still gets
         # a dialog rather than disappearing into the status line.
         self._quiet = False
-        # Set when this dialog was opened by pressing "Check my mail now" on
-        # the report screen behind it, rather than by clicking a row or
-        # "Edit setup" — see _first_look(). Without this, that button opened
-        # an otherwise-idle dialog and the owner had to find the second
-        # button of the same name inside it before anything actually ran.
-        self._auto_check_on_open = auto_check
 
         self._build_header_actions()
 
@@ -850,19 +974,28 @@ class InquiryDialog(PrismDialog):
             if 0 <= index < len(TABS) else None)
         self.body.addWidget(self.tabs, stretch=1)
 
-        self.footer.add_utility(self.button(
+        root.addWidget(C.hairline())
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
+                                      theme.PAGE_PAD, theme.SPACE_3)
+        footer_row.setSpacing(theme.SPACE_2)
+        footer_row.addWidget(self.button(
             i18n.t("Open the folder"), "secondary", icon_name="folder",
             small=True,
             on_click=lambda: open_in_file_manager(self._root())))
-        self.footer.add_utility(self.button(
+        footer_row.addWidget(self.button(
             i18n.t("Open the register file"), "secondary", icon_name="file",
             small=True, on_click=self._open_register))
-        # Still a plain reject, exactly as the QDialogButtonBox was — the box
-        # only ever carried one Close button, and it brought Qt's platform
-        # icons with it (a GTK red ✕, the one place the desktop theme leaked
-        # into this window).
-        self.footer.add_secondary(self.button(
-            i18n.t("Close"), "secondary", on_click=self.reject))
+        footer_row.addStretch(1)
+        # This screen is reached by drilling in from the launcher panel, not
+        # from the sidebar directly — "Back" returns there. Was a plain
+        # `reject()` when this was a modal; now it asks the main window to
+        # switch screens, the same convention every other embedded panel's
+        # `navigate` signal already uses.
+        footer_row.addWidget(self.button(
+            i18n.t("Back to Email automation"), "secondary",
+            on_click=lambda: self.navigate.emit("inquiry")))
+        root.addLayout(footer_row)
 
         # Checking on a timer is what makes this "runs by itself" rather than
         # "a button somebody remembers". Started here rather than in the
@@ -870,37 +1003,69 @@ class InquiryDialog(PrismDialog):
         # Rejected sign-ins are counted PER ADDRESS: one mailbox's dead
         # password must not stop the others being read — see _note_failure.
         self._auth_failures: dict[str, int] = {}
-        # Guards the deferred _first_look() singleShot below against firing
-        # after this dialog has been closed — see closeEvent().
-        self._closed = False
         self._auto = QTimer(self)
         self._auto.timeout.connect(self._auto_check)
         self._apply_auto_interval()
 
+        self.enter()
+
+    def enter(self, tab: int = 0, auto_check: bool = False):
+        """Show the latest state. Called every time the main window
+        navigates to this screen — the replacement for what constructing a
+        fresh dialog and calling .exec() used to do. `tab` lands on the tab
+        the launcher's action line was about ("Quote them" → to_quote,
+        "Read the answer" → replies, ...); `auto_check` is set only for the
+        front door's "Check my mail now" — see InquiryPanel.check_requested.
+        """
         self._refresh_register()
         # Draw the three worklist tabs from what is already on disk, before
-        # any check has run this session — reopening the dialog tomorrow
+        # any check has run this session — returning to this screen tomorrow
         # must show the same pending replies and orders it showed today,
         # not a blank screen waiting for a fresh check to repopulate them.
         self._render_arrived()
         self._render_replies()
         self._render_orders()
         self.tabs.setCurrentIndex(max(0, min(int(tab or 0), len(TABS) - 1)))
-        QTimer.singleShot(0, self._first_look)
+        self._apply_auto_interval()
+        # Deferred so the screen paints before a "needs setup?" question can
+        # pop over it. `_closed` guards it in the (now rare, since this
+        # widget is never destroyed by ordinary navigation) case the app is
+        # shutting down before Qt delivers this zero-delay callback.
+        QTimer.singleShot(0, lambda: self._first_look(auto_check))
 
-    def _size_to_screen(self):
-        """Open at most of the screen, never less than a size every tab is
-        readable at. A 1366×768 laptop — ordinary kit in a drawing office —
-        gets 1229×655, which is seven table rows on a text tab; the
-        maximise button is there for the rest."""
-        screen = QGuiApplication.primaryScreen()
-        avail = screen.availableGeometry() if screen else QRect(0, 0, 1280, 800)
-        self.setMinimumSize(960, 640)
-        self.resize(max(960, min(1440, int(avail.width() * 0.9))),
-                    max(640, min(900, int(avail.height() * 0.9))))
+    def on_leave(self):
+        """Called by the main window when the user navigates to a different
+        screen. Only stops the timer — an in-flight check is left to finish
+        in the background rather than force-terminated, so leaving this
+        screen is instant rather than blocking on network I/O. The register
+        it writes is re-read fresh by the launcher panel and by `enter()`
+        regardless of which screen was active while it finished. Full worker
+        teardown is `closeEvent`, below, for the rare case this widget is
+        actually destroyed rather than merely navigated away from."""
+        self._auto.stop()
+
+    def button(self, text: str, variant: str = "secondary",
+              icon_name: str = "", on_click=None, tooltip: str = "",
+              small: bool = False):
+        """One button, on the four-variant scale — the same helper
+        `PrismDialog.button()` gave every dialog, kept here verbatim now
+        that this screen is no longer a PrismDialog, so none of the many
+        `self.button(...)` call sites elsewhere in this class had to change."""
+        btn = C.button(text, variant, icon_name, small=small, on_click=on_click)
+        if tooltip:
+            btn.setToolTip(tooltip)
+            if not btn.accessibleName():
+                btn.setAccessibleName(f"{text}. {tooltip}")
+        if variant == "primary":
+            btn.setDefault(True)
+            btn.setAutoDefault(True)
+        return btn
 
     def closeEvent(self, event):
-        """Wind up every worker before this dialog is destroyed.
+        """Wind up every worker if this widget is ever actually closed or
+        destroyed outright — ordinary navigation away from this screen goes
+        through `on_leave()` above instead, which does not wait on anything,
+        so this is a safety net rather than the normal path.
 
         A QThread destroyed while still running aborts the whole process — Qt
         calls qFatal() from ~QThread. Reel and BOQ have guarded this since they
@@ -908,25 +1073,25 @@ class InquiryDialog(PrismDialog):
         a mailbox check, a send, and a browser draft that runs for minutes.
 
         The timer is stopped first. Otherwise it can fire while the waits are
-        running and start a fresh check on a dialog that is closing.
+        running and start a fresh check on a widget that is closing.
 
-        `QTimer.singleShot(0, self._first_look)` in `__init__` posts a
-        zero-delay callback that Qt does not deliver until the event loop
-        next turns — which a caller that never spins the loop after closing
-        (every test in tests/test_inquiry_ui.py, deliberately: see its own
-        comments) never gives it the chance to do before moving on. Left
-        unguarded, that callback survives the close and fires whenever ANYONE
-        next drives the event loop — in a completely unrelated test, possibly
-        dozens of modules later — and if this dialog's config was not "ready"
-        (a case a test exists specifically to cover), `_first_look` opens a
-        genuinely modal, blocking `QMessageBox.question` with nothing in a
-        headless test able to answer it: a hang, not a failure, in whatever
-        test happened to call `processEvents()` next.
+        `QTimer.singleShot(0, ...)` in `enter()` posts a zero-delay callback
+        that Qt does not deliver until the event loop next turns — which a
+        caller that never spins the loop after closing (every test in
+        tests/test_inquiry_ui.py, deliberately: see its own comments) never
+        gives it the chance to do before moving on. Left unguarded, that
+        callback survives the close and fires whenever ANYONE next drives the
+        event loop — in a completely unrelated test, possibly dozens of
+        modules later — and if this screen's config was not "ready" (a case a
+        test exists specifically to cover), `_first_look` opens a genuinely
+        modal, blocking `QMessageBox.question` with nothing in a headless
+        test able to answer it: a hang, not a failure, in whatever test
+        happened to call `processEvents()` next.
 
         `QCoreApplication.removePostedEvents(self)` looks like the fix and
         is not one: Qt's `QTimer.singleShot` free function runs the timer on
         an internal helper object it owns, not on `self`, so nothing posted
-        against this dialog is ever waiting to be removed. The `_closed`
+        against this widget is ever waiting to be removed. The `_closed`
         flag `_first_look` checks below is the actual guard.
         """
         self._closed = True
@@ -1094,6 +1259,7 @@ class InquiryDialog(PrismDialog):
             "boq": self._make_boq, "phone": self._phone_reply,
             "lost": self._mark_lost, "edit": self._edit_row,
             "folder": self._open_inquiry_folder, "delete": self._delete_inquiry,
+            "history": self._show_history,
         }
         for key, text, variant in ROW_ACTIONS:
             panel.add_action(key, text, variant, handlers[key])
@@ -1105,9 +1271,7 @@ class InquiryDialog(PrismDialog):
             ["From", "Subject", "Sorted as", "Why", "Date"], stretch=1,
             fit=(0, 2, 3, 4))
         page = _TabPage(
-            "Every mail Prism has read and how it sorted it. If one is in "
-            "the wrong column, correct it here and Prism will remember that "
-            "sender.",
+            ARRIVED_SENTENCE,
             self.arrived, "inbox", "Nothing has come in yet",
             "Press Check my mail now. Everything that arrives is listed here "
             "and stays listed.", on_change=self._render_arrived)
@@ -1229,6 +1393,8 @@ class InquiryDialog(PrismDialog):
                          "secondary", self._win_back)
         panel.add_action("folder", "Open this inquiry's folder", "tertiary",
                          self._open_inquiry_folder)
+        panel.add_action("history", "See the whole story", "tertiary",
+                         self._show_history)
         self.replies_table.currentCellChanged.connect(
             lambda *_: self._sync_panel("replies"))
         return page
@@ -1313,6 +1479,24 @@ class InquiryDialog(PrismDialog):
                 self, i18n.t("Email automation"),
                 i18n.t("Pick a reply from the list first."))
             return
+        # Two replies on the same inquiry can both be waiting here at once —
+        # a customer who answers twice before either gets applied, or one
+        # reopened by hand. worklist.pending() is oldest-first, so if this
+        # one is not the last with this inquiry number, a newer answer is
+        # still sitting below it — applying this one would silently
+        # overwrite whatever that one decides, with nothing on screen to
+        # say so afterwards.
+        siblings = [r for r in self._replies if r.inquiry_no == item.inquiry_no]
+        if len(siblings) > 1 and siblings[-1] is not item:
+            proceed = QMessageBox.question(
+                self, i18n.t("A newer reply is waiting"),
+                i18n.t("This inquiry has a more recent reply still waiting "
+                       "in this list. Applying this older one now will "
+                       "overwrite whatever the newer one decides.\n\nApply "
+                       "this one anyway?"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if proceed != QMessageBox.Yes:
+                return
         intent = self.intent_picker.currentData()
         register = CB.get_register()
         # Work on the copy in the register we just loaded, not on the copy
@@ -1393,6 +1577,8 @@ class InquiryDialog(PrismDialog):
                          "secondary", self._remove_order)
         panel.add_action("folder", "Open this inquiry's folder", "tertiary",
                          self._open_order_folder)
+        panel.add_action("history", "See the whole story", "tertiary",
+                         self._show_history)
         self.orders_table.currentCellChanged.connect(
             lambda *_: self._sync_panel("orders"))
         return page
@@ -1600,6 +1786,12 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        CB.get_history().append(
+            target.get("Folder") or self._root(),
+            i18n.t("Order accepted — converted"),
+            body=i18n.t("PO {po}, dated {date} — ₹{value}.")
+                .replace("{po}", number).replace("{date}", po_date or "—")
+                .replace("{value}", target.get("Order value", "") or value_text))
         # Resolved in the worklist file — see _apply_reply() for why popping
         # the in-memory row is not enough on its own.
         item = getattr(self, "_po_item", None)
@@ -1614,7 +1806,7 @@ class InquiryDialog(PrismDialog):
             .replace("{value}", target.get("Order value", "") or value_text))
 
     # ── running a check ───────────────────────────────────────────────────
-    def _first_look(self):
+    def _first_look(self, auto_check: bool = False):
         if self._closed:
             return
         if not is_ready(self.cfg):
@@ -1626,7 +1818,7 @@ class InquiryDialog(PrismDialog):
             if answer == QMessageBox.Yes:
                 self.open_setup()
             return
-        if self._auto_check_on_open:
+        if auto_check:
             self.check_now()
             return
         self.status.setText(i18n.t("Ready. Press Check my mail now."))
@@ -2044,6 +2236,11 @@ class InquiryDialog(PrismDialog):
         folder = self._root()
         data = worklist.load(folder) if folder else {"arrived": []}
         page = self._pages.get("arrived")
+        if page is not None:
+            sentence = i18n.t(ARRIVED_SENTENCE)
+            if folder and worklist.has_archive(folder, "arrived"):
+                sentence += " " + i18n.t(ARRIVED_ARCHIVE_NOTE)
+            page.sentence.setText(sentence)
         today = date.today()
         text = page.search_text() if page else ""
         rows = [r for r in worklist.history(data, "arrived")
@@ -2286,7 +2483,13 @@ class InquiryDialog(PrismDialog):
         if not hasattr(self, "tabs") or len(self._pages) < len(TABS):
             return
         counts = {"to_quote": len(self._to_quote_rows),
-                  "waiting": len(self._followup_rows),
+                  # Every quotation still unanswered — same rows the "No
+                  # answer yet" table shows (_render_waiting()). This used
+                  # to count _followup_rows instead: only the ones due a
+                  # reminder TODAY, a narrower, different list — so the
+                  # badge could read "(0)" with a row plainly sitting in
+                  # the table right under it, "Not yet due".
+                  "waiting": len(self._waiting_rows),
                   "replies": len(self._replies),
                   "orders": len(self._orders)}
         for index, (key, label) in enumerate(TABS):
@@ -2300,10 +2503,24 @@ class InquiryDialog(PrismDialog):
     def _current_row(self) -> dict | None:
         """The picked register row, or None — silently. The twin of
         _selected_row() for signal handlers, which must never pop a
-        message box."""
+        message box.
+
+        _focus_row can go stale — set from the replies or orders tab, then
+        orphaned the moment _refresh_register() reloads _register_rows with
+        fresh dicts, since that reload only re-syncs the to_quote/waiting/
+        register tables (_reselect()). Re-anchoring by inquiry number, the
+        one thing that survives a reload, is what stops "pick an inquiry
+        from the list first" firing on a row that is plainly still
+        selected on screen."""
         row = self._focus_row
         if row is not None and any(row is r for r in self._register_rows):
             return row
+        if self._focus_key:
+            register = CB.get_register()
+            found = register.find(self._register_rows, self._focus_key)
+            if found is not None:
+                self._focus_row = found
+                return found
         index = self.register_table.currentRow()
         rows = getattr(self, "_visible_rows", [])
         return rows[index] if 0 <= index < len(rows) else None
@@ -2376,11 +2593,13 @@ class InquiryDialog(PrismDialog):
                 return
             row = item.row or {}
             self._focus_row = row if row else None
+            self._focus_key = row.get("Inquiry no", "") if row else ""
             self.reply_sent_line.setText(self._row_info(row) if row else "")
             title = (self._row_title(row) if row else
                      f"{item.inquiry_no} · {item.message.from_addr}")
-            panel.show_row(title, "", ["win_back", "folder"] if row else [],
-                           extra=True)
+            panel.show_row(
+                title, "",
+                ["win_back", "folder", "history"] if row else [], extra=True)
             return
         if key == "orders":
             item = self._selected_order()
@@ -2389,8 +2608,10 @@ class InquiryDialog(PrismDialog):
                 return
             row = item.row or {}
             self._focus_row = row if row else None
-            keys = (["po", "remove_order", "folder"] if item.message_id
-                    else ["record_po", "phone", "lost", "folder"])
+            self._focus_key = row.get("Inquiry no", "") if row else ""
+            keys = (["po", "remove_order", "folder", "history"]
+                    if item.message_id else
+                    ["record_po", "phone", "lost", "folder", "history"])
             title = (self._row_title(row) if row else
                      f"{item.inquiry_no} · {item.message.from_addr}")
             panel.show_row(title, self._row_info(row) if row else "", keys)
@@ -2403,6 +2624,7 @@ class InquiryDialog(PrismDialog):
                 return
             entry = rows[index]
             self._focus_row = None
+            self._focus_key = ""
             category = entry.get("category", "")
             panel.show_row(
                 f"{entry.get('from_name') or entry.get('from_addr', '')} · "
@@ -2419,6 +2641,7 @@ class InquiryDialog(PrismDialog):
         index = table.currentRow()
         row = rows[index] if 0 <= index < len(rows) else None
         self._focus_row = row
+        self._focus_key = row.get("Inquiry no", "") if row else ""
         if row is None:
             panel.clear()
             return
@@ -2447,6 +2670,15 @@ class InquiryDialog(PrismDialog):
         if row:
             open_in_file_manager(row.get("Folder", "") or self._root())
 
+    def _show_history(self):
+        """The enquiry, every quotation and reminder sent, every reply, and
+        how it closed — read back in one window instead of a trip to the
+        file manager for history.txt. See core/history.py."""
+        row = self._selected_row()
+        if not row:
+            return
+        _HistoryDialog(row, row.get("Folder", ""), self).exec()
+
     def _mark_lost(self):
         row = self._selected_row()
         if not row:
@@ -2461,6 +2693,8 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        CB.get_history().append(row.get("Folder") or self._root(),
+                                i18n.t("Marked lost"), body=reason)
         self._refresh_register()
 
     def _delete_inquiry(self):
@@ -2502,6 +2736,7 @@ class InquiryDialog(PrismDialog):
         if block:
             self._learn_sender(address, "other")
         self._focus_row = None
+        self._focus_key = ""
         self._refresh_register()
         self.status.setText(
             i18n.t("{no} deleted. Mail from {who} will be filed as Other.")
@@ -2532,16 +2767,23 @@ class InquiryDialog(PrismDialog):
         register = CB.get_register()
         intent, note = dialog.intent(), dialog.note()
         if intent == "rejected":
-            register.mark_lost(row, note or i18n.t("Declined by phone"))
+            detail = note or i18n.t("Declined by phone")
+            register.mark_lost(row, detail)
+            event = i18n.t("Marked lost — by phone")
         else:
             register.mark_reply(row, intent)
             if note:
                 row["Notes"] = (row.get("Notes", "") + " " + note).strip()
+            detail = note or i18n.t("Customer responded: {intent}").replace(
+                "{intent}", intent)
+            event = i18n.t("Reply received — by phone")
         try:
             register.save(self._register_rows, self._paths().register_csv)
         except Exception as e:
             self._explain(str(e))
             return
+        CB.get_history().append(row.get("Folder") or self._root(), event,
+                                body=detail)
         self._refresh_register()
         self.status.setText(
             i18n.t("{no} is now {status}.")
@@ -2587,6 +2829,11 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
+        CB.get_history().append(
+            row.get("Folder") or self._root(),
+            i18n.t("Quoted outside Prism — recorded by hand"),
+            body=i18n.t("Quotation {no}, value ₹{value}.")
+                .replace("{no}", quote_no).replace("{value}", str(value)))
         self._refresh_register()
         self.status.setText(i18n.t(
             "Marked as quoted. Prism will remind you if there is no reply."))
@@ -2685,13 +2932,13 @@ class InquiryDialog(PrismDialog):
                         "name": row.get("Contact person", "")}],
             draft.subject(), draft.message(), [])
         self._send_worker.done.connect(
-            lambda sent, failed, s=draft.subject():
-            self._reminder_sent(row, sent, failed, subject=s))
+            lambda sent, failed, s=draft.subject(), b=draft.message():
+            self._reminder_sent(row, sent, failed, subject=s, body=b))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
 
     def _reminder_sent(self, row: dict, sent: list, failed: list,
-                       subject: str = ""):
+                       subject: str = "", body: str = ""):
         self.remind_btn.setEnabled(True)
         self.status.setText("")
         if failed:
@@ -2709,29 +2956,41 @@ class InquiryDialog(PrismDialog):
             self._explain(str(e))
             return
         self._log_sent("reminder", row, subject or
-                       self._reminder_words(row)[0])
+                       self._reminder_words(row)[0], body=body)
         self._refresh_register()
         self.status.setText(
             i18n.t("Reminder sent to {who}.").replace(
                 "{who}", row.get("Email", "")))
 
-    def _log_sent(self, kind: str, row: dict, subject: str):
+    _SENT_EVENTS = {
+        "quotation": "Quotation sent",
+        "revised": "Revised quotation sent",
+        "reminder": "Reminder sent",
+        "winback": "Win-back mail sent",
+    }
+
+    def _log_sent(self, kind: str, row: dict, subject: str, body: str = ""):
         """Write one line to worklist/sent.json — the readable history the
-        "Sent so far" line and the reminder column are drawn from. The
-        register's own "Reminders sent" count stays the engine's schedule;
-        this is written in the same breath so the two cannot disagree. A
-        failure here must never undo a send that already happened, so it is
-        swallowed rather than raised."""
+        "Sent so far" line and the reminder column are drawn from — and, with
+        the actual mail text, one entry to this inquiry's own history.txt.
+        The register's own "Reminders sent" count stays the engine's
+        schedule; this is written in the same breath so the two cannot
+        disagree. A failure here must never undo a send that already
+        happened, so it is swallowed rather than raised."""
         folder = self._root()
-        if not folder:
-            return
-        try:
-            CB.get_worklist().log_sent(
-                folder, kind, to=row.get("Email", ""), subject=subject,
-                inquiry_no=row.get("Inquiry no", ""),
-                quotation_no=row.get("Quotation no", ""))
-        except Exception:               # noqa: BLE001 — see docstring
-            pass
+        if folder:
+            try:
+                CB.get_worklist().log_sent(
+                    folder, kind, to=row.get("Email", ""), subject=subject,
+                    inquiry_no=row.get("Inquiry no", ""),
+                    quotation_no=row.get("Quotation no", ""))
+            except Exception:           # noqa: BLE001 — see docstring
+                pass
+        inquiry_folder = row.get("Folder") or folder
+        if inquiry_folder and body:
+            CB.get_history().append(
+                inquiry_folder, i18n.t(self._SENT_EVENTS.get(kind, "Mail sent")),
+                who=row.get("Email", ""), subject=subject, body=body)
 
     def _reminder_failed(self, message: str):
         self.remind_btn.setEnabled(True)
@@ -3021,13 +3280,13 @@ class InquiryDialog(PrismDialog):
                         "name": row.get("Contact person", "")}],
             dialog.subject(), dialog.message(), [])
         self._send_worker.done.connect(
-            lambda sent, failed, s=dialog.subject():
-            self._winback_sent(row, sent, failed, subject=s))
+            lambda sent, failed, s=dialog.subject(), b=dialog.message():
+            self._winback_sent(row, sent, failed, subject=s, body=b))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
 
     def _winback_sent(self, row: dict, sent: list, failed: list,
-                      subject: str = ""):
+                      subject: str = "", body: str = ""):
         if failed:
             self._explain(failed[0][1])
             return
@@ -3044,7 +3303,7 @@ class InquiryDialog(PrismDialog):
         except Exception as e:
             self._explain(str(e))
             return
-        self._log_sent("winback", row, subject)
+        self._log_sent("winback", row, subject, body=body)
         self._refresh_register()
         self.status.setText(i18n.t("Sent. This inquiry is open again."))
 
@@ -4064,7 +4323,7 @@ class QuotationDialog(PrismDialog):
             log = getattr(self.parent_dialog, "_log_sent", None)
             if log is not None:
                 log("revised" if revised else "quotation", self.row,
-                    self.subject.text())
+                    self.subject.text(), body=self.mail_body.toPlainText())
 
 
 class _CompareDialog(PrismDialog):

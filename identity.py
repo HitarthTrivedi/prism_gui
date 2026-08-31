@@ -99,11 +99,22 @@ def display_name(cfg: dict | None = None) -> str:
     nowhere to change it. So the config carries a plain display name for that
     case, and the signed one still wins wherever it exists: a member cannot
     rename themselves past what their firm issued.
+
+    Below both of those, the licence key itself already carries a name — who
+    the licence was sold to (a solo buyer's own name, or the firm's, for a
+    team) — so a copy that has activated a licence but typed nothing of its
+    own reads as that name rather than the generic "This computer" every
+    caller falls back to. It is not cached the way `current()` is: the
+    licence can be changed or released without touching a designation key, so
+    this reads licensing.state() fresh each call.
     """
     signed = (current().get("name") or "").strip()
     if signed:
         return signed
-    return str((cfg or {}).get("display_name") or "").strip()
+    typed = str((cfg or {}).get("display_name") or "").strip()
+    if typed:
+        return typed
+    return (licensing.state().customer or "").strip()
 
 
 def reload() -> dict:

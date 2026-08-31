@@ -35,6 +35,7 @@ from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.home_panel import HomePanel
 from widgets.inquiry_panel import InquiryPanel
+from dialogs.inquiry_dialog import InquiryDialog
 from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
@@ -54,7 +55,6 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      FFmpegWorker, UpdateWorker, ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
-from dialogs.setup_dialog import SetupDialog
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
 from dialogs.boq_dialog import BoqDialog
@@ -76,6 +76,10 @@ WIZARD = 11
 # renumbers — unlike WIZARD, this one IS reachable from the rail and DOES
 # have an entry in _show_screen()'s table below.
 ARTIFACTS = 12
+# The Email automation working screen — reached only by drilling in from the
+# launcher panel (INQUIRY), never from the rail directly, so like WIZARD it
+# has no entry in _show_screen()'s name->index table either.
+INQUIRY_WORK = 13
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -320,6 +324,13 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.wizard_panel)          # WIZARD
         self.artifacts_panel = ArtifactsPanel(self.cfg)
         self.screens.addWidget(self.artifacts_panel)        # ARTIFACTS
+        # The Email automation working screen — drilled into from the
+        # launcher panel (INQUIRY), never a rail entry of its own. Used to be
+        # constructed fresh and .exec()'d as a modal every time it opened;
+        # now it is built once, like every other screen, and .enter() is
+        # what refreshes it on each visit — see _open_inquiry_dialog.
+        self.inquiry_work_panel = InquiryDialog(self.cfg, self)
+        self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -334,7 +345,6 @@ class MainWindow(QMainWindow):
         self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
         self.wizard_panel.finished.connect(self._on_wizard_finished)
         self.wizard_panel.guide_requested.connect(self._open_guide)
-        self.settings_panel.edit_requested.connect(self._open_setup)
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
         # The four screens the rail used to spend a row each on.
         self.settings_panel.navigate.connect(self._handle_command)
@@ -365,6 +375,7 @@ class MainWindow(QMainWindow):
         for panel in (self.boq_panel, self.gerber_panel, self.email_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
+        self.inquiry_work_panel.navigate.connect(self._handle_command)
         # "Open →" on an active-run card goes to the run itself, not a blank
         # bench — the run is already on the workbench's RUNNING page.
         self.home_panel.open_run.connect(lambda: self._show_screen("workbench"))
@@ -384,6 +395,15 @@ class MainWindow(QMainWindow):
 
     def _show_screen(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
+        # Leaving the Email automation working screen: stop its auto-check
+        # timer (see InquiryDialog.on_leave) and pick up whatever it wrote —
+        # it saves its own settings and reading bookmark, works the register
+        # (new inquiries, sent quotes, logged replies), so both the in-memory
+        # cfg and the launcher panel behind it are stale the moment you leave.
+        if self.screens.currentIndex() == INQUIRY_WORK:
+            self.inquiry_work_panel.on_leave()
+            self.cfg = CB.config.load()
+            self.inquiry_panel.cfg = self.cfg
         index = {"home": HOME, "workbench": WORKBENCH,
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
@@ -982,6 +1002,7 @@ class MainWindow(QMainWindow):
         self.output_panel.stop_requested.connect(self._stop_run)
         self.output_panel.skip_requested.connect(self._skip_step)
         self.output_panel.edit_reel.connect(self._edit_reel_layout)
+        self.artifacts_panel.edit_reel.connect(self._edit_reel_layout)
         self.reel_edits_saved.connect(self._on_reel_edits_saved)
         self.reel_edits_rendered.connect(self._on_reel_edits_rendered)
         self._reel_edit_stop = None
@@ -1054,14 +1075,15 @@ class MainWindow(QMainWindow):
             self._show_screen("support")
         elif key in ("agents", "profile", "key", "chrome", "licence",
                      "language", "team", "config", "status"):
-            # All nine land on the Settings screen now. The three that have no
-            # section of their own go to the one that states them: your role
-            # is part of Profile, and the API key and Chrome version are both
-            # facts on Status. Editing still happens in SetupDialog — the
-            # screen's buttons open it focused, exactly as the rail used to.
+            # All nine land on the Settings screen now, each on the section
+            # that actually holds the editable field: your role is part of
+            # Profile, the Groq key lives on Agents (beside the picks it
+            # routes for), and Chrome's pin is a Connections fact. Every
+            # field on the page you land on is editable right there — no
+            # second dialog to hop into.
             self._show_screen("config")
             self.settings_panel.show_section(
-                {"team": "profile", "key": "status",
+                {"team": "profile", "key": "agents",
                  "chrome": "status", "config": "licence"}.get(key, key))
         elif key == "login":
             self._open_login_tabs()
@@ -1219,23 +1241,22 @@ class MainWindow(QMainWindow):
             self.home_panel.refresh()
 
     def _open_inquiry_dialog(self, tab: int = 0, auto_check: bool = False):
-        """The working window, opened on the tab the owner asked for — the
+        """The working screen, opened on the tab the owner asked for — the
         launcher's "Quote them" lands on To quote, "Read the answer" on
         They answered, and so on. `auto_check` is set only for the front
-        door's "Check my mail now" — see InquiryPanel.check_requested."""
-        from dialogs.inquiry_dialog import InquiryDialog
-        dialog = InquiryDialog(self.cfg, self, tab=int(tab or 0),
-                               auto_check=auto_check)
-        dialog.exec()
-        # The dialog saves its own settings and its reading bookmark, so pick
-        # up whatever it wrote rather than overwriting it from a stale copy on
-        # the next Settings save.
-        self.cfg = CB.config.load()
-        # It also works the register — new inquiries, sent quotes, logged
-        # replies. The screen behind it is a report on exactly that file, so
-        # it is stale the moment the dialog closes.
-        self.inquiry_panel.cfg = self.cfg
-        self.inquiry_panel.refresh()
+        door's "Check my mail now" — see InquiryPanel.check_requested.
+
+        Used to construct a fresh modal InquiryDialog and .exec() it; the
+        screen is now built once (see _build_ui) and stays alive for the
+        app's whole session, so opening it is just handing it the latest cfg
+        and switching to it — enter() does what the constructor + exec used
+        to do. Leaving it again (_show_screen) is what used to happen after
+        .exec() returned: reload cfg, refresh the launcher behind it.
+        """
+        self.inquiry_work_panel.cfg = self.cfg
+        self.inquiry_work_panel.enter(tab=int(tab or 0), auto_check=auto_check)
+        self.screens.setCurrentIndex(INQUIRY_WORK)
+        self.sidebar.set_current("inquiry")
 
     def _open_boq(self):
         # Land on the front door, not straight in the dialog — same reasoning
@@ -1303,15 +1324,6 @@ class MainWindow(QMainWindow):
             self.email_panel.cfg = self.cfg
             self.email_panel.refresh()
 
-    def _open_setup(self, focus: str | None = None):
-        """The rail links straight at individual settings, so pass along which
-        one was asked for — Setup scrolls there rather than making the user
-        find it."""
-        dlg = SetupDialog(self.cfg, self, focus=focus)
-        if dlg.exec() == QDialog.Accepted:
-            self.cfg = dlg.cfg
-            self.statusBar().showMessage("Setup saved.", 4000)
-
     def _first_run(self):
         """A never-configured machine goes straight into the wizard - no
         blocking Welcome popup first. The wizard's own first page carries the
@@ -1373,6 +1385,7 @@ class MainWindow(QMainWindow):
         over rather than duplicating the renderer.
         """
         dialog = HistoryDialog(self)
+        dialog.edit_reel.connect(self._edit_reel_layout)
         runs = getattr(dialog, "runs", None)
         if runs is not None:
             for i in range(runs.count()):

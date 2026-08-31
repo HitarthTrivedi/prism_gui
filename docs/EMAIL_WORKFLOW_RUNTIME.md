@@ -323,8 +323,12 @@ end-of-day summary all run with nobody present.
   his office. The cost of that choice is that a switched-off PC sorts no mail.
   Fix: leave the office machine on, or a small always-on PC in the corner.
   **Never gloss over this. It is the first thing he will notice.**
-- **The first fetch is slow** on a mailbox with years in it. It reads history
-  once, then only what is new.
+- **The first fetch reaches back 365 days** — the mailbox's own past year,
+  not everything it has ever received — on a mailbox Prism has not read
+  before, or one the mail server renumbered. After that, only what is new.
+  A mailbox with years of history keeps the rest on the server; Prism never
+  goes back for it, so 365 days is the actual limit of what shows up, not
+  just a slow first day.
 - **Scanned POs.** A photograph of a printout is not text. Until OCR is added,
   Prism asks him to type four fields. Do not promise this on day one.
 - **Gmail and Office 365 need extra steps** — an app password, or a sign-in

@@ -243,6 +243,41 @@ try:
 except ImportError:
     print("[prism] Google Drive libraries not installed - picker will be "
           "unavailable in this build")
+
+# Prism Studio's browser. playwright._impl._driver.compute_driver_executable()
+# locates both the Node driver AND the Chromium binary as a sibling of
+# wherever `playwright.__file__` resolves to at runtime — under a frozen
+# onedir build that's this bundle's own playwright/ folder, which is exactly
+# what collect_data_files puts there. It only has anything to find because
+# .github/workflows/build.yml ran `playwright install chromium` with
+# PLAYWRIGHT_BROWSERS_PATH=0 first, landing Chromium INSIDE the package
+# (playwright/driver/package/.local-browsers/…) instead of the OS cache dir a
+# frozen build can never see. A build machine that skipped that step still
+# builds — Studio just falls back to Prism Reel on every customer's machine,
+# same as it always has, rather than failing here.
+#
+# The actual bundling is NOT the collect_submodules/collect_data_files call
+# below — playwright ships its OWN PyInstaller hook (see
+# playwright/_impl/__pyinstaller/hook-playwright.*.py in the installed
+# package), which PyInstaller auto-runs the moment playwright.sync_api is
+# discovered as a needed import (core/reel_web.py's own `from
+# playwright.sync_api import sync_playwright`, found while analysing the
+# core.reel_web hiddenimport below, is already enough — this try/except is a
+# safety net for older playwright versions without that hook, not the
+# primary path). That hook calls collect_data_files("playwright") with NO
+# filtering, so anything trimmed from `datas` here gets silently re-added by
+# it — the real filter is the one applied to `a.datas` after Analysis(), well
+# below. See that comment for what gets trimmed and why.
+try:
+    import playwright  # noqa: F401
+    hiddenimports += collect_submodules("playwright")
+    datas += collect_data_files("playwright")
+    print("[prism] Prism Studio's browser engine bundled")
+except ImportError:
+    print("[prism] WARNING: playwright is not installed, so this build ships "
+          "no browser engine — Prism Studio will fall back to Prism Reel on "
+          "every machine that runs it.")
+
 hiddenimports += collect_submodules("undetected_chromedriver")
 hiddenimports += collect_submodules("selenium")
 
@@ -316,6 +351,64 @@ a = Analysis(
     win_private_assemblies=False,
     noarchive=False,
 )
+
+# `playwright install chromium` (.github/workflows/build.yml) pulls in two
+# things nothing in this codebase calls: chromium-headless-shell (only used
+# via the explicit channel="chromium-headless-shell" launch option —
+# core/reel_web.py and core/motion/render.py both just do
+# p.chromium.launch(), never that) and playwright's OWN bundled ffmpeg (only
+# for its record_video_dir option, which nothing here uses either — Reel
+# already carries imageio-ffmpeg for its own encoding). Together they were
+# ~265MB of a ~730MB playwright payload for code with no path that reaches
+# them, verified by grepping prism_terminal/core for "headless_shell" and
+# "record_video" before writing this.
+#
+# This can't be done by filtering `datas` before Analysis(): playwright ships
+# its OWN PyInstaller hook (playwright/_impl/__pyinstaller/hook-playwright.*
+# .py) that PyInstaller runs automatically once playwright.sync_api is
+# discovered as a needed import, and that hook calls its own unfiltered
+# collect_data_files("playwright") — silently re-adding anything trimmed
+# beforehand. Filtering a.datas AFTER Analysis() is the one point past every
+# hook's contribution, hook-independent by construction — it survives a
+# playwright upgrade that changes what its hook bundles.
+#
+# TOC entries are (name, path, typecode) — PyInstaller's OWN documented
+# order, name (destination) before path (source) — checked against both ends
+# since the parts of the path that name the folder can legally land on
+# either side depending on which hook contributed the entry.
+#
+# "playwright" AND the skip pattern, not the skip pattern alone: imageio_ffmpeg
+# — Reel's real encoder, bundled separately above — ships its own binary as
+# imageio_ffmpeg/binaries/ffmpeg-<platform>-v<version>, which "os.sep +
+# 'ffmpeg-'" alone matches just as well as playwright's copy does. An
+# unscoped filter would have silently deleted Reel's FFmpeg out of the
+# bundle rather than trimming Studio's unused one — caught by inspecting
+# what a first, unscoped version of this filter actually matched.
+def _pw_keep(toc):
+    skip = ("chromium_headless_shell-", os.sep + "ffmpeg-")
+    before = len(toc)
+    kept = [t for t in toc
+           if not (("playwright" in t[0] or "playwright" in t[1])
+                   and any(s in t[0] or s in t[1] for s in skip))]
+    return kept, before - len(kept)
+
+# The actual chrome-headless-shell and ffmpeg-linux EXECUTABLES don't stay in
+# a.datas long enough for the filter above to see them: PyInstaller's own
+# "binary vs. data reclassification" pass (every Analysis() runs one) moves
+# anything it recognises as an ELF/PE/dylib — which is exactly what these
+# are — out of datas and into a.binaries before this spec ever gets control
+# back. First cut of this filter only touched a.datas, dropped 287 small
+# support files, and left the two actual binaries (chrome-headless-shell,
+# libvulkan.so.1, ffmpeg-linux) sitting right where they were — 663MB
+# instead of the ~400MB this was supposed to land at. Filtering both TOCs is
+# what the reclassification step makes necessary.
+a.datas, _pw_dropped_data = _pw_keep(a.datas)
+a.binaries, _pw_dropped_bin = _pw_keep(a.binaries)
+if _pw_dropped_data or _pw_dropped_bin:
+    print(f"[prism] trimmed {_pw_dropped_data + _pw_dropped_bin} unused "
+          f"playwright headless-shell/ffmpeg files from the bundle "
+          f"({_pw_dropped_data} data, {_pw_dropped_bin} binaries)")
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(

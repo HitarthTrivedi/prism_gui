@@ -35,8 +35,9 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox,
+    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
     QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTabWidget,
     QVBoxLayout, QWidget,
@@ -46,6 +47,7 @@ import core_bridge as CB
 import i18n
 from dialogs.base import PrismDialog
 import theme
+from widgets import controls as C
 from widgets import icons
 from workers import InboxVerifyWorker
 
@@ -142,19 +144,25 @@ def _scrolled(page: QWidget) -> QScrollArea:
     return area
 
 
-def _group(title: str) -> tuple[QGroupBox, QFormLayout]:
-    """A titled block with a form inside it.
+def _group(title: str) -> tuple[QWidget, QFormLayout]:
+    """A titled block with a form inside it, on the same rounded-card
+    surface as the rest of the app.
 
     The three later steps were flat lists — nine boxes on "Your terms" with
     nothing to say that GST belongs with the quotation and "check every N
     minutes" does not. Grouping is the whole difference between a form you
-    read and a form you survey.
+    read and a form you survey. It was a bare QGroupBox before this pass —
+    the one screen in Email automation not built from the shared Card, so it
+    read as a generic native form bolted onto an otherwise designed app.
     """
-    box = QGroupBox(i18n.t(title))
-    form = QFormLayout(box)
-    form.setContentsMargins(14, 8, 14, 12)
+    card = C.Card()
+    col = card.body(margins=(16, 14, 16, 14), spacing=8)
+    col.addWidget(C.kicker(title))
+    form = QFormLayout()
+    form.setContentsMargins(0, 4, 0, 0)
     form.setSpacing(9)
-    return box, form
+    col.addLayout(form)
+    return card, form
 
 
 class _Disclosure(QWidget):
@@ -244,6 +252,8 @@ class InquirySetupDialog(PrismDialog):
                                       "from suppliers"))):
             self.tabs.setTabToolTip(index, tip)
         root.addWidget(self.tabs, stretch=1)
+        self.work_folder.edit.textChanged.connect(self._update_tab_progress)
+        self._update_tab_progress()
 
         self.step_hint = QLabel("")
         self.step_hint.setWordWrap(True)
@@ -281,13 +291,12 @@ class InquirySetupDialog(PrismDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        note = QLabel(i18n.t(
+        note = C.label(i18n.t(
             "Prism only READS these mailboxes. It never marks anything as "
             "read, never moves anything and never deletes anything — "
             "everyone keeps using Outlook or their phone exactly as before."
             "\n\nPasswords are saved on this computer only. Prism has no "
-            "server to send them to."))
-        note.setWordWrap(True)
+            "server to send them to."), level="SUPPORT", wrap=True)
         layout.addWidget(note)
 
         # The list. Hidden while there is only the one mailbox: a list of one,
@@ -367,13 +376,30 @@ class InquirySetupDialog(PrismDialog):
         row.addWidget(self.test_result, stretch=1)
         layout.addLayout(row)
 
-        gmail = QLabel(i18n.t(
+        gmail = C.label(i18n.t(
             "Gmail and Outlook need an app password rather than your normal "
             "one. A mailbox on your own company domain usually takes the "
-            "normal password."))
-        gmail.setWordWrap(True)
-        gmail.setObjectName("meta")
+            "normal password."), role="meta", wrap=True)
         layout.addWidget(gmail)
+
+        # The gap this fills: the note above NAMES the app-password
+        # requirement but never says how to get one, which is exactly the
+        # point a first-time, non-technical user gives up and phones
+        # somebody. Same disclosure idiom as the format explainers below.
+        layout.addWidget(_Disclosure(
+            "How do I get an app password?",
+            "Gmail: open myaccount.google.com on your phone or computer -> "
+            "Security -> turn on 2-Step Verification if it isn't already on "
+            "-> App passwords -> create one named \"Prism\" or \"Mail\" -> "
+            "Google shows a 16-letter code. Paste that code into the "
+            "Password box here — not your normal Gmail password.\n\n"
+            "Outlook / Microsoft 365: open account.microsoft.com -> "
+            "Security -> Advanced security options -> App passwords -> "
+            "Create a new app password. Paste the code it shows into the "
+            "Password box here.\n\n"
+            "A mailbox on your own company domain (not Gmail or Outlook) "
+            "almost always takes your everyday password instead — try that "
+            "first."))
 
         # ── behind the disclosure ────────────────────────────────────────
         layout.addSpacing(6)
@@ -541,6 +567,7 @@ class InquirySetupDialog(PrismDialog):
             self._tested_ok = False
             self._set_test_state("")
         self._update_password_status()
+        self._update_tab_progress()
 
     def _update_password_status(self):
         """Say, in words nobody can miss, whether the password box being
@@ -565,6 +592,19 @@ class InquirySetupDialog(PrismDialog):
             self.password_status.setStyleSheet(
                 f"color: {theme.NEUTRAL[600]}; font-size: 12.5px;")
         self.password_status.setVisible(True)
+
+    def _update_tab_progress(self):
+        """Mark a tab done once it has what it needs, so the wizard reads as
+        "2 of 4 done" rather than four identical tabs. A hint only — Save's
+        own validation (see _save) is still what actually enforces
+        completeness; nothing here can let an incomplete setup through."""
+        mail_done = bool(self.addr.text().strip()) and bool(
+            self.password.text().strip() or self._saved_password)
+        work_folder = getattr(self, "work_folder", None)
+        files_done = bool(work_folder and work_folder.value())
+        check = QIcon(icons.pixmap("check", 14, theme.OK))
+        self.tabs.setTabIcon(0, check if mail_done else QIcon())
+        self.tabs.setTabIcon(1, check if files_done else QIcon())
 
     def _set_test_state(self, text: str, tone: str = ""):
         """One place that paints the result, so success and failure cannot
@@ -643,12 +683,12 @@ class InquirySetupDialog(PrismDialog):
         layout = QVBoxLayout(page)
         saved = settings_of(self.cfg)
 
-        note = QLabel(i18n.t(
+        note = C.label(i18n.t(
             "Everything Prism produces lands in one folder you choose — the "
             "inquiry register, and a folder per inquiry holding the mail and "
             "the drawings. They are ordinary files: the register opens in "
-            "Excel, and it stays yours whatever happens to Prism."))
-        note.setWordWrap(True)
+            "Excel, and it stays yours whatever happens to Prism."),
+            level="SUPPORT", wrap=True)
         layout.addWidget(note)
 
         # The one thing this step actually requires, on its own. It used to sit
@@ -667,11 +707,10 @@ class InquirySetupDialog(PrismDialog):
         import workspace
         if workspace.is_shared(self.cfg):
             shared_row = QHBoxLayout()
-            shared_note = QLabel(i18n.t(
+            shared_note = C.label(i18n.t(
                 "Your team workspace is set up — keep this folder in it and "
-                "every member sees the same register."))
-            shared_note.setWordWrap(True)
-            shared_note.setObjectName("meta")
+                "every member sees the same register."), role="meta",
+                wrap=True)
             shared_row.addWidget(shared_note, stretch=1)
             use_shared = QPushButton(i18n.t("Use the team folder"))
             use_shared.clicked.connect(lambda: self.work_folder.edit.setText(
@@ -679,12 +718,11 @@ class InquirySetupDialog(PrismDialog):
             shared_row.addWidget(use_shared)
             need_form.addRow(shared_row)
         else:
-            shared_note = QLabel(i18n.t(
+            shared_note = C.label(i18n.t(
                 "Several people? Choose a folder on your shared drive and "
                 "everyone opens the same register — the same sheet you keep "
-                "by hand today, kept by Prism instead."))
-            shared_note.setWordWrap(True)
-            shared_note.setObjectName("meta")
+                "by hand today, kept by Prism instead."), role="meta",
+                wrap=True)
             need_form.addRow(shared_note)
         layout.addWidget(need)
 
@@ -822,12 +860,10 @@ class InquirySetupDialog(PrismDialog):
         chase_form.addRow(i18n.t("Check the inbox every:"), self.auto_minutes)
         layout.addWidget(chase)
 
-        auto_note = QLabel(i18n.t(
+        auto_note = C.label(i18n.t(
             "Automatic checking only ever READS your mail. Ten minutes suits "
             "most offices; below five is more often than any mail server "
-            "expects to be asked."))
-        auto_note.setWordWrap(True)
-        auto_note.setObjectName("meta")
+            "expects to be asked."), role="meta", wrap=True)
         layout.addWidget(auto_note)
 
         self.auto_followup = QCheckBox(i18n.t(
@@ -835,7 +871,7 @@ class InquirySetupDialog(PrismDialog):
         self.auto_followup.setChecked(bool(saved.get("auto_followup", False)))
         layout.addWidget(self.auto_followup)
 
-        chase_note = QLabel(i18n.t(
+        chase_note = C.label(i18n.t(
             "With this ticked, a quotation nobody has replied to is chased on "
             "the schedule above and the register is updated — the whole thing "
             "runs without you. Every reminder is written afresh rather than "
@@ -843,9 +879,8 @@ class InquirySetupDialog(PrismDialog):
             "reply.\n\n"
             "It is off to begin with because these are letters going out in "
             "your name. Leave it off for the first week, watch what the "
-            "reminders say, then turn it on once you trust them."))
-        chase_note.setWordWrap(True)
-        chase_note.setObjectName("meta")
+            "reminders say, then turn it on once you trust them."),
+            role="meta", wrap=True)
         layout.addWidget(chase_note)
         layout.addStretch(1)
         return page
@@ -857,24 +892,24 @@ class InquirySetupDialog(PrismDialog):
         saved = settings_of(self.cfg)
         known = saved.get("knowledge") or {}
 
-        note = QLabel(i18n.t(
+        note = C.label(i18n.t(
             "Telling Prism who your customers and suppliers are makes the "
             "sorting right from day one instead of week three — and it keeps "
             "their mail on this computer, because a sender Prism already "
             "recognises never has to be looked at by an AI.\n\n"
             "One line each. A whole company works: type shaktiauto.in and "
-            "everybody there is covered."))
-        note.setWordWrap(True)
+            "everybody there is covered."), level="SUPPORT", wrap=True)
         layout.addWidget(note)
 
         def box(title: str, values, placeholder: str) -> QPlainTextEdit:
-            group = QGroupBox(title)
-            inner = QVBoxLayout(group)
+            card = C.Card()
+            inner = card.body(margins=(16, 14, 16, 14), spacing=8)
+            inner.addWidget(C.kicker(title))
             edit = QPlainTextEdit("\n".join(values or []))
             edit.setPlaceholderText(placeholder)
             edit.setFixedHeight(74)
             inner.addWidget(edit)
-            layout.addWidget(group)
+            layout.addWidget(card)
             return edit
 
         self.own = box(i18n.t("Your own company's addresses"),
@@ -888,23 +923,20 @@ class InquirySetupDialog(PrismDialog):
         # mail ever leaves their machine, which makes it the most consequential
         # control in the whole dialog — and it was a bare tickbox under three
         # text areas, reading like a preference about notifications.
-        privacy = QGroupBox(i18n.t("Privacy"))
-        privacy_box = QVBoxLayout(privacy)
-        privacy_box.setContentsMargins(14, 8, 14, 12)
-        privacy_box.setSpacing(6)
+        privacy = C.Card()
+        privacy_box = privacy.body(margins=(16, 14, 16, 14), spacing=8)
+        privacy_box.addWidget(C.kicker(i18n.t("Privacy")))
         self.local_only = QCheckBox(i18n.t(
             "Keep everything on this computer — never send any mail to an AI"))
         self.local_only.setChecked(bool(saved.get("local_only", False)))
         privacy_box.addWidget(self.local_only)
 
-        explain = QLabel(i18n.t(
+        explain = C.label(i18n.t(
             "With this ticked, Prism sorts using only the rules above and "
             "anything it cannot place is listed for you to glance at. "
             "Nothing whatsoever leaves the machine. Untick it and only the "
             "few messages from senders Prism does not recognise are sent to "
-            "be labelled."))
-        explain.setWordWrap(True)
-        explain.setObjectName("meta")
+            "be labelled."), role="meta", wrap=True)
         privacy_box.addWidget(explain)
         layout.addWidget(privacy)
         layout.addStretch(1)

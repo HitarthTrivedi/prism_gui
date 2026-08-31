@@ -228,8 +228,12 @@ class InquiryPanel(QWidget):
         foot = []
         if counts["sent_today"]:
             n = counts["sent_today"]
-            foot.append((i18n.t("Prism sent {n} mail for you today") if n == 1
-                         else i18n.t("Prism sent {n} mails for you today"))
+            # Without the period, " ".join(foot) below ran this straight
+            # into the next sentence with no separator at all — "...for you
+            # today Prism checks..." — the run-on that made the footer read
+            # as one confused sentence.
+            foot.append((i18n.t("Prism sent {n} mail for you today.") if n == 1
+                         else i18n.t("Prism sent {n} mails for you today."))
                         .replace("{n}", str(n)))
         minutes = self._auto_minutes()
         if minutes:

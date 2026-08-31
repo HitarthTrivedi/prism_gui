@@ -51,6 +51,20 @@ if paths.is_frozen():
     # the compiled one — the sources are no longer shipped, and this is what
     # makes sure they could not win even if something put them back.
     _TERMINAL_DIR = paths.resource("prism_terminal")
+
+    # Prism Studio's Chromium lives INSIDE the playwright package
+    # (playwright/driver/package/.local-browsers/…), because that's the only
+    # location prism.spec's collect_data_files(playwright) can bundle — it
+    # got there because .github/workflows/build.yml ran `playwright install
+    # chromium` with this exact same variable set. Playwright's own default,
+    # unset, is the OS cache dir (~/.cache/ms-playwright or the Windows/macOS
+    # equivalent) — real for a developer who ran `playwright install`
+    # themselves, empty on a customer's machine, which is what "the web
+    # renderer needs Playwright" was actually reporting even after the
+    # browser shipped in the build right next to it. setdefault, not a flat
+    # assignment: a build/test environment that already set this on purpose
+    # keeps winning.
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 else:
     _TERMINAL_DIR = next(
         (os.path.abspath(c) for c in _CANDIDATES
@@ -116,10 +130,10 @@ def resolved_agents(chosen: dict) -> list[tuple[str, str]]:
     """(tool name, sign-in URL) for a {category: tool} mapping, de-duplicated
     by tool and kept in mapping-iteration order.
 
-    The one place this dedupe-and-look-up loop lives — SetupDialog, the
-    wizard, MainWindow's own "Login tabs" and Settings' site-card grid all
-    need the same answer to "which tools, which URLs" and used to each write
-    their own copy of this loop.
+    The one place this dedupe-and-look-up loop lives — the Settings screen's
+    Agents section, the wizard, and MainWindow's own "Login tabs" all need the
+    same answer to "which tools, which URLs" and used to each write their own
+    copy of this loop.
     """
     out, seen = [], set()
     for name in chosen.values():
@@ -232,6 +246,11 @@ def get_worklist():
     return worklist
 
 
+def get_history():
+    from core import history
+    return history
+
+
 def get_files():
     from core import files
     return files
@@ -262,6 +281,21 @@ def get_reel():
     return reel
 
 
+def _no_pip_in_a_frozen_build(why: str) -> str:
+    """core.reel_web.available() and core.motion.is_available() are shared
+    with the CLI, where "pip install playwright && playwright install
+    chromium" is a real instruction — the person reading it has a shell and
+    the same Python that raised the message. Someone who downloaded the
+    Windows/macOS installer has neither: no pip on PATH, and even a pip that
+    happened to exist wouldn't touch the frozen app's bundled interpreter.
+    Telling them to run it is not a workaround, it's a dead end dressed up
+    as one — so a frozen build gets the plain fact instead."""
+    if paths.is_frozen() and "pip install playwright" in why:
+        return ("The web renderer (Playwright) isn't included in this "
+                "installer build yet.")
+    return why
+
+
 def studio_available() -> tuple[bool, str]:
     """Prism Studio films an HTML page, so it needs a browser engine on top of
     FFmpeg. Probed separately from the template renderer: a machine can have
@@ -270,7 +304,8 @@ def studio_available() -> tuple[bool, str]:
         from core import reel_web
     except Exception as e:
         return False, f"The web renderer isn't available ({e})."
-    return reel_web.available()
+    ok, why = reel_web.available()
+    return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
 def get_studio():
@@ -301,7 +336,8 @@ def motion_available() -> tuple[bool, str]:
         from core import motion
     except Exception as e:
         return False, f"Motion Graphics engine not installed ({e})."
-    return motion.is_available()
+    ok, why = motion.is_available()
+    return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
 def get_motion():
