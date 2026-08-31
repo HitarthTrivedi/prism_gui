@@ -975,6 +975,7 @@ class MainWindow(QMainWindow):
         self.agents_panel.run_requested.connect(self._run_pipeline)
         self.output_panel.back_requested.connect(self._back_to_plan)
         self.output_panel.stop_requested.connect(self._stop_run)
+        self.output_panel.skip_requested.connect(self._skip_step)
         self.agents_panel.discard_requested.connect(self._discard_plan)
 
     # ── moving between the two pages ────────────────────────────────────────
@@ -1964,6 +1965,21 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
         self._reset_for_new_task()
+
+    def _skip_step(self):
+        """Give up on the stage that is running and let the run move on.
+
+        The engine polls the flag inside the stage's waits — including the
+        image wait, where a picture that never finishes used to hold the
+        run for its whole cap — keeps whatever the tool produced, and
+        clears the flag itself so one press skips exactly one step.
+        """
+        worker = getattr(self, "_active_run", None)
+        if worker is None or not worker.isRunning() or not hasattr(worker, "skip"):
+            return
+        worker.skip()
+        self.statusBar().showMessage(
+            i18n.t("Skipping this step — moving to the next one…"), 6000)
 
     def _stop_run(self):
         """Ask the running pipeline to wind up.

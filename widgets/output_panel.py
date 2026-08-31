@@ -914,6 +914,7 @@ class RunHeader(Card):
 class OutputPanel(QWidget):
     back_requested = Signal()
     stop_requested = Signal()
+    skip_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -946,6 +947,19 @@ class OutputPanel(QWidget):
                                     on_click=self._next_problem)
         self.problem_btn.setVisible(False)
         head.addWidget(self.problem_btn)
+
+        # One tool stuck generating — an image that never finishes, a site
+        # whose page has changed — used to hold the whole run hostage: the
+        # only ways out were waiting out the cap or stopping everything.
+        # Skip gives up on THIS step only, keeps whatever it produced, and
+        # the run carries on.
+        self.skip_btn = C.button(i18n.t("Skip this step"), "secondary",
+                                 "play", small=True, on_click=self._on_skip)
+        self.skip_btn.setToolTip(i18n.t(
+            "Give up on the step that's running — keep whatever it has "
+            "produced so far — and move on to the next one. Use it when a "
+            "tool is stuck generating."))
+        head.addWidget(self.skip_btn)
 
         # A run is tens of minutes of browser automation. Without this the
         # only way out is force-quitting the app, which loses every step that
@@ -998,6 +1012,11 @@ class OutputPanel(QWidget):
         self._refresh_header()
 
     # ── panel chrome ────────────────────────────────────────────────────────
+    def _on_skip(self):
+        # Not latched like Stop: skipping two slow steps in a row is a
+        # legitimate thing to do. The engine clears the flag per press.
+        self.skip_requested.emit()
+
     def _on_stop(self):
         # Latch immediately so a second click can't queue a second stop, and
         # so the label stops claiming an action that is already under way. The
@@ -1011,6 +1030,7 @@ class OutputPanel(QWidget):
         """Show Stop only while there is something to stop."""
         self._running = bool(running)
         self.stop_btn.setVisible(running)
+        self.skip_btn.setVisible(running)
         if running:
             self._finished = False
             self.stop_btn.setEnabled(True)
