@@ -63,10 +63,14 @@ class AutomationWorker(QThread):
 
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
                  custom_stages=None, chatgpt_analysis: bool = True,
-                 reel_design_stage: str = "", motion_design_stage: str = ""):
+                 reel_design_stage: str = "", motion_design_stage: str = "",
+                 resume_urls: dict | None = None):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        # {stage: conversation_url} — a follow-up resumes the SAME chat the
+        # stage answered in, instead of opening a fresh one. None = normal run.
+        self.resume_urls = resume_urls
         # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
         # instead of going through the router's fixed categories; the engine
         # accepts them directly. None = ordinary routed run, unchanged.
@@ -111,12 +115,53 @@ class AutomationWorker(QThread):
                 kwargs["reel_design_stage"] = self.reel_design_stage
             if self.motion_design_stage:
                 kwargs["motion_design_stage"] = self.motion_design_stage
+            if self.resume_urls:
+                kwargs["resume_urls"] = self.resume_urls
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
                 query=self.query, should_stop=self._stop.is_set, **kwargs,
             )
             self.done.emit(responses, links)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class FollowupRouteWorker(QThread):
+    """Work out which finished step a post-completion follow-up is about, so the
+    note goes to that step's assigned agent — Prism's "assign it automatically"
+    rule, applied to refinements. A quick Groq classify (JSON mode)."""
+    done = Signal(str)      # target stage key ("" = unsure/none)
+    failed = Signal(str)
+
+    def __init__(self, followup: str, stages_info: list, cfg: dict):
+        super().__init__()
+        self.followup = followup
+        self.stages_info = stages_info   # [{"stage","agent","summary"}]
+        self.cfg = cfg
+
+    def run(self):
+        try:
+            import json
+            lines = "\n".join(
+                f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
+                for s in self.stages_info)
+            keys = ", ".join(f'"{s["stage"]}"' for s in self.stages_info)
+            prompt = (
+                "A multi-step task just finished. The steps that ran, each with "
+                "its category key, the tool that did it, and a snippet of its "
+                f"output:\n\n{lines}\n\n"
+                f'The user now says: "{self.followup}"\n\n'
+                "Which ONE step should handle this follow-up? Choose the step "
+                "whose work the follow-up is about. Reply with ONLY a JSON "
+                'object: {"stage": "<one of the keys above>"}. Valid keys: '
+                f"{keys}. If genuinely unsure, use the last key."
+            )
+            out = CB.router.groq_chat(
+                self.cfg.get("api_key", ""), self.cfg.get("model", ""),
+                prompt, json_mode=True, timeout=45)
+            data = json.loads(out)
+            self.done.emit(str(data.get("stage", "")).strip())
         except Exception as e:
             self.failed.emit(str(e))
 
