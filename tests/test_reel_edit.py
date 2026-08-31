@@ -220,9 +220,34 @@ class InARealBrowser(unittest.TestCase):
 
 class TheReelWindow(unittest.TestCase):
 
-    def _dialog(self):
+    def _dialog(self, runs_dir: str = ""):
         from dialogs.reel_dialog import ReelDialog
-        return ReelDialog({"agents": {"content": "ChatGPT"}}, [], None)
+        with mock.patch.object(CB.config, "RUNS_DIR",
+                               runs_dir or tempfile.mkdtemp()):
+            return ReelDialog({"agents": {"content": "ChatGPT"}}, [], None)
+
+    def test_the_last_studio_reel_is_back_on_the_bench(self):
+        """Closing the window after a render must not orphan the reel: the
+        spec is saved beside the video so Edit the layout still works."""
+        import json
+        runs = tempfile.mkdtemp()
+        spec = _spec()
+        with open(os.path.join(runs, "reel_100.json"), "w") as f:
+            json.dump(spec, f)
+        with open(os.path.join(runs, "reel_099.json"), "w") as f:
+            json.dump({"scenes": [{"type": "hook"}]}, f)   # a Quick reel
+        d = self._dialog(runs)
+        self.assertTrue(d.edit_btn.isEnabled())
+        self.assertEqual(len(d.spec["scenes"]), 2)
+        self.assertTrue(d.out_path.endswith("reel_100.mp4"))
+
+    def test_a_quick_reel_alone_does_not_light_the_button(self):
+        import json
+        runs = tempfile.mkdtemp()
+        with open(os.path.join(runs, "reel_099.json"), "w") as f:
+            json.dump({"scenes": [{"type": "hook", "heading": "x"}]}, f)
+        d = self._dialog(runs)
+        self.assertFalse(d.edit_btn.isEnabled())
 
     def test_the_button_waits_for_a_studio_reel(self):
         d = self._dialog()
