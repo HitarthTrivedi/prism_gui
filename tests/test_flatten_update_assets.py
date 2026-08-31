@@ -61,6 +61,16 @@ class FlatteningABuildDirectory(unittest.TestCase):
         self.assertEqual(count, 2)  # the symlink itself doesn't count
         self.assertNotIn("linux-x64__prism-link", os.listdir(self.out))
 
+    def test_zero_byte_files_are_skipped(self):
+        """GitHub Releases refuses a zero-byte asset outright (confirmed
+        against the real API publishing 1.3.1 — a `py.typed` marker file
+        broke the upload). updater.stage_update() creates these directly
+        instead of fetching them, so there's nothing to upload."""
+        open(os.path.join(self.root, "py.typed"), "wb").close()
+        count = flatten_update_assets.flatten(self.root, self.out, "linux-x64")
+        self.assertEqual(count, 2)  # the empty file doesn't count
+        self.assertNotIn("linux-x64__py.typed", os.listdir(self.out))
+
 
 if __name__ == "__main__":
     unittest.main()

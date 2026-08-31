@@ -406,6 +406,18 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
                 if os.path.islink(dest) or os.path.exists(dest):
                     os.remove(dest)
                 os.symlink(entry["symlink"], dest)
+            elif entry.get("size") == 0:
+                # GitHub Releases refuses to host a zero-byte asset at all
+                # ("size must be greater than or equal to 1") — confirmed
+                # against the real API while publishing 1.3.1's assets, not
+                # theorised. There is nothing ambiguous about an empty
+                # file's content, so there is nothing to fetch: create it
+                # directly. Without this, any release containing so much as
+                # one empty file (a Python `py.typed` marker, for instance)
+                # would 404 on this path and fail every customer's update.
+                open(dest, "wb").close()
+                if entry.get("mode"):
+                    os.chmod(dest, 0o644 | entry["mode"])
             elif entry["path"] in to_fetch:
                 url = _file_url(entry["path"])
                 # max_bytes cuts the stream off the instant more than the

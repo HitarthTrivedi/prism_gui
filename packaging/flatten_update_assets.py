@@ -37,6 +37,14 @@ def flatten(root_dir: str, out_dir: str, platform_tag: str) -> int:
             full = os.path.join(dirpath, name)
             if os.path.islink(full):
                 continue
+            if os.path.getsize(full) == 0:
+                # GitHub Releases refuses zero-byte assets outright
+                # ("size must be greater than or equal to 1" — confirmed
+                # against the real API). updater.stage_update() already
+                # knows to create an empty file directly instead of
+                # fetching one, so there's nothing for this flattened
+                # asset to do except fail every upload that includes it.
+                continue
             rel = os.path.relpath(full, root_dir).replace(os.sep, "/")
             flat_name = f"{platform_tag}__{rel.replace('/', '__')}"
             shutil.copy2(full, os.path.join(out_dir, flat_name))

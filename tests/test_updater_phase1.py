@@ -172,6 +172,28 @@ class StagingAnUpdate(Harness):
         self.assertFalse(os.path.exists(
             os.path.join(staged.stage_dir, "_internal/removed-in-new.dat")))
 
+    def test_a_zero_byte_file_is_created_directly_never_fetched(self):
+        """GitHub Releases refuses to host a zero-byte asset at all ('size
+        must be greater than or equal to 1' — confirmed against the real
+        API publishing 1.3.1, where a `py.typed` marker file broke the
+        upload). There is nothing ambiguous about an empty file's content,
+        so stage_update() must create it directly rather than ever asking
+        _file_url() for it."""
+        empty_entry = self._entry("_internal/py.typed", "")
+        manifest_dict = {"version": "2.0.0", "files": [empty_entry]}
+        token = self._sign(manifest_dict)
+
+        def fetch(url, *, timeout):
+            if url == updater._manifest_url():
+                return token.encode("utf-8")
+            raise AssertionError(f"should never fetch an empty file: {url}")
+
+        check = updater.check_for_update(running="1.0.0", fetch=fetch)
+        staged = updater.stage_update(check, self.install_dir, fetch=fetch)
+        staged_path = os.path.join(staged.stage_dir, "_internal/py.typed")
+        self.assertTrue(os.path.isfile(staged_path))
+        self.assertEqual(os.path.getsize(staged_path), 0)
+
     def test_download_size_mismatch_is_rejected(self):
         entry = self._entry("Prism", "expected-content")
         manifest_dict = {"version": "2.0.0", "files": [entry]}
