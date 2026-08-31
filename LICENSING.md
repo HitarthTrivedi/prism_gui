@@ -18,8 +18,7 @@ and add-ons unlock per licence — backed by a hosted licence server.
   licence keeps working on its cached token for the remaining days, as designed.
 
 Left: deployment and the production keypair, the dialogs and gates in the app,
-cross-platform proving, and all of Tier 2. Live progress in the checkboxes of
-[`05-build-checklist.md`](docs/licensing/05-build-checklist.md).
+cross-platform proving, and all of Tier 2.
 
 This file holds the **strategy and the reasoning**. The detailed specs live in
 [`docs/licensing/`](docs/licensing/):
@@ -31,7 +30,6 @@ This file holds the **strategy and the reasoning**. The detailed specs live in
 | [02 · API & data](docs/licensing/02-api-and-data.md) | Every endpoint, the Postgres schema, hosting | Backend |
 | [03 · Client integration](docs/licensing/03-client-integration.md) | Exactly what changes in this repo, and where | Desktop |
 | [04 · Operations](docs/licensing/04-operations.md) | Issuing keys, extending trials, fixing tickets | Support |
-| [05 · Build checklist](docs/licensing/05-build-checklist.md) | Three weeks, day by day, with a definition of done | Everyone |
 | [06 · Tier 3 (future)](docs/licensing/06-tier-3-future.md) | The "completely uncrackable" option, and why it's deferred | Future us |
 
 ---
@@ -394,9 +392,6 @@ The part that decides whether customers hate this. Treat these as requirements.
   `core_bridge.py`, prove a never-activated build is a shell.
 - Result: you can hand a build to a client and control exactly what they get and
   for how long.
-
-Day-by-day breakdown in
-[`05-build-checklist.md`](docs/licensing/05-build-checklist.md).
 
 ### Phase 2 — Self-serve billing (~1 week)
 

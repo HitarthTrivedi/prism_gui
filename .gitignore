@@ -35,3 +35,15 @@ integrations/token.json
 # would put thousands of lines of third-party prose in our diffs for no gain.
 .agents/
 .claude/skills/
+
+# ── video editor scratch ──────────────────────────────────────────────────
+# The hyperframes editor writes preview JPEGs, timestamped backups of single
+# compositions, and per-machine preferences beside the video source. None of
+# it is source: the thumbnails regenerate from the compositions on demand and
+# a backup is one machine's undo history. 51 thumbnails had been committed.
+videos/*/.thumbnails/
+videos/*/.hyperframes/backup/
+videos/*/.media/preferences.json
+# Rendered output — big, regenerable, and belongs beside a release, not here.
+videos/*/renders/
+videos/*/snapshots/

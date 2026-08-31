@@ -2,7 +2,8 @@
 
 **Status: not being built. Recorded so the decision and its costs survive.**
 
-Tiers 1 and 2 are the plan of record — see [`05-build-checklist.md`](05-build-checklist.md).
+Tiers 1 and 2 are the plan of record, and both are built — see
+[`00-overview.md`](00-overview.md).
 This document exists so that when someone asks *"can we make it completely
 uncrackable?"* in a year, the answer and its price are already written down.
 

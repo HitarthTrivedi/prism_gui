@@ -9,7 +9,6 @@ why, so anyone — technical or not — can follow the rest of the docs.
 | `02-api-and-data.md` | What the server does and what it stores |
 | `03-client-integration.md` | What changes inside the Prism app |
 | `04-operations.md` | Day-to-day: issuing keys, fixing customer problems |
-| `05-build-checklist.md` | The build order |
 | `06-tier-3-future.md` | The "absolutely uncrackable" option we chose *not* to build yet |
 
 The strategy and the reasoning behind the decisions live one level up, in
