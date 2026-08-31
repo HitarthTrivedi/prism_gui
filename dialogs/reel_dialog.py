@@ -532,10 +532,7 @@ class ReelDialog(PrismDialog):
                     spec = json.load(f)
             except (OSError, ValueError):
                 continue
-            scenes = spec.get("scenes") if isinstance(spec, dict) else None
-            if (isinstance(scenes, list) and scenes
-                    and any(isinstance(sc, dict) and sc.get("html")
-                            for sc in scenes)):
+            if CB.get_reel_edit().is_studio_spec(spec):
                 return spec, path[:-5] + ".mp4"
         return None
 

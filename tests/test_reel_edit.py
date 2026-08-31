@@ -218,6 +218,59 @@ class InARealBrowser(unittest.TestCase):
             stop()
 
 
+class TheWorkbenchCard(unittest.TestCase):
+    """The place reels are actually made — a task's "Make the video" step.
+    The finished card gets Edit the layout beside Play video, but only when
+    the video really is a Studio reel (its spec, saved beside it, carries
+    HTML scenes)."""
+
+    def _card(self):
+        from widgets.output_panel import StageCard
+        return StageCard("media", "Prism Studio")
+
+    def _reel_on_disk(self, spec) -> str:
+        import json
+        d = tempfile.mkdtemp()
+        mp4 = os.path.join(d, "reel_123.mp4")
+        open(mp4, "wb").write(b"\x00")
+        with open(mp4[:-4] + ".json", "w") as f:
+            json.dump(spec, f)
+        return mp4
+
+    def test_a_studio_reel_lights_the_button(self):
+        card = self._card()
+        mp4 = self._reel_on_disk(_spec())
+        card.set_done(["Made on this machine"], mp4)
+        card.set_collapsed(False)      # a finished step folds itself away
+        self.assertTrue(card.edit_btn.isVisibleTo(card))
+        seen = []
+        card.edit_reel.connect(seen.append)
+        card.edit_btn.click()
+        self.assertEqual(seen, [mp4])
+
+    def test_a_quick_reel_or_no_spec_does_not(self):
+        card = self._card()
+        mp4 = self._reel_on_disk({"scenes": [{"type": "hook"}]})
+        card._set_url(mp4)
+        self.assertFalse(card.edit_btn.isVisibleTo(card))
+        card._set_url("https://chat.openai.com/c/abc")   # a tab, not a file
+        self.assertFalse(card.edit_btn.isVisibleTo(card))
+
+    def test_the_panel_bubbles_it_and_the_window_answers(self):
+        from widgets.output_panel import OutputPanel
+        src_panel = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "widgets", "output_panel.py"), encoding="utf-8").read()
+        self.assertIn("card.edit_reel.connect(self.edit_reel.emit)", src_panel)
+        src_win = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "main_window.py"), encoding="utf-8").read()
+        self.assertIn("output_panel.edit_reel.connect(self._edit_reel_layout)",
+                      src_win)
+        self.assertIn("def _on_reel_edits_rendered", src_win)
+        self.assertIn("ReelWorker(ctx[\"spec\"], out, studio=True)", src_win)
+
+
 class TheReelWindow(unittest.TestCase):
 
     def _dialog(self, runs_dir: str = ""):

@@ -12,7 +12,7 @@ The work column is a two-page stack: composing (task + plan) and running
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
@@ -51,7 +51,7 @@ from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
-                     FFmpegWorker, UpdateWorker)
+                     FFmpegWorker, UpdateWorker, ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.setup_dialog import SetupDialog
@@ -129,6 +129,11 @@ AGENT_FEATURES = {"Prism Reel": "reel", "Prism Studio": "reel",
 
 
 class MainWindow(QMainWindow):
+    # From the reel layout editor's local server (its own thread — Qt queues
+    # these onto the UI thread): the browser pressed Save / Save & render.
+    reel_edits_saved = Signal(list)
+    reel_edits_rendered = Signal(list)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Prism")
@@ -976,6 +981,12 @@ class MainWindow(QMainWindow):
         self.output_panel.back_requested.connect(self._back_to_plan)
         self.output_panel.stop_requested.connect(self._stop_run)
         self.output_panel.skip_requested.connect(self._skip_step)
+        self.output_panel.edit_reel.connect(self._edit_reel_layout)
+        self.reel_edits_saved.connect(self._on_reel_edits_saved)
+        self.reel_edits_rendered.connect(self._on_reel_edits_rendered)
+        self._reel_edit_stop = None
+        self._reel_edit_ctx = None          # {"spec":…, "spec_path":…}
+        self._reel_edit_worker = None
         self.agents_panel.discard_requested.connect(self._discard_plan)
 
     # ── moving between the two pages ────────────────────────────────────────
@@ -1966,6 +1977,106 @@ class MainWindow(QMainWindow):
             return
         self._reset_for_new_task()
 
+    # ── the reel layout editor, from a finished workbench step ──────────
+    def _edit_reel_layout(self, mp4_path: str):
+        """A Studio reel on a stage card wants fixing by hand. Open the
+        page it was filmed from in the browser, with the edit layer on."""
+        import json as _json
+        spec_path = mp4_path[:-4] + ".json"
+        try:
+            with open(spec_path, encoding="utf-8") as f:
+                spec = _json.load(f)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Reel", i18n.t(
+                "The reel's saved design could not be read: {error}").format(
+                error=e))
+            return
+        edit = CB.get_reel_edit()
+        if not edit.is_studio_spec(spec):
+            QMessageBox.information(self, "Reel", i18n.t(
+                "This reel was drawn from templates — there is no page to "
+                "edit. Studio reels only."))
+            return
+        self._stop_reel_editor()
+        try:
+            url, self._reel_edit_stop = edit.serve(
+                spec,
+                on_save=self.reel_edits_saved.emit,
+                on_render=self.reel_edits_rendered.emit)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, "Reel", i18n.t(
+                "Could not open the editor: {error}").format(error=e))
+            return
+        self._reel_edit_ctx = {"spec": spec, "spec_path": spec_path}
+        QDesktopServices.openUrl(QUrl(url))
+        self.statusBar().showMessage(i18n.t(
+            "The reel is open in your browser — drag things into place, "
+            "then press Save & render there."), 12000)
+
+    def _keep_reel_edits(self, edits: list):
+        import json as _json
+        ctx = self._reel_edit_ctx
+        if not ctx:
+            return
+        ctx["spec"]["edits"] = edits
+        try:
+            with open(ctx["spec_path"], "w", encoding="utf-8") as f:
+                _json.dump(ctx["spec"], f, indent=2)
+        except OSError:
+            pass    # the render still carries the edits in memory
+
+    def _on_reel_edits_saved(self, edits: list):
+        self._keep_reel_edits(edits)
+        self.statusBar().showMessage(i18n.t(
+            "Reel layout saved — {n} change(s). Press Save & render in the "
+            "browser when you are happy.").format(n=len(edits)), 8000)
+
+    def _on_reel_edits_rendered(self, edits: list):
+        self._keep_reel_edits(edits)
+        self._stop_reel_editor()
+        ctx = self._reel_edit_ctx
+        if not ctx:
+            return
+        import time as _time
+        out = os.path.join(CB.config.RUNS_DIR,
+                           f"reel_{int(_time.time())}.mp4")
+        self.statusBar().showMessage(
+            i18n.t("Rendering the fixed reel…"))
+        worker = ReelWorker(ctx["spec"], out, studio=True)
+        worker.progress.connect(lambda d, t: self.statusBar().showMessage(
+            i18n.t("Rendering the fixed reel… {p}%").format(
+                p=int(d / max(1, t) * 100))))
+        worker.done.connect(self._on_reel_edit_rendered_done)
+        worker.failed.connect(lambda e: (
+            self.statusBar().clearMessage(),
+            QMessageBox.warning(self, "Reel", e)))
+        self._reel_edit_worker = worker
+        worker.start()
+
+    def _on_reel_edit_rendered_done(self, path: str):
+        try:
+            artifact = CB.config.save_artifact(
+                path, "reel — layout fixed by hand", kind="reel",
+                task="reel — layout fixed by hand")
+        except Exception:                               # noqa: BLE001
+            artifact = ""
+        shown = artifact or path
+        self.statusBar().showMessage(i18n.t(
+            "Fixed reel rendered — {name}").format(
+            name=os.path.basename(shown)), 12000)
+        try:
+            paths.reveal_result(shown)
+        except Exception:                               # noqa: BLE001
+            pass
+
+    def _stop_reel_editor(self):
+        if self._reel_edit_stop is not None:
+            try:
+                self._reel_edit_stop()
+            except Exception:                           # noqa: BLE001
+                pass
+            self._reel_edit_stop = None
+
     def _skip_step(self):
         """Give up on the stage that is running and let the run move on.
 
@@ -2338,6 +2449,12 @@ class MainWindow(QMainWindow):
             self._toggle_mic()
 
     def closeEvent(self, event):
+        self._stop_reel_editor()
+        worker = getattr(self, "_reel_edit_worker", None)
+        if worker is not None and worker.isRunning():
+            if not worker.wait(8000):
+                worker.terminate()
+                worker.wait(1000)
         if self._wake_listener:
             # Longer than the toggle case: the app is going away, so a brief
             # stall costs nothing, while a listener still running when the

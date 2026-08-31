@@ -267,6 +267,9 @@ class StageCard(QWidget):
     # Raised whenever this stage's state changes, so the panel can keep the
     # header and the "next problem" control in step without polling.
     state_changed = Signal()
+    # A Studio reel landed on this card and the user wants to fix its layout
+    # by hand. Carries the mp4 path; the window opens the browser editor.
+    edit_reel = Signal(str)
     # Arrow-key navigation between cards, handled by the panel: -1 / +1.
     move_focus = Signal(int)
 
@@ -435,6 +438,16 @@ class StageCard(QWidget):
             on_click=lambda: paths.reveal_result(self._url))
         self.reveal_btn.setVisible(False)
         row.addWidget(self.reveal_btn)
+        # Studio reels only: the spec saved beside the video is a web page,
+        # and fixing a misplaced text by hand beats re-prompting for it.
+        self.edit_btn = C.button(i18n.t("Edit the layout"), "secondary",
+                                 "pencil", small=True,
+                                 on_click=lambda: self.edit_reel.emit(self._url))
+        self.edit_btn.setToolTip(i18n.t(
+            "Open this reel in your browser: drag anything into place, "
+            "resize it, retype it or delete it, then render it again."))
+        self.edit_btn.setVisible(False)
+        row.addWidget(self.edit_btn)
         row.addStretch(1)
         self.content.addWidget(self.actions)
 
@@ -711,6 +724,7 @@ class StageCard(QWidget):
         # and the user never learns the video is already on their machine.
         local = paths.is_local_result(self._url)
         self.reveal_btn.setVisible(local)
+        self.edit_btn.setVisible(local and self._editable_reel(self._url))
         if local:
             video = self._url.lower().endswith((".mp4", ".mov", ".m4v", ".webm"))
             self.open_btn.setText(i18n.t("Play video") if video
@@ -722,6 +736,21 @@ class StageCard(QWidget):
             icons.button_icon(self.open_btn, "external", 15,
                               theme.ACCENT_RAMP[700])
         self._paint_facts()
+
+    @staticmethod
+    def _editable_reel(url: str) -> bool:
+        """A video with a Studio spec saved beside it — reel_<stamp>.json
+        next to reel_<stamp>.mp4, scenes carrying real HTML."""
+        if not url.lower().endswith(".mp4"):
+            return False
+        try:
+            import json as _json
+            with open(url[:-4] + ".json", encoding="utf-8") as f:
+                spec = _json.load(f)
+            import core_bridge as CB
+            return CB.get_reel_edit().is_studio_spec(spec)
+        except Exception:                               # noqa: BLE001
+            return False
 
     def set_waiting(self, seconds: int):
         self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
@@ -915,6 +944,7 @@ class OutputPanel(QWidget):
     back_requested = Signal()
     stop_requested = Signal()
     skip_requested = Signal()
+    edit_reel = Signal(str)         # a card's Studio reel wants the editor
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1150,6 +1180,7 @@ class OutputPanel(QWidget):
             return card
         self.empty.setVisible(False)
         card = StageCard(stage, agent, index=len(self._order) + 1)
+        card.edit_reel.connect(self.edit_reel.emit)
         card.state_changed.connect(self._on_card_state)
         card.move_focus.connect(
             lambda step, key=stage: self._focus_neighbour(key, step))
