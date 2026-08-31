@@ -90,6 +90,42 @@ def file_mode(path: str) -> int:
     return stat.S_IMODE(st.st_mode) & 0o111
 
 
+# Ext4, APFS, NTFS and HFS+ all cap a single filename component at 255
+# bytes — not the whole path, just the last segment. Flattening never hits
+# that for an ordinary tree, but Chromium's macOS build does: a bundled
+# "Google Chrome for Testing.app" nests deep (Contents/Frameworks/…
+# .framework/Versions/<ver>/…), and Google's own naming is verbose enough
+# that platform_tag + "__" + the whole flattened relative path blows past
+# 255 on its own — the actual failure, once (see packaging/
+# flatten_update_assets.py's CI run for v1.4.0, 2026-08-31).
+_MAX_FLAT_NAME = 255
+
+
+def flat_name(platform_tag: str, rel: str) -> str:
+    """The GitHub Release asset name for one file — shared by
+    packaging/flatten_update_assets.py (writing it at build time) and
+    updater.py's `_file_url()` (reading it back at runtime), so there is
+    exactly one implementation to keep in sync, not two that must agree by
+    convention. `rel` is a manifest entry's `path` field: relative, `/`-
+    separated, exactly what `build()` below records.
+
+    Ordinarily just `<platform_tag>__<rel with / as __>`, readable and
+    reversible by eye. Past `_MAX_FLAT_NAME` bytes, falls back to a name
+    built from a hash of the same (platform_tag, rel) pair — still
+    deterministic, still exactly reproducible by both call sites, just no
+    longer human-readable. The extension is kept where there is one, purely
+    so a directory listing still hints at what a hashed file is.
+    """
+    name = f"{platform_tag}__{rel.replace('/', '__')}"
+    if len(name.encode("utf-8")) <= _MAX_FLAT_NAME:
+        return name
+    digest = hashlib.sha256(f"{platform_tag}/{rel}".encode("utf-8")).hexdigest()
+    ext = os.path.splitext(rel)[1]
+    if len(ext) > 16:                # a "." picked up from a version number
+        ext = ""                     # or similar, not a real extension
+    return f"{platform_tag}__long__{digest}{ext}"
+
+
 # ── building the (unsigned) payload ─────────────────────────────────────────
 def build(root_dir: str, version: str) -> dict[str, Any]:
     """Walk `root_dir` (a built app directory, e.g. dist/Prism) and list every

@@ -181,6 +181,58 @@ class SigningAndVerifying(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "malformed")
 
 
+class FlatteningAFileNameForHosting(unittest.TestCase):
+    """The v1.4.0 macOS build's real failure: flattening a manifest entry's
+    `path` into one GitHub Release asset name — <platform>__<path with / as
+    __> — overran the filesystem's 255-byte filename limit for Chromium's
+    nested macOS Framework path, and flatten_update_assets.py died mid-CI
+    with OSError: File name too long. updater.py's _file_url() and
+    flatten_update_assets.py's flatten() must derive the identical name for
+    every path or every long-name download 404s against what CI actually
+    uploaded."""
+
+    def test_an_ordinary_path_is_unchanged(self):
+        self.assertEqual(
+            UM.flat_name("linux-x64", "_internal/base_library.zip"),
+            "linux-x64___internal__base_library.zip")
+
+    def test_a_path_past_the_limit_falls_back_to_a_hash(self):
+        rel = ("_internal/playwright/driver/package/.local-browsers/"
+              "chromium-1234/chrome-mac-arm64/"
+              "Google Chrome for Testing.app/Contents/Frameworks/"
+              "Google Chrome for Testing Framework.framework/"
+              "Versions/151.0.7922.34/Google Chrome for Testing Framework")
+        name = UM.flat_name("macos-arm64", rel)
+        self.assertLessEqual(len(name.encode("utf-8")), 255)
+        self.assertTrue(name.startswith("macos-arm64__long__"))
+
+    def test_the_fallback_is_deterministic_and_collision_free_for_near_misses(self):
+        """Two paths differing only in their last path segment must not
+        collapse onto the same hashed name — the hash is over the WHOLE
+        (platform_tag, rel) pair, not a truncated prefix of it."""
+        base = "_internal/" + "x" * 300 + "/"
+        a = UM.flat_name("macos-arm64", base + "one")
+        b = UM.flat_name("macos-arm64", base + "two")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, UM.flat_name("macos-arm64", base + "one"))
+
+    def test_updater_and_the_build_script_agree_on_every_name(self):
+        """The one thing this whole fix exists to guarantee: updater.py's
+        _file_url() and packaging/flatten_update_assets.py's flatten() must
+        never be able to drift into naming the same file two different
+        ways. Both now call THIS function rather than each keeping their
+        own copy of the naming rule — this test pins that they still do."""
+        import inspect
+        import updater
+        src = inspect.getsource(updater._file_url)
+        self.assertIn("update_manifest.flat_name(", src)
+        gui_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        flatten_src = open(os.path.join(
+            gui_dir, "packaging", "flatten_update_assets.py"),
+            encoding="utf-8").read()
+        self.assertIn("update_manifest.flat_name(", flatten_src)
+
+
 def token_payload_b64(manifest: dict) -> str:
     import json
     from licensing.token import b64u_encode

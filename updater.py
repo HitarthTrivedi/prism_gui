@@ -311,7 +311,14 @@ def _file_url(relpath: str) -> str:
     # a hosting-layer detail, not a security one — the manifest's own `path`
     # field (unflattened) is what every hash check and staged-tree layout is
     # keyed on. Platform-prefixed for the same reason _manifest_url() is.
-    return f"{UPDATE_HOST}/{platform_tag()}__{relpath.replace('/', '__')}"
+    #
+    # update_manifest.flat_name(), not an inline f-string here: past 255
+    # bytes (a real case — Chromium's macOS Framework path) the flattened
+    # name has to fall back to a hash, and packaging/flatten_update_assets.py
+    # (which wrote the file under this exact name at build time) needs to
+    # compute the identical fallback. One function, not two that have to
+    # agree by convention.
+    return f"{UPDATE_HOST}/{update_manifest.flat_name(platform_tag(), relpath)}"
 
 
 def check_for_update(*, running: str | None = None,
