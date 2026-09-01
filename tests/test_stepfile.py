@@ -71,6 +71,33 @@ class ABoxOfKnownSize(unittest.TestCase):
             self.assertLessEqual(len(number), 2)
 
 
+@unittest.skipUnless(HAVE, "cadquery not installed")
+class TheBriefForTheImageAgent(unittest.TestCase):
+    """/step-auto's prompt: exact measured figures in, the model kept out."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = os.path.join(tempfile.mkdtemp(), "block.step")
+        _box_with_hole(cls.path)
+        cls.brief = SF.auto_brief(SF.analyse(cls.path, mode="plastic"))
+
+    def test_the_measured_figures_are_in_it_verbatim(self):
+        self.assertIn("60.00 x 40.00 x 8.00 mm", self.brief)
+        self.assertIn("Ø5 x 1", self.brief)
+
+    def test_it_says_the_model_is_not_shared(self):
+        self.assertIn("MEASURED OFFLINE", self.brief)
+        self.assertIn("is not shared", self.brief)
+
+    def test_it_forbids_invented_numbers(self):
+        self.assertIn("EXACTLY the numbers above", self.brief)
+        self.assertIn("do not round", self.brief)
+
+    def test_every_figure_is_two_decimals(self):
+        for number in re.findall(r"\d+\.(\d+)", self.brief):
+            self.assertLessEqual(len(number), 2)
+
+
 @unittest.skipUnless(HAVE and os.path.exists(REAL),
                      "cadquery or the demo assembly not on this machine")
 class TheCustomersOwnEnclosure(unittest.TestCase):
@@ -144,6 +171,28 @@ class TheTerminalDoor(unittest.TestCase):
 
     def test_the_mode_words_are_metal_and_plastic(self):
         self.assertEqual(SF.MODES, ("metal", "plastic"))
+
+    def test_step_auto_is_dispatched_before_step(self):
+        """startswith("/step") would swallow "/step-auto" — the auto branch
+        must be checked first or the command silently runs plain /step."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        self.assertIn("def cmd_step_auto(", src)
+        self.assertLess(src.index('line.startswith("/step-auto")'),
+                        src.index('line.startswith("/step") or'))
+
+    def test_step_auto_never_uploads_the_model(self):
+        """The only attachment /step-auto builds is Prism's OWN render; the
+        customer's STEP file must never be in the file list."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        body = src[src.index("def cmd_step_auto("):
+                   src.index("def cmd_gerber(")]
+        self.assertIn('F.attach(drawn["png"])', body)
+        self.assertNotIn("F.attach(target", body)
+        self.assertIn("STEP file stays here", body)
 
 
 if __name__ == "__main__":
