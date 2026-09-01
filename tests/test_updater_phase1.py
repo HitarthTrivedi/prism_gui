@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import apply_update
 import licensing
+import paths
 import update_manifest as UM
 import updater
 from licensing import device, keys
@@ -49,7 +50,24 @@ class Harness(unittest.TestCase):
         self.priv_hex, self.pub_hex = _keypair()
         device.reset_cache()
         self.patches = [
-            mock.patch.object(licensing, "user_dir",
+            # licensing.user_dir() takes NO arguments in reality (it's a
+            # zero-arg wrapper around paths.user_dir()) — return_value, not
+            # a variadic side_effect, so a future accidental
+            # licensing.user_dir("x") call fails here in tests exactly the
+            # way it would for real, instead of a permissive mock quietly
+            # accepting an argument the real function never could. A
+            # variadic mock here is EXACTLY what let updater.updates_root()
+            # ship calling licensing.user_dir("updates") — TypeError on
+            # every real stage_update() call — with this whole test suite
+            # green throughout.
+            mock.patch.object(licensing, "user_dir", return_value=self.tmp),
+            # updates_root() calls paths.user_dir("updates") directly
+            # (paths.user_dir IS the variadic one) — without mocking this
+            # too, stage_update() in these tests was writing into this
+            # machine's REAL ~/.prism/updates/, not the isolated temp dir
+            # every other piece of state here uses. Caught by literally
+            # finding those files after a test run, not by any assertion.
+            mock.patch.object(paths, "user_dir",
                               side_effect=lambda *p: os.path.join(self.tmp, *p)),
             mock.patch.object(keys, "update_public_keys",
                               return_value={"u1": self.pub_hex}),
@@ -132,6 +150,19 @@ class StagingAnUpdate(Harness):
         if executable:
             os.chmod(full, 0o755)
 
+    def test_updates_root_does_not_crash(self):
+        """The actual v1.4.0 incident: updates_root() called
+        licensing.user_dir("updates") — a function that takes NO arguments
+        — so stage_update() raised a plain TypeError on its very first
+        line, every time, for every customer. UpdateWorker's blanket
+        `except Exception` routed that into the same silent "just open the
+        browser" fallback as an ordinary no-update-available result, so it
+        shipped and went unnoticed until someone actually watched a real
+        update attempt fail. paths.user_dir(*parts) is the variadic one;
+        this pins updates_root() to keep using that, not licensing.user_dir."""
+        root = updater.updates_root()
+        self.assertEqual(root, os.path.join(self.tmp, "updates"))
+
     def _entry(self, path: str, content: str, mode: int = 0) -> dict:
         data = content.encode("utf-8")
         return {"path": path, "size": len(data),
@@ -147,7 +178,7 @@ class StagingAnUpdate(Harness):
 
         fetched_urls = []
         real_responses = {updater._manifest_url(): token.encode("utf-8"),
-                          updater._file_url("Prism"): new_binary.encode("utf-8")}
+                          updater._file_url("2.0.0", "Prism"): new_binary.encode("utf-8")}
 
         def fetch(url, *, timeout):
             fetched_urls.append(url)
@@ -159,8 +190,8 @@ class StagingAnUpdate(Harness):
 
         # The unchanged file's URL was never requested — this IS the size
         # win update-research-inapp-download.md §1/§3 is built around.
-        self.assertNotIn(updater._file_url("_internal/unchanged.dat"), fetched_urls)
-        self.assertIn(updater._file_url("Prism"), fetched_urls)
+        self.assertNotIn(updater._file_url("2.0.0", "_internal/unchanged.dat"), fetched_urls)
+        self.assertIn(updater._file_url("2.0.0", "Prism"), fetched_urls)
 
         with open(os.path.join(staged.stage_dir, "Prism")) as f:
             self.assertEqual(f.read(), new_binary)
@@ -200,7 +231,7 @@ class StagingAnUpdate(Harness):
         token = self._sign(manifest_dict)
         fetch = self._fake_fetch({
             updater._manifest_url(): token.encode("utf-8"),
-            updater._file_url("Prism"): b"short",  # wrong size on purpose
+            updater._file_url("2.0.0", "Prism"): b"short",  # wrong size on purpose
         })
         check = updater.check_for_update(running="1.0.0", fetch=fetch)
         with self.assertRaises(updater.UpdateError):
@@ -216,7 +247,7 @@ class StagingAnUpdate(Harness):
         self.assertEqual(len(wrong_but_same_size), entry["size"])
         fetch = self._fake_fetch({
             updater._manifest_url(): token.encode("utf-8"),
-            updater._file_url("Prism"): wrong_but_same_size.encode("utf-8"),
+            updater._file_url("2.0.0", "Prism"): wrong_but_same_size.encode("utf-8"),
         })
         check = updater.check_for_update(running="1.0.0", fetch=fetch)
         with self.assertRaises(updater.UpdateError):
@@ -245,7 +276,7 @@ class StagingAnUpdate(Harness):
         token = self._sign(manifest_dict)
         fetch = self._fake_fetch({
             updater._manifest_url(): token.encode("utf-8"),
-            updater._file_url("Prism"): new_binary.encode("utf-8"),
+            updater._file_url("2.0.0", "Prism"): new_binary.encode("utf-8"),
         })
         check = updater.check_for_update(running="1.0.0", fetch=fetch)
         staged = updater.stage_update(check, self.install_dir, fetch=fetch)

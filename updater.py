@@ -23,7 +23,13 @@ authority to cover it:
 
   - The manifest is fetched from a FIXED host constant (UPDATE_HOST below),
     never from a URL the licence server or anything else hands us — exactly
-    the same rule DEFAULT_SERVER follows in licensing/client.py.
+    the same rule DEFAULT_SERVER follows in licensing/client.py. The per-file
+    assets live in a SEPARATE release, one per (version, platform) — see
+    _assets_release_tag — because GitHub caps a release at 1000 assets and
+    three platforms' worth of files sharing the manifest's release blew
+    past that. Still the same fixed repo (UPDATE_REPO), still never a URL
+    handed to us by anything — the tag is derived from the version the
+    manifest itself already claims, not a second trust input.
   - The manifest is signed with a key that is NOT the licence server's
     signing key (licensing/keys.py's UPDATE_PRODUCTION/UPDATE_DEVELOPMENT,
     separate from PRODUCTION/DEVELOPMENT) — a licence-server compromise must
@@ -80,7 +86,21 @@ _DEFAULT: dict[str, Any] = {
 # (releases/latest/download/<asset>) always resolves to whatever the CI
 # workflow most recently published, the same way app_meta.DOWNLOAD_URL's
 # releases/latest page does today.
-UPDATE_HOST = "https://github.com/HitarthTrivedi/prism_gui/releases/latest/download"
+UPDATE_REPO = "HitarthTrivedi/prism_gui"
+UPDATE_HOST = f"https://github.com/{UPDATE_REPO}/releases/latest/download"
+
+# The per-file assets do NOT live in the same release as the manifest and
+# the human-facing archives. GitHub caps a release at 1000 assets — a
+# real limit, hit for real shipping v1.4.0 (linux-x64 alone needs 966
+# individual files once Playwright's Chromium is in the bundle, and all
+# three platforms together need ~2600, nearly 3x the cap, if hosted in
+# one release). Each platform's flattened files get their OWN release
+# instead, one per (version, platform), tagged deterministically from the
+# manifest's own `version` field — never "latest", since three releases
+# can't all BE "latest" at once. RELEASING-UPDATES.md's publish step
+# creates these alongside the main tagged release.
+def _assets_release_tag(version: str, tag: str) -> str:
+    return f"v{version}-assets-{tag}"
 
 # Manifest fetch is a background/launch-time check, same spirit as the
 # licence server's default TIMEOUT — fail fast, never make launch wait.
@@ -206,7 +226,18 @@ class StagedUpdate:
 
 
 def updates_root() -> str:
-    return licensing.user_dir("updates")
+    # licensing.user_dir() takes no arguments — it's a zero-arg wrapper
+    # around paths.user_dir(). The variadic one that takes a subdirectory
+    # is paths.user_dir(*parts) itself, which every other caller in this
+    # codebase (workspace.py, diagnostics.py, i18n.py, integrations/
+    # gdrive.py) already uses this way. Calling licensing.user_dir("updates")
+    # here was a straight mix-up between the two — TypeError, unconditionally,
+    # on every single stage_update() call, since this is the first line it
+    # runs. UpdateWorker's blanket `except Exception` then routed that
+    # crash into the same "just open the browser" fallback as a genuine
+    # "no update available", which is exactly why this went unnoticed: the
+    # symptom looked identical to the ordinary no-op case.
+    return paths.user_dir("updates")
 
 
 def _highest_seen_version() -> str:
@@ -305,7 +336,7 @@ def _manifest_url() -> str:
     return f"{UPDATE_HOST}/manifest.{platform_tag()}.signed"
 
 
-def _file_url(relpath: str) -> str:
+def _file_url(version: str, relpath: str) -> str:
     # GitHub release assets can't contain "/" in their filename, so a
     # relative path is flattened for the wire and restored on write. This is
     # a hosting-layer detail, not a security one — the manifest's own `path`
@@ -318,7 +349,17 @@ def _file_url(relpath: str) -> str:
     # (which wrote the file under this exact name at build time) needs to
     # compute the identical fallback. One function, not two that have to
     # agree by convention.
-    return f"{UPDATE_HOST}/{update_manifest.flat_name(platform_tag(), relpath)}"
+    #
+    # A DIFFERENT release from _manifest_url()'s (see _assets_release_tag
+    # above) — `releases/download/<tag>/<asset>`, an explicit tag, never
+    # "latest": three platforms' per-file assets living in the shared
+    # "latest" release is what hit GitHub's 1000-assets-per-release cap in
+    # the first place. `version` comes from the manifest THIS SAME CALLER
+    # already verified (see stage_update's `check.version`), never from
+    # anywhere else — the tag is derived data, not a second trust input.
+    tag = _assets_release_tag(version, platform_tag())
+    return (f"https://github.com/{UPDATE_REPO}/releases/download/{tag}/"
+           f"{update_manifest.flat_name(platform_tag(), relpath)}")
 
 
 def check_for_update(*, running: str | None = None,
@@ -426,7 +467,7 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
                 if entry.get("mode"):
                     os.chmod(dest, 0o644 | entry["mode"])
             elif entry["path"] in to_fetch:
-                url = _file_url(entry["path"])
+                url = _file_url(check.version, entry["path"])
                 # max_bytes cuts the stream off the instant more than the
                 # manifest's declared size has arrived — see _get()'s
                 # docstring for why this is done during the read, not as a

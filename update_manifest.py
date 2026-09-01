@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import time
 from typing import Any
@@ -100,6 +101,17 @@ def file_mode(path: str) -> int:
 # flatten_update_assets.py's CI run for v1.4.0, 2026-08-31).
 _MAX_FLAT_NAME = 255
 
+# GitHub silently REWRITES a release asset's filename on upload for any
+# character outside this set — no error, no warning, `gh release upload`
+# exits 0 either way. Confirmed against the real API while fixing v1.4.0:
+# "[Content_Types].xml" landed as ".Content_Types.xml" (both `[` and `]`
+# became `.`), "First Run" landed as "First.Run" (the space became `.`).
+# Uploading under our intended name and then asking for that same name
+# back at fetch time 404s forever — the file is THERE, just under a name
+# neither side ever asked for. Matching this pattern before upload, not
+# after discovering the mismatch, is what keeps upload and fetch agreeing.
+_GITHUB_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+
 
 def flat_name(platform_tag: str, rel: str) -> str:
     """The GitHub Release asset name for one file — shared by
@@ -110,19 +122,22 @@ def flat_name(platform_tag: str, rel: str) -> str:
     separated, exactly what `build()` below records.
 
     Ordinarily just `<platform_tag>__<rel with / as __>`, readable and
-    reversible by eye. Past `_MAX_FLAT_NAME` bytes, falls back to a name
-    built from a hash of the same (platform_tag, rel) pair — still
-    deterministic, still exactly reproducible by both call sites, just no
-    longer human-readable. The extension is kept where there is one, purely
-    so a directory listing still hints at what a hashed file is.
+    reversible by eye. Falls back to a name built from a hash of the same
+    (platform_tag, rel) pair — still deterministic, still exactly
+    reproducible by both call sites, just no longer human-readable — for
+    either of two reasons: past `_MAX_FLAT_NAME` bytes, or containing any
+    character GitHub itself would silently rewrite on upload (see
+    _GITHUB_SAFE_NAME above). The extension is kept where there is one,
+    purely so a directory listing still hints at what a hashed file is.
     """
     name = f"{platform_tag}__{rel.replace('/', '__')}"
-    if len(name.encode("utf-8")) <= _MAX_FLAT_NAME:
+    if (len(name.encode("utf-8")) <= _MAX_FLAT_NAME
+           and _GITHUB_SAFE_NAME.match(name)):
         return name
     digest = hashlib.sha256(f"{platform_tag}/{rel}".encode("utf-8")).hexdigest()
     ext = os.path.splitext(rel)[1]
-    if len(ext) > 16:                # a "." picked up from a version number
-        ext = ""                     # or similar, not a real extension
+    if len(ext) > 16 or not _GITHUB_SAFE_NAME.match(ext.lstrip(".")):
+        ext = ""                     # not a real, upload-safe extension
     return f"{platform_tag}__long__{digest}{ext}"
 
 

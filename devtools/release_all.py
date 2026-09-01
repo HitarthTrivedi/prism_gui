@@ -10,47 +10,78 @@ shows it, or `gh run list --workflow "Build desktop apps" -b <tag> -L 1`.
 This is the loop RELEASING-UPDATES.md's "Every release" section describes,
 run once per platform instead of copy-pasted by hand three times: download
 that platform's unsigned manifest and flattened update-assets from the CI
-run, sign the manifest, upload both back to the release. devtools/
-sign_manifest.py is still the thing that actually signs — this script
-never touches the key beyond handing it to that subprocess exactly the way
-it already accepts it (--key-hex, defaulting to the environment variable),
-and never prints or logs it.
+run, sign the manifest, upload both. devtools/sign_manifest.py is still the
+thing that actually signs — this script never touches the key beyond
+handing it to that subprocess exactly the way it already accepts it
+(--key-hex, defaulting to the environment variable), and never prints or
+logs it.
 
 Deliberately NOT shipped (devtools/ is absent from packaging/prism.spec —
 see build.py's own comment) and deliberately still a human running it on
 their own offline signing machine: this automates the repetitive mechanics,
-not the trust decision. UPDATE_SIGNING_KEY_HEX must already be in this
-shell's environment before you run it — the script refuses outright if it
-isn't, and never accepts it as a command-line argument (a CLI arg is
-visible to anyone who can list processes on the machine; an inherited
-environment variable isn't).
+not the trust decision. Signing a platform for the first time needs
+UPDATE_SIGNING_KEY_HEX already in this shell's environment — the script
+refuses outright, with a specific "which platform, why" error, right at
+the point it would actually need it, and never accepts it as a
+command-line argument (a CLI arg is visible to anyone who can list
+processes on the machine; an inherited environment variable isn't). A
+platform whose signed manifest already exists on the release needs no key
+at all — re-running this to finish an interrupted asset upload, or to add
+a platform's release-assets structure after the fact, works without it.
 
-Idempotent per platform: skips any platform whose `manifest.<platform_tag>.
-signed` is already on the release, so a run that fails partway through
-(network blip, wrong key, Ctrl-C) can just be re-run rather than needing
-you to remember which platforms already made it, and re-running after a
-successful release is a fast no-op rather than a slow re-upload of
-everything. Pass --force to re-sign and re-upload a platform anyway.
+TWO releases per version, not one — this is the real structural fix from
+the v1.4.0 incident, not just a convenience wrapper:
 
-Uploading update-assets is genuinely slow — each platform is roughly a
-thousand individual files, and `gh release upload` creates one release
-asset per file over the API, not a single bulk transfer. That's real, not
-a bug in this script; there's nothing here to speed it up short of the
-CI-side flattening scheme changing.
+  <tag>                    the human-facing release: archives, unsigned
+                            manifests (from CI), signed manifests (from
+                            here). updater.py's _manifest_url() reads this
+                            one via "latest/download" — unchanged.
+  <tag>-assets-<platform>  ONE per platform, holding that platform's ~1000
+                            flattened per-file update assets. Created
+                            --prerelease so it can never become GitHub's
+                            "latest" release out from under the real one.
+                            updater.py's _file_url() reads these via an
+                            explicit tag, never "latest".
+
+Why: GitHub caps a release at 1000 assets. Three platforms' flattened
+files sharing the tag release with the manifests and archives blew past
+that on the very first real 3-platform release (linux-x64 alone needs 966
+once Playwright's Chromium is in the bundle) — 863 of those files silently
+never made it onto the release at all, `gh release upload` still exited 0,
+and nobody noticed until an actual update attempt was watched fail.
+
+Uploads happen in small batches (BATCH_SIZE files per `gh release upload`
+call), each one followed by re-listing what the release ACTUALLY has —
+via the paginated assets API, never `gh release view --json assets`, which
+silently returns an incomplete list once a release has hundreds of assets
+(confirmed against the real API; this is exactly how those 863 missing
+files went undetected the first time). Any file still missing after all
+batches gets one more individual retry pass. This is slow — real, not a
+bug in this script — but a dropped connection now costs at most one batch,
+not the other 90% of a thousand-file upload silently vanishing.
+
+Idempotent per platform: skips one whose assets-release already has every
+file the signed manifest calls for, so a run that fails partway through
+can just be re-run. Pass --force to redo a platform anyway.
 """
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 import subprocess
 import sys
 import tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# platform_tag (what manifests and .signed files are named) -> the
-# .github/workflows/build.yml matrix's `os` value (what its
+import update_manifest as UM  # noqa: E402
+import licensing.keys as K  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BATCH_SIZE = 40
+
+# platform_tag (what manifests, .signed files and assets-releases are
+# named) -> the .github/workflows/build.yml matrix's `os` value (what its
 # `update-assets-<os>` workflow artifact is actually named). Mirrors that
 # workflow's `strategy.matrix.include` — update this table if that matrix
 # ever changes runner images.
@@ -61,9 +92,44 @@ PLATFORMS = [
 ]
 
 
-def run(cmd: list[str]) -> None:
+def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     print("»", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def _version_from_tag(tag: str) -> str:
+    return tag[1:] if tag.startswith("v") else tag
+
+
+def _assets_tag(tag: str, platform_tag: str) -> str:
+    return f"{tag}-assets-{platform_tag}"
+
+
+def _release_exists(repo: str, tag: str) -> bool:
+    return subprocess.run(
+        ["gh", "release", "view", tag, "-R", repo],
+        capture_output=True).returncode == 0
+
+
+def _release_id(repo: str, tag: str) -> int:
+    out = subprocess.run(
+        ["gh", "api", f"repos/{repo}/releases/tags/{tag}", "-q", ".id"],
+        check=True, capture_output=True, text=True).stdout.strip()
+    return int(out)
+
+
+def _list_assets(repo: str, release_id: int) -> set[str]:
+    """The full, real asset list — explicitly paginated. NEVER use
+    `gh release view --json assets` for this: it silently returns an
+    incomplete list once a release has hundreds of assets, which is
+    exactly how 863 missing linux-x64 files went unnoticed the first
+    time this shipped."""
+    out = subprocess.run(
+        ["gh", "api", "--paginate",
+         f"repos/{repo}/releases/{release_id}/assets?per_page=100",
+         "-q", ".[].name"],
+        check=True, capture_output=True, text=True).stdout
+    return {line for line in out.splitlines() if line}
 
 
 def already_signed(repo: str, tag: str, platform_tag: str) -> bool:
@@ -75,25 +141,123 @@ def already_signed(repo: str, tag: str, platform_tag: str) -> bool:
     return out != "0"
 
 
+def expected_flat_names(manifest_path: str, platform_tag: str) -> dict[str, str]:
+    """{flat_name: manifest path} for every file needing an uploaded
+    asset — matches flatten_update_assets.py's own skip rules: no
+    symlinks (recreated from the manifest's own `symlink` field), no
+    zero-byte files (GitHub refuses to host them; updater.py creates
+    them directly)."""
+    token = open(manifest_path, encoding="utf-8").read().strip()
+    payload = UM.verify(token, public_keys=K.UPDATE_PRODUCTION)
+    return {UM.flat_name(platform_tag, e["path"]): e["path"]
+           for e in payload["files"]
+           if "symlink" not in e and e.get("size", 0) > 0}
+
+
+def upload_missing(repo: str, assets_tag: str, assets_dir: str,
+                   expected: dict[str, str]) -> list[str]:
+    """Uploads whatever `expected` names aren't already on the
+    assets-release, in small batches, verified after each. Returns
+    whatever is STILL missing after one full pass plus a retry — should
+    be empty; a non-empty result means something is wrong beyond a
+    transient network blip and wants a human look, not another retry
+    loop."""
+    release_id = _release_id(repo, assets_tag)
+    actual = _list_assets(repo, release_id)
+    missing = sorted(n for n in expected if n not in actual)
+    if not missing:
+        print(f"  {assets_tag}: all {len(expected)} expected assets "
+             f"already present")
+        return []
+
+    not_local = [n for n in missing
+                if not os.path.exists(os.path.join(assets_dir, n))]
+    if not_local:
+        print(f"  WARNING: {len(not_local)} missing files aren't in "
+             f"{assets_dir} either. First few: {not_local[:5]}",
+             file=sys.stderr)
+    missing = [n for n in missing if n not in not_local]
+
+    for attempt in (1, 2):
+        if not missing:
+            break
+        for i in range(0, len(missing), BATCH_SIZE):
+            batch = missing[i:i + BATCH_SIZE]
+            paths = [os.path.join(assets_dir, n) for n in batch]
+            print(f"  uploading batch {i // BATCH_SIZE + 1} "
+                 f"({len(batch)} files, {i + len(batch)}/{len(missing)}, "
+                 f"attempt {attempt})…")
+            subprocess.run(
+                ["gh", "release", "upload", assets_tag, "-R", repo,
+                 "--clobber"] + paths, check=True)
+        actual = _list_assets(repo, release_id)
+        missing = sorted(n for n in expected
+                         if n not in actual and n not in not_local)
+
+    return missing + not_local
+
+
 def do_platform(repo: str, tag: str, run_id: str, work: str,
-                platform_tag: str, matrix_os: str) -> None:
+                platform_tag: str, matrix_os: str, force: bool) -> None:
+    version = _version_from_tag(tag)
+    assets_tag = _assets_tag(tag, platform_tag)
     unsigned = os.path.join(work, f"manifest.{platform_tag}.unsigned.json")
     signed = os.path.join(work, f"manifest.{platform_tag}.signed")
     assets_dir = os.path.join(work, f"update-assets-{platform_tag}")
 
-    run(["gh", "release", "download", tag, "-R", repo,
-        "-p", f"manifest.{platform_tag}.unsigned.json",
-        "-D", work, "--clobber"])
     run(["gh", "run", "download", run_id, "-R", repo,
         "-n", f"update-assets-{matrix_os}", "-D", assets_dir])
-    # No --key-hex here: sign_manifest.py already defaults it to
-    # os.environ["UPDATE_SIGNING_KEY_HEX"], which main() below has already
-    # confirmed is set. Passing it explicitly here would work identically
-    # but put it on THIS process's command line for no benefit.
-    run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
-        unsigned, "-o", signed])
-    uploads = [signed] + glob.glob(os.path.join(assets_dir, "*"))
-    run(["gh", "release", "upload", tag, "-R", repo, "--clobber"] + uploads)
+
+    if not force and already_signed(repo, tag, platform_tag):
+        # sign_manifest.py's downgrade guard would refuse to re-sign this
+        # SAME version — correctly; that is not a bug to route around here.
+        # Reuse what's already on the release instead of trying to redo it,
+        # so a re-run only picks up where a previous partial run actually
+        # left off (asset upload), not "sign this version again".
+        print(f"  manifest.{platform_tag}.signed already on {tag} — "
+             f"reusing it, checking assets only")
+        run(["gh", "release", "download", tag, "-R", repo,
+            "-p", f"manifest.{platform_tag}.signed",
+            "-D", work, "--clobber"])
+    else:
+        run(["gh", "release", "download", tag, "-R", repo,
+            "-p", f"manifest.{platform_tag}.unsigned.json",
+            "-D", work, "--clobber"])
+        if not os.environ.get("UPDATE_SIGNING_KEY_HEX"):
+            raise RuntimeError(
+                "UPDATE_SIGNING_KEY_HEX is not set in this shell, and "
+                f"{platform_tag} actually needs signing (no valid "
+                f".signed manifest to reuse) — set it there before "
+                f"running this, never as a command-line argument.")
+        # No --key-hex here: sign_manifest.py already defaults it to
+        # the UPDATE_SIGNING_KEY_HEX environment variable just confirmed
+        # above. Passing it explicitly here would work identically but put
+        # it on THIS process's command line for no benefit.
+        extra = ["--allow-downgrade"] if force else []
+        run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
+            unsigned, "-o", signed] + extra)
+        # The signed manifest goes on the MAIN release — updater.py's
+        # _manifest_url() reads it from there via "latest/download".
+        run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
+
+    if not _release_exists(repo, assets_tag):
+        run(["gh", "release", "create", assets_tag, "-R", repo,
+            "--prerelease",
+            "--title", f"{tag} update assets — {platform_tag}",
+            "--notes", f"Per-file update assets for {tag}, {platform_tag} "
+                      f"only. Not for direct download — see {tag} for "
+                      f"the actual installers. Fetched by Prism's "
+                      f"in-app updater; --prerelease so it never "
+                      f"becomes GitHub's \"latest\" release."])
+
+    expected = expected_flat_names(signed, platform_tag)
+    still_missing = upload_missing(repo, assets_tag, assets_dir, expected)
+    if still_missing:
+        raise RuntimeError(
+            f"{platform_tag}: {len(still_missing)} files still missing "
+            f"from {assets_tag} after upload + retry: {still_missing[:10]}")
+    print(f"  {assets_tag}: confirmed all {len(expected)} files present "
+         f"(version {version})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,40 +276,35 @@ def main(argv: list[str] | None = None) -> int:
                         "release already has its .signed manifest")
     args = p.parse_args(argv)
 
-    if not os.environ.get("UPDATE_SIGNING_KEY_HEX"):
-        p.error("UPDATE_SIGNING_KEY_HEX is not set in this shell. Set it "
-                "there (export UPDATE_SIGNING_KEY_HEX=... or read -s "
-                "UPDATE_SIGNING_KEY_HEX) before running this script — "
-                "never pass it as an argument.")
+    # No upfront "key must be set" check: a platform whose signed manifest
+    # already exists (the common re-run case — everything but a genuinely
+    # new version) needs no key at all, only a human running this on their
+    # signing machine has any business setting it, and do_platform() below
+    # raises a clear, specific error the one time it's actually needed —
+    # signing a platform for the first time — rather than this function
+    # guessing upfront whether any platform will need it.
 
     work = args.work_dir or tempfile.mkdtemp(prefix="prism-release-")
     os.makedirs(work, exist_ok=True)
     print(f"Working directory: {work}\n")
 
-    done, skipped, failed = [], [], []
+    done, failed = [], []
     for platform_tag, matrix_os in PLATFORMS:
         print(f"── {platform_tag} " + "─" * max(1, 40 - len(platform_tag)))
-        if not args.force and already_signed(args.repo, args.tag, platform_tag):
-            print(f"already has manifest.{platform_tag}.signed on the "
-                 f"release — skipping (--force to redo it)\n")
-            skipped.append(platform_tag)
-            continue
         try:
             do_platform(args.repo, args.tag, args.run_id, work,
-                       platform_tag, matrix_os)
+                       platform_tag, matrix_os, args.force)
             done.append(platform_tag)
             print(f"✓ {platform_tag} done\n")
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"✗ {platform_tag} failed: {e}\n", file=sys.stderr)
             failed.append(platform_tag)
 
     print("── summary " + "─" * 30)
-    print(f"done:    {done or '(none)'}")
-    print(f"skipped: {skipped or '(none, already signed)'}")
-    print(f"failed:  {failed or '(none)'}")
+    print(f"done:   {done or '(none)'}")
+    print(f"failed: {failed or '(none)'}")
     if failed:
-        print(f"\nRe-run the same command to retry — completed platforms "
-             f"are skipped automatically, work is kept at {work}")
+        print(f"\nRe-run the same command to retry — work is kept at {work}")
     return 1 if failed else 0
 
 
