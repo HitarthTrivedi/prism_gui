@@ -41,7 +41,8 @@ from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from widgets.simple_panels import (
-    BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel, HistoryPanel,
+    BomPanel, BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel,
+    HistoryPanel,
 )
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
@@ -81,6 +82,10 @@ ARTIFACTS = 12
 # launcher panel (INQUIRY), never from the rail directly, so like WIZARD it
 # has no entry in _show_screen()'s name->index table either.
 INQUIRY_WORK = 13
+# BOM reuses the BOQ dialog (mode="bom") but has its own front-door panel and
+# its own screen. Appended LAST so nothing above renumbers; it IS a rail entry
+# and DOES have an entry in _show_screen()'s table below.
+BOM = 14
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -332,6 +337,8 @@ class MainWindow(QMainWindow):
         # what refreshes it on each visit — see _open_inquiry_dialog.
         self.inquiry_work_panel = InquiryDialog(self.cfg, self)
         self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
+        self.bom_panel = BomPanel(self.cfg)
+        self.screens.addWidget(self.bom_panel)              # BOM (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -362,6 +369,7 @@ class MainWindow(QMainWindow):
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.bom_panel.opened.connect(self._open_bom_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
         self.email_panel.open_compose.connect(self._open_email_dialog)
@@ -373,7 +381,8 @@ class MainWindow(QMainWindow):
         self.catalog_panel.navigate.connect(self._handle_command)
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
-        for panel in (self.boq_panel, self.gerber_panel, self.email_panel):
+        for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
+                      self.email_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -409,7 +418,7 @@ class MainWindow(QMainWindow):
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
                  "email": EMAIL, "support": SUPPORT, "gerber": GERBER,
-                 "artifacts": ARTIFACTS}.get(name, HOME)
+                 "artifacts": ARTIFACTS, "bom": BOM}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -443,7 +452,7 @@ class MainWindow(QMainWindow):
             SETTINGS: "config", GUIDE: "guide", CATALOG: "catalog",
             HISTORY: "runs", BOQ: "boq", EMAIL: "email",
             SUPPORT: "support", GERBER: "gerber",
-            ARTIFACTS: "artifacts"}.get(index, "home"))
+            ARTIFACTS: "artifacts", BOM: "bom"}.get(index, "home"))
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
@@ -1096,6 +1105,8 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
+        elif key == "bom":
+            self._open_bom()
         elif key == "gerber":
             self._open_gerber()
         elif key == "inquiry":
@@ -1288,7 +1299,33 @@ class MainWindow(QMainWindow):
         # stage's query label doubles as the Artifacts task key, so "what came
         # back" shows the BOQ itself.
         self._offer_followup_for_dialog(
-            f"Bill of Quantities — {getattr(dlg, 'request', '')}",
+            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
+            getattr(dlg, "_all_responses", {}),
+            getattr(dlg, "_stage_agents_map", {}),
+            getattr(dlg, "_links", {}))
+
+    def _open_bom(self):
+        # Same front-door pattern as BOQ. Gated on the BOQ entitlement for now —
+        # there is no dedicated "bom" feature on the licence server yet, exactly
+        # like Gerber rides on "boq" (see the sidebar entry).
+        self._authorized_then("boq", "addon", lambda: self._show_screen("bom"))
+
+    def _open_bom_dialog(self):
+        ok, err = CB.boq_available()
+        if not ok:
+            QMessageBox.information(
+                self, "BOM",
+                "The BOM add-on needs the ezdxf library to measure drawings:\n\n"
+                "    pip install ezdxf\n\n"
+                "A .dwg also needs a converter — install the free ODA File "
+                f"Converter on Windows.\n\nDetail: {err}")
+            return
+        # Same dialog as BOQ, in BOM mode — it measures the drawing identically
+        # and writes a parts list instead of a quantities schedule.
+        dlg = BoqDialog(self.cfg, self.attachments, self, mode="bom")
+        dlg.exec()
+        self._offer_followup_for_dialog(
+            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
             getattr(dlg, "_all_responses", {}),
             getattr(dlg, "_stage_agents_map", {}),
             getattr(dlg, "_links", {}))

@@ -224,7 +224,7 @@ class BoqDialog(PrismDialog):
         self.open_btn.setEnabled(False)
         self.footer.add_utility(self.open_btn)
         self.footer.add_secondary(self.button(i18n.t("Close"), on_click=self.reject))
-        self.run_btn = self.button(i18n.t("Make my BOQ"), "primary", icon_name="check",
+        self.run_btn = self.button(f"Make my {self._noun}", "primary", icon_name="check",
                                    on_click=self._run)
         self.footer.set_primary(self.run_btn)
 
@@ -294,7 +294,7 @@ class BoqDialog(PrismDialog):
         try:
             CB.config.save_artifact(
                 self.csv_path, os.path.basename(self.cad_path), kind="boq",
-                task=f"Bill of Quantities — {self.request}")
+                task=f"{self._doc} — {self.request}")
         except Exception:                               # noqa: BLE001
             pass
         note = "  ".join(notes)
@@ -356,7 +356,7 @@ class BoqDialog(PrismDialog):
         if not request and not self.q:
             QMessageBox.information(
                 self, "BOQ",
-                "Tell me what the BOQ is for — or attach a drawing.")
+                f"Tell me what the {self._noun} is for — or attach a drawing.")
             return
 
         # A drawing is attached but still being measured: wait for it. The
@@ -385,7 +385,7 @@ class BoqDialog(PrismDialog):
         # Matches cmd_boq in prism_terminal/prism.py — the pipelines have to
         # agree, or the same drawing produces two different documents.
         self.interpreter = "ChatGPT" if self.images else None
-        self.request = request or "Produce a Bill of Quantities from the attached drawing."
+        self.request = request or f"Produce a {self._doc} from the attached drawing."
 
         # Start the clock for this run's timing report.
         self._t0 = time.time()
@@ -396,9 +396,9 @@ class BoqDialog(PrismDialog):
             self._set_busy(True, f"{self.researcher} is checking the standard "
                                  "sizes and norms…")
             self._worker = AutomationWorker(
-                {}, self.cfg, [], "design standards for a BOQ trade",
+                {}, self.cfg, [], f"design/material standards for a {self._noun}",
                 custom_stages=[("standards", self.researcher,
-                                [self.boq.standards_prompt(
+                                [self._pm.standards_prompt(
                                     self.request, project_context=self.request,
                                     measured_text=self.summary)])],
                 chatgpt_analysis=False)
@@ -478,7 +478,7 @@ class BoqDialog(PrismDialog):
 
     def _write(self):
         self._set_busy(True, f"{self.writer_agent} is writing your BOQ…")
-        prompt = self.boq.formatting_prompt(
+        prompt = self._pm.formatting_prompt(
             self.summary, project_context=self.request,
             has_template=bool(self.templates),
             legend=self.legend_edit.text().strip(),
@@ -499,7 +499,7 @@ class BoqDialog(PrismDialog):
                 pass
 
         self._worker = AutomationWorker(
-            {}, self.cfg, files, f"Bill of Quantities — {self.request}",
+            {}, self.cfg, files, f"{self._doc} — {self.request}",
             custom_stages=[("format", self.writer_agent, [prompt])],
             chatgpt_analysis=False)
         self._worker.done.connect(self._on_written)
@@ -527,7 +527,7 @@ class BoqDialog(PrismDialog):
                 + "Check the numbers against the saved file above.")
         self.open_btn.setEnabled(bool(self._links.get("format")))
         CB.config.save_run({
-            "query": f"BOQ — {self.request}", "responses": responses,
+            "query": f"{self._noun} — {self.request}", "responses": responses,
             "links": self._links,
             "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
         })
