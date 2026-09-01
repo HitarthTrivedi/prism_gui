@@ -10,6 +10,32 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
 
 ## Fixed, pending review
 
+### 0a. Native crash — QThread destroyed while still running — FIXED, uncommitted 🔴
+- **Symptom:** the window opens, then Prism vanishes a few seconds later with no
+  Python traceback. Windows logs a fast-fail — `python.exe … Qt6Core.dll …
+  c0000409` (BEX64). Reproduced on `followup-artifact-capture` by opening BOQ and
+  clicking **Attach files**; also latent on closing any dialog whose worker was
+  still running.
+- **Cause:** every worker is a `QThread` subclass, and a `QThread` that is
+  garbage-collected while its thread is still running is a Qt *fatal*
+  (`QThread: Destroyed while thread is still running`) that aborts the process.
+  A `Signal.connect()` does **not** keep the emitter alive, so a worker held only
+  through its `done`/`failed` connections is dropped the instant the caller's own
+  reference goes — a dialog closing, an attribute reassigned to the next run's
+  worker, or a local going out of scope — and the next GC destroys it mid-run.
+- **Fix applied:** new `_Worker(QThread)` base in `workers.py` that anchors each
+  worker in a module-level `_running` set from `start()` until its `finished`
+  signal fires (drains itself on the GUI thread, so the eventual destruction is
+  always safe). All 20 workers inherit it; `dialogs/license_dialog._ActivateWorker`
+  too (it was parented to the dialog and could be destroyed mid-activation behind
+  a slow proxy). `drive_dialog._Job` and `wakeword.WakeWordListener` already
+  `wait()` on teardown.
+- **Verified:** a standalone repro (start a QThread, drop its only reference,
+  `gc.collect()` while running) fast-fails `0xC0000409` before the fix and exits 0
+  after; the live app now runs well past the old ~15–30 s crash window.
+- **Action:** review + commit; any new background thread must subclass
+  `workers._Worker`, never `QThread` directly.
+
 ### 0. Ghost-window flash on panel rebuilds — FIXED, uncommitted 🟡
 - **Symptom:** navigating to Settings (and any rebuilt panel) flashed a tiny
   top-level OS window with a titlebar and DWM open-animation.
