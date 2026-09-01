@@ -1,10 +1,10 @@
-"""AgentsPicker — one combo box per pipeline category, shared by SetupDialog
-and the first-run wizard so "which tool handles which kind of step" has one
-implementation instead of two that can drift apart.
+"""AgentsPicker — one combo box per pipeline category, shared by the Settings
+screen's Agents section and the first-run wizard so "which tool handles which
+kind of step" has one implementation instead of two that can drift apart.
 
 Deliberately owns no chrome (no Card, no kicker, no surrounding Section) —
-SetupDialog wraps it in its own card, the wizard wraps it in a plain page.
-Only the form of combos is this widget's job; how it's framed is the host's.
+each host wraps it in its own card or plain page. Only the form of combos is
+this widget's job; how it's framed is the host's.
 """
 from __future__ import annotations
 

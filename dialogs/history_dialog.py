@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -55,6 +55,22 @@ def _when(path: str) -> tuple[str, str]:
 def _one_line(text: str, limit: int = 90) -> str:
     flat = " ".join((text or "").split())
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
+
+
+def _editable_reel(url: str) -> bool:
+    """A video with a Studio spec saved beside it — reel_<stamp>.json next
+    to reel_<stamp>.mp4, scenes carrying real HTML. Same check
+    widgets.output_panel.StageCard._editable_reel and
+    widgets.artifacts_panel._editable_reel make — a past run's reel is no
+    less editable than one still on the workbench."""
+    if not url.lower().endswith(".mp4"):
+        return False
+    try:
+        with open(url[:-4] + ".json", encoding="utf-8") as f:
+            spec = json.load(f)
+        return CB.get_reel_edit().is_studio_spec(spec)
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def _attachment_name(entry) -> str:
@@ -122,6 +138,13 @@ def _role_chip(me: dict) -> QLabel:
 
 
 class HistoryDialog(PrismDialog):
+    # A Studio reel from a past run wants fixing by hand. Carries the mp4
+    # path; MainWindow owns the browser editor and re-render (see
+    # _edit_reel_layout on the main window), so this dialog only asks — and
+    # closes itself first, since the editor and the re-render both surface
+    # through the main window, which this modal dialog sits in front of.
+    edit_reel = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(
             i18n.t("Run history"),
@@ -177,6 +200,15 @@ class HistoryDialog(PrismDialog):
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(True)
         right_box.addWidget(self.view, stretch=1)
+        self._current_reel = ""
+        self.edit_reel_btn = C.button(
+            i18n.t("Edit the layout"), "secondary", icon_name="pencil",
+            small=True, on_click=self._edit_current_reel)
+        self.edit_reel_btn.setToolTip(i18n.t(
+            "Open this reel in your browser: drag anything into place, "
+            "resize it, retype it or delete it, then render it again."))
+        self.edit_reel_btn.setVisible(False)
+        right_box.addWidget(self.edit_reel_btn)
         split.addWidget(right)
 
         split.setStretchFactor(0, 1)
@@ -198,6 +230,8 @@ class HistoryDialog(PrismDialog):
         try:
             identity.view_as(self.who.currentData())
         except PermissionError as e:
+            self._current_reel = ""
+            self.edit_reel_btn.setVisible(False)
             self.view.setHtml(self._page(f"<p>{e}</p>"))
             return
         self.runs.clear()
@@ -218,6 +252,8 @@ class HistoryDialog(PrismDialog):
                            reverse=True)
         if not names:
             self.runs.setEnabled(False)
+            self._current_reel = ""
+            self.edit_reel_btn.setVisible(False)
             nobody = ("No runs saved yet. Once Prism finishes a task, it "
                       "turns up here.")
             if who["mid"] != self._me["mid"]:
@@ -254,12 +290,29 @@ class HistoryDialog(PrismDialog):
             with open(path, "r", encoding="utf-8") as f:
                 record = json.load(f)
         except Exception as e:
+            self._current_reel = ""
+            self.edit_reel_btn.setVisible(False)
             self.view.setHtml(self._page(
                 f"<p style='color:{theme.ERR_INK}'>Couldn't read "
                 f"{os.path.basename(path)}: "
                 f"{e}</p>"))
             return
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
+        # The reel button reads the URLs this run actually produced, not the
+        # HTML _render() just wrote — one source of truth for "is there a
+        # reel here", matched against by widgets.artifacts_panel and
+        # widgets.output_panel the same way.
+        self._current_reel = next(
+            (url for url in (record.get("links") or {}).values()
+             if url and _editable_reel(url)), "")
+        self.edit_reel_btn.setVisible(bool(self._current_reel))
+
+    def _edit_current_reel(self):
+        if not self._current_reel:
+            return
+        url = self._current_reel
+        self.accept()
+        self.edit_reel.emit(url)
 
     # ── rendering ─────────────────────────────────────────────────────────
     @staticmethod

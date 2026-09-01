@@ -4,12 +4,19 @@ The design folds the rail's old WORKSPACE and CONFIGURE groups — nine separate
 rows, each opening the same dialog scrolled to a different place — into a single
 page. This is that page.
 
-It is deliberately a *reading* surface for anything SetupDialog already owns.
-Every value shown here is editable there, and that dialog knows how to validate
-a Groq key, probe a Chrome version and write the team file safely; duplicating
-that here would mean two code paths that must agree about what a valid API key
-looks like. So each section states what is currently true and hands off to the
-dialog to change it.
+Editing happens right here, not in a second dialog. There used to be a
+SetupDialog with its own left-hand index of the same eight-ish sections, under
+different names and a different order, that every "Change…" button on this
+page opened — so a customer browsed one nav to find the fact, then landed in a
+second, disagreeing nav to change it, then had to Save/Cancel back out to see
+whether it took. That dialog is gone; every field it owned (the Groq key, the
+agent picks, both languages, the Chrome pin, the workspace root, the
+designation key, the team roster) now lives inline in the matching section
+below, each with its own small Save so one field's mistake can't block
+another's. The one thing still genuinely a separate flow is entering a new
+licence key — LicenseDialog validates and activates in a way this page has no
+reason to duplicate, so the licence section still opens it, directly, with no
+detour through a scrolled-to section first.
 
 What this screen owns outright, because nothing else offers it:
 
@@ -40,7 +47,8 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -54,6 +62,7 @@ import theme
 import updater
 import workspace
 from widgets import controls as C
+from widgets.agents_picker import AgentsPicker
 from widgets.controls import Card, Pill
 
 # Lifted out of the rail (see widgets/sidebar.SECONDARY). These are screens,
@@ -150,7 +159,6 @@ def feature_name(key: str) -> str:
 
 
 class SettingsPanel(QWidget):
-    edit_requested = Signal(str)     # a FOCUS_SECTIONS key for SetupDialog
     login_tabs = Signal()
     navigate = Signal(str)           # a rail command key — see MORE_LINKS
     rename_requested = Signal()      # set the display name on a solo copy
@@ -389,9 +397,53 @@ class SettingsPanel(QWidget):
         row.addStretch(1)
         return wrap
 
-    def _edit_button(self, text: str, key: str, variant: str = "secondary"):
-        return C.button(i18n.t(text), variant,
-                        on_click=lambda: self.edit_requested.emit(key))
+    @staticmethod
+    def _row(widgets) -> QWidget:
+        """Two or three controls on one line — a field beside its "Choose…"
+        or "Detect" button — as opposed to _buttons(), which is a row of
+        buttons under something. The first widget stretches; the rest (a
+        button, a second combo) size to their own content."""
+        wrap = QWidget()
+        row = QHBoxLayout(wrap)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_2)
+        for i, widget in enumerate(widgets):
+            row.addWidget(widget, stretch=1 if i == 0 else 0)
+        return wrap
+
+    def _field_card(self, title: str, blurb: str, field: QWidget, on_save,
+                    extra_buttons=None) -> Card:
+        """One editable setting: a kicker, what it's for, the field itself,
+        then Save — every inline editor on this page (the Groq key, the
+        workspace folder, both languages, the Chrome pin) is built from this
+        one shape, so a customer learns it once. `extra_buttons` sits to
+        Save's left — "Choose…", "Detect" — never competing with it."""
+        # `title`/`blurb` arrive already translated — every other helper on
+        # this page (_head, _danger, _note) takes the same contract, so a
+        # caller wraps once with i18n.t() rather than this method silently
+        # wrapping an already-wrapped string a second time.
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                         theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        col.addWidget(C.kicker(title))
+        if blurb:
+            col.addWidget(C.label(blurb, level="META", wrap=True))
+        col.addWidget(field)
+        buttons = list(extra_buttons or [])
+        buttons.append(C.button(i18n.t("Save"), "primary", on_click=on_save))
+        col.addWidget(self._buttons(buttons))
+        return card
+
+    def _after_save(self, message: str):
+        """The common tail of every inline Save: persist, say so somewhere
+        the customer is actually looking (the status bar, not a modal that
+        would interrupt the next field they're about to edit), then rebuild
+        the page so every section reads back what was just written."""
+        CB.config.save(self.cfg)
+        window = self.window()
+        if hasattr(window, "statusBar"):
+            window.statusBar().showMessage(message, 3000)
+        self.refresh()
 
     def _danger(self, title: str, blurb: str, buttons) -> Card:
         """The quarantine. Everything irreversible lives in one red-bordered
@@ -452,9 +504,20 @@ class SettingsPanel(QWidget):
             i18n.t("Both actions stop Prism working on this computer until a "
                    "licence key is entered again. Your settings, your history "
                    "and your files are untouched by either."),
-            [self._edit_button("Change licence key", "licence"),
+            [C.button(i18n.t("Change licence key"), "secondary",
+                      on_click=self._open_license_dialog),
              C.button(i18n.t("Release this computer's seat"), "destructive",
                       on_click=self._release_seat)]))
+
+    def _open_license_dialog(self):
+        """Straight to the key-entry dialog — no detour through a settings
+        section first. LicenseDialog is its own validated, multi-step flow
+        (paste a key, confirm, activate) that this page has no reason to
+        re-implement; everything else here edits a config value in place."""
+        from dialogs.license_dialog import LicenseDialog
+        if LicenseDialog(self.window(), mode="change").exec() == QDialog.Accepted:
+            self.licence_changed.emit()
+            self.refresh()
 
     @staticmethod
     def _licence_tone(state) -> tuple[str, str]:
@@ -497,9 +560,8 @@ class SettingsPanel(QWidget):
     def _features(state) -> list[tuple[str, str, str, bool]]:
         """Every add-on Prism sells, with this licence's answer for each.
 
-        Listing the locked ones is deliberate and matches SetupDialog: this is
-        the only screen on which a customer can see what else the product
-        does.
+        Listing the locked ones is deliberate: this is the only screen on
+        which a customer can see what else the product does.
         """
         try:
             import plans
@@ -541,9 +603,8 @@ class SettingsPanel(QWidget):
         return card
 
     def _release_seat(self):
-        """Free this machine's seat. The same call SetupDialog makes, behind
-        the same confirmation — a seat released by accident costs a support
-        call and a re-activation."""
+        """Free this machine's seat, behind a confirmation — a seat released
+        by accident costs a support call and a re-activation."""
         if QMessageBox.question(
                 self, i18n.t("Release this computer's seat"),
                 i18n.t("This frees the seat so the licence can be used on "
@@ -574,17 +635,76 @@ class SettingsPanel(QWidget):
         col.addWidget(self._facts([
             (i18n.t("Name"), shown or i18n.t("Not set — this computer")),
             (i18n.t("Role"), role.label if role else i18n.t("Personal copy")),
-            (i18n.t("What you do"), (self.cfg.get("profile") or "—")),
             (i18n.t("Member folder"), self._mono(me.get("mid") or "—")),
-            (i18n.t("Workspace folder"),
-             self._path(workspace.root(self.cfg) or "—")),
         ]))
+        if not (me.get("name") or "").strip():
+            # A team member's name comes from their signed designation key
+            # and is not theirs to type; a solo copy has no key, so without
+            # this there is no way to be called anything but "This computer".
+            col.addWidget(self._buttons([C.button(
+                i18n.t("Set your name"), "primary",
+                on_click=self.rename_requested.emit)]))
 
         if role and role.blurb:
             col.addWidget(self._note(i18n.t(role.blurb)))
 
         col.addWidget(self._head(i18n.t("Who can see your work")))
         col.addWidget(self._note(self._visibility(me), "info"))
+
+        # ── what you do — edited right where it's shown ────────────────────
+        profile_edit = QLineEdit(self.cfg.get("profile", ""))
+        profile_edit.setPlaceholderText(
+            i18n.t("e.g. indie game dev, startup marketer…"))
+        col.addWidget(self._field_card(
+            i18n.t("What you do"),
+            i18n.t("One line. Prism uses it to pitch every prompt at the "
+                   "right audience."),
+            profile_edit,
+            lambda: self._save_profile_line(profile_edit)))
+
+        # ── the designation key ──────────────────────────────────────────
+        key_edit = QLineEdit()
+        key_edit.setPlaceholderText(
+            i18n.t("PRSD1.… — paste your designation key"))
+        key_row = self._row([key_edit])
+        key_buttons = [C.button(i18n.t("Apply"), "primary",
+                                on_click=lambda: self._apply_designation(
+                                    key_edit))]
+        if role:
+            key_buttons.append(C.button(
+                i18n.t("Remove"), "destructive",
+                on_click=self._clear_designation))
+        card = Card()
+        kcol = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        kcol.addWidget(C.kicker(i18n.t("Company designation key")))
+        kcol.addWidget(C.label(
+            i18n.t("If your company gave you a designation key, paste it "
+                   "here to switch this copy to your job's setup. It only "
+                   "works alongside your company licence key.")
+            if not role else
+            i18n.t("Paste a new key to switch roles, or remove this one to "
+                   "turn this back into a personal copy."),
+            level="META", wrap=True))
+        kcol.addWidget(key_row)
+        kcol.addWidget(self._buttons(key_buttons))
+        col.addWidget(card)
+
+        # ── team workspace — where the shared folder lives ─────────────────
+        workspace_edit = QLineEdit(self.cfg.get("workspace_root", ""))
+        workspace_edit.setPlaceholderText(workspace.default_root())
+        browse = C.button(i18n.t("Choose…"), "secondary",
+                          on_click=lambda: self._pick_workspace(workspace_edit))
+        col.addWidget(self._field_card(
+            i18n.t("Team workspace"),
+            i18n.t("Point this at a folder every member's computer can "
+                   "reach — a Google Drive, OneDrive or Dropbox folder, or a "
+                   "network share — and the manager can see the whole "
+                   "team's work. Leave it blank to keep everything on this "
+                   "computer only."),
+            self._row([workspace_edit]),
+            lambda: self._save_workspace(workspace_edit),
+            extra_buttons=[browse]))
 
         members = self._safe(lambda: workspace.load_team(self.cfg)) or []
         if members:
@@ -596,6 +716,20 @@ class SettingsPanel(QWidget):
                 grid.add(self._member_card(member))
             col.addWidget(grid)
 
+        if me.get("admin"):
+            member_name = QLineEdit()
+            member_name.setPlaceholderText(i18n.t("Name, e.g. Ravi Patel"))
+            member_role = QComboBox()
+            for entry in R.ordered():
+                member_role.addItem(entry.label, entry.key)
+            col.addWidget(self._field_card(
+                i18n.t("Add a team member"),
+                i18n.t("Tell us the names and jobs and we issue one "
+                       "designation key each — add them here so their work "
+                       "is labelled with a name instead of a folder id."),
+                self._row([member_name, member_role]),
+                lambda: self._add_member(member_name, member_role)))
+
         col.addWidget(self._head(
             i18n.t("The roles Prism knows"),
             i18n.t("A designation key sets this copy to one of these. The "
@@ -606,15 +740,72 @@ class SettingsPanel(QWidget):
             grid.add(self._role_card(entry, entry.key == (me.get("role") or "")))
         col.addWidget(grid)
 
-        actions = [self._edit_button("Change what you do", "profile"),
-                   self._edit_button("Your role and team", "team")]
-        # A team member's name comes from their signed designation key and is
-        # not theirs to type; a solo copy has no key, so without this there is
-        # no way to be called anything but "This computer".
-        if not (me.get("name") or "").strip():
-            actions.insert(0, C.button(i18n.t("Set your name"), "primary",
-                                       on_click=self.rename_requested.emit))
-        col.addWidget(self._buttons(actions))
+    def _save_profile_line(self, field: QLineEdit):
+        self.cfg["profile"] = field.text().strip()
+        self._after_save(i18n.t("Saved."))
+
+    def _pick_workspace(self, field: QLineEdit):
+        chosen = QFileDialog.getExistingDirectory(
+            self, i18n.t("Choose the team workspace folder"),
+            field.text().strip() or workspace.default_root())
+        if chosen:
+            field.setText(chosen)
+
+    def _save_workspace(self, field: QLineEdit):
+        self.cfg["workspace_root"] = field.text().strip()
+        self._after_save(i18n.t("Saved."))
+
+    def _apply_designation(self, field: QLineEdit):
+        import roles as R
+        key = field.text().strip()
+        if not key:
+            QMessageBox.information(
+                self, i18n.t("Designation key"),
+                i18n.t("Paste the designation key we sent you for this "
+                       "person."))
+            return
+        try:
+            me = identity.activate(key)
+        except licensing.TokenError as error:
+            QMessageBox.warning(self, i18n.t("Designation key"), str(error))
+            return
+        workspace.ensure_member(me["mid"], self.cfg)
+        QMessageBox.information(
+            self, i18n.t("Designation key"),
+            i18n.t("This copy is now set up for {name} — {role}.\n\nRestart "
+                   "Prism to pick up the role's colours and default tools."
+                   ).format(name=me.get("name") or i18n.t("this member"),
+                            role=R.label(me.get("role") or "")))
+        self.licence_changed.emit()
+        self.refresh()
+
+    def _clear_designation(self):
+        if QMessageBox.question(
+                self, i18n.t("Remove role"),
+                i18n.t("Turn this back into a personal copy?\n\nWork already "
+                       "saved in the team workspace stays where it is."),
+                QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+        identity.clear()
+        QMessageBox.information(self, i18n.t("Removed"),
+                                i18n.t("Restart Prism to finish switching "
+                                       "back."))
+        self.licence_changed.emit()
+        self.refresh()
+
+    def _add_member(self, name_field: QLineEdit, role_combo: QComboBox):
+        name = name_field.text().strip()
+        role_key = role_combo.currentData()
+        if not name:
+            QMessageBox.information(self, i18n.t("Team"),
+                                    i18n.t("Enter the person's name."))
+            return
+        # The member id is derived the same way the minting tool derives it,
+        # so the roster entry and the key we issue agree on the folder name
+        # without anyone having to copy an id between the two.
+        workspace.upsert_member(self.cfg, workspace.member_id(role_key, name),
+                                name, role_key)
+        self._after_save(i18n.t("{name} added.").format(name=name))
 
     def _role_card(self, role, current: bool) -> Card:
         """One row of roles.ordered(), read straight off the table the
@@ -659,8 +850,7 @@ class SettingsPanel(QWidget):
         return card
 
     def _visibility(self, me: dict) -> str:
-        """Said plainly, because finding it out later is a much worse day.
-        The three cases are exactly the ones SetupDialog words."""
+        """Said plainly, because finding it out later is a much worse day."""
         if me.get("admin"):
             return i18n.t("You are set up as a manager, so you can open any "
                           "member's profile and history from the History "
@@ -680,52 +870,31 @@ class SettingsPanel(QWidget):
 
         # The Groq key and the agent picks are one job — "change my AI
         # setup" — even though they used to live on two different nav
-        # destinations (this section and Connections). Shown before the
-        # empty-state return below so it's visible even with zero agents
-        # picked yet.
-        key_set = bool((self.cfg.get("api_key") or "").strip())
-        col.addWidget(self._facts([
-            (i18n.t("Groq key"), Pill(i18n.t("Set") if key_set else i18n.t("Not set"),
-                                      "ok" if key_set else "warn")),
-        ]))
-        if not key_set:
-            col.addWidget(self._note(i18n.t(
-                "Prism cannot route anything without a Groq key. It is free "
-                "at console.groq.com — API Keys, then Create API Key.")))
-        col.addWidget(self._buttons([self._edit_button("Change API key", "key")]))
+        # destinations (this section and Connections).
+        key_edit = QLineEdit(self.cfg.get("api_key", ""))
+        key_edit.setEchoMode(QLineEdit.Password)
+        key_edit.setPlaceholderText("gsk_…")
+        col.addWidget(self._field_card(
+            i18n.t("Groq key"),
+            i18n.t("Free at console.groq.com — API Keys, then Create API "
+                   "Key. It starts with gsk_. Prism cannot route anything "
+                   "without one."),
+            key_edit, lambda: self._save_key(key_edit)))
+
+        col.addWidget(self._agents_editor(chosen, premium))
 
         picked = [(stage, chosen.get(stage))
                   for stage in CB.agents.PIPELINE_ORDER
                   if stage != "summary" and stage in categories]
         if not any(tool for _stage, tool in picked):
-            empty = C.EmptyState(
-                "grid", i18n.t("No tools picked yet"),
-                i18n.t("Prism will suggest one per category the first time "
-                       "you plan a task — or pick them yourself now."),
-                i18n.t("Pick your agents"))
-            empty.clicked.connect(lambda: self.edit_requested.emit("agents"))
-            col.addWidget(empty, stretch=1)
-            self._claims_height = True
-            return
+            return   # nothing saved yet — the editor above is the whole page
 
+        col.addWidget(self._head(i18n.t("Currently active")))
         grid = C.CardGrid(min_col_width=300)
         for stage, tool in picked:
             grid.add(self._agent_card(categories.get(stage, {}), stage, tool,
                                       tool in premium))
         col.addWidget(grid)
-
-        col.addWidget(self._head(
-            i18n.t("Premium plans"),
-            i18n.t("The tools you pay for. Prism routes the bulk of the work "
-                   "to those and keeps the free ones for the short steps.")))
-        if premium:
-            col.addWidget(self._facts(
-                [(name, Pill(i18n.t("Paid plan"), "accent"))
-                 for name in sorted(premium)]))
-        else:
-            col.addWidget(self._note(i18n.t(
-                "None ticked. Prism spreads the work evenly instead, which is "
-                "the right answer while every tool is on its free tier.")))
 
         # "Which tools you'll sign into" is a direct consequence of which
         # tools you picked, so it belongs beside the pick rather than on the
@@ -742,11 +911,86 @@ class SettingsPanel(QWidget):
             col.addWidget(site_grid)
 
         col.addWidget(self._buttons([
-            self._edit_button("Re-pick agents", "agents", "primary"),
             C.button(i18n.t("Open the AI tools screen"), "secondary",
                      on_click=lambda: self.navigate.emit("catalog")),
             C.button(i18n.t("Open login tabs"), "secondary",
                      on_click=self.login_tabs.emit)]))
+
+    def _agents_editor(self, chosen: dict, premium: set) -> Card:
+        """The picker and its premium tick-boxes, one editable card. Picking
+        a specialist changes which premium checkbox can even exist for it, so
+        the two rebuild together and save together — splitting them into two
+        cards would let one save land without the other and leave a premium
+        tick pointing at a tool nobody picked."""
+        picker = AgentsPicker(chosen)
+        premium_layout = QVBoxLayout()
+        premium_layout.setContentsMargins(0, 0, 0, 0)
+        premium_layout.setSpacing(6)
+        premium_boxes: dict[str, QCheckBox] = {}
+
+        def rebuild_premium():
+            while premium_layout.count():
+                item = premium_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            premium_boxes.clear()
+            names = sorted(set(picker.current_agents().values()))
+            if not names:
+                premium_layout.addWidget(C.label(
+                    i18n.t("Pick at least one specialist above."),
+                    level="META"))
+                return
+            for name in names:
+                box = QCheckBox(name)
+                box.setChecked(name in premium)
+                box.setCursor(Qt.PointingHandCursor)
+                premium_boxes[name] = box
+                premium_layout.addWidget(box)
+
+        picker.picked_changed.connect(rebuild_premium)
+        rebuild_premium()
+
+        card = Card()
+        acol = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_3)
+        acol.addWidget(C.kicker(i18n.t("Your specialists")))
+        acol.addWidget(C.label(
+            i18n.t("One tool per kind of step. Pick one per category, or "
+                   "skip categories you won't use."), level="META",
+            wrap=True))
+        acol.addWidget(picker)
+        acol.addWidget(C.hairline())
+        acol.addWidget(C.kicker(i18n.t("Premium plans"), muted=True))
+        acol.addWidget(C.label(
+            i18n.t("Tick the tools you pay for — Prism routes the bulk of "
+                   "the work to those and keeps the free ones for the short "
+                   "steps."), level="META", wrap=True))
+        acol.addLayout(premium_layout)
+        acol.addWidget(self._buttons([C.button(
+            i18n.t("Save"), "primary",
+            on_click=lambda: self._save_agents(picker, premium_boxes))]))
+        return card
+
+    def _save_key(self, field: QLineEdit):
+        key = field.text().strip()
+        if key and not (key.startswith("gsk_") and len(key) > 20):
+            QMessageBox.warning(self, i18n.t("API key"), i18n.t(
+                "That doesn't look like a Groq key — it should start with "
+                "'gsk_'."))
+            return
+        self.cfg["api_key"] = key
+        self._after_save(i18n.t("Saved."))
+
+    def _save_agents(self, picker: AgentsPicker, boxes: dict):
+        agents = picker.current_agents()
+        if not agents:
+            QMessageBox.warning(self, i18n.t("Specialists"),
+                                i18n.t("Pick at least one specialist."))
+            return
+        self.cfg["agents"] = agents
+        self.cfg["premium"] = [name for name, box in boxes.items()
+                               if box.isChecked()]
+        self._after_save(i18n.t("Saved."))
 
     def _agent_card(self, meta: dict, stage: str, tool: str | None,
                     paid: bool) -> Card:
@@ -774,25 +1018,52 @@ class SettingsPanel(QWidget):
     # ── language ──────────────────────────────────────────────────────────
     def _language(self, col):
         packs = self._safe(i18n.available) or []
-        names = {code: label for code, label, _native in packs}
         current = i18n.current()
         out = (self.cfg.get("output_language") or "").strip()
-        # The key the setup dialog and the engine both write is
-        # `output_language`. This screen read `ai_language`, which nothing has
-        # ever written, so the AI output row showed the interface language
-        # back at you however it was set.
-        out_name = (i18n.LANGUAGES.get(out, ("", "", False))[0] if out else "")
 
-        col.addWidget(self._facts([
-            (i18n.t("Prism's own language"), names.get(current, current)),
-            (i18n.t("AI writes back in"),
-             out_name or i18n.t("Same language as you asked in")),
-        ]))
-        col.addWidget(self._note(i18n.t(
-            "These are two different wishes. An owner who wants Prism in "
-            "Gujarati may still want the proposal it produces in English, so "
-            "changing one never changes the other. A new interface language "
-            "applies from the next start.")))
+        lang_combo = QComboBox()
+        for code, name, native in packs:
+            done, total = self._safe(lambda c=code: i18n.coverage(c)) or (0, 0)
+            shown = native if native == name else f"{native} — {name}"
+            if code != "en" and total and done < total:
+                shown += f"  ({done * 100 // total}%)"
+            lang_combo.addItem(shown, code)
+        self._select_code(lang_combo, current)
+
+        out_combo = QComboBox()
+        out_combo.addItem(i18n.t("Same as I asked in"), "")
+        for code, (name, native, _rtl) in i18n.LANGUAGES.items():
+            if code == i18n.DEFAULT:
+                continue
+            out_combo.addItem(f"{native} — {name}", code)
+        out_combo.insertItem(1, i18n.t("English"), "en")
+        self._select_code(out_combo, out)
+        out_combo.setToolTip(i18n.t(
+            "Adds one line to every prompt asking the tool to answer in "
+            "this language. Email addresses, links, file names and code are "
+            "left alone."))
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(theme.SPACE_3)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        form.addRow(C.icon_label("globe", i18n.t("Prism's language")),
+                    lang_combo)
+        form.addRow(C.icon_label("pencil", i18n.t("AI writes back in")),
+                    out_combo)
+        form_widget = QWidget()
+        form_widget.setLayout(form)
+
+        col.addWidget(self._field_card(
+            i18n.t("Language"),
+            i18n.t("These are two different wishes. An owner who wants "
+                   "Prism in Gujarati may still want the proposal it "
+                   "produces in English, so changing one never changes the "
+                   "other. A new interface language applies from the next "
+                   "start."),
+            form_widget,
+            lambda: self._save_language(lang_combo, out_combo)))
 
         if packs:
             col.addWidget(self._head(
@@ -817,8 +1088,19 @@ class SettingsPanel(QWidget):
                 rows.append((shown, Pill(value, tone)))
             col.addWidget(self._facts(rows))
 
-        col.addWidget(self._buttons(
-            [self._edit_button("Change language", "language", "primary")]))
+    def _save_language(self, lang_combo: QComboBox, out_combo: QComboBox):
+        changed = (lang_combo.currentData() or i18n.DEFAULT) != i18n.current()
+        self.cfg["language"] = lang_combo.currentData() or i18n.DEFAULT
+        self.cfg["output_language"] = out_combo.currentData() or ""
+        self._after_save(
+            i18n.t("Saved — restart Prism for the new language to take "
+                   "effect.") if changed else i18n.t("Saved."))
+
+    @staticmethod
+    def _select_code(combo: QComboBox, code: str):
+        """Select by data, not by label — the labels are translated."""
+        index = combo.findData(code)
+        combo.setCurrentIndex(index if index >= 0 else 0)
 
     # ── connections ───────────────────────────────────────────────────────
     def _connections(self, col):
@@ -852,15 +1134,69 @@ class SettingsPanel(QWidget):
                    "Chrome does not reach it.")))
         col.addWidget(self._facts(self._browser_rows()))
 
+        chrome_edit = QLineEdit(self.cfg.get("chrome_version", ""))
+        chrome_edit.setPlaceholderText(i18n.t("blank = auto-detect"))
+        detect_btn = C.button(i18n.t("Detect"), "secondary",
+                              on_click=lambda: self._detect_chrome(chrome_edit))
+        col.addWidget(self._field_card(
+            i18n.t("Chrome version"),
+            i18n.t("Leave blank to auto-detect. Only pin this if automation "
+                   "keeps failing to attach."),
+            self._row([chrome_edit]),
+            lambda: self._save_chrome(chrome_edit),
+            extra_buttons=[detect_btn]))
+
         col.addWidget(self._buttons([
-            self._edit_button("Pin Chrome version", "chrome"),
+            C.button(i18n.t("Copy my Chrome logins again"), "secondary",
+                     on_click=self._reseed_profile),
         ]))
+
+    def _detect_chrome(self, field: QLineEdit):
+        try:
+            automation = CB.get_automation()
+            version = automation.detect_chrome_version()
+        except Exception as error:                     # noqa: BLE001
+            QMessageBox.warning(self, i18n.t("Chrome detection"), i18n.t(
+                "Couldn't detect Chrome: {error}").format(error=error))
+            return
+        field.setText(str(version) if version else "")
+
+    def _save_chrome(self, field: QLineEdit):
+        ok, _why = self._safe(CB.automation_available) or (False, "")
+        parsed = ok and CB.get_automation().parse_chrome_version(field.text())
+        self.cfg["chrome_version"] = str(parsed) if parsed else ""
+        self._after_save(i18n.t("Saved."))
+
+    def _reseed_profile(self):
+        """Re-copies cookies from the customer's everyday Chrome into Prism's
+        own profile — the fix for "I signed in but Prism still asks.\""""
+        ok, err = self._safe(CB.automation_available) or (False, "")
+        if not ok:
+            QMessageBox.warning(self, i18n.t("Chrome"), i18n.t(
+                "Automation isn't available: {error}").format(error=err))
+            return
+        automation = CB.get_automation()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            automation.seed_profile(force=True)
+        except Exception as error:                     # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, i18n.t("Chrome"), i18n.t(
+                "Couldn't copy the profile: {error}").format(error=error))
+            return
+        QApplication.restoreOverrideCursor()
+        QMessageBox.information(
+            self, i18n.t("Chrome"),
+            i18n.t("Copied your Chrome logins into Prism's profile.\n\nIf a "
+                   "tool still asks you to sign in, sign in inside the "
+                   "window Prism opens — that sticks."))
+        self.refresh()
 
     def _login_sites(self) -> list[tuple[str, str]]:
         """The tools this copy is set up to drive, and the address each one
         signs in at — reads core_bridge.resolved_agents(), the one shared
-        implementation of this lookup (also used by SetupDialog, MainWindow's
-        Login tabs, and the wizard)."""
+        implementation of this lookup (also used by MainWindow's Login tabs
+        and the wizard)."""
         return CB.resolved_agents(dict(self.cfg.get("agents") or {}))
 
     def _site_card(self, tool: str, url: str) -> Card:
@@ -957,8 +1293,12 @@ class SettingsPanel(QWidget):
         buttons.append(C.button(
             i18n.t("Open the artifacts folder"), "secondary",
             on_click=lambda: self._open_artifacts_folder(artifacts_dir)))
-        buttons.append(self._edit_button("Change the workspace folder",
-                                         "team"))
+        # The workspace folder is edited on Profile, next to who it's shared
+        # with — this jumps there instead of opening a second editor for the
+        # same field.
+        buttons.append(C.button(
+            i18n.t("Change the workspace folder"), "secondary",
+            on_click=lambda: self.show_section("profile")))
         col.addWidget(self._buttons(buttons))
 
     def _redacted_card(self, label: str) -> Card:

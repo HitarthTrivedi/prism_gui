@@ -2,10 +2,11 @@
 into them -> straight into the task composer.
 
 This replaces the old first-run path (a blocking "Welcome" popup, then the
-same scrolling Setup page a returning user edits from). That page still
-exists (dialogs/setup_dialog.py) for returning users — this is a separate,
-deliberately narrower surface for the one moment a customer has never used
-Prism before. Three pages, forward-moving, one focused thing per screen.
+same long settings page a returning user edits from). A returning user edits
+those same values inline on the Settings screen (widgets/settings_panel.py)
+— this is a separate, deliberately narrower surface for the one moment a
+customer has never used Prism before. Three pages, forward-moving, one
+focused thing per screen.
 
 Structurally modelled on Workbench's own "1 Describe -> 2 Plan -> 3 Run"
 breadcrumb (main_window.py's _workbench_header/_set_stage) — same #stepCur/

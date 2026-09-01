@@ -118,6 +118,13 @@ class AutomationWorker(_Worker):
         # auto-detection, so every caller names this stage explicitly.
         self.motion_design_stage = motion_design_stage
         self._stop = threading.Event()
+        # One press skips one step: the engine clears it when it acts.
+        self._skip = threading.Event()
+
+    def skip(self):
+        """Skip the stage that is running right now and move on — for a tool
+        stuck generating. The rest of the run continues."""
+        self._skip.set()
 
     def stop(self):
         """Ask the run to wind up at the next safe point.
@@ -152,7 +159,8 @@ class AutomationWorker(_Worker):
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
-                query=self.query, should_stop=self._stop.is_set, **kwargs,
+                query=self.query, should_stop=self._stop.is_set,
+                skip_signal=self._skip, **kwargs,
             )
             self.done.emit(responses, links)
         except Exception as e:

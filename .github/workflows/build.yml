@@ -79,6 +79,19 @@ jobs:
           pip install -r requirements.txt
           pip install -r packaging/requirements-build.txt
 
+      # Prism Studio's browser. `pip install playwright` (above) only gets the
+      # Python driver; the Chromium binary is a separate download this step
+      # does. PLAYWRIGHT_BROWSERS_PATH=0 is the part that matters: it puts
+      # Chromium INSIDE the playwright package (playwright/driver/package/
+      # .local-browsers/…) instead of the OS cache dir, which is the only
+      # place packaging/prism.spec's collect_data_files(playwright) — and so
+      # PyInstaller — can see it. Unset, this step still downloads Chromium,
+      # but to a path the frozen build never ships.
+      - name: Install Chromium for Prism Studio
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+        run: playwright install chromium
+
       # PyAudio needs PortAudio headers and has no wheel on some platforms;
       # the app runs without it (voice input just reports itself unavailable),
       # so a failure here must not fail the build.

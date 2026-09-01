@@ -187,6 +187,25 @@ class ReelDialog(PrismDialog):
         if attachments:
             self._absorb([a["path"] for a in attachments])
 
+        # The last Studio reel, back on the bench. Its spec is saved beside
+        # the video precisely so it can be reopened — without this, closing
+        # the window after a render left "Edit the layout" with nothing to
+        # edit and no way back in.
+        try:
+            last = self._last_studio_reel()
+        except Exception:                               # noqa: BLE001
+            last = None
+        if last:
+            self.spec, self.out_path = last
+            self._studio_last = True
+            self._refresh_edit_btn()
+            have_video = os.path.exists(self.out_path)
+            self.play_btn.setEnabled(have_video)
+            self.folder_btn.setEnabled(have_video)
+            self.status.setText(i18n.t(
+                "Your last Studio reel is loaded — press Edit the layout to "
+                "fix it by hand, or just make a new one."))
+
     # ── inputs ──────────────────────────────────────────────────────────
 
     def _on_files_added(self, paths: list):
@@ -492,6 +511,31 @@ class ReelDialog(PrismDialog):
         self.status.setText(message)
 
     # ── the browser layout editor ───────────────────────────────────────
+    @staticmethod
+    def _last_studio_reel():
+        """(spec, mp4 path) of the newest saved Studio reel, or None.
+
+        A Studio spec is told from a Quick one by its scenes carrying real
+        HTML — the Quick renderer draws from templates and its spec has
+        none. Only the newest twenty records are tried; this runs at every
+        open of the window."""
+        folder = CB.config.RUNS_DIR
+        if not os.path.isdir(folder):
+            return None
+        names = sorted((n for n in os.listdir(folder)
+                        if n.startswith("reel_") and n.endswith(".json")),
+                       reverse=True)
+        for name in names[:20]:
+            path = os.path.join(folder, name)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    spec = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if CB.get_reel_edit().is_studio_spec(spec):
+                return spec, path[:-5] + ".mp4"
+        return None
+
     def _refresh_edit_btn(self):
         self.edit_btn.setEnabled(bool(self.spec) and self._studio_last)
 

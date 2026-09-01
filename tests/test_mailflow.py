@@ -21,7 +21,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from email.message import EmailMessage
 
@@ -166,6 +166,19 @@ class FetchingSafely(unittest.TestCase):
         messages, _state, error = inbox.fetch_new({}, None)
         self.assertEqual(messages, [])
         self.assertIn("set up", error.lower())
+
+    def test_first_check_reaches_back_a_year(self):
+        """Regression: a customer's "my older mail never showed up" traced
+        back to this number shrinking to 30 days — a mailbox Prism has
+        never read only ever gets this one look backward, so silently
+        narrowing it is a real complaint, not a config tweak."""
+        self.assertEqual(inbox.FIRST_FETCH_DAYS, 365)
+        conn = _FakeConn(search_result=b"")
+        inbox._search(conn, last_uid=0, first_days=0)
+        criteria = conn.calls[0][1][1]
+        expected_since = (datetime.now(timezone.utc)
+                          - timedelta(days=inbox.FIRST_FETCH_DAYS))
+        self.assertIn(expected_since.strftime("%d-%b-%Y"), criteria)
 
 
 class AttachmentNamesCannotEscape(unittest.TestCase):
@@ -667,6 +680,26 @@ class MonthEndNumbers(unittest.TestCase):
 
     def test_no_quotations_is_zero_not_a_crash(self):
         self.assertEqual(register.summarise([]).conversion, 0.0)
+
+    def test_waiting_means_no_reply_not_just_not_closed(self):
+        """Found from a real report: the dashboard's "Quotations with no
+        answer yet" and the working window's own "No answer yet" tab
+        disagreed — 3 against 0 — because this counted Negotiating and
+        Accepted as "waiting" too. Both of those mean the customer already
+        replied; only Quoted and Following up genuinely have no answer."""
+        quoted = register.from_message(message())
+        register.mark_quoted(quoted, "QTN/25-26/0001", 1000)
+
+        negotiating = register.from_message(message())
+        register.mark_quoted(negotiating, "QTN/25-26/0002", 1000)
+        register.mark_reply(negotiating, "negotiating")
+
+        accepted = register.from_message(message())
+        register.mark_quoted(accepted, "QTN/25-26/0003", 1000)
+        register.mark_reply(accepted, "accepted")
+
+        stats = register.summarise([quoted, negotiating, accepted])
+        self.assertEqual(stats.waiting, 1)
 
 
 # ── 4. money ──────────────────────────────────────────────────────────────────
@@ -1184,6 +1217,109 @@ class TheDailyLoop(unittest.TestCase):
         self.assertEqual(len(result.new_inquiries[0].files), 1)
         self.assertIn("drawing.pdf", result.new_inquiries[0].row["Drawing"])
 
+    def test_the_enquiry_is_traceable_in_the_folders_own_history(self):
+        """The folder's own history.txt is the "show me everything about
+        this inquiry" file — a search through the inbox should never be
+        the only way to see what a customer actually wrote."""
+        k = triage.Knowledge(customers={"shaktiauto.in"})
+        result = self._run([message()], knowledge=k)
+        folder = result.new_inquiries[0].row["Folder"]
+        path = os.path.join(folder, "history.txt")
+        self.assertTrue(os.path.exists(path))
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("Enquiry received", text)
+        self.assertIn("Mr Patel", text)
+        self.assertIn("5000 compression springs", text)
+
+    def test_a_reply_is_added_to_the_same_history_file(self):
+        """One inquiry, one folder, one growing story — a reply is a new
+        line in the same file, not a second one."""
+        k = triage.Knowledge(customers={"shaktiauto.in"})
+        self._run([message()], knowledge=k)
+        reply = message(subject="Re: Enquiry — best price please",
+                        body="Can you do 4mm wire instead?",
+                        headers={"In-Reply-To": "<a1@shaktiauto.in>",
+                                 "Message-ID": "<b2@shaktiauto.in>"})
+        result = self._run([reply], knowledge=k)
+        folder = result.replies[0].row["Folder"]
+        with open(os.path.join(folder, "history.txt"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("Enquiry received", text)
+        self.assertIn("Reply received", text)
+        self.assertIn("Can you do 4mm wire instead?", text)
+        self.assertLess(text.index("Enquiry received"),
+                        text.index("Reply received"),
+                        "the story must read in the order it happened")
+
+    def _run_as(self, messages, category, **kw):
+        """Like _run(), but with classify() forced to one category — so a
+        test can pin down "what if the sorter calls this an order" without
+        depending on the real local-rule/AI split ever landing there."""
+        def fake_fetch(cfg, state, **_kw):
+            return messages, inbox.State(1, 99), ""
+
+        def fake_classify(msgs, api_key, **_kw):
+            return [triage.Verdict(category=category, source="rule")
+                   for _ in msgs]
+
+        real_fetch, real_classify = inbox.fetch_new, triage.classify
+        inbox.fetch_new, triage.classify = fake_fetch, fake_classify
+        try:
+            return mailflow.check(self.cfg, self.paths, local_only=True, **kw)
+        finally:
+            inbox.fetch_new, triage.classify = real_fetch, real_classify
+
+    def test_a_bare_confirmation_on_an_open_inquiry_is_a_reply_not_an_order(self):
+        """Found from a real report: a customer's plain "Done deal" on an
+        already-quoted inquiry was sorted as an ORDER — CATEGORIES[ORDER]'s
+        own wording ("a customer saying they are placing the order") fits
+        it — and sat unresolved in "Order came" with nothing applied to
+        the register, while "No answer yet" kept reading as if nobody had
+        replied at all. With no attachment and no PO reference, this must
+        fall through to the reply pipeline instead."""
+        k = triage.Knowledge(customers={"shaktiauto.in"})
+        self._run([message()], knowledge=k)
+        confirmation = message(subject="Re: Enquiry — best price please",
+                              body="Done deal",
+                              headers={"In-Reply-To": "<a1@shaktiauto.in>",
+                                       "Message-ID": "<b2@shaktiauto.in>"})
+        result = self._run_as([confirmation], triage.ORDER, knowledge=k)
+        self.assertEqual(len(result.orders), 0)
+        self.assertEqual(len(result.replies), 1)
+
+    def test_an_attachment_still_makes_it_a_real_order(self):
+        k = triage.Knowledge(customers={"shaktiauto.in"})
+        self._run([message()], knowledge=k)
+        po_mail = message(subject="Re: Enquiry — best price please",
+                          body="Please find our PO attached.",
+                          headers={"In-Reply-To": "<a1@shaktiauto.in>",
+                                   "Message-ID": "<b3@shaktiauto.in>"},
+                          attachments=[("PO.pdf", b"%PDF-1.4",
+                                       "application/pdf")])
+        result = self._run_as([po_mail], triage.ORDER, knowledge=k)
+        self.assertEqual(len(result.orders), 1)
+        self.assertEqual(len(result.replies), 0)
+
+    def test_a_named_po_number_also_counts_as_a_real_order(self):
+        k = triage.Knowledge(customers={"shaktiauto.in"})
+        self._run([message()], knowledge=k)
+        po_mail = message(subject="Re: Enquiry — best price please",
+                          body="Please proceed. PO number: SAC/PO/4471.",
+                          headers={"In-Reply-To": "<a1@shaktiauto.in>",
+                                   "Message-ID": "<b4@shaktiauto.in>"})
+        result = self._run_as([po_mail], triage.ORDER, knowledge=k)
+        self.assertEqual(len(result.orders), 1)
+
+    def test_a_genuinely_new_correspondents_order_is_unaffected(self):
+        """The narrowing only matters once there is an existing inquiry to
+        weigh a bare confirmation against — a first-ever mail with nothing
+        else to call it is still an order, attachment or not."""
+        result = self._run_as(
+            [message(subject="Order for springs",
+                    body="Please supply 500 units.")], triage.ORDER)
+        self.assertEqual(len(result.orders), 1)
+
     def test_a_reply_does_not_become_a_second_inquiry(self):
         """A three-message negotiation must stay one row, or the register
         stops being true."""
@@ -1341,8 +1477,10 @@ class InquiryDetails(unittest.TestCase):
 class _FakeConn:
     def __init__(self, search_result=b""):
         self.search_result = search_result
+        self.calls = []
 
     def uid(self, command, *args):
+        self.calls.append((command, args))
         if command == "SEARCH":
             return "OK", [self.search_result]
         return "NO", []

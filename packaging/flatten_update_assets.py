@@ -28,6 +28,10 @@ import os
 import shutil
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import update_manifest  # noqa: E402
+
 
 def flatten(root_dir: str, out_dir: str, platform_tag: str) -> int:
     os.makedirs(out_dir, exist_ok=True)
@@ -46,8 +50,14 @@ def flatten(root_dir: str, out_dir: str, platform_tag: str) -> int:
                 # asset to do except fail every upload that includes it.
                 continue
             rel = os.path.relpath(full, root_dir).replace(os.sep, "/")
-            flat_name = f"{platform_tag}__{rel.replace('/', '__')}"
-            shutil.copy2(full, os.path.join(out_dir, flat_name))
+            # update_manifest.flat_name(), not an inline f-string — see its
+            # own docstring. A build over a deeply-nested tree (Chromium's
+            # macOS Framework bundle, in the one case that's actually hit
+            # this) needs the identical long-name fallback updater.py's
+            # _file_url() computes at fetch time, or the two would name the
+            # same file differently and every such download would 404.
+            flat = update_manifest.flat_name(platform_tag, rel)
+            shutil.copy2(full, os.path.join(out_dir, flat))
             count += 1
     return count
 

@@ -13,11 +13,16 @@ supplied at run time via --key-hex or the UPDATE_SIGNING_KEY_HEX environment
 variable, on whatever offline machine holds it.
 
 Refuses to sign a version that is not strictly newer than the last version
-this tool has signed on this machine (tracked in
-devtools/.last_signed_update_version, gitignored) — the same "no accidental
-downgrade" property update_manifest.verify()'s expiry/monotonic checks give
-the CLIENT side, mirrored here so a release engineer can't accidentally
-re-sign an old manifest and publish it over a newer one.
+this tool has signed, on this machine, for this manifest's PLATFORM — one
+tracker file per platform tag (devtools/.last_signed_update_version.<tag>,
+gitignored, tag read off the manifest's own filename), because one release
+signs the identical version three times over, once per platform manifest,
+and a single shared tracker refused the second and third of those as
+"downgrades" of the first. The property this guard actually protects — a
+release engineer can't accidentally re-sign an OLDER manifest for a
+platform that already shipped a newer one — is the same "no accidental
+downgrade" contract update_manifest.verify()'s expiry/monotonic checks give
+the CLIENT side; it's just now scoped correctly.
 
 NOT SHIPPED. devtools/ is absent from packaging/prism.spec (see build.py's
 own comment: "devtools/ is NOT here, and must never be").
@@ -27,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,7 +40,36 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import update_manifest  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LAST_SIGNED_PATH = os.path.join(HERE, ".last_signed_update_version")
+
+# The OLD single global tracker (pre-2026-08-31). Every release signs the
+# SAME version three times — once per platform manifest — and this file
+# couldn't tell "the same platform's manifest, an older version" (a real
+# downgrade, correctly refused) apart from "a different platform's
+# manifest, the version I just signed a minute ago" (completely normal,
+# wrongly refused). The first real multi-platform release hit exactly that:
+# linux-x64 signed 1.4.0 fine, then windows-x64's signing attempt for the
+# SAME 1.4.0 was refused as "not newer than 1.4.0" — the version this very
+# tool had just recorded, for a different platform's manifest.
+_LEGACY_LAST_SIGNED_PATH = os.path.join(HERE, ".last_signed_update_version")
+
+
+def _tracker_key(manifest_path: str) -> str:
+    """Which downgrade-history "lane" this manifest belongs to — the
+    platform tag, read off the filename packaging/manifest.py already
+    names it with (`manifest.<platform_tag>.unsigned.json`). Falls back to
+    the whole basename for anything that doesn't match, which only ever
+    makes the guard MORE precise (a distinct key per distinct filename),
+    never less — it still catches a genuine same-file downgrade, and it
+    can never wrongly conflate two different files the way one global file
+    did."""
+    name = os.path.basename(manifest_path)
+    m = re.match(r"manifest\.([^.]+)\.", name)
+    return m.group(1) if m else name
+
+
+def _last_signed_path(manifest_path: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", _tracker_key(manifest_path))
+    return os.path.join(HERE, f".last_signed_update_version.{safe}")
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -47,16 +82,26 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _last_signed_version() -> str:
+def _last_signed_version(manifest_path: str) -> str:
+    # Deliberately NOT falling back to the old global _LEGACY_LAST_SIGNED_PATH
+    # here: that file can't say which PLATFORM last wrote it, so treating its
+    # value as "the last version signed for THIS platform" would silently
+    # reintroduce the exact bug this file exists to fix — attributing one
+    # platform's signing history to a different platform's manifest. A
+    # machine upgrading to per-platform tracking starts every platform with
+    # a clean slate instead: a one-time, one-machine relaxation of the
+    # downgrade guard (each platform's very next sign can't be caught as a
+    # downgrade, having no prior record to compare against), which is a far
+    # smaller risk than the guard wrongly refusing a legitimate release.
     try:
-        with open(LAST_SIGNED_PATH, "r", encoding="utf-8") as f:
+        with open(_last_signed_path(manifest_path), "r", encoding="utf-8") as f:
             return f.read().strip()
     except OSError:
         return ""
 
 
-def _record_signed_version(version: str) -> None:
-    with open(LAST_SIGNED_PATH, "w", encoding="utf-8") as f:
+def _record_signed_version(manifest_path: str, version: str) -> None:
+    with open(_last_signed_path(manifest_path), "w", encoding="utf-8") as f:
         f.write(version)
 
 
@@ -85,11 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     if not version:
         p.error("manifest has no 'version' field")
 
-    last = _last_signed_version()
+    last = _last_signed_version(args.manifest_path)
     if last and not args.allow_downgrade and _version_tuple(version) <= _version_tuple(last):
         p.error(f"refusing to sign {version!r}: not newer than the last version this "
-                f"machine signed ({last!r}). Pass --allow-downgrade only for test "
-                f"fixtures, never for a real release.")
+                f"machine signed for {_tracker_key(args.manifest_path)!r} ({last!r}). "
+                f"Pass --allow-downgrade only for test fixtures, never for a real "
+                f"release.")
 
     token = update_manifest.sign(manifest, args.key_hex, kid=args.kid,
                                  validity_days=args.validity_days)
@@ -98,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         f.write(token)
 
     if not args.allow_downgrade:
-        _record_signed_version(version)
+        _record_signed_version(args.manifest_path, version)
 
     print(f"Signed manifest for {version} (kid={args.kid}) -> {args.output}")
     return 0

@@ -26,6 +26,20 @@ python-docx
 # wouldn't otherwise force the version CI resolves, so it's explicit here.
 certifi
 
+# Prism Studio films a real web page rather than drawing from a template, so
+# it needs an actual browser engine. `pip install` alone only gets the Python
+# driver — the Chromium binary itself is a separate `playwright install
+# chromium` step, which .github/workflows/build.yml runs (with
+# PLAYWRIGHT_BROWSERS_PATH=0, so the browser lands INSIDE the package where
+# packaging/prism.spec's collect_data_files can find it, rather than in the
+# OS cache dir a frozen build can't reach into) right after this file installs.
+#
+# Not optional for a BUILD, same reasoning as imageio-ffmpeg below: a build
+# without this ships a Studio button that falls back to Prism Reel on every
+# customer machine instead of just this build machine. Adds roughly 250-400MB
+# to the installer (the Node driver alone is ~130MB before Chromium).
+playwright
+
 # ── Add-ons we sell ─────────────────────────────────────────────────────────
 # Not optional for a BUILD, however optional they are at runtime: PyInstaller
 # can only bundle what is installed, so a packaging runner without these

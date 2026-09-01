@@ -181,6 +181,104 @@ class SigningAndVerifying(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "malformed")
 
 
+class FlatteningAFileNameForHosting(unittest.TestCase):
+    """Two real v1.4.0 failures, both in flattening a manifest entry's
+    `path` into one GitHub Release asset name — <platform>__<path with /
+    as __>:
+
+    1. Overran the filesystem's 255-byte filename limit for Chromium's
+       nested macOS Framework path — flatten_update_assets.py died mid-CI
+       with OSError: File name too long.
+    2. GitHub itself silently REWRITES an uploaded asset's name for any
+       character outside [A-Za-z0-9._-] — no error, `gh release upload`
+       exits 0 regardless — so a name that looked fine locally (spaces,
+       brackets) still 404s at fetch time because it was never actually
+       stored under that name. Caught only by re-listing what the API
+       actually has, after 863/966 linux-x64 files and 806/863
+       macos-arm64 files silently never made it onto the release at all
+       in the same incident (a separate upload-reliability bug, not a
+       naming one — see devtools/verify_upload.py).
+
+    updater.py's _file_url() and flatten_update_assets.py's flatten() must
+    derive the identical name for every path under both rules, or a
+    download 404s against what CI actually uploaded."""
+
+    def test_an_ordinary_path_is_unchanged(self):
+        self.assertEqual(
+            UM.flat_name("linux-x64", "_internal/base_library.zip"),
+            "linux-x64___internal__base_library.zip")
+
+    def test_a_path_past_the_limit_falls_back_to_a_hash(self):
+        rel = ("_internal/playwright/driver/package/.local-browsers/"
+              "chromium-1234/chrome-mac-arm64/"
+              "Google Chrome for Testing.app/Contents/Frameworks/"
+              "Google Chrome for Testing Framework.framework/"
+              "Versions/151.0.7922.34/Google Chrome for Testing Framework")
+        name = UM.flat_name("macos-arm64", rel)
+        self.assertLessEqual(len(name.encode("utf-8")), 255)
+        self.assertTrue(name.startswith("macos-arm64__long__"))
+
+    def test_a_bracket_in_the_path_falls_back_to_a_hash(self):
+        """The exact real failure: docx's own template ships a file
+        literally named "[Content_Types].xml". Naively flattened, GitHub
+        silently stored it as ".Content_Types.xml" instead (confirmed
+        against the real API) — short enough to pass the length check,
+        so without this the character check is the only thing that
+        catches it."""
+        rel = "_internal/docx/templates/default-docx-template/[Content_Types].xml"
+        name = UM.flat_name("windows-x64", rel)
+        naive = f"windows-x64__{rel.replace('/', '__')}"
+        self.assertLess(len(naive.encode("utf-8")), 255)  # not a length case
+        self.assertNotEqual(name, naive)
+        self.assertTrue(name.startswith("windows-x64__long__"))
+        self.assertTrue(name.endswith(".xml"))
+
+    def test_a_space_in_the_path_falls_back_to_a_hash(self):
+        """Also real: Chromium's own macOS bundle ships "Google Chrome for
+        Testing.app" — a space right in a directory name that's otherwise
+        nowhere near the length limit. GitHub silently turned "First Run"
+        into "First.Run" on upload."""
+        rel = ("_internal/playwright/driver/package/.local-browsers/"
+              "chromium-1234/chrome-win64/First Run")
+        name = UM.flat_name("windows-x64", rel)
+        self.assertTrue(name.startswith("windows-x64__long__"))
+
+    def test_an_ordinary_path_with_a_dot_dash_or_underscore_is_still_unchanged(self):
+        """The safe-character check must not be so strict it hash-falls-back
+        ordinary filenames — dots, dashes and underscores are exactly what
+        real filenames are made of, including the __ separator this scheme
+        itself uses."""
+        self.assertEqual(
+            UM.flat_name("linux-x64", "_internal/some-lib_v2.1.so"),
+            "linux-x64___internal__some-lib_v2.1.so")
+
+    def test_the_fallback_is_deterministic_and_collision_free_for_near_misses(self):
+        """Two paths differing only in their last path segment must not
+        collapse onto the same hashed name — the hash is over the WHOLE
+        (platform_tag, rel) pair, not a truncated prefix of it."""
+        base = "_internal/" + "x" * 300 + "/"
+        a = UM.flat_name("macos-arm64", base + "one")
+        b = UM.flat_name("macos-arm64", base + "two")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a, UM.flat_name("macos-arm64", base + "one"))
+
+    def test_updater_and_the_build_script_agree_on_every_name(self):
+        """The one thing this whole fix exists to guarantee: updater.py's
+        _file_url() and packaging/flatten_update_assets.py's flatten() must
+        never be able to drift into naming the same file two different
+        ways. Both now call THIS function rather than each keeping their
+        own copy of the naming rule — this test pins that they still do."""
+        import inspect
+        import updater
+        src = inspect.getsource(updater._file_url)
+        self.assertIn("update_manifest.flat_name(", src)
+        gui_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        flatten_src = open(os.path.join(
+            gui_dir, "packaging", "flatten_update_assets.py"),
+            encoding="utf-8").read()
+        self.assertIn("update_manifest.flat_name(", flatten_src)
+
+
 def token_payload_b64(manifest: dict) -> str:
     import json
     from licensing.token import b64u_encode

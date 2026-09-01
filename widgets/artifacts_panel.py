@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QLabel
 
@@ -109,6 +109,23 @@ def _folder_stats(path: str) -> tuple[int, str]:
     return count, size
 
 
+def _editable_reel(path: str) -> bool:
+    """A video with a Studio spec saved beside it — reel_<stamp>.json next
+    to reel_<stamp>.mp4, scenes carrying real HTML. Same check
+    widgets.output_panel.StageCard._editable_reel makes on a just-finished
+    run's card — this is the same fact read off disk instead of off a
+    fresh render, so a reel found here days later is just as editable."""
+    if not path.lower().endswith(".mp4"):
+        return False
+    try:
+        import json as _json
+        with open(path[:-4] + ".json", encoding="utf-8") as f:
+            spec = _json.load(f)
+        return CB.get_reel_edit().is_studio_spec(spec)
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
 def _chat_link(path: str) -> str:
     """The AI conversation this artifact came from, if save_artifact() had
     one to record — see config.save_artifact's `link` param. Empty for a
@@ -128,6 +145,11 @@ class ArtifactsPanel(_Page):
     BLURB = ("Everything Prism has generated for you — reels, images, "
              "documents — kept here even after you close it.")
     LAZY = True
+
+    # A Studio reel found here wants fixing by hand, same as one still on
+    # the workbench. Carries the mp4 path; MainWindow owns the browser
+    # editor and re-render (see _edit_reel_layout), so this row only asks.
+    edit_reel = Signal(str)
 
     def header_actions(self) -> list:
         return [C.button(i18n.t("Open the folder"), "secondary",
@@ -204,6 +226,10 @@ class ArtifactsPanel(_Page):
         actions = [C.icon_button(
             "external", i18n.t("Open"),
             lambda _=False, p=path: self._open_file(p))]
+        if kind == "video" and _editable_reel(path):
+            actions.append(C.icon_button(
+                "pencil", i18n.t("Edit the layout"),
+                lambda _=False, p=path: self.edit_reel.emit(p)))
         link = _chat_link(path)
         if link:
             actions.append(C.icon_button(
