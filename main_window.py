@@ -1245,7 +1245,19 @@ class MainWindow(QMainWindow):
                 "A .dwg also needs a converter — `brew install libredwg` on "
                 f"macOS.\n\nDetail: {err}")
             return
-        BoqDialog(self.cfg, self.attachments, self).exec()
+        dlg = BoqDialog(self.cfg, self.attachments, self)
+        dlg.exec()
+        # A BOQ runs in its own dialog and never touches the main workbench's
+        # completion path, so the post-completion follow-up was never offered
+        # after one. Bridge it in now the dialog has closed: hand its finished
+        # stages to the same refinement flow every routed run gets. The format
+        # stage's query label doubles as the Artifacts task key, so "what came
+        # back" shows the BOQ itself.
+        self._offer_followup_for_dialog(
+            f"Bill of Quantities — {getattr(dlg, 'request', '')}",
+            getattr(dlg, "_all_responses", {}),
+            getattr(dlg, "_stage_agents_map", {}),
+            getattr(dlg, "_links", {}))
 
     def _open_gerber(self):
         # Licence feature is "boq" for now — see the comment in
@@ -2264,6 +2276,38 @@ class MainWindow(QMainWindow):
         self._offer_followup(responses, links)
 
     # ── post-completion follow-up ─────────────────────────────────────────
+    def _offer_followup_for_dialog(self, query: str, responses: dict,
+                                   stage_agents: dict, links: dict):
+        """Bridge an add-on dialog's finished run into the post-completion
+        follow-up.
+
+        Add-on dialogs (BOQ, and the same gap exists for Reel/Email/Gerber)
+        run their own worker chains and never reach _on_run_done, so the
+        "anything to change?" refinement the main workbench offers was
+        invisible from inside them — you'd finish a BOQ and be offered nothing.
+        This primes the same instance state a routed run leaves behind — the
+        task label (so the follow-up's "what came back" resolves the file this
+        run saved to Artifacts), the stage→agent map (so the note routes to the
+        right step), and an empty routing (an add-on's stages are custom_stages,
+        not a routed plan) — then hands off to the ordinary _offer_followup. The
+        refinement then runs on the workbench and can itself be followed up,
+        exactly like any other run's.
+        """
+        if not responses:
+            return
+        self._last_query = query
+        self._stage_agents = dict(stage_agents or {})
+        self.routing = {}
+        # The refinement is its own small run, not a continuation of whatever
+        # last happened on the workbench: clear the recap accumulators so its
+        # completion window shows only the follow-up, not a stale earlier task.
+        # The queue counters are deliberately left alone — after any completed
+        # run they already read "no more tasks", which is what keeps the loop
+        # offering a further follow-up instead of advancing a phantom queue.
+        self._stage_results = []
+        self._task_runs = []
+        self._offer_followup(responses, links or {})
+
     def _offer_followup(self, responses: dict, links: dict = None):
         """After a whole task finishes, offer a refinement. Prism reads the
         note, works out which step it is about, and sends it to THAT step's
