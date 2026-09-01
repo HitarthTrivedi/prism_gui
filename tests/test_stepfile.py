@@ -93,6 +93,13 @@ class TheBriefForTheImageAgent(unittest.TestCase):
         self.assertIn("EXACTLY the numbers above", self.brief)
         self.assertIn("do not round", self.brief)
 
+    def test_it_forbids_fake_flat_patterns_and_tolerances(self):
+        """ChatGPT's first real sheet labelled a decorative view 'FLAT
+        PATTERN' and invented a ±0.05 tolerance note — both are the kind of
+        plausible extra a fabricator would act on."""
+        self.assertIn("Never label any view 'flat pattern'", self.brief)
+        self.assertIn("Do not state any tolerance", self.brief)
+
     def test_every_figure_is_two_decimals(self):
         for number in re.findall(r"\d+\.(\d+)", self.brief):
             self.assertLessEqual(len(number), 2)
