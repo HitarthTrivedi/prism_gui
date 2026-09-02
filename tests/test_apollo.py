@@ -202,5 +202,59 @@ class RegistryWiring(unittest.TestCase):
                                 f"{name} has a handoff_spec but is not a search tool")
 
 
+
+class FiltersAreDecidedBeforeApolloOpens(unittest.TestCase):
+    """When Apollo is the FIRST stage there is no previous stage to write the
+    filter block — a live run typed a full prose prompt into Apollo's keyword
+    box and got nothing. Now Groq writes the block locally first, the stage
+    prompt carries it verbatim, and the fallback is a few words, never a
+    sentence."""
+
+    def test_the_groq_prompt_demands_the_exact_block(self):
+        from core import mailer
+        p = mailer.apollo_filter_prompt("email plastics manufacturers in Gujarat")
+        self.assertIn("HANDOFF FOR APOLLO", p)
+        for field in _APOLLO_FIELDS:
+            self.assertIn(f"{field}:", p)
+        self.assertIn("nothing else", p)
+        self.assertIn("comma-separated", p)
+
+    def test_a_block_carrying_prompt_parses_straight_into_filters(self):
+        """The whole point: the research stage's own prompt must parse into
+        the same URL filters as the raw block."""
+        from core import mailer
+        block = CLEAN[CLEAN.index("HANDOFF"):]
+        research, _ = mailer.discovery_prompts("goal", "Apollo", block)
+        self.assertEqual(_apollo_filters(research), _apollo_filters(block))
+        self.assertNotIn("Your ONLY task", research)
+
+    def test_without_a_block_the_old_prompt_survives(self):
+        from core import mailer
+        research, _ = mailer.discovery_prompts("find agencies", "Apollo")
+        self.assertIn("Your ONLY task", research)
+
+    def test_the_discovery_flow_builds_the_block_with_groq(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        body = src[src.index("def _discover_recipients("):]
+        body = body[:body.index("\ndef ", 10)]
+        self.assertIn("apollo_filter_prompt", body)
+        self.assertIn("groq_chat", body)
+
+    def test_the_fallback_is_words_not_a_sentence(self):
+        from core.automation import _apollo_fallback_query
+        q = _apollo_fallback_query(
+            "Your ONLY task is to build a prospect list for this request: "
+            "email the best plastics manufacturers in Gujarat about Prism.")
+        self.assertLessEqual(len(q), 60)
+        self.assertLessEqual(len(q.split()), 6)
+        self.assertNotIn(":", q)
+
+    def test_the_fallback_survives_an_empty_brief(self):
+        from core.automation import _apollo_fallback_query
+        self.assertEqual(_apollo_fallback_query(""), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
