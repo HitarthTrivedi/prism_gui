@@ -145,6 +145,24 @@ class TheClientsRealForm(unittest.TestCase):
         self.assertEqual((self.ws["A31"].value, self.ws["B31"].value),
                          (1.3, 60))
 
+    def test_the_companys_photos_and_layout_survive_byte_for_byte(self):
+        """The client's form is their document — logo, drawing layout,
+        print setup and all. openpyxl's save() rebuilt those wrong (the
+        logo drawing shrank 12KB → 1KB, printer settings vanished), which
+        is why filling is a zip-level patch: every part of the file except
+        the one sheet XML must be BYTE-identical to the template."""
+        import zipfile
+        with zipfile.ZipFile(FCC) as tin, zipfile.ZipFile(self.out) as tout:
+            self.assertEqual(set(tin.namelist()), set(tout.namelist()))
+            changed = [n for n in tin.namelist()
+                       if tin.read(n) != tout.read(n)]
+            self.assertEqual(changed, ["xl/worksheets/sheet1.xml"])
+            # And even in that one file, the client's own namespace
+            # prefixes are untouched — a prefix rename is what makes
+            # Excel call the file corrupt.
+            sheet = tout.read("xl/worksheets/sheet1.xml").decode()
+            self.assertIn('mc:Ignorable="x14ac', sheet)
+
 
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
