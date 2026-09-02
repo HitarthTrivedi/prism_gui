@@ -102,6 +102,7 @@ def _measure_and_join(dlg, paths, timeout_s=15.0, step_s=0.02):
     partially-run dialog.
     """
     dlg._on_files_added(list(paths))
+    dlg._measure()   # dropping no longer measures — Generate is the go button
     deadline = time.monotonic() + timeout_s
     while not dlg.jobs and time.monotonic() < deadline:
         _app.processEvents()
@@ -401,3 +402,28 @@ class CleaningOutsideTheBorder(unittest.TestCase):
         self.assertIn("removed outside the border", dlg.status.text())
         self.assertTrue(dlg.clean_btn.isEnabled())
         GD.QDesktopServices.openUrl.assert_called_once()
+
+
+class GenerationWaitsForTheButton(unittest.TestCase):
+    """Dropping a job used to measure instantly — the CSV existed before
+    the user could choose the client's format. Now Generate is the go
+    button, and the AI write-up is a small sideline, never the primary."""
+
+    def test_dropping_a_job_does_not_measure_by_itself(self):
+        dlg = _dialog()
+        dlg._on_files_added([os.path.join(REAL, "layer 1.zip")])
+        self.assertIsNone(getattr(dlg, "_worker", None))
+        self.assertEqual(dlg.jobs, [])
+        self.assertTrue(dlg.generate_btn.isEnabled())
+        self.assertFalse(dlg.run_btn.isEnabled())
+        self.assertIn("Generate", dlg.status.text())
+
+    def test_generate_is_primary_and_the_ai_answer_is_a_sideline(self):
+        dlg = _dialog()
+        self.assertEqual(dlg.generate_btn.text(), "Generate")
+        self.assertFalse(dlg.generate_btn.isEnabled())   # no job yet
+        self.assertEqual(dlg.run_btn.text(), "Answer with AI")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -77,7 +77,8 @@ class GerberDialog(PrismDialog):
 
         self.ask = AskPanel(
             "Drop the customer's zip or rar exactly as it arrived — a "
-            "folder works too. Measuring starts the moment it lands.\n\n"
+            "folder works too. Set the client's format below if you want "
+            "it, then press Generate.\n\n"
             "Optionally say what to do with the numbers, e.g. \"reply with "
             "our price for 500 pieces\" — leave it blank to just get the "
             "five figures.")
@@ -182,13 +183,26 @@ class GerberDialog(PrismDialog):
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
         self.footer.add_utility(self.open_btn)
+        # The AI write-up is the sideline, not the headline: a small utility
+        # button beside Clean/Open, enabled only once figures exist. The
+        # PRIMARY action is Generate — measuring waits for it, so the user
+        # can set the client's format (or think) after dropping the job.
+        self.run_btn = self.button(i18n.t("Answer with AI"), "secondary",
+                                   icon_name="pencil", small=True,
+                                   on_click=self._write_up)
+        self.run_btn.setEnabled(False)
+        self.run_btn.setToolTip(i18n.t(
+            "After generating: an agent writes the reply or quotation from "
+            "the measured numbers — the files still never leave"))
+        self.footer.add_utility(self.run_btn)
         self.footer.add_secondary(
             self.button(i18n.t("Close"), on_click=self.reject))
-        self.run_btn = self.button(i18n.t("Write this up"), "primary",
-                                   icon_name="pencil", on_click=self._write_up)
-        self.run_btn.setEnabled(False)
-        self.run_btn.setToolTip("Measure a job first")
-        self.footer.set_primary(self.run_btn)
+        self.generate_btn = self.button(i18n.t("Generate"), "primary",
+                                        icon_name="grid",
+                                        on_click=self._measure)
+        self.generate_btn.setEnabled(False)
+        self.generate_btn.setToolTip(i18n.t("Attach a job first"))
+        self.footer.set_primary(self.generate_btn)
 
         if attachments:
             self._on_files_added([a["path"] for a in attachments])
@@ -271,7 +285,14 @@ class GerberDialog(PrismDialog):
         self.clean_btn.setEnabled(True)
         known = self.ask.paths()
         self.ask.add_paths([p for p in new if p not in known])
-        self._measure()
+        # Deliberately NOT measuring yet. Measuring on drop left no moment
+        # to choose the client's format first — the CSV was already made.
+        # Generate is the go button.
+        self.generate_btn.setEnabled(True)
+        self.generate_btn.setToolTip("")
+        self.status.setText(i18n.t(
+            "Job attached. Choose the client's format above if you want "
+            "the figures in their form, then press Generate."))
 
     # ── measuring ───────────────────────────────────────────────────────
 
@@ -477,6 +498,7 @@ class GerberDialog(PrismDialog):
 
     def _set_busy(self, busy: bool, message: str):
         self.progress.setVisible(busy)
+        self.generate_btn.setEnabled(not busy and bool(self.paths))
         self.run_btn.setEnabled(not busy and bool(self.jobs))
         self.status.setText(message)
 
