@@ -165,6 +165,129 @@ class TheCustomersOwnEnclosure(unittest.TestCase):
         self.assertIn("101.00 x 93.00 x 71.00", html)
 
 
+class ThePlanIsValidatedNotTrusted(unittest.TestCase):
+    """/step-ask: whatever the agent answers, only the two executable ops
+    survive, and only with sane numbers."""
+
+    def test_a_fenced_json_plan_parses(self):
+        plan, _ = SF.parse_plan([
+            'Here you go:\n```json\n{"changes": [{"op": "enlarge_hole", '
+            '"part": "top", "dia_mm": 5, "new_dia_mm": 6.5, "why": "M6"}], '
+            '"advice": ["add draft"]}\n```'])
+        self.assertEqual(plan["changes"], [
+            {"op": "enlarge_hole", "part": "top", "dia_mm": 5.0,
+             "new_dia_mm": 6.5, "why": "M6"}])
+        self.assertEqual(plan["advice"], ["add draft"])
+
+    def test_a_shrink_or_unknown_op_is_dropped(self):
+        plan, _ = SF.parse_plan([
+            '{"changes": [{"op": "enlarge_hole", "part": "x", "dia_mm": 6, '
+            '"new_dia_mm": 5}, {"op": "delete_part", "part": "x"}, '
+            '{"op": "scale", "part": "x", "factor": 99}], "advice": []}'])
+        self.assertEqual(plan["changes"], [])
+
+    def test_garbage_returns_none_with_a_sentence(self):
+        plan, why = SF.parse_plan(["no json here", ""])
+        self.assertIsNone(plan)
+        self.assertIn("no JSON plan", why)
+
+    def test_the_newest_capture_wins(self):
+        older = '{"changes": [], "advice": ["old"]}'
+        newer = '{"changes": [], "advice": ["new"]}'
+        plan, _ = SF.parse_plan([older, newer])
+        self.assertEqual(plan["advice"], ["new"])
+
+
+@unittest.skipUnless(HAVE, "cadquery not installed")
+class ThePromptsCarryNumbersNotTheModel(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = os.path.join(tempfile.mkdtemp(), "block.step")
+        _box_with_hole(cls.path)
+        cls.report = SF.analyse(cls.path, mode="plastic")
+
+    def test_groq_hears_the_figures_and_the_confidentiality(self):
+        p = SF.ask_prompt(self.report, "make it lighter")
+        self.assertIn("60.00 x 40.00 x 8.00", p)
+        self.assertIn("make it lighter", p)
+        self.assertIn("cannot be shown to you", p)
+
+    def test_the_planner_gets_the_schema_and_the_honest_out(self):
+        p = SF.plan_prompt(self.report, "q", "advice text")
+        self.assertIn('"enlarge_hole"', p)
+        self.assertIn('"scale"', p)
+        self.assertIn("never shrunk", p)
+        self.assertIn("empty changes list", p)
+
+
+@unittest.skipUnless(HAVE, "cadquery not installed")
+class ChangesLandOnACopy(unittest.TestCase):
+    """apply_plan edits real geometry and the re-measure proves it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.path = os.path.join(cls.dir, "block.step")
+        _box_with_hole(cls.path)
+
+    def test_a_hole_is_enlarged_and_nothing_else_moves(self):
+        out = os.path.join(self.dir, "bigger.step")
+        done = SF.apply_plan(self.path, {"changes": [
+            {"op": "enlarge_hole", "part": "all", "dia_mm": 5.0,
+             "new_dia_mm": 6.0, "why": ""}], "advice": []}, out)
+        self.assertTrue(any("1 hole(s) enlarged" in l for l in done["log"]))
+        part = SF.analyse(out, mode="plastic")["parts"][0]
+        self.assertEqual(part["size_mm"], (60.0, 40.0, 8.0))
+        self.assertEqual(part["holes"], [{"dia_mm": 6.0, "count": 1}])
+
+    def test_a_scaled_part_keeps_its_holes_as_holes(self):
+        out = os.path.join(self.dir, "scaled.step")
+        SF.apply_plan(self.path, {"changes": [
+            {"op": "scale", "part": "all", "factor": 1.5, "why": ""}],
+            "advice": []}, out)
+        part = SF.analyse(out, mode="plastic")["parts"][0]
+        self.assertEqual(part["size_mm"], (90.0, 60.0, 12.0))
+        self.assertEqual(part["holes"], [{"dia_mm": 7.5, "count": 1}])
+
+    def test_the_original_file_is_untouched(self):
+        before = open(self.path, "rb").read()
+        SF.apply_plan(self.path, {"changes": [
+            {"op": "scale", "part": "all", "factor": 2, "why": ""}],
+            "advice": []}, os.path.join(self.dir, "x.step"))
+        self.assertEqual(open(self.path, "rb").read(), before)
+
+    def test_a_plan_that_lands_nowhere_refuses_to_write(self):
+        out = os.path.join(self.dir, "never.step")
+        with self.assertRaises(SF.StepError):
+            SF.apply_plan(self.path, {"changes": [
+                {"op": "enlarge_hole", "part": "no-such-part",
+                 "dia_mm": 5.0, "new_dia_mm": 6.0, "why": ""}],
+                "advice": []}, out)
+        self.assertFalse(os.path.exists(out))
+
+
+@unittest.skipUnless(HAVE and os.path.exists(REAL),
+                     "cadquery or the demo assembly not on this machine")
+class ChangesOnTheCustomersEnclosure(unittest.TestCase):
+    """Witnessed on the real assembly: one hole grows, names and every
+    other figure hold still."""
+
+    def test_only_the_named_hole_on_the_named_part_changes(self):
+        out = os.path.join(tempfile.mkdtemp(), "m.step")
+        SF.apply_plan(REAL, {"changes": [
+            {"op": "enlarge_hole", "part": "top", "dia_mm": 6.2,
+             "new_dia_mm": 8.0, "why": ""}], "advice": []}, out)
+        by = {p["name"]: p for p in SF.analyse(out, "metal")["parts"]}
+        self.assertEqual(set(by), {"top", "bottom", "side"})
+        top = {h["dia_mm"] for h in by["top"]["holes"]}
+        self.assertIn(8.0, top)
+        self.assertNotIn(6.2, top)
+        self.assertEqual(by["top"]["size_mm"], (101.0, 93.0, 71.0))
+        self.assertEqual(by["side"]["size_mm"], (92.0, 68.5, 6.0))
+        self.assertIn(5.2, {h["dia_mm"] for h in by["bottom"]["holes"]})
+
+
 class TheTerminalDoor(unittest.TestCase):
 
     def test_step_and_s_reach_the_command(self):
@@ -196,10 +319,23 @@ class TheTerminalDoor(unittest.TestCase):
         src = open(os.path.join(root, "prism_terminal", "prism.py"),
                    encoding="utf-8").read()
         body = src[src.index("def cmd_step_auto("):
-                   src.index("def cmd_gerber(")]
+                   src.index("def cmd_step_ask(")]
         self.assertIn('F.attach(drawn["png"])', body)
         self.assertNotIn("F.attach(target", body)
         self.assertIn("STEP file stays here", body)
+
+    def test_step_ask_is_dispatched_and_never_uploads_the_model(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        self.assertLess(src.index('line.startswith("/step-ask")'),
+                        src.index('line.startswith("/step") or'))
+        body = src[src.index("def cmd_step_ask("):
+                   src.index("def cmd_gerber(")]
+        self.assertNotIn("F.attach(target", body)
+        self.assertIn('F.attach(drawn["png"])', body)
+        self.assertIn("groq_chat", body)
+        self.assertIn('"modified.step"', body)
 
 
 if __name__ == "__main__":
