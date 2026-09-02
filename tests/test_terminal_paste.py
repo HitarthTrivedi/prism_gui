@@ -51,6 +51,24 @@ class PastedCommandsStayCommands(unittest.TestCase):
         gate_body = src[src.index("def _get_input("):src.index("def main(")]
         self.assertIn("_strip_paste_markers", gate_body)
 
+    def test_the_main_prompt_reads_canonical_not_widget(self):
+        """questionary runs the tty raw and swallows a multi-line paste's
+        remaining lines into its own buffer — they then surfaced as
+        keystrokes inside the NEXT widget, cutting a /step-ask question in
+        half and answering its confirm 'No'. The main prompt must stay on
+        plain input() so the drain can merge the whole paste back."""
+        src = open(PRISM_PY, encoding="utf-8").read()
+        prompt_body = src[src.index("def _prompt("):src.index("def _confirm_task(")]
+        self.assertNotIn("questionary.text", prompt_body)
+        self.assertNotIn("import questionary", prompt_body)
+        self.assertEqual(prompt_body.count("_drain_pending_lines"), 2)
+
+    def test_the_confirm_widget_is_drained_first(self):
+        src = open(PRISM_PY, encoding="utf-8").read()
+        body = src[src.index("def _ask_yes_no("):src.index("def _prompt(")]
+        self.assertLess(body.index("_drain_pending_lines"),
+                        body.index("_q_confirm(msg"))
+
 
 class RoutingFailuresSpeakEnglish(unittest.TestCase):
 

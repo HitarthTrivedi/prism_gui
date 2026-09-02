@@ -267,6 +267,68 @@ class ChangesLandOnACopy(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
 
 
+class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
+    """The user confirms against a page they can see — a table of every
+    dimension before → after and the drawing — and only then is
+    modified.step written."""
+
+    PLAN = {"changes": [{"op": "enlarge_hole", "part": "p", "dia_mm": 5.0,
+                         "new_dia_mm": 6.0, "why": "fitting"}],
+            "advice": ["add draft"]}
+    REPORT = {"file": "x.step", "mode": "plastic",
+              "overall_mm": (60.0, 40.0, 8.0),
+              "parts": [{"name": "p", "size_mm": (60.0, 40.0, 8.0),
+                         "thickness_mm": 6.0, "volume_cm3": 38.0,
+                         "holes": [{"dia_mm": 5.0, "count": 1},
+                                   {"dia_mm": 6.0, "count": 1}]}],
+              "warnings": []}
+
+    def test_prediction_merges_an_enlarged_hole_into_its_new_group(self):
+        parts = SF.predicted_parts(self.REPORT, self.PLAN)
+        self.assertEqual(parts[0]["holes"], [{"dia_mm": 6.0, "count": 2}])
+        self.assertEqual(parts[0]["size_mm"], (60.0, 40.0, 8.0))
+
+    def test_prediction_scales_every_figure(self):
+        parts = SF.predicted_parts(self.REPORT, {"changes": [
+            {"op": "scale", "part": "all", "factor": 2.0, "why": ""}],
+            "advice": []})
+        self.assertEqual(parts[0]["size_mm"], (120.0, 80.0, 16.0))
+        self.assertEqual(parts[0]["holes"][0], {"dia_mm": 10.0, "count": 1})
+
+    def test_the_page_says_nothing_is_built_yet(self):
+        out = tempfile.mkdtemp()
+        page = open(SF.review_html(self.REPORT, self.PLAN, out,
+                                   question="fit 6mm"),
+                    encoding="utf-8").read()
+        self.assertIn("Nothing is built yet", page)
+        self.assertIn("Hole Ø5 → Ø6", page)
+        self.assertIn("60.00 x 40.00 x 8.00", page)
+        self.assertIn("class='changed'", page)
+        self.assertIn("add draft", page)
+        self.assertIn("fit 6mm", page)
+
+    def test_after_the_build_the_page_says_re_measured(self):
+        out = tempfile.mkdtemp()
+        after = {"parts": [{"name": "p", "size_mm": (60.0, 40.0, 8.0),
+                            "thickness_mm": 5.9, "volume_cm3": 37.5,
+                            "holes": [{"dia_mm": 6.0, "count": 2}]}]}
+        page = open(SF.review_html(self.REPORT, self.PLAN, out,
+                                   after=after), encoding="utf-8").read()
+        self.assertIn("BUILT", page)
+        self.assertIn("re-measured", page)
+        self.assertNotIn("Nothing is built yet", page)
+
+    def test_the_terminal_builds_only_after_the_page_and_the_yes(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        body = src[src.index("def cmd_step_ask("):src.index("def cmd_gerber(")]
+        self.assertLess(body.index("review_html"),
+                        body.index("build modified.step now"))
+        self.assertLess(body.index("build modified.step now"),
+                        body.index("apply_plan"))
+
+
 @unittest.skipUnless(HAVE and os.path.exists(REAL),
                      "cadquery or the demo assembly not on this machine")
 class ChangesOnTheCustomersEnclosure(unittest.TestCase):
