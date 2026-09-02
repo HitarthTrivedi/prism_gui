@@ -114,6 +114,26 @@ class GerberDialog(PrismDialog):
         lock_row.addWidget(lock_text, stretch=1)
         root.addWidget(lock)
 
+        # The client's own format. FCC's F-SAL-01 quotation form was the
+        # request that built this: "put the parameters inside OUR template".
+        # Choose it once — the path is remembered — and every measured job
+        # also lands as a filled copy of that form: labels Prism recognises
+        # get the measured value in the cell beside them, the form's own
+        # formulas and everything else stay exactly as the client drew it.
+        form_box = QGroupBox(i18n.t("Client's format (optional)"))
+        form_l = QHBoxLayout(form_box)
+        self.form_label = QLabel(self._form_caption())
+        self.form_label.setWordWrap(True)
+        form_l.addWidget(self.form_label, stretch=1)
+        form_l.addWidget(self.button(i18n.t("Choose template…"), "secondary",
+                                     small=True, on_click=self._pick_form))
+        self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
+                                          small=True, on_click=self._clear_form)
+        self.form_clear_btn.setVisible(
+            bool(self.cfg.get("gerber_form_template")))
+        form_l.addWidget(self.form_clear_btn)
+        root.addWidget(form_box)
+
         # Only appears once a job has actually been measured.
         self.meas_box = QGroupBox("Measured — not by an AI")
         meas_l = QVBoxLayout(self.meas_box)
@@ -172,6 +192,74 @@ class GerberDialog(PrismDialog):
 
         if attachments:
             self._on_files_added([a["path"] for a in attachments])
+
+    # ── the client's own form ───────────────────────────────────────────
+
+    def _form_caption(self) -> str:
+        path = self.cfg.get("gerber_form_template") or ""
+        if path and os.path.exists(path):
+            return i18n.t("Filled copies of “{name}” are saved beside the "
+                          "CSVs for every measured job.").replace(
+                              "{name}", os.path.basename(path))
+        return i18n.t("If the client wants the figures in their own Excel "
+                      "form — a quotation format, a checklist — choose it "
+                      "here. Prism fills the cells it recognises and leaves "
+                      "everything else exactly as they drew it.")
+
+    def _pick_form(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Client's Excel format"), "",
+            "Excel (*.xlsx *.xlsm)")
+        if not path:
+            return
+        self.cfg["gerber_form_template"] = path
+        CB.config.save(self.cfg)
+        self.form_label.setText(self._form_caption())
+        self.form_clear_btn.setVisible(True)
+        if self.jobs:
+            self._fill_forms()   # a job is already measured — fill it now
+
+    def _clear_form(self):
+        self.cfg.pop("gerber_form_template", None)
+        CB.config.save(self.cfg)
+        self.form_label.setText(self._form_caption())
+        self.form_clear_btn.setVisible(False)
+
+    def _fill_forms(self):
+        """One filled copy of the client's form per measured job. A fill
+        that fails says so and never blocks the measurement it decorates."""
+        template = self.cfg.get("gerber_form_template") or ""
+        if not template or not os.path.exists(template) or not self.jobs:
+            return
+        form = CB.get_gerber_form()
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        made = []
+        for name, job in self.jobs:
+            stem = "".join(c if c.isalnum() or c in "-_ " else "_"
+                           for c in name).strip()[:40] or "job"
+            out = os.path.join(
+                REPORTS_DIR,
+                f"{stem} — "
+                f"{os.path.splitext(os.path.basename(template))[0]}"
+                " (filled).xlsx")
+            try:
+                result = form.fill_form(job, template, out,
+                                        meta={"part": name})
+            except Exception as e:                      # noqa: BLE001
+                self.status.setText(
+                    i18n.t("Couldn't fill the client's form: ") + str(e))
+                continue
+            made.append((out, len(result["filled"])))
+            try:
+                CB.config.save_artifact(out, os.path.basename(out),
+                                        kind="gerber", task=name)
+            except Exception:                           # noqa: BLE001
+                pass
+        if made:
+            self.meas_view.appendPlainText(
+                "\n\nCLIENT'S FORMAT\n" + "\n".join(
+                    f"  {n} cell(s) filled → {p}" for p, n in made))
 
     # ── files ───────────────────────────────────────────────────────────
 
@@ -257,6 +345,7 @@ class GerberDialog(PrismDialog):
         self.meas_box.setVisible(True)
         self.run_btn.setEnabled(True)
         self.run_btn.setToolTip("")
+        self._fill_forms()
         self._set_busy(False, "Measured from the Gerber geometry itself — "
                               "not by an AI.")
 

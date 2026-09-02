@@ -201,6 +201,12 @@ def get_gerber_clean():
     return gerber_clean
 
 
+def get_gerber_form():
+    """Fill a client's own Excel quotation form from a measured job."""
+    from core import gerber_form
+    return gerber_form
+
+
 # ── Inquiry automation ───────────────────────────────────────────────────────
 # Imported on demand like the rest: the engine's mail modules pull in imaplib
 # and the CSV machinery, and a customer who never buys this add-on should not
