@@ -20,11 +20,17 @@ import tempfile
 
 # Same cp1252 hazard as build.py: this script prints ✓, and it also READS the
 # app's UTF-8 self-test output, which a cp1252 decode would reject.
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+#
+# Under __main__ only: at import time sys.stdout belongs to the importer,
+# not to us. devtools/mint.py is imported by five test files, so at module
+# level this block would re-encode pytest's own capture stream as a side
+# effect of collecting a test — a script reaching into its caller's I/O.
+if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUI = os.path.dirname(HERE)

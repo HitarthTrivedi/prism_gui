@@ -24,6 +24,20 @@ import argparse
 import getpass
 import os
 import sys
+
+# Windows consoles are cp1252 and cannot encode the characters below — see
+# packaging/build.py for the CI failure that found this. Degrade, don't die.
+#
+# Under __main__ only: at import time sys.stdout belongs to the importer,
+# not to us. devtools/mint.py is imported by five test files, so at module
+# level this block would re-encode pytest's own capture stream as a side
+# effect of collecting a test — a script reaching into its caller's I/O.
+if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 from datetime import date, timedelta
 from decimal import Decimal
 from email.message import EmailMessage

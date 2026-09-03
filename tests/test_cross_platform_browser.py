@@ -936,3 +936,133 @@ class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
         source = inspect.getsource(self.mint._ungated_features)
         self.assertIn("_authorized_then", source)
         self.assertIn("main_window.py", source)
+
+
+# ── 10. the box-drawing characters Windows cannot print ──────────────────────
+
+class ScriptsSurviveAWindowsConsole(unittest.TestCase):
+    """Every ✓ and ─ these scripts print is a Windows crash waiting.
+
+    Windows consoles are cp1252, which has no U+2713 ✓, no U+2500 ─ and no
+    U+2192 →. Python then raises UnicodeEncodeError *from the print itself*,
+    so the work succeeds and the process dies reporting it — which is
+    exactly what happened twice:
+
+      · packaging/build.py FAILED on Windows CI after building the app
+        correctly, on the line `print("✓ built")`.
+      · devtools/scenarios.py FAILED on Windows CI with all 148 scenarios
+        passing, on the line printing a section heading.
+
+    Both were fixed the same way (reconfigure stdout to UTF-8, replacing
+    what cannot be encoded), and both times only that one script was fixed.
+    Six others were carrying the identical bug when this test was written,
+    including release_all.py, mint.py and codesign.py — the release,
+    licensing and signing tools, i.e. the ones where dying halfway is worst.
+
+    So the rule is checked rather than remembered: if a script that someone
+    runs prints a character cp1252 cannot encode, it must set its own
+    encoding first.
+    """
+
+    GUI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _runnable_scripts(self):
+        import glob
+        for folder in ("devtools", "packaging"):
+            for path in sorted(glob.glob(os.path.join(self.GUI, folder, "*.py"))):
+                with open(path, encoding="utf-8") as f:
+                    source = f.read()
+                if "__main__" in source:      # something a person can run
+                    yield os.path.relpath(path, self.GUI), source
+
+    @staticmethod
+    def _unprintable_on_windows(source: str) -> set[str]:
+        """Characters cp1252 cannot encode that reach stdout.
+
+        Only lines that actually print: a ✓ inside a docstring is written to
+        a file the interpreter reads as UTF-8 and never encodes, so it is
+        harmless and must not be reported as a bug.
+        """
+        found = set()
+        for line in source.splitlines():
+            if "print(" not in line and "sys.stdout" not in line:
+                continue
+            for char in line:
+                if ord(char) < 128:
+                    continue
+                try:
+                    char.encode("cp1252")
+                except UnicodeEncodeError:
+                    found.add(char)
+        return found
+
+    def test_every_script_that_needs_the_guard_has_it(self):
+        missing = []
+        for name, source in self._runnable_scripts():
+            risky = self._unprintable_on_windows(source)
+            if risky and "reconfigure(encoding" not in source:
+                missing.append(f"{name} prints {''.join(sorted(risky))}")
+        self.assertEqual(missing, [], "\n".join(
+            ["these would raise UnicodeEncodeError on a Windows console — "
+             "add the sys.stdout.reconfigure block, see packaging/build.py:"]
+            + missing))
+
+    def test_the_guard_runs_before_anything_is_printed(self):
+        """Placement is the whole fix. A guard below the first print is
+        no guard at all, and reads as one."""
+        import re
+        late = []
+        for name, source in self._runnable_scripts():
+            lines = source.splitlines()
+            guards = [i for i, l in enumerate(lines) if "reconfigure(encoding" in l]
+            if not guards:
+                continue
+            prints = [i for i, l in enumerate(lines) if re.search(r"\bprint\(", l)]
+            if prints and min(prints) < guards[0]:
+                late.append(f"{name}: print at line {min(prints) + 1}, "
+                            f"guard at line {guards[0] + 1}")
+        self.assertEqual(late, [], "\n".join(["guard set up too late:"] + late))
+
+    def test_the_guard_never_runs_at_import_time(self):
+        """It must sit under `if __name__ == "__main__"`.
+
+        `sys.stdout` at import time is not the script's — it belongs to
+        whoever imported it, and these scripts are imported: five test
+        files import devtools/mint.py for its licence minting. At module
+        level the block would therefore re-encode pytest's own capture
+        stream as a side effect of collecting a test.
+
+        Nothing visibly broke from it, which is the point of pinning it
+        here rather than waiting: a script silently changing its caller's
+        I/O is the kind of thing that surfaces later as something else's
+        inexplicable bug.
+        """
+        import ast
+        unguarded = []
+        for name, source in self._runnable_scripts():
+            if "reconfigure(encoding" not in source:
+                continue
+            tree = ast.parse(source)
+            under_main = any(
+                isinstance(node, ast.If)
+                and "__main__" in ast.dump(node.test)
+                and "reconfigure(encoding" in (
+                    ast.get_source_segment(source, node) or "")
+                for node in ast.walk(tree))
+            if not under_main:
+                unguarded.append(name)
+        self.assertEqual(unguarded, [], "\n".join(
+            ['these reconfigure stdout at IMPORT time — put the block under '
+             '`if __name__ == "__main__":`:'] + unguarded))
+
+    def test_the_check_can_actually_fail(self):
+        """The two tests above pass trivially if _unprintable_on_windows
+        finds nothing, which is the failure mode of every source-scanning
+        test. Prove it sees a real one."""
+        self.assertEqual(
+            self._unprintable_on_windows('print("✓ done")'), {"✓"})
+        self.assertEqual(
+            self._unprintable_on_windows('"""a ✓ in a docstring"""'), set())
+        # é IS in cp1252 — a Windows console prints it fine, and flagging it
+        # would send someone chasing a bug that is not there.
+        self.assertEqual(self._unprintable_on_windows('print("café")'), set())
