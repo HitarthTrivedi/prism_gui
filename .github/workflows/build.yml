@@ -172,10 +172,24 @@ jobs:
       # channel="chromium", which is what makes the full build the one that
       # runs. Those three have to agree; if this flag is ever removed, check
       # the other two first.
+      #
+      # `--with-deps` on Linux, and it is load-bearing: the runner installs
+      # Qt's libraries above but never Chromium's, which are a different set
+      # (libnss3, libgbm1, libasound2, libcups2 …). Without them the browser
+      # launches and dies immediately, and the smoke test — which now starts
+      # a real browser rather than checking a file exists — failed with
+      # "Target page, context or browser has been closed" on Linux while
+      # Windows and macOS passed, because those two have the equivalents
+      # built in.
+      #
+      # Not on Windows/macOS: install-deps is a Linux apt/dnf routine, and
+      # the flag needs a sudo the other two runners do not want.
       - name: Install Chromium for Prism Studio
         env:
           PLAYWRIGHT_BROWSERS_PATH: "0"
-        run: playwright install --no-shell chromium
+        run: >-
+          playwright install --no-shell
+          ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
 
       # PyAudio needs PortAudio headers and has no wheel on some platforms;
       # the app runs without it (voice input just reports itself unavailable),
