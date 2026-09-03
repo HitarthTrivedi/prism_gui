@@ -314,6 +314,71 @@ class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
         self.assertNotIn("material_type", bare)
 
 
+
+@unittest.skipUnless(HAVE, "openpyxl not installed")
+class TheAIFillsOnlyWhatIsBlank(unittest.TestCase):
+    """The email-and-pricing half: blank fields are offered, the agent's
+    JSON is validated, and the patch can never touch a filled cell."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.form = os.path.join(cls.dir, "form.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"], ws["B1"] = "Board X", 60.0          # measured — filled
+        ws["A2"] = "QTY"                              # blank
+        ws["A3"] = "Delivery"                         # blank
+        ws["A4"] = "Total"
+        ws["B4"] = "=B1*2"                            # their arithmetic
+        ws["A5"] = ("A long sentence that is clearly not a field label "
+                    "at all, just a note")
+        wb.save(cls.form)
+
+    def test_blank_fields_are_the_short_labels_with_empty_neighbours(self):
+        self.assertEqual(GF.blank_fields(self.form), ["QTY", "Delivery"])
+
+    def test_the_prompt_says_the_design_is_not_shared(self):
+        p = GF.ai_fill_prompt([("B1", "Board X", 60.0)],
+                              ["QTY"], "urgent job")
+        self.assertIn("not shared", p)
+        self.assertIn("OMIT any field", p)
+        self.assertIn("QTY", p)
+        self.assertIn("urgent job", p)
+
+    def test_fills_are_validated_against_the_offered_blanks(self):
+        fills, _ = GF.parse_fills(
+            ['{"fills": {"QTY": 500, "Board X": 999, "Made Up": "x"}}'],
+            ["QTY", "Delivery"])
+        self.assertEqual(fills, {"QTY": 500})   # only an offered blank
+
+    def test_garbage_comes_back_as_a_sentence_not_a_crash(self):
+        fills, why = GF.parse_fills(["no json"], ["QTY"])
+        self.assertEqual(fills, {})
+        self.assertIn("No JSON", why)
+
+    def test_the_patch_lands_in_blanks_and_never_elsewhere(self):
+        out = os.path.join(self.dir, "after.xlsx")
+        r = GF.fill_by_label(self.form, out,
+                             {"QTY": 500, "Delivery": "2 weeks",
+                              "Board X": 999, "Total": 7})
+        ws = openpyxl.load_workbook(out).active
+        self.assertEqual(ws["B2"].value, 500)
+        self.assertEqual(ws["B3"].value, "2 weeks")
+        self.assertEqual(ws["B1"].value, 60.0)        # measured — untouched
+        self.assertEqual(ws["B4"].value, "=B1*2")     # formula — untouched
+        self.assertEqual(len(r["filled"]), 2)
+
+    def test_patching_a_file_into_itself_is_safe(self):
+        import shutil
+        inplace = os.path.join(self.dir, "inplace.xlsx")
+        shutil.copyfile(self.form, inplace)
+        GF.fill_by_label(inplace, inplace, {"QTY": 42})
+        ws = openpyxl.load_workbook(inplace).active
+        self.assertEqual(ws["B2"].value, 42)
+        self.assertEqual(ws["B1"].value, 60.0)
+
+
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
     def test_the_gui_offers_and_uses_the_clients_format(self):

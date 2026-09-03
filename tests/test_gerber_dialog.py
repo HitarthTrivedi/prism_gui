@@ -388,6 +388,58 @@ class TheOwnersCheckingFolderIsHonoured(unittest.TestCase):
         self.assertEqual(dlg._out_dir(), GD.REPORTS_DIR)
 
 
+
+class TheAIFillSeesOnlyTheDocuments(unittest.TestCase):
+    """The whole point of the split: the fill stage's attachments are
+    exactly the user's documents — never a path into the Gerber job."""
+
+    def test_only_extra_docs_reach_the_worker(self):
+        import dialogs.gerber_dialog as mod
+        dlg = _dialog()
+        # A measured job with a filled form, staged by hand.
+        doc = os.path.join(tempfile.mkdtemp(), "inquiry.csv")
+        with open(doc, "w") as f:
+            f.write("qty,rate\n500,12\n")
+        form = os.path.join(tempfile.mkdtemp(), "form.xlsx")
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "QTY"
+        wb.save(form)
+        dlg.paths = ["/secret/job.zip"]
+        dlg.jobs = [("job", {"answers": {}})]
+        dlg._filled_forms = [("job", form, {"filled": []})]
+        dlg.extra_paths = [doc]
+
+        seen = {}
+
+        class Fake:
+            def __init__(self, *a, **kw):
+                seen["args"], seen["kwargs"] = a, kw
+                self.done = self.failed = _Sig()
+
+            def start(self):
+                seen["started"] = True
+
+        was = mod.AutomationWorker
+        mod.AutomationWorker = Fake
+        try:
+            dlg._ai_fill()
+        finally:
+            mod.AutomationWorker = was
+
+        records = seen["args"][2]
+        paths = [r["path"] for r in records]
+        self.assertEqual(paths, [doc])
+        self.assertTrue(all("job.zip" not in p for p in paths))
+        prompt = seen["args"][4] if len(seen["args"]) > 4 else \
+            seen["kwargs"]["custom_stages"][0][2][0]
+        self.assertIn("not shared", prompt)
+
+    def test_design_files_are_refused_from_the_docs_list(self):
+        for ext in (".zip", ".rar", ".gtl", ".drl", ".txt"):
+            self.assertIn(ext, GerberDialog._DESIGN_EXTS)
+
+
 if __name__ == "__main__":
     unittest.main()
 
