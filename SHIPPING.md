@@ -225,8 +225,7 @@ path: they will want to pay by NEFT against a PO, not by card.
 
 **Self-serve (Razorpay)** — not built yet. Needs `POST /webhooks/razorpay`,
 subscription/webhook tables (already in the schema), a customer portal, and
-dunning emails. About a week. See Phase 2 in
-[`docs/licensing/05-build-checklist.md`](docs/licensing/05-build-checklist.md).
+dunning emails. About a week. See Phase 2 in [`LICENSING.md`](LICENSING.md) §7.
 
 Nothing in the app changes for either. It never touches money — it only ever
 asks the licence server what a key allows.
