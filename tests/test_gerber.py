@@ -1368,3 +1368,54 @@ class TheAnnularRingIsMeasuredNotAssumed(unittest.TestCase):
         _name, group = G.split_jobs(G.gather([src]))[0]
         a = G.analyse(group)["answers"]
         self.assertIsNone(a["min_annular_ring_mm"])
+
+
+class TheEletecksOwnCheckSheets(unittest.TestCase):
+    """Five real single/double-sided jobs whose Gerbers are named 031.GBR,
+    03S.GBR — nothing in the name says which layer is which, and the CAM
+    tool writes D1/D2/D3 without the leading zero. Witnessed against the
+    fab's own filled check sheets (the .doc beside each zip): board size
+    and minimum line for every job, spacing where their sheet and the
+    geometry agree."""
+
+    GD = os.path.join(REAL, "gerber data")
+
+    def _answers(self, folder, zipname):
+        src = os.path.join(self.GD, folder, zipname)
+        if not os.path.exists(src):
+            raise unittest.SkipTest(f"{zipname} not on this machine")
+        _name, group = G.split_jobs(G.gather([src]))[0]
+        return G.analyse(group)["answers"]
+
+    def test_ast03_reads_the_sheets_own_numbers(self):
+        a = self._answers("Eleteck-AST03-INC", "AST03-INC.zip")
+        w, h = a["pcb_size_mm"]
+        self.assertAlmostEqual(w / 25.4, 1.3500, places=3)
+        self.assertAlmostEqual(h / 25.4, 3.8250, places=3)
+        self.assertAlmostEqual(a["min_track_width_mm"], 1.27, places=2)
+        self.assertAlmostEqual(a["min_track_spacing_mm"], 0.508, places=2)
+
+    def test_ast14_reads_the_sheets_own_numbers(self):
+        a = self._answers("Eleteck-AST14-FF", "AST14-FF.zip")
+        w, h = a["pcb_size_mm"]
+        self.assertAlmostEqual(w / 25.4, 0.9150, places=3)
+        self.assertAlmostEqual(h / 25.4, 2.3000, places=3)
+        self.assertAlmostEqual(a["min_track_width_mm"], 1.27, places=2)
+        self.assertAlmostEqual(a["min_track_spacing_mm"] / 25.4 * 1000,
+                               45.7, delta=0.2)
+
+    def test_ast04s_text_pen_is_not_its_track_width(self):
+        # 65 strokes of 10 mil lettering on a board routed at 12 — the
+        # fab's sheet says 12, and so must the answer.
+        a = self._answers("Eleteck-AST04-ACM", "AST04-ACM.zip")
+        self.assertAlmostEqual(a["min_track_width_mm"] / 25.4 * 1000,
+                               12.0, delta=0.3)
+
+    def test_the_gbr_layers_are_recognised_by_geometry(self):
+        src = os.path.join(self.GD, "Eleteck-AST03-INC", "AST03-INC.zip")
+        if not os.path.exists(src):
+            raise unittest.SkipTest("job not on this machine")
+        _name, group = G.split_jobs(G.gather([src]))[0]
+        roles = {e["name"]: e["role"] for e in G.classify(group)}
+        self.assertEqual(roles.get("031.GBR"), "copper_top")
+        self.assertIn("outline", roles.values())
