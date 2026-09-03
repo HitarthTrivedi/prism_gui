@@ -19,8 +19,8 @@ import time
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
-    QPlainTextEdit, QMessageBox, QProgressBar,
+    QComboBox, QDialog, QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
+    QPushButton, QPlainTextEdit, QMessageBox, QProgressBar,
 )
 
 import core_bridge as CB
@@ -126,6 +126,19 @@ class GerberDialog(PrismDialog):
         self.form_label = QLabel(self._form_caption())
         self.form_label.setWordWrap(True)
         form_l.addWidget(self.form_label, stretch=1)
+        # The unit their form (or their customer) works in. Prism always
+        # measures in mm; every LENGTH going into the filled form follows
+        # this choice — counts and layer numbers never convert.
+        form_l.addWidget(QLabel(i18n.t("Measurements in")))
+        self.units_combo = QComboBox()
+        self.units_combo.addItems(["mm", "inch", "mil"])
+        self.units_combo.setCurrentText(
+            self.cfg.get("gerber_units") or "mm")
+        self.units_combo.currentTextChanged.connect(self._units_changed)
+        self.units_combo.setToolTip(i18n.t(
+            "The unit every size, width, spacing and drill diameter is "
+            "written in on the client's form"))
+        form_l.addWidget(self.units_combo)
         form_l.addWidget(self.button(i18n.t("Choose template…"), "secondary",
                                      small=True, on_click=self._pick_form))
         self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
@@ -240,6 +253,12 @@ class GerberDialog(PrismDialog):
         self.form_label.setText(self._form_caption())
         self.form_clear_btn.setVisible(False)
 
+    def _units_changed(self, units: str):
+        self.cfg["gerber_units"] = units
+        CB.config.save(self.cfg)
+        if self.jobs:
+            self._fill_forms()   # refill the measured job in the new unit
+
     def _fill_forms(self):
         """One filled copy of the client's form per measured job. A fill
         that fails says so and never blocks the measurement it decorates."""
@@ -258,8 +277,9 @@ class GerberDialog(PrismDialog):
                 f"{os.path.splitext(os.path.basename(template))[0]}"
                 " (filled).xlsx")
             try:
-                result = form.fill_form(job, template, out,
-                                        meta={"part": name})
+                result = form.fill_form(
+                    job, template, out, meta={"part": name},
+                    units=self.cfg.get("gerber_units") or "mm")
             except Exception as e:                      # noqa: BLE001
                 self.status.setText(
                     i18n.t("Couldn't fill the client's form: ") + str(e))

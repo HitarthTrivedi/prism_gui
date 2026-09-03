@@ -164,6 +164,57 @@ class TheClientsRealForm(unittest.TestCase):
             self.assertIn('mc:Ignorable="x14ac', sheet)
 
 
+@unittest.skipUnless(HAVE, "openpyxl not installed")
+class TheUnitsFollowTheUsersChoice(unittest.TestCase):
+    """Lengths convert to inch or mil at that unit's honest precision;
+    counts, layers and text never do."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.tpl = os.path.join(cls.dir, "form.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Board X"
+        ws["A2"] = "Min Line"
+        ws["A3"] = "No Layer"
+        ws["C1"] = "Pcs / Array"
+        ws["A5"] = "HOLE SIZE"
+        ws["B5"] = "NO.OF HOLES/ARRAY"
+        ws["A9"] = "TOTAL DRILL"
+        wb.save(cls.tpl)
+
+    def _fill(self, units):
+        out = os.path.join(self.dir, f"{units}.xlsx")
+        GF.fill_form(JOB, self.tpl, out, units=units)
+        return openpyxl.load_workbook(out).active
+
+    def test_inch_converts_lengths_and_only_lengths(self):
+        ws = self._fill("inch")
+        self.assertEqual(ws["B1"].value, 2.3622)   # 60 mm
+        self.assertEqual(ws["B2"].value, 0.1181)   # 3 mm
+        self.assertEqual(ws["B3"].value, 2)        # layers: a count
+        self.assertEqual(ws["D1"].value, 2)        # pcs/array: a count
+        self.assertEqual(ws["A6"].value, 0.0394)   # Ø1 mm drill
+        self.assertEqual(ws["B6"].value, 20)       # hits: a count
+
+    def test_mil_is_the_fabricators_thou(self):
+        ws = self._fill("mil")
+        self.assertEqual(ws["B1"].value, 2362.2)
+        self.assertEqual(ws["A6"].value, 39.37)
+        self.assertEqual(ws["A7"].value, 51.18)    # Ø1.3 mm
+
+    def test_mm_stays_exactly_as_before(self):
+        ws = self._fill("mm")
+        self.assertEqual(ws["B1"].value, 60.0)
+        self.assertEqual(ws["A6"].value, 1.0)
+
+    def test_a_made_up_unit_is_refused_with_a_sentence(self):
+        with self.assertRaises(GF.FormError):
+            GF.fill_form(JOB, self.tpl,
+                         os.path.join(self.dir, "x.xlsx"), units="cm")
+
+
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
     def test_the_gui_offers_and_uses_the_clients_format(self):
@@ -172,6 +223,10 @@ class TheDialogRemembersTheTemplate(unittest.TestCase):
                    encoding="utf-8").read()
         self.assertIn('cfg.get("gerber_form_template")', src)
         self.assertIn("get_gerber_form", src)
+        # The unit choice is offered, remembered, and actually used.
+        self.assertIn('cfg.get("gerber_units")', src)
+        self.assertIn('addItems(["mm", "inch", "mil"])', src)
+        self.assertIn("units=self.cfg.get", src)
         # Filling runs as part of measuring, not as a separate chore.
         measured = src[src.index("def _on_measured("):
                        src.index("def _on_measure_failed(")]
