@@ -1419,3 +1419,25 @@ class TheEletecksOwnCheckSheets(unittest.TestCase):
         roles = {e["name"]: e["role"] for e in G.classify(group)}
         self.assertEqual(roles.get("031.GBR"), "copper_top")
         self.assertIn("outline", roles.values())
+
+
+class TheKeyboardIsItsFrameNotItsCutout(unittest.TestCase):
+    """Altium puts internal CUTOUTS on .GM1 — the extension other tools use
+    for the outline. On the real Argus keyboard a 67 x 50 mm cutout stood
+    in for the 290 x 162 mm board. The rule that fixes it: the board must
+    CONTAIN the copper, and when the nominal outline doesn't, the most
+    trusted layer whose shape does becomes the edge. Witnessed against the
+    fab's own sheet: 11.4161 x 6.3808 in."""
+
+    def test_the_board_contains_the_copper(self):
+        src = os.path.join(REAL, "gerber data", "Argus-MP_28750390_1",
+                           "GERBER_28750390.zip")
+        if not os.path.exists(src):
+            raise unittest.SkipTest("the Argus job is not on this machine")
+        _name, group = G.split_jobs(G.gather([src]))[0]
+        job = G.analyse(group)
+        w, h = job["answers"]["pcb_size_mm"]
+        self.assertAlmostEqual(w / 25.4, 11.4161, delta=0.01)
+        self.assertAlmostEqual(h / 25.4, 6.3808, delta=0.01)
+        self.assertTrue(any("cutout, not the board edge" in x
+                            for x in job["warnings"]))
