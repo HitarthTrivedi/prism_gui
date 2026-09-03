@@ -145,7 +145,15 @@ def _selftest(app) -> int:
     for module, what in (("docx", "reading .docx attachments"),
                          ("pypdf", "reading PDF attachments"),
                          ("openpyxl", "reading .xlsx rate lists"),
-                         ("dns.resolver", "finding a customer's mail server")):
+                         ("dns.resolver", "finding a customer's mail server"),
+                         # Gerber. shapely especially: core/gerber.py returns
+                         # "not measured" for copper spacing, pitch and SMT
+                         # pads without it — no error, no crash, just a report
+                         # with holes in it. Exactly the shape of failure this
+                         # whole check exists to catch, and it shipped in every
+                         # build until the first Windows CI run found it.
+                         ("shapely", "measuring copper spacing and pitch"),
+                         ("gerbonara", "reading and writing Gerber files")):
         try:
             importlib.import_module(module)
         except Exception as e:                          # noqa: BLE001

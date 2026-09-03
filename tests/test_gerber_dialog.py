@@ -377,6 +377,16 @@ class TheOwnersCheckingFolderIsHonoured(unittest.TestCase):
     it; without it, everything goes to Prism Gerber as before."""
 
     def test_outputs_land_in_the_gerber_data_subfolder(self):
+        # The guard every other real-job test in this file has, and this one
+        # did not. Without the sample folder it measured a .zip that is not
+        # there, and _measure_and_join never came back — a HANG, not a
+        # failure, so it took the whole suite's budget and reported nothing.
+        #
+        # Invisible until now because it needs gerbonara/shapely installed to
+        # get that far, and neither was in requirements.txt. Adding them (so
+        # Gerber can measure copper spacing at all) is what surfaced it.
+        if not os.path.isdir(REAL):
+            raise unittest.SkipTest(sample_jobs.missing("gerber_test"))
         sub = os.path.join(GD.REPORTS_DIR, "gerber data")
         os.makedirs(sub, exist_ok=True)
         try:

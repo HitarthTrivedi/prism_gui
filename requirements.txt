@@ -49,6 +49,23 @@ playwright
 ezdxf     # BOQ reads DXF geometry directly (pulls in numpy)
 pillow    # Prism Reel draws every frame with PIL
 
+# Gerber, and the exact drift this file's header warns about happening again.
+# Both were in prism_terminal/requirements.txt (or in neither) and not here,
+# so no build has ever shipped them.
+#
+# shapely is the one that matters, because core/gerber.py degrades SILENTLY
+# without it: `if not HAVE_SHAPELY` returns "not measured" for copper
+# spacing, pitch and SMT pads. No error, no crash — a Gerber report with
+# holes in it, from the most expensive add-on on the price book, on every
+# packaged copy ever built. Found on the first Windows CI run of the suite,
+# as 23 test failures nobody had seen.
+#
+# gerbonara reads and writes the Gerber itself (core/gerber_clean.py). It at
+# least says so — "Cleaning needs the gerbonara package" — which is why it
+# was less urgent and equally absent.
+shapely
+gerbonara
+
 # FFmpeg, as a wheel. Pillow draws the frames and this encodes them.
 #
 # Not optional for a BUILD, and this is why: Windows does not come with

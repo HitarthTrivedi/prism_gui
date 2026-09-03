@@ -48,6 +48,21 @@ import sample_jobs  # noqa: E402
 
 from core import gerber as G  # noqa: E402
 
+# shapely is optional to core.gerber and NOT optional to these tests.
+# core/gerber.py degrades quietly without it — `if not HAVE_SHAPELY` returns
+# "not measured" for copper spacing, pitch and SMT pads — so every test that
+# asserts one of those numbers fails with a bare None instead of skipping.
+# That is what 23 of the failures on the first Windows CI run of this suite
+# actually were: one absent package, reported 23 times as a Windows bug.
+#
+# tests/test_gerber_clean.py already guards on `HAVE_GERBONARA and
+# HAVE_SHAPELY`; this file had no guard at all, which is the only reason the
+# two behaved differently on the same machine.
+_NEEDS_SHAPELY = unittest.skipUnless(
+    G.HAVE_SHAPELY,
+    "shapely not installed — core.gerber returns 'not measured' for every "
+    "spacing/pitch figure without it (pip install shapely)")
+
 
 def _write(dirpath: str, name: str, body: str) -> str:
     path = os.path.join(dirpath, name)
@@ -114,6 +129,7 @@ DRILL_EXCELLON = """
     """
 
 
+@_NEEDS_SHAPELY
 class TheBoardIsItsOutlineNotItsInk(unittest.TestCase):
 
     def setUp(self):
@@ -189,6 +205,7 @@ class TrackWidthCarriesItsOwnContext(unittest.TestCase):
         self.assertEqual([round(w["width_mm"], 3) for w in widths], [0.2])
 
 
+@_NEEDS_SHAPELY
 class SpacingTellsTheRuleFromTheOutlier(unittest.TestCase):
 
     def test_the_gap_is_between_copper_edges_not_centrelines(self):
@@ -320,6 +337,7 @@ class DrillsSurviveBothFormatsTheyArriveIn(unittest.TestCase):
         self.assertTrue(any("No drill file" in w for w in job["warnings"]))
 
 
+@_NEEDS_SHAPELY
 class ModalCodesAndPolarityOrder(unittest.TestCase):
     """Two defects found by measuring the same boards with an unrelated
     library (gerbonara) and an unrelated method (raster + distance
@@ -414,6 +432,7 @@ class ModalCodesAndPolarityOrder(unittest.TestCase):
         self.assertAlmostEqual(G.layer_copper(layer).area, 100.0, places=1)
 
 
+@_NEEDS_SHAPELY
 class LetteringInCopperIsNotATrack(unittest.TestCase):
     """Boards carry text: part numbers, revision marks, a logo, etched into
     the copper beside the tracks. It is copper. It is not a conductor.
@@ -745,6 +764,7 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
 REAL = sample_jobs.path("gerber_test")
 
 
+@_NEEDS_SHAPELY
 class TheRulebookIsNotTheBoard(unittest.TestCase):
     """A .RUL file is the designer's rulebook: what the board was ALLOWED to
     use. The copper is what it actually uses. A speed limit and a radar
@@ -1106,6 +1126,7 @@ OUTLINE_GAPPY = """
     """
 
 
+@_NEEDS_SHAPELY
 class AnArrayIsSeveralBoardsNotOneBigOne(unittest.TestCase):
     """The customer's word is "array". Five boards on a panel priced as one
     196 x 195 mm board is the wrong price, and that is what the reader did
@@ -1195,6 +1216,7 @@ class EveryFigureIsShownToTwoDecimals(unittest.TestCase):
                                                  (name, row))
 
 
+@_NEEDS_SHAPELY
 class PitchIsBetweenSeparatePads(unittest.TestCase):
 
     def setUp(self):
@@ -1215,6 +1237,7 @@ class PitchIsBetweenSeparatePads(unittest.TestCase):
         self.assertIn("8. Min pad pitch        0.50 mm", G.answers_text(self.job))
 
 
+@_NEEDS_SHAPELY
 class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):
 
     def test_the_narrow_side_of_the_smallest_pad_without_a_hole(self):
@@ -1253,6 +1276,7 @@ class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):
         self.assertIn("every pad has a hole", G.answers_text(job))
 
 
+@_NEEDS_SHAPELY
 class AnOutlineThatDoesNotQuiteClose(unittest.TestCase):
 
     def test_gaps_of_a_few_hundredths_are_joined_and_named(self):
