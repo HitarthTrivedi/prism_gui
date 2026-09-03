@@ -69,6 +69,14 @@ class PastedCommandsStayCommands(unittest.TestCase):
         self.assertLess(body.index("_drain_pending_lines"),
                         body.index("_q_confirm(msg"))
 
+    def test_readline_is_active_so_input_reads_one_line(self):
+        """Without readline, input() reads the tty through C stdio, which
+        buffers a whole chunk: a paste's second line hides inside libc
+        where select()-based draining cannot see it, and leaks out at the
+        next Y/n prompt. Watched auto-answer 'No' on two real runs."""
+        src = open(PRISM_PY, encoding="utf-8").read()
+        self.assertIn("import readline", src)
+
 
 class RoutingFailuresSpeakEnglish(unittest.TestCase):
 
@@ -80,6 +88,70 @@ class RoutingFailuresSpeakEnglish(unittest.TestCase):
         self.assertIn("asking once more", body)
         self.assertIn("rewording", body)
 
+
+
+@unittest.skipIf(os.name == "nt", "pty is POSIX-only")
+class TheVoiceGateLeavesThePasteInTheTty(unittest.TestCase):
+    """RawKeys read the first keystroke through the BUFFERED sys.stdin —
+    which slurped a whole pasted command into Python's internal buffer to
+    hand back one character. The remainder then haunted the session from
+    inside Python, invisible to every select()-based drain: a stray 'n'
+    from a paste's second line answered a Y/n prompt on two real runs.
+    This drives the real RawKeys in a real pty and proves the sequence
+    gate → input() → drain → confirm sees every byte in the right place."""
+
+    CHILD = r'''
+import os, select, sys
+sys.path.insert(0, %r)
+import readline  # noqa: F401
+from core.voice import RawKeys
+with RawKeys() as keys:
+    ch = keys.wait()
+rest = input()
+def drain():
+    out = []
+    while True:
+        r, _, _ = select.select([sys.stdin], [], [], 0.2)
+        if not r:
+            break
+        out.append(sys.stdin.readline().strip())
+    return out
+extra = drain()
+print("CMD=" + repr((ch + rest + " " + " ".join(extra)).strip()), flush=True)
+print("CONFIRM=" + repr(input("y/n? ").strip()), flush=True)
+''' % (os.path.join(ROOT, "prism_terminal"),)
+
+    def test_a_two_line_paste_survives_gate_input_drain_confirm(self):
+        import pty
+        import select as sel
+        import subprocess
+        import time
+        master, slave = pty.openpty()
+        p = subprocess.Popen([sys.executable, "-c", self.CHILD],
+                             stdin=slave, stdout=slave, stderr=slave,
+                             close_fds=True)
+        os.close(slave)
+        out = b""
+
+        def pump(seconds):
+            nonlocal out
+            end = time.time() + seconds
+            while time.time() < end:
+                r, _, _ = sel.select([master], [], [], 0.1)
+                if r:
+                    try:
+                        out += os.read(master, 65536)
+                    except OSError:
+                        return
+        pump(0.8)
+        os.write(master, b"/step-ask first half\n  second half\n")
+        pump(2.0)
+        os.write(master, b"y\n")
+        pump(1.5)
+        p.kill()
+        text = out.decode(errors="replace")
+        self.assertIn("CMD='/step-ask first half second half'", text)
+        self.assertIn("CONFIRM='y'", text)
 
 if __name__ == "__main__":
     unittest.main()

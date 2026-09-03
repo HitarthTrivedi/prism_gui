@@ -323,6 +323,27 @@ class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
         self.assertIn("re-measured", page)
         self.assertNotIn("Nothing is built yet", page)
 
+    def test_after_the_build_both_drawings_are_on_the_page(self):
+        out = tempfile.mkdtemp()
+        for name in ("drawing.png", "drawing_after.png"):
+            open(os.path.join(out, name), "wb").write(b"png")
+        after = {"parts": [{"name": "p", "size_mm": (60.0, 40.0, 8.0),
+                            "thickness_mm": 5.9, "volume_cm3": 37.5,
+                            "holes": [{"dia_mm": 6.0, "count": 2}]}]}
+        page = open(SF.review_html(self.REPORT, self.PLAN, out,
+                                   after=after), encoding="utf-8").read()
+        self.assertIn("drawing_after.png", page)
+        self.assertIn("from the BUILT file", page)
+
+    def test_before_the_build_only_the_received_drawing_shows(self):
+        out = tempfile.mkdtemp()
+        for name in ("drawing.png", "drawing_after.png"):
+            open(os.path.join(out, name), "wb").write(b"png")
+        page = open(SF.review_html(self.REPORT, self.PLAN, out),
+                    encoding="utf-8").read()
+        self.assertNotIn("drawing_after.png", page)
+
+
     def test_the_terminal_builds_only_after_the_page_and_the_yes(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         src = open(os.path.join(root, "prism_terminal", "prism.py"),
