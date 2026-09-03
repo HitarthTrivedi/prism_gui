@@ -122,30 +122,39 @@ class GerberDialog(PrismDialog):
         # get the measured value in the cell beside them, the form's own
         # formulas and everything else stay exactly as the client drew it.
         form_box = QGroupBox(i18n.t("Client's format (optional)"))
-        form_l = QHBoxLayout(form_box)
+        form_v = QVBoxLayout(form_box)
+        form_v.setSpacing(theme.SPACE_2)
+        # Row 1 — the template itself: what it does, choose it, forget it.
+        top_row = QHBoxLayout()
         self.form_label = QLabel(self._form_caption())
         self.form_label.setWordWrap(True)
-        form_l.addWidget(self.form_label, stretch=1)
-        # The unit their form (or their customer) works in. Prism always
-        # measures in mm; every LENGTH going into the filled form follows
-        # this choice — counts and layer numbers never convert.
-        form_l.addWidget(QLabel(i18n.t("Measurements in")))
+        top_row.addWidget(self.form_label, stretch=1)
+        top_row.addWidget(self.button(i18n.t("Choose template…"), "secondary",
+                                      small=True, on_click=self._pick_form))
+        self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
+                                          small=True, on_click=self._clear_form)
+        self.form_clear_btn.setVisible(
+            bool(self.cfg.get("gerber_form_template")))
+        top_row.addWidget(self.form_clear_btn)
+        form_v.addLayout(top_row)
+        # Row 2 — the unit, on its own line so neither row is cramped. Prism
+        # always measures in mm; every LENGTH written into the filled form
+        # follows this choice — counts and layer numbers never convert.
+        unit_row = QHBoxLayout()
+        unit_row.addWidget(QLabel(i18n.t("Measurements in")))
         self.units_combo = QComboBox()
         self.units_combo.addItems(["mm", "inch", "mil"])
         self.units_combo.setCurrentText(
             self.cfg.get("gerber_units") or "mm")
         self.units_combo.currentTextChanged.connect(self._units_changed)
-        self.units_combo.setToolTip(i18n.t(
-            "The unit every size, width, spacing and drill diameter is "
-            "written in on the client's form"))
-        form_l.addWidget(self.units_combo)
-        form_l.addWidget(self.button(i18n.t("Choose template…"), "secondary",
-                                     small=True, on_click=self._pick_form))
-        self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
-                                          small=True, on_click=self._clear_form)
-        self.form_clear_btn.setVisible(
-            bool(self.cfg.get("gerber_form_template")))
-        form_l.addWidget(self.form_clear_btn)
+        unit_row.addWidget(self.units_combo)
+        unit_note = QLabel(i18n.t("— every size, width, spacing and drill "
+                                  "diameter on the filled form"))
+        unit_note.setStyleSheet(
+            f"color: {theme.NEUTRAL[700]}; font-size: 12.5px;")
+        unit_row.addWidget(unit_note)
+        unit_row.addStretch(1)
+        form_v.addLayout(unit_row)
         root.addWidget(form_box)
 
         # Only appears once a job has actually been measured.
@@ -294,6 +303,14 @@ class GerberDialog(PrismDialog):
             self.meas_view.appendPlainText(
                 "\n\nCLIENT'S FORMAT\n" + "\n".join(
                     f"  {n} cell(s) filled → {p}" for p, n in made))
+            # The filled form is a headline deliverable, so it belongs in
+            # the same green "here is what you got" note as the CSVs — not
+            # only at the bottom of a scrolled text box.
+            units = self.cfg.get("gerber_units") or "mm"
+            self.csv_label.setText(
+                getattr(self, "_csv_note", self.csv_label.text())
+                + "\nClient's form filled (" + units + ") → "
+                + "; ".join(p for p, _n in made))
 
     # ── files ───────────────────────────────────────────────────────────
 
@@ -380,9 +397,12 @@ class GerberDialog(PrismDialog):
                                         task=task)
             except Exception:                           # noqa: BLE001
                 pass
-        self.csv_label.setText(
-            note + "Saved so every number can be checked → "
-            + "; ".join(csv_paths))
+        # Remembered so _fill_forms (now, and again on a unit change) can
+        # append the filled form's path to this same green note without
+        # doubling the CSV half.
+        self._csv_note = (note + "Saved so every number can be checked → "
+                          + "; ".join(csv_paths))
+        self.csv_label.setText(self._csv_note)
         self.meas_box.setVisible(True)
         self.run_btn.setEnabled(True)
         self.run_btn.setToolTip("")

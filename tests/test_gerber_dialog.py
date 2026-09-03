@@ -345,6 +345,26 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
         self.assertEqual(fired, [])
 
 
+
+class TheGreenNoteNamesTheFilledForm(unittest.TestCase):
+    """The filled client form is a headline deliverable — it belongs in the
+    same green note as the CSVs, not only at the bottom of the text box."""
+
+    def test_the_note_carries_the_form_path(self):
+        fcc = os.path.join(REAL, "gerber data",
+                           "F-SAL-01 Rev-00 QUOTATION FORM.xlsx")
+        if not os.path.exists(fcc):
+            raise unittest.SkipTest("client form not on this machine")
+        dlg = _dialog({"agents": {"content": "ChatGPT"},
+                       "gerber_form_template": fcc, "gerber_units": "mm"})
+        if not _measure_and_join(dlg, [os.path.join(REAL, "layer 1.zip")]):
+            raise unittest.SkipTest("measuring did not finish in time")
+        text = dlg.csv_label.text()
+        self.assertIn("Saved so every number", text)
+        self.assertIn("Client's form filled (mm)", text)
+        self.assertIn("(filled).xlsx", text)
+
+
 if __name__ == "__main__":
     unittest.main()
 
