@@ -350,6 +350,101 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
         self.assertEqual(fired, [])
 
 
+
+class TheGreenNoteNamesTheFilledForm(unittest.TestCase):
+    """The filled client form is a headline deliverable — it belongs in the
+    same green note as the CSVs, not only at the bottom of the text box."""
+
+    def test_the_note_carries_the_form_path(self):
+        fcc = os.path.join(REAL, "gerber data",
+                           "F-SAL-01 Rev-00 QUOTATION FORM.xlsx")
+        if not os.path.exists(fcc):
+            raise unittest.SkipTest("client form not on this machine")
+        dlg = _dialog({"agents": {"content": "ChatGPT"},
+                       "gerber_form_template": fcc, "gerber_units": "mm"})
+        if not _measure_and_join(dlg, [os.path.join(REAL, "layer 1.zip")]):
+            raise unittest.SkipTest("measuring did not finish in time")
+        text = dlg.csv_label.text()
+        self.assertIn("Saved so every number", text)
+        self.assertIn("Client's form filled (mm)", text)
+        self.assertIn("(filled).xlsx", text)
+
+
+
+class TheOwnersCheckingFolderIsHonoured(unittest.TestCase):
+    """The owner keeps a 'gerber data' folder inside Prism Gerber for the
+    files Prism MAKES — when it exists, the CSVs and filled forms land in
+    it; without it, everything goes to Prism Gerber as before."""
+
+    def test_outputs_land_in_the_gerber_data_subfolder(self):
+        sub = os.path.join(GD.REPORTS_DIR, "gerber data")
+        os.makedirs(sub, exist_ok=True)
+        try:
+            dlg = _dialog()
+            if not _measure_and_join(dlg, [os.path.join(REAL, "layer 1.zip")]):
+                raise unittest.SkipTest("measuring did not finish in time")
+            self.assertIn(sub + os.sep, dlg.csv_label.text())
+        finally:
+            import shutil
+            shutil.rmtree(sub, ignore_errors=True)
+
+    def test_without_the_subfolder_nothing_changes(self):
+        dlg = _dialog()
+        self.assertEqual(dlg._out_dir(), GD.REPORTS_DIR)
+
+
+
+class TheAIFillSeesOnlyTheDocuments(unittest.TestCase):
+    """The whole point of the split: the fill stage's attachments are
+    exactly the user's documents — never a path into the Gerber job."""
+
+    def test_only_extra_docs_reach_the_worker(self):
+        import dialogs.gerber_dialog as mod
+        dlg = _dialog()
+        # A measured job with a filled form, staged by hand.
+        doc = os.path.join(tempfile.mkdtemp(), "inquiry.csv")
+        with open(doc, "w") as f:
+            f.write("qty,rate\n500,12\n")
+        form = os.path.join(tempfile.mkdtemp(), "form.xlsx")
+        import openpyxl
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "QTY"
+        wb.save(form)
+        dlg.paths = ["/secret/job.zip"]
+        dlg.jobs = [("job", {"answers": {}})]
+        dlg._filled_forms = [("job", form, {"filled": []})]
+        dlg.extra_paths = [doc]
+
+        seen = {}
+
+        class Fake:
+            def __init__(self, *a, **kw):
+                seen["args"], seen["kwargs"] = a, kw
+                self.done = self.failed = _Sig()
+
+            def start(self):
+                seen["started"] = True
+
+        was = mod.AutomationWorker
+        mod.AutomationWorker = Fake
+        try:
+            dlg._ai_fill()
+        finally:
+            mod.AutomationWorker = was
+
+        records = seen["args"][2]
+        paths = [r["path"] for r in records]
+        self.assertEqual(paths, [doc])
+        self.assertTrue(all("job.zip" not in p for p in paths))
+        prompt = seen["args"][4] if len(seen["args"]) > 4 else \
+            seen["kwargs"]["custom_stages"][0][2][0]
+        self.assertIn("not shared", prompt)
+
+    def test_design_files_are_refused_from_the_docs_list(self):
+        for ext in (".zip", ".rar", ".gtl", ".drl", ".txt"):
+            self.assertIn(ext, GerberDialog._DESIGN_EXTS)
+
+
 if __name__ == "__main__":
     unittest.main()
 

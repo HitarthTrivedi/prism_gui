@@ -122,31 +122,60 @@ class GerberDialog(PrismDialog):
         # get the measured value in the cell beside them, the form's own
         # formulas and everything else stay exactly as the client drew it.
         form_box = QGroupBox(i18n.t("Client's format (optional)"))
-        form_l = QHBoxLayout(form_box)
+        form_v = QVBoxLayout(form_box)
+        form_v.setSpacing(theme.SPACE_2)
+        # Row 1 — the template itself: what it does, choose it, forget it.
+        top_row = QHBoxLayout()
         self.form_label = QLabel(self._form_caption())
         self.form_label.setWordWrap(True)
-        form_l.addWidget(self.form_label, stretch=1)
-        # The unit their form (or their customer) works in. Prism always
-        # measures in mm; every LENGTH going into the filled form follows
-        # this choice — counts and layer numbers never convert.
-        form_l.addWidget(QLabel(i18n.t("Measurements in")))
+        top_row.addWidget(self.form_label, stretch=1)
+        top_row.addWidget(self.button(i18n.t("Choose template…"), "secondary",
+                                      small=True, on_click=self._pick_form))
+        self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
+                                          small=True, on_click=self._clear_form)
+        self.form_clear_btn.setVisible(
+            bool(self.cfg.get("gerber_form_template")))
+        top_row.addWidget(self.form_clear_btn)
+        form_v.addLayout(top_row)
+        # Row 2 — the unit, on its own line so neither row is cramped. Prism
+        # always measures in mm; every LENGTH written into the filled form
+        # follows this choice — counts and layer numbers never convert.
+        unit_row = QHBoxLayout()
+        unit_row.addWidget(QLabel(i18n.t("Measurements in")))
         self.units_combo = QComboBox()
         self.units_combo.addItems(["mm", "inch", "mil"])
         self.units_combo.setCurrentText(
             self.cfg.get("gerber_units") or "mm")
         self.units_combo.currentTextChanged.connect(self._units_changed)
-        self.units_combo.setToolTip(i18n.t(
-            "The unit every size, width, spacing and drill diameter is "
-            "written in on the client's form"))
-        form_l.addWidget(self.units_combo)
-        form_l.addWidget(self.button(i18n.t("Choose template…"), "secondary",
-                                     small=True, on_click=self._pick_form))
-        self.form_clear_btn = self.button(i18n.t("Forget it"), "secondary",
-                                          small=True, on_click=self._clear_form)
-        self.form_clear_btn.setVisible(
-            bool(self.cfg.get("gerber_form_template")))
-        form_l.addWidget(self.form_clear_btn)
+        unit_row.addWidget(self.units_combo)
+        unit_note = QLabel(i18n.t("— every size, width, spacing and drill "
+                                  "diameter on the filled form"))
+        unit_note.setStyleSheet(
+            f"color: {theme.NEUTRAL[700]}; font-size: 12.5px;")
+        unit_row.addWidget(unit_note)
+        unit_row.addStretch(1)
+        form_v.addLayout(unit_row)
         root.addWidget(form_box)
+
+        # The other half of the job's paperwork: the inquiry email, the
+        # price list, a spec sheet. These — and ONLY these — may be shown
+        # to an agent to fill the form fields measurement cannot know
+        # (quantity, rates, terms). The consent line is the legal half of
+        # the design: the user is told, in the UI, exactly what leaves.
+        self.extra_paths: list[str] = []
+        docs_box = QGroupBox(i18n.t("Files for the AI (optional)"))
+        docs_l = QHBoxLayout(docs_box)
+        self.docs_label = QLabel(self._docs_caption())
+        self.docs_label.setWordWrap(True)
+        docs_l.addWidget(self.docs_label, stretch=1)
+        docs_l.addWidget(self.button(i18n.t("Add files…"), "secondary",
+                                     small=True, on_click=self._pick_docs))
+        self.docs_clear_btn = self.button(i18n.t("Clear"), "secondary",
+                                          small=True,
+                                          on_click=self._clear_docs)
+        self.docs_clear_btn.setVisible(False)
+        docs_l.addWidget(self.docs_clear_btn)
+        root.addWidget(docs_box)
 
         # Only appears once a job has actually been measured.
         self.meas_box = QGroupBox("Measured — not by an AI")
@@ -208,6 +237,15 @@ class GerberDialog(PrismDialog):
             "After generating: an agent writes the reply or quotation from "
             "the measured numbers — the files still never leave"))
         self.footer.add_utility(self.run_btn)
+        self.fill_ai_btn = self.button(i18n.t("Fill the rest with AI"),
+                                       "secondary", icon_name="pencil",
+                                       small=True, on_click=self._ai_fill)
+        self.fill_ai_btn.setEnabled(False)
+        self.fill_ai_btn.setToolTip(i18n.t(
+            "After generating with a template: your attached email/pricing "
+            "documents — never the Gerbers — are shown to an agent to fill "
+            "the blank fields"))
+        self.footer.add_utility(self.fill_ai_btn)
         self.footer.add_secondary(
             self.button(i18n.t("Close"), on_click=self.reject))
         self.generate_btn = self.button(i18n.t("Generate"), "primary",
@@ -219,6 +257,155 @@ class GerberDialog(PrismDialog):
 
         if attachments:
             self._on_files_added([a["path"] for a in attachments])
+
+    def _out_dir(self) -> str:
+        """The owner keeps a 'gerber data' folder inside Prism Gerber for
+        the files Prism MAKES — the CSVs and filled client forms — so his
+        own checking pile stays separate from cleaned-job folders. When
+        that folder exists, outputs land in it; otherwise everything goes
+        to Prism Gerber exactly as before."""
+        sub = os.path.join(REPORTS_DIR, "gerber data")
+        return sub if os.path.isdir(sub) else REPORTS_DIR
+
+    # ── files for the AI: the email and pricing, never the design ───────
+
+    # A design file in this list would break the whole promise, so the list
+    # refuses anything that could be one — by extension, and any archive or
+    # folder, because "it was inside the zip" is how a leak actually happens.
+    _DESIGN_EXTS = {
+        ".zip", ".rar", ".7z", ".gbr", ".gtl", ".gbl", ".gts", ".gbs",
+        ".gto", ".gbo", ".gtp", ".gbp", ".gko", ".gml", ".gm1", ".gd1",
+        ".gg1", ".gpt", ".gpb", ".drl", ".drr", ".txt", ".art", ".pho",
+        ".cam", ".apr", ".rul", ".ldp", ".extrep", ".rep",
+    }
+
+    def _docs_caption(self) -> str:
+        if self.extra_paths:
+            names = ", ".join(os.path.basename(p) for p in self.extra_paths)
+            return i18n.t("WILL be shown to the AI: ") + names
+        return i18n.t(
+            "The inquiry email, price list or spec sheet (PDF, Word, "
+            "Excel). These files WILL be shown to the AI — only to fill "
+            "the form fields measurement cannot know. The Gerber files "
+            "are never shown.")
+
+    def _pick_docs(self):
+        from PySide6.QtWidgets import QFileDialog
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, i18n.t("Files the AI may read"), "",
+            "Documents (*.pdf *.doc *.docx *.xlsx *.xls *.csv *.eml *.msg "
+            "*.rtf *.odt)")
+        for p in paths:
+            ext = os.path.splitext(p)[1].lower()
+            if os.path.isdir(p) or ext in self._DESIGN_EXTS:
+                QMessageBox.warning(
+                    self, "Gerber",
+                    i18n.t("{name} looks like a design file or archive — "
+                           "those never go to an AI. Attach the email or "
+                           "pricing document instead.").replace(
+                               "{name}", os.path.basename(p)))
+                continue
+            if p not in self.extra_paths:
+                self.extra_paths.append(p)
+        self.docs_label.setText(self._docs_caption())
+        self.docs_clear_btn.setVisible(bool(self.extra_paths))
+        self._sync_fill_btn()
+
+    def _clear_docs(self):
+        self.extra_paths = []
+        self.docs_label.setText(self._docs_caption())
+        self.docs_clear_btn.setVisible(False)
+        self._sync_fill_btn()
+
+    def _sync_fill_btn(self):
+        self.fill_ai_btn.setEnabled(
+            bool(self.extra_paths)
+            and bool(getattr(self, "_filled_forms", None)))
+
+    def _ai_fill(self):
+        """Blank fields + the user's documents → an agent's field:value
+        JSON → Prism patches the SAME filled form locally. The Gerbers are
+        not in the room: attachments are exactly self.extra_paths."""
+        forms = getattr(self, "_filled_forms", None) or []
+        if not forms or not self.extra_paths:
+            return
+        if len(forms) > 1:
+            QMessageBox.information(
+                self, "Gerber",
+                i18n.t("Several jobs were measured — the AI fill works one "
+                       "job at a time. Measure the one you want on its "
+                       "own."))
+            return
+        agents = CB.config.active_agents(self.cfg)
+        writer = next((agents[s] for s in ("content", "brains")
+                       if agents.get(s)), None)
+        if not writer:
+            QMessageBox.warning(self, "Gerber",
+                                i18n.t("No writing agent set up yet — open "
+                                       "Agents first."))
+            return
+        name, form_path, fill_result = forms[0]
+        gform = CB.get_gerber_form()
+        try:
+            blanks = gform.blank_fields(form_path)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, "Gerber", str(e))
+            return
+        if not blanks:
+            self.status.setText(i18n.t(
+                "Nothing on the form is blank — there is nothing for the "
+                "AI to add."))
+            return
+        self._ai_blanks, self._ai_form_path = blanks, form_path
+        records = []
+        for p in self.extra_paths:
+            try:
+                records.append(CB.files.attach(p))
+            except Exception:                           # noqa: BLE001
+                pass
+        prompt = gform.ai_fill_prompt(fill_result.get("filled") or [],
+                                      blanks, self.ask.text().strip())
+        self._set_busy(True, i18n.t(
+            "{agent} is reading your documents — the Gerber files are NOT "
+            "attached, only these documents and the blank field list."
+        ).replace("{agent}", writer))
+        self._fill_worker = AutomationWorker(
+            {}, self.cfg, records, f"fill a quotation form — {name}",
+            custom_stages=[("fill", writer, [prompt])],
+            chatgpt_analysis=False)
+        self._fill_worker.done.connect(self._on_ai_filled)
+        self._fill_worker.failed.connect(self._on_write_failed)
+        self._fill_worker.start()
+
+    def _on_ai_filled(self, responses: dict, links: dict):
+        self._set_busy(False, "")
+        self._links.update(links)
+        gform = CB.get_gerber_form()
+        texts = [t for t in (responses.get("fill") or []) if t.strip()]
+        fills, why = gform.parse_fills(texts, self._ai_blanks)
+        if not fills:
+            self.status.setText(why or i18n.t("The agent returned nothing."))
+            return
+        try:
+            result = gform.fill_by_label(self._ai_form_path,
+                                         self._ai_form_path, fills)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, "Gerber", str(e))
+            return
+        # Provenance, out loud: an AI-read value must never look measured.
+        lines = [f"  {label} = {value}"
+                 for _c, label, value in result["filled"]]
+        self.meas_view.appendPlainText(
+            "\n\nFROM YOUR DOCUMENTS (AI-read — VERIFY before quoting)\n"
+            + "\n".join(lines))
+        self.csv_label.setText(
+            self.csv_label.text()
+            + f"\n{len(result['filled'])} field(s) AI-read from your "
+              "documents — marked in the results above, verify before "
+              "quoting.")
+        self.status.setText(i18n.t(
+            "Done. Measured cells were never touched; the AI only filled "
+            "blanks."))
 
     # ── the client's own form ───────────────────────────────────────────
 
@@ -266,25 +453,32 @@ class GerberDialog(PrismDialog):
         if not template or not os.path.exists(template) or not self.jobs:
             return
         form = CB.get_gerber_form()
-        os.makedirs(REPORTS_DIR, exist_ok=True)
-        made = []
+        out_root = self._out_dir()
+        os.makedirs(out_root, exist_ok=True)
+        made, forms = [], []
         for name, job in self.jobs:
             stem = "".join(c if c.isalnum() or c in "-_ " else "_"
                            for c in name).strip()[:40] or "job"
             out = os.path.join(
-                REPORTS_DIR,
+                out_root,
                 f"{stem} — "
                 f"{os.path.splitext(os.path.basename(template))[0]}"
                 " (filled).xlsx")
             try:
+                # The ask-box text rides along: a Gerber export rarely
+                # states material/colour/finish, but the estimator knows
+                # them — "FR4 1.6mm 1oz green mask HASL" typed once fills
+                # those cells too.
                 result = form.fill_form(
                     job, template, out, meta={"part": name},
-                    units=self.cfg.get("gerber_units") or "mm")
+                    units=self.cfg.get("gerber_units") or "mm",
+                    notes=self.ask.text().strip())
             except Exception as e:                      # noqa: BLE001
                 self.status.setText(
                     i18n.t("Couldn't fill the client's form: ") + str(e))
                 continue
             made.append((out, len(result["filled"])))
+            forms.append((name, out, result))
             try:
                 CB.config.save_artifact(out, os.path.basename(out),
                                         kind="gerber", task=name)
@@ -294,6 +488,16 @@ class GerberDialog(PrismDialog):
             self.meas_view.appendPlainText(
                 "\n\nCLIENT'S FORMAT\n" + "\n".join(
                     f"  {n} cell(s) filled → {p}" for p, n in made))
+            # The filled form is a headline deliverable, so it belongs in
+            # the same green "here is what you got" note as the CSVs — not
+            # only at the bottom of a scrolled text box.
+            units = self.cfg.get("gerber_units") or "mm"
+            self.csv_label.setText(
+                getattr(self, "_csv_note", self.csv_label.text())
+                + "\nClient's form filled (" + units + ") → "
+                + "; ".join(p for p, _n in made))
+        self._filled_forms = forms
+        self._sync_fill_btn()
 
     # ── files ───────────────────────────────────────────────────────────
 
@@ -341,7 +545,8 @@ class GerberDialog(PrismDialog):
         # the summary below covers every job at once, so it has none to
         # belong to and stays ungrouped rather than picking one arbitrarily.
         to_save = []
-        os.makedirs(REPORTS_DIR, exist_ok=True)
+        out_root = self._out_dir()
+        os.makedirs(out_root, exist_ok=True)
         for name, job in results:
             label = name if len(results) > 1 else ""
             heading = f"═══ {name} ═══\n" if len(results) > 1 else ""
@@ -357,7 +562,7 @@ class GerberDialog(PrismDialog):
                           for c in label)[:40]
             csv_name = f"gerber_{stem}_{int(time.time())}.csv" if stem \
                 else f"gerber_{int(time.time())}.csv"
-            csv_path = os.path.join(REPORTS_DIR, csv_name)
+            csv_path = os.path.join(out_root, csv_name)
             G.write_report_csv(job, csv_path)
             csv_paths.append(csv_path)
             to_save.append((csv_path, name))
@@ -366,7 +571,7 @@ class GerberDialog(PrismDialog):
         note = ""
         if len(results) > 1:
             summary_path = os.path.join(
-                REPORTS_DIR, f"gerber_summary_{int(time.time())}.csv")
+                out_root, f"gerber_summary_{int(time.time())}.csv")
             G.write_summary_csv(results, summary_path)
             csv_paths.append(summary_path)
             to_save.append((summary_path, ""))
@@ -380,9 +585,12 @@ class GerberDialog(PrismDialog):
                                         task=task)
             except Exception:                           # noqa: BLE001
                 pass
-        self.csv_label.setText(
-            note + "Saved so every number can be checked → "
-            + "; ".join(csv_paths))
+        # Remembered so _fill_forms (now, and again on a unit change) can
+        # append the filled form's path to this same green note without
+        # doubling the CSV half.
+        self._csv_note = (note + "Saved so every number can be checked → "
+                          + "; ".join(csv_paths))
+        self.csv_label.setText(self._csv_note)
         self.meas_box.setVisible(True)
         self.run_btn.setEnabled(True)
         self.run_btn.setToolTip("")
@@ -528,6 +736,7 @@ class GerberDialog(PrismDialog):
         than let Qt tear it down underneath."""
         for worker in (getattr(self, "_worker", None),
                        getattr(self, "_agent_worker", None),
+                       getattr(self, "_fill_worker", None),
                        getattr(self, "_clean_worker", None)):
             if worker is None or not worker.isRunning():
                 continue

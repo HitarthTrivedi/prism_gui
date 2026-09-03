@@ -222,6 +222,170 @@ class TheUnitsFollowTheUsersChoice(unittest.TestCase):
                          os.path.join(self.dir, "x.xlsx"), units="cm")
 
 
+@unittest.skipUnless(HAVE, "openpyxl not installed")
+class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
+    """Beyond the nine headline figures: annular ring, tool count, which
+    sides carry SMT/mask/legend, slots, and the stackup facts the CAM
+    tool's own report states. A fact the job does not carry leaves the
+    client's cell blank — never guessed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        report = os.path.join(cls.dir, "readme.rep")
+        with open(report, "w") as f:
+            f.write("Material: FR4, board thickness 1.6 mm, copper 1 oz,\n"
+                    "I/L 0.5 oz, surface finish HASL lead free, V-CUT "
+                    "scoring,\ngreen solder mask, UL E123456.\n")
+        drill = os.path.join(cls.dir, "job.txt")
+        with open(drill, "w") as f:
+            f.write("M48\nT1C0.018\n%\nT1\nX1Y1\nG85X2Y2\nM30\n")
+        cls.job = {
+            "answers": {**JOB["answers"],
+                        "min_annular_ring_mm": 0.1397,
+                        "drill_tools": 10,
+                        "array_grid": "2 x 3"},
+            "drills": JOB["drills"],
+            "smt": [{"name": "top.gtl", "count": 5}],
+            "files": [
+                {"name": "top.gtl", "role": "copper_top", "path": ""},
+                {"name": "top.gts", "role": "mask_top", "path": ""},
+                {"name": "bot.gbs", "role": "mask_bottom", "path": ""},
+                {"name": "top.gto", "role": "silk_top", "path": ""},
+                {"name": "job.txt", "role": "drill", "path": drill},
+                {"name": "readme.rep", "role": "report", "path": report},
+            ],
+        }
+        tpl = os.path.join(cls.dir, "big-form.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        labels = ["Min Annular Ring", "No. of Tools", "Smt Side",
+                  "SM Sides", "Legend Sides", "Slots", "Material Type",
+                  "Mat. Thickness", "Cu. Wt Finish", "Final Finish",
+                  "Scoring", "E.T.", "S&R", "I/L Wt Finish", "SM Color",
+                  "UL CODE"]
+        for i, label in enumerate(labels, 1):
+            ws.cell(row=i, column=1, value=label)
+        wb.save(tpl)
+        out = os.path.join(cls.dir, "big-filled.xlsx")
+        GF.fill_form(cls.job, tpl, out)
+        cls.ws = openpyxl.load_workbook(out).active
+
+    def _value(self, label):
+        for row in self.ws.iter_rows():
+            if row[0].value == label:
+                return row[1].value
+        raise AssertionError(label)
+
+    def test_the_measured_extras_land(self):
+        self.assertEqual(self._value("Min Annular Ring"), 0.14)
+        self.assertEqual(self._value("No. of Tools"), 10)
+        self.assertEqual(self._value("Smt Side"), "TOP")
+        self.assertEqual(self._value("SM Sides"), "BOTH")
+        self.assertEqual(self._value("Legend Sides"), "TOP")
+        self.assertEqual(self._value("Slots"), "YES")   # the G85 in the file
+
+    def test_the_cam_reports_own_words_fill_the_stackup(self):
+        self.assertEqual(self._value("Material Type"), "FR-4")
+        self.assertEqual(self._value("Mat. Thickness"), "1.6 mm")
+        self.assertEqual(self._value("Cu. Wt Finish"), "1 oz")
+        self.assertEqual(self._value("I/L Wt Finish"), "0.5 oz")
+        self.assertEqual(self._value("Final Finish"), "HASL")
+        self.assertEqual(self._value("Scoring"), "YES")
+        self.assertEqual(self._value("SM Color"), "GREEN")
+        self.assertEqual(self._value("UL CODE"), "E123456")
+
+    def test_s_and_r_is_the_measured_array_grid(self):
+        self.assertEqual(self._value("S&R"), "2 x 3")
+
+    def test_the_estimators_own_note_fills_what_no_report_states(self):
+        """A Gerber export rarely carries material/colour/finish (the real
+        Argus job's reports contain none) — the ask-box note does."""
+        extras = GF._job_extras(
+            {"answers": {}},
+            notes="FR4 1.6mm thick, 1oz copper, blue mask, ENIG, UL E77777")
+        self.assertEqual(extras["material_type"], "FR-4")
+        self.assertEqual(extras["material_thickness"], "1.6 mm")
+        self.assertEqual(extras["copper_weight"], "1 oz")
+        self.assertEqual(extras["sm_color"], "BLUE")
+        self.assertEqual(extras["final_finish"], "ENIG")
+        self.assertEqual(extras["ul_code"], "E77777")
+
+    def test_what_the_job_does_not_know_stays_blank(self):
+        self.assertIsNone(self._value("E.T."))
+        # A bare job with no files carries none of the extras.
+        bare = GF._job_extras({"answers": {}})
+        self.assertIsNone(bare["sm_sides"])
+        self.assertIsNone(bare["smt_side"])
+        self.assertNotIn("slots", bare)
+        self.assertNotIn("material_type", bare)
+
+
+
+@unittest.skipUnless(HAVE, "openpyxl not installed")
+class TheAIFillsOnlyWhatIsBlank(unittest.TestCase):
+    """The email-and-pricing half: blank fields are offered, the agent's
+    JSON is validated, and the patch can never touch a filled cell."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.form = os.path.join(cls.dir, "form.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"], ws["B1"] = "Board X", 60.0          # measured — filled
+        ws["A2"] = "QTY"                              # blank
+        ws["A3"] = "Delivery"                         # blank
+        ws["A4"] = "Total"
+        ws["B4"] = "=B1*2"                            # their arithmetic
+        ws["A5"] = ("A long sentence that is clearly not a field label "
+                    "at all, just a note")
+        wb.save(cls.form)
+
+    def test_blank_fields_are_the_short_labels_with_empty_neighbours(self):
+        self.assertEqual(GF.blank_fields(self.form), ["QTY", "Delivery"])
+
+    def test_the_prompt_says_the_design_is_not_shared(self):
+        p = GF.ai_fill_prompt([("B1", "Board X", 60.0)],
+                              ["QTY"], "urgent job")
+        self.assertIn("not shared", p)
+        self.assertIn("OMIT any field", p)
+        self.assertIn("QTY", p)
+        self.assertIn("urgent job", p)
+
+    def test_fills_are_validated_against_the_offered_blanks(self):
+        fills, _ = GF.parse_fills(
+            ['{"fills": {"QTY": 500, "Board X": 999, "Made Up": "x"}}'],
+            ["QTY", "Delivery"])
+        self.assertEqual(fills, {"QTY": 500})   # only an offered blank
+
+    def test_garbage_comes_back_as_a_sentence_not_a_crash(self):
+        fills, why = GF.parse_fills(["no json"], ["QTY"])
+        self.assertEqual(fills, {})
+        self.assertIn("No JSON", why)
+
+    def test_the_patch_lands_in_blanks_and_never_elsewhere(self):
+        out = os.path.join(self.dir, "after.xlsx")
+        r = GF.fill_by_label(self.form, out,
+                             {"QTY": 500, "Delivery": "2 weeks",
+                              "Board X": 999, "Total": 7})
+        ws = openpyxl.load_workbook(out).active
+        self.assertEqual(ws["B2"].value, 500)
+        self.assertEqual(ws["B3"].value, "2 weeks")
+        self.assertEqual(ws["B1"].value, 60.0)        # measured — untouched
+        self.assertEqual(ws["B4"].value, "=B1*2")     # formula — untouched
+        self.assertEqual(len(r["filled"]), 2)
+
+    def test_patching_a_file_into_itself_is_safe(self):
+        import shutil
+        inplace = os.path.join(self.dir, "inplace.xlsx")
+        shutil.copyfile(self.form, inplace)
+        GF.fill_by_label(inplace, inplace, {"QTY": 42})
+        ws = openpyxl.load_workbook(inplace).active
+        self.assertEqual(ws["B2"].value, 42)
+        self.assertEqual(ws["B1"].value, 60.0)
+
+
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
     def test_the_gui_offers_and_uses_the_clients_format(self):
