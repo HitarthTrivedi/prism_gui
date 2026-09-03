@@ -130,6 +130,26 @@ class AvailabilityMeansTheBinaryIsThere(unittest.TestCase):
         browser._cached_path = "/somewhere/chrome"
         self.assertEqual(browser.available(), (True, ""))
 
+    def test_the_build_gate_starts_the_browser_rather_than_stat_ing_it(self):
+        """The shipped bug was a launch resolving to a binary the bundle did
+        not carry — while Chromium itself sat right there. A file-exists
+        check on Chromium would have passed on the broken build, which is
+        exactly why the packaging gate does the whole round trip."""
+        source = inspect.getsource(browser.selftest)
+        self.assertIn("launch_chromium", source)
+        self.assertIn("screenshot", source)
+
+    def test_a_browser_that_will_not_start_is_reported_not_raised(self):
+        """It runs inside packaging/smoke_test.py, where an exception is a
+        traceback instead of a named failure."""
+        with mock.patch.object(browser, "launch_chromium",
+                               side_effect=RuntimeError(
+                                   "BrowserType.launch: Executable doesn't "
+                                   "exist at …chrome-headless-shell.exe")):
+            ok, why = browser.selftest()
+        self.assertFalse(ok)
+        self.assertIn("Executable doesn't exist", why)
+
     def test_studio_reports_the_same_answer(self):
         """core.reel_web.available() must not have its own opinion — it is
         the one the GUI asks before offering the button."""

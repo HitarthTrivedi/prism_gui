@@ -314,6 +314,25 @@ def studio_available() -> tuple[bool, str]:
     return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
+def studio_render_selftest() -> tuple[bool, str]:
+    """Does a render actually work on this machine? Used by main.py's
+    --selftest, i.e. by the packaging gate.
+
+    Separate from studio_available() on purpose: that one answers "should
+    the button be offered", cheaply, on the way into a dialog, and a
+    browser launch is far too slow to put there. This one is the build
+    gate, where being slow is fine and being wrong is not — see
+    core.browser.selftest for why a file-exists check would have passed
+    the very build that shipped broken.
+    """
+    try:
+        from core import browser
+    except Exception as e:                      # noqa: BLE001
+        return False, f"The web renderer isn't available ({e})."
+    ok, why = browser.selftest()
+    return ok, why if ok else _no_pip_in_a_frozen_build(why)
+
+
 def get_studio():
     from core import reel_web
     return reel_web

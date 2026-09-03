@@ -125,7 +125,12 @@ def _selftest(app) -> int:
     # INSIDE the bundle, so its absence is a broken build and nothing a user
     # can fix; a source checkout that has not run `playwright install` is an
     # ordinary state and is reported below with voice input instead.
-    studio_ok, studio_err = CB.studio_available()
+    # A real launch, not a file-exists check. The bug that shipped was a
+    # launch resolving to a binary the bundle did not carry, and Chromium
+    # itself was sitting right there — so "is the browser in the bundle"
+    # would have passed on the broken build. This starts it, paints a frame
+    # and closes it, which is the same round trip a render takes.
+    studio_ok, studio_err = CB.studio_render_selftest()
 
     # The dependencies nothing else here would notice. Every one of them is
     # imported lazily, inside the function that needs it, so a build that
