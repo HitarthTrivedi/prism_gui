@@ -116,10 +116,31 @@ class GateTest(unittest.TestCase):
 
     def _window(self):
         """A real MainWindow, with first-run stubbed — it would otherwise pop
-        the setup wizard on a window that has no Groq key configured."""
+        the setup wizard on a window that has no Groq key configured.
+
+        The cfg is set EXPLICITLY afterwards, and that is not tidiness. A
+        MainWindow reads ~/.prism/config.json, and nothing here redirects
+        HOME — so these tests ran against whatever the developer happened to
+        have configured. On a machine with a real config they passed; on one
+        without, `_route_one` took its "Finish Setup first" branch and opened
+        a blocking QMessageBox.warning, which in a headless run is a HANG.
+
+        That is the hang README documented a mandatory `--deselect` for, and
+        it is NOT the InquiryDialog modal fixed elsewhere on this branch —
+        that fix made this test pass locally and left it hanging on CI, where
+        there is no config to inherit. Found on the first Windows CI run.
+
+        A test that asserts tasks are planned in turn has to start from a
+        window that CAN plan, and say so itself rather than borrowing the
+        answer from the machine.
+        """
         import main_window
         with mock.patch.object(main_window.MainWindow, "_first_run"):
-            return main_window.MainWindow()
+            win = main_window.MainWindow()
+        win.cfg = dict(win.cfg or {})
+        win.cfg.update({"api_key": "test-not-a-real-key", "onboarded": True,
+                        "agents": {"content": "ChatGPT"}})
+        return win
 
     def _instant_authorize(self, allowed=True, message=""):
         """Replace AuthorizeWorker with something synchronous.
