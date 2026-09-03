@@ -365,6 +365,29 @@ class TheGreenNoteNamesTheFilledForm(unittest.TestCase):
         self.assertIn("(filled).xlsx", text)
 
 
+
+class TheOwnersCheckingFolderIsHonoured(unittest.TestCase):
+    """The owner keeps a 'gerber data' folder inside Prism Gerber for the
+    files Prism MAKES — when it exists, the CSVs and filled forms land in
+    it; without it, everything goes to Prism Gerber as before."""
+
+    def test_outputs_land_in_the_gerber_data_subfolder(self):
+        sub = os.path.join(GD.REPORTS_DIR, "gerber data")
+        os.makedirs(sub, exist_ok=True)
+        try:
+            dlg = _dialog()
+            if not _measure_and_join(dlg, [os.path.join(REAL, "layer 1.zip")]):
+                raise unittest.SkipTest("measuring did not finish in time")
+            self.assertIn(sub + os.sep, dlg.csv_label.text())
+        finally:
+            import shutil
+            shutil.rmtree(sub, ignore_errors=True)
+
+    def test_without_the_subfolder_nothing_changes(self):
+        dlg = _dialog()
+        self.assertEqual(dlg._out_dir(), GD.REPORTS_DIR)
+
+
 if __name__ == "__main__":
     unittest.main()
 

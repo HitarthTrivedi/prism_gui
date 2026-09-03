@@ -229,6 +229,15 @@ class GerberDialog(PrismDialog):
         if attachments:
             self._on_files_added([a["path"] for a in attachments])
 
+    def _out_dir(self) -> str:
+        """The owner keeps a 'gerber data' folder inside Prism Gerber for
+        the files Prism MAKES — the CSVs and filled client forms — so his
+        own checking pile stays separate from cleaned-job folders. When
+        that folder exists, outputs land in it; otherwise everything goes
+        to Prism Gerber exactly as before."""
+        sub = os.path.join(REPORTS_DIR, "gerber data")
+        return sub if os.path.isdir(sub) else REPORTS_DIR
+
     # ── the client's own form ───────────────────────────────────────────
 
     def _form_caption(self) -> str:
@@ -275,13 +284,14 @@ class GerberDialog(PrismDialog):
         if not template or not os.path.exists(template) or not self.jobs:
             return
         form = CB.get_gerber_form()
-        os.makedirs(REPORTS_DIR, exist_ok=True)
+        out_root = self._out_dir()
+        os.makedirs(out_root, exist_ok=True)
         made = []
         for name, job in self.jobs:
             stem = "".join(c if c.isalnum() or c in "-_ " else "_"
                            for c in name).strip()[:40] or "job"
             out = os.path.join(
-                REPORTS_DIR,
+                out_root,
                 f"{stem} — "
                 f"{os.path.splitext(os.path.basename(template))[0]}"
                 " (filled).xlsx")
@@ -363,7 +373,8 @@ class GerberDialog(PrismDialog):
         # the summary below covers every job at once, so it has none to
         # belong to and stays ungrouped rather than picking one arbitrarily.
         to_save = []
-        os.makedirs(REPORTS_DIR, exist_ok=True)
+        out_root = self._out_dir()
+        os.makedirs(out_root, exist_ok=True)
         for name, job in results:
             label = name if len(results) > 1 else ""
             heading = f"═══ {name} ═══\n" if len(results) > 1 else ""
@@ -379,7 +390,7 @@ class GerberDialog(PrismDialog):
                           for c in label)[:40]
             csv_name = f"gerber_{stem}_{int(time.time())}.csv" if stem \
                 else f"gerber_{int(time.time())}.csv"
-            csv_path = os.path.join(REPORTS_DIR, csv_name)
+            csv_path = os.path.join(out_root, csv_name)
             G.write_report_csv(job, csv_path)
             csv_paths.append(csv_path)
             to_save.append((csv_path, name))
@@ -388,7 +399,7 @@ class GerberDialog(PrismDialog):
         note = ""
         if len(results) > 1:
             summary_path = os.path.join(
-                REPORTS_DIR, f"gerber_summary_{int(time.time())}.csv")
+                out_root, f"gerber_summary_{int(time.time())}.csv")
             G.write_summary_csv(results, summary_path)
             csv_paths.append(summary_path)
             to_save.append((summary_path, ""))
