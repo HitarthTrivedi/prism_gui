@@ -19,6 +19,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
 
 from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -254,6 +256,11 @@ class StagingAnUpdate(Harness):
             updater.stage_update(check, self.install_dir, fetch=fetch)
 
     def test_symlinks_are_recreated_not_downloaded(self):
+        # Windows needs Administrator or Developer Mode for this.
+        # Without either it is an environment fact, not a bug.
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
         os.symlink("Prism", os.path.join(self.install_dir, "prism-link"))
         entry = {"path": "prism-link", "symlink": "Prism"}
         manifest_dict = {"version": "2.0.0", "files": [entry]}

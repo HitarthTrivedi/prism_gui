@@ -17,6 +17,8 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
 
 from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -61,12 +63,20 @@ class BuildingAManifest(unittest.TestCase):
     def test_symlinks_recorded_without_hashing(self):
         with open(os.path.join(self.tmp, "real.txt"), "w") as f:
             f.write("x")
+        # Windows needs Administrator or Developer Mode for this.
+        # Without either it is an environment fact, not a bug.
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
         os.symlink("real.txt", os.path.join(self.tmp, "link.txt"))
         manifest = UM.build(self.tmp, "1.0.0")
         link = next(f for f in manifest["files"] if f["path"] == "link.txt")
         self.assertEqual(link["symlink"], "real.txt")
         self.assertNotIn("sha256", link)
 
+    @unittest.skipIf(os.name == "nt",
+                     "NTFS has no executable bit — os.chmod(0o755) is a no-op "
+                     "on Windows, so there is nothing here to record")
     def test_executable_bit_recorded(self):
         exe = os.path.join(self.tmp, "run")
         with open(exe, "w") as f:

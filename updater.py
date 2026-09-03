@@ -453,7 +453,27 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
             if "symlink" in entry:
                 if os.path.islink(dest) or os.path.exists(dest):
                     os.remove(dest)
-                os.symlink(entry["symlink"], dest)
+                try:
+                    os.symlink(entry["symlink"], dest)
+                except OSError as e:
+                    # Windows treats creating a symlink as a PRIVILEGE: without
+                    # Administrator or Developer Mode it raises WinError 1314,
+                    # "A required privilege is not held by the client".
+                    #
+                    # A Windows bundle should contain no symlinks, so this
+                    # should never fire there — but "should" is doing a lot of
+                    # work in the one code path that rewrites a customer's
+                    # installation, and the alternative is a bare OSError
+                    # surfacing after the whole update has been downloaded,
+                    # with nothing to tell them what to do. Surfaced on the
+                    # first Windows CI run of the suite, as four tests that
+                    # create a symlink to exercise this branch.
+                    raise UpdateError(
+                        f"{entry['path']}: this computer would not let Prism "
+                        f"create a shortcut file ({e}). On Windows that needs "
+                        "Administrator rights or Developer Mode. Nothing has "
+                        "been changed — the update was staged, not applied."
+                    ) from e
             elif entry.get("size") == 0:
                 # GitHub Releases refuses to host a zero-byte asset at all
                 # ("size must be greater than or equal to 1") — confirmed

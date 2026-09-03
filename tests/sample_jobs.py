@@ -57,3 +57,42 @@ def missing(*parts: str) -> str:
         return (f"sample jobs folder not on this machine ({root()}) — "
                 f"set {ENV_VAR} to point at it")
     return f"sample not on this machine: {wanted}"
+
+
+# ── symlinks, which Windows treats as a privilege ────────────────────────────
+
+def symlinks_unavailable() -> str:
+    """"" if this machine can create a symlink, else why it cannot.
+
+    Windows needs Administrator or Developer Mode for os.symlink; without
+    either it raises OSError [WinError 1314] "A required privilege is not
+    held by the client". Four test files create one to exercise the
+    updater's symlink handling, and on the first Windows CI run of this
+    suite all four failed for that reason alone — an environment fact
+    reported as four bugs.
+
+    Probed by actually trying it, rather than by checking the OS: the answer
+    depends on the machine's settings, not its name, and a developer box
+    with Developer Mode on should run these tests.
+    """
+    import os
+    import tempfile
+
+    folder = tempfile.mkdtemp(prefix="prism-symlink-probe-")
+    link = os.path.join(folder, "link")
+    try:
+        os.symlink(os.path.join(folder, "target"), link)
+        return ""
+    except (OSError, NotImplementedError, AttributeError) as e:
+        return (f"this machine cannot create symlinks ({e.__class__.__name__}"
+                f": {e}) — on Windows that needs Administrator or Developer "
+                "Mode")
+    finally:
+        try:
+            os.remove(link)
+        except OSError:
+            pass
+        try:
+            os.rmdir(folder)
+        except OSError:
+            pass

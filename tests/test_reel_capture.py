@@ -167,7 +167,12 @@ class TheEvidenceIsKept(unittest.TestCase):
         self.assertIn("would-not-parse", os.path.basename(path))
 
     def test_a_full_disk_does_not_turn_a_bad_spec_into_a_crash(self):
-        self.config.CONFIG_PATH = "/definitely/not/a/real/place/config.json"
+        # An unwritable path on THIS OS. "/definitely/not/…" is absolute on
+        # POSIX and merely relative on Windows, where it resolves against the
+        # current drive and the write can succeed — so the test proved nothing
+        # there. A file path under a NUL/null device name is refused by both.
+        self.config.CONFIG_PATH = os.path.join(
+            os.devnull, "not-a-real-place", "config.json")
         self.assertEqual(R.keep_unparsed(["x"]), "")
 
 
