@@ -41,6 +41,11 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "prism_terminal"))
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 from core import gerber as G  # noqa: E402
 
 
@@ -555,7 +560,7 @@ class AgainstTheCustomersOwnCheckSheet(unittest.TestCase):
 
     def _job(self, name):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         src = os.path.join(REAL, name)
         if not os.path.exists(src):
             self.skipTest("sample missing")
@@ -605,7 +610,7 @@ class AgainstAnIndependentImplementation(unittest.TestCase):
         # this job, and the exact construct Prism was fixed to handle.
         warnings.filterwarnings("ignore", category=SyntaxWarning)
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
 
     def test_object_counts_match_on_the_2013_job(self):
         from gerbonara import GerberFile
@@ -737,7 +742,7 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
         self.assertIn("Reply with the measured figures below", brief)
 
 
-REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
+REAL = sample_jobs.path("gerber_test")
 
 
 class TheRulebookIsNotTheBoard(unittest.TestCase):
@@ -889,7 +894,7 @@ class EveryJobWeHaveStillReadsRight(unittest.TestCase):
 
     def _measure(self, name):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         if (self.samples[name].get("slow")
                 and not os.environ.get("PRISM_SLOW_TESTS")):
             # The twelve-layer board takes five minutes. That is fine for a
@@ -957,7 +962,7 @@ class TheJobsOwnCamReportIsAWitness(unittest.TestCase):
 
     def test_the_2018_job_reproduces_its_own_cam_report(self):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         src = os.path.join(REAL, "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
         if not os.path.exists(src):
             self.skipTest("sample missing")
@@ -1268,7 +1273,7 @@ class PadsAgainstAnIndependentImplementation(unittest.TestCase):
 
     def setUp(self):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         try:
             import gerbonara            # noqa: F401
         except ImportError:

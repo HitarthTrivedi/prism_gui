@@ -26,6 +26,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("PRISM_LICENSE_OFFLINE_DEV", "1")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 from dialogs import gerber_dialog as GD  # noqa: E402
 from dialogs.gerber_dialog import GerberDialog  # noqa: E402
 
@@ -54,7 +59,7 @@ def setUpModule():
 def tearDownModule():
     GD.REPORTS_DIR = _REAL_REPORTS_DIR
 
-REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
+REAL = sample_jobs.path("gerber_test")
 
 
 class _Sig:
@@ -144,7 +149,7 @@ class AnAgentOnlyEverSeesTheNumbers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isdir(REAL):
-            raise unittest.SkipTest("sample jobs not on this machine")
+            raise unittest.SkipTest(sample_jobs.missing("gerber_test"))
         cls.dlg = _dialog()
         ok = _measure_and_join(
             cls.dlg,
@@ -228,7 +233,7 @@ class WithNoWritingAgentConfigured(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isdir(REAL):
-            raise unittest.SkipTest("sample jobs not on this machine")
+            raise unittest.SkipTest(sample_jobs.missing("gerber_test"))
         cls.dlg = _dialog(cfg={})     # no agents configured
         if not _measure_and_join(
                 cls.dlg,
@@ -275,7 +280,7 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isdir(REAL):
-            raise unittest.SkipTest("sample jobs not on this machine")
+            raise unittest.SkipTest(sample_jobs.missing("gerber_test"))
 
     def setUp(self):
         # The module-level redirect (see setUpModule) already keeps this off
@@ -358,7 +363,7 @@ class CleaningOutsideTheBorder(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isdir(REAL):
-            raise unittest.SkipTest("sample jobs not on this machine")
+            raise unittest.SkipTest(sample_jobs.missing("gerber_test"))
 
     def setUp(self):
         self._reports_dir = tempfile.mkdtemp(prefix="prism-test-gerber-clean-")

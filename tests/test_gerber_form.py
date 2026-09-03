@@ -15,6 +15,11 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "prism_terminal"))
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 from core import gerber_form as GF  # noqa: E402
 
 try:
@@ -23,8 +28,8 @@ try:
 except Exception:                                   # pragma: no cover
     HAVE = False
 
-FCC = ("/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/"
-       "gerber_test/gerber data/F-SAL-01 Rev-00 QUOTATION FORM.xlsx")
+FCC = sample_jobs.path("gerber_test", "gerber data",
+                       "F-SAL-01 Rev-00 QUOTATION FORM.xlsx")
 
 JOB = {
     "answers": {
@@ -113,7 +118,9 @@ class TheLabelsFindTheirCells(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE and os.path.exists(FCC),
-                     "the client's real form is not on this machine")
+                     "openpyxl missing, or " + (sample_jobs.missing(
+                         "gerber_test", "gerber data",
+                         "F-SAL-01 Rev-00 QUOTATION FORM.xlsx") or ""))
 class TheClientsRealForm(unittest.TestCase):
     """Witnessed against FCC's actual F-SAL-01 sheet."""
 

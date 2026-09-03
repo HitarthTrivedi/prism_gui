@@ -57,6 +57,48 @@ def sign(claims: dict, private: Ed25519PrivateKey) -> str:
     return f"{T.PREFIX}.{payload_b64}.{T.b64u_encode(signature)}"
 
 
+def parse_features(raw: str) -> list[str]:
+    """--features, split and CHECKED against what the app actually gates on.
+
+    Two names look obvious and are wrong, and both padlock something in
+    front of a customer:
+
+      · **Gerber is gated on `boq`.** There is no "gerber" feature at all —
+        main_window._open_gerber() calls _authorized_then("boq", …), because
+        nothing on the licence server sells Gerber separately yet. So
+        `--features core,gerber` locks the most expensive add-on on the
+        price book AND the flag it was locked by means nothing.
+      · **Email automation is gated on `inbox`.** `email` is a DIFFERENT
+        row — the draft-and-send screen. Minting `email` and expecting the
+        automation screen to open gets a padlock.
+
+    Both are invisible until the moment someone clicks, which on demo day is
+    in front of the person being sold to. A typo should fail here, at mint
+    time, in front of a developer who can retype it.
+    """
+    import plans
+
+    wanted = [f.strip() for f in raw.split(",") if f.strip()]
+    unknown = [f for f in wanted if f not in plans.FEATURES]
+    if unknown:
+        known = ", ".join(sorted(plans.FEATURES))
+        hint = ""
+        if "gerber" in unknown:
+            hint += "\n  Gerber is gated on 'boq' — there is no 'gerber' feature."
+        if "email" in unknown:      # defensive: 'email' is real, but pair it
+            hint += "\n  Email automation needs 'inbox'; 'email' is the draft screen."
+        raise SystemExit(
+            f"unknown feature(s): {', '.join(unknown)}\n"
+            f"  known features: {known}{hint}")
+    # 'email' IS a real feature, so the check above cannot catch the commonest
+    # mistake of all — asking for it and expecting Email AUTOMATION.
+    if "email" in wanted and "inbox" not in wanted:
+        print("mint: note — 'email' is the draft-and-send screen. Email "
+              "AUTOMATION needs 'inbox', which is not in this licence.",
+              file=sys.stderr)
+    return wanted
+
+
 def build_claims(args, device_fp: str) -> dict:
     now = int(args.now or time.time())
     license_end = now + args.days * DAY
@@ -69,7 +111,7 @@ def build_claims(args, device_fp: str) -> dict:
         "cust": args.customer,
         "plan": args.plan,
         "kind": args.kind,
-        "feat": [f.strip() for f in args.features.split(",") if f.strip()],
+        "feat": parse_features(args.features),
         "seats": args.seats,
         "dev": device_fp,
         "iat": now,
@@ -166,7 +208,7 @@ def cmd_lease(args) -> int:
     claims = L.build_claims(
         kid=args.kid, license_id=args.license_id, device_fp=device_fp,
         scope=[s.strip() for s in args.scopes.split(",") if s.strip()],
-        features=[f.strip() for f in args.features.split(",") if f.strip()],
+        features=parse_features(args.features),
         metered=args.metered, jti=args.jti, now=now, ttl=args.ttl,
         offline=args.offline)
     lease_str = sign_lease(claims, private)

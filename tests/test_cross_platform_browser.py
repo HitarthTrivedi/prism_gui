@@ -630,3 +630,116 @@ class TheDwgConverterIsFoundWhereItInstalls(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── 7. brief 03 — the QA pass ────────────────────────────────────────────────
+
+class TheSuiteCanRunOnAMachineThatIsNotOurs(unittest.TestCase):
+    """Two things stopped ~1,500 tests ever running in CI, and neither was a
+    failing test."""
+
+    def test_a_missing_dev_signing_key_skips_one_file_not_the_run(self):
+        """tests/test_sign_manifest.py read a gitignored key at MODULE scope,
+        so on a fresh clone or any CI runner it raised during collection and
+        took the whole suite with it."""
+        import test_sign_manifest as TSM
+        source = inspect.getsource(TSM)
+        self.assertNotIn("\nDEV_KEY = open(", source,
+                         "reading the key at import time aborts collection")
+        self.assertIn("skipUnless", source)
+
+    def test_the_sample_jobs_folder_is_configurable(self):
+        """Five test files hardcoded one developer's Mac path, so 22
+        real-customer-job tests skipped everywhere else — silently."""
+        import sample_jobs
+        self.assertEqual(sample_jobs.ENV_VAR, "PRISM_SAMPLE_JOBS")
+        with mock.patch.dict(os.environ, {"PRISM_SAMPLE_JOBS": "/somewhere"}):
+            self.assertEqual(sample_jobs.path("gerber_test"),
+                             os.path.join("/somewhere", "gerber_test"))
+
+    def test_a_skipped_sample_says_which_folder_it_wanted(self):
+        """Q3's DONE: 'the output says visibly why not. Silence is not
+        acceptable.'"""
+        with mock.patch.dict(os.environ,
+                             {"PRISM_SAMPLE_JOBS": "/definitely/not/here"}):
+            import sample_jobs
+            why = sample_jobs.missing("gerber_test")
+        self.assertIn("/definitely/not/here", why)
+        self.assertIn("PRISM_SAMPLE_JOBS", why)
+
+    def test_no_hardcoded_developer_path_is_left_in_the_tests(self):
+        # Built rather than written, so this file does not match its own
+        # scan — the first version of this test failed on itself.
+        needle = "/Users/" + "hitarthtrivedi"
+        here = os.path.dirname(os.path.abspath(__file__))
+        offenders = []
+        for name in sorted(os.listdir(here)):
+            if not name.startswith("test_") or not name.endswith(".py"):
+                continue
+            with open(os.path.join(here, name), encoding="utf-8") as f:
+                if needle in f.read():
+                    offenders.append(name)
+        self.assertEqual(offenders, [],
+                         "a sample path belongs in tests/sample_jobs.py")
+
+
+class ARenderChecksForRoomFirst(unittest.TestCase):
+    """KNOWN_ISSUES #12. A disk that fills mid-encode gives FFmpeg's own 'No
+    space left on device' at minute four of a seven-minute job and leaves a
+    truncated .mp4 that looks like a file."""
+
+    def setUp(self):
+        self.ff = CB.get_ffmpeg()
+
+    def test_plenty_of_room_says_nothing(self):
+        self.assertEqual(self.ff.check_space("/tmp/out.mp4", need_mb=1), "")
+
+    def test_no_room_is_a_sentence_with_the_numbers_in_it(self):
+        why = self.ff.check_space("/tmp/out.mp4", need_mb=10 ** 10)
+        self.assertIn("Not enough free space", why)
+        self.assertIn("MB", why)
+
+    def test_an_unmeasurable_disk_does_not_block_the_render(self):
+        """Refusing to render because a disk-space PROBE failed would turn a
+        diagnostic into an outage."""
+        with mock.patch.object(self.ff, "free_mb", return_value=None):
+            self.assertEqual(self.ff.check_space("/tmp/out.mp4"), "")
+
+    def test_both_renderers_check_before_they_start(self):
+        for module in ("reel", "reel_web"):
+            source = inspect.getsource(
+                __import__(f"core.{module}", fromlist=["x"]).render)
+            self.assertIn("check_space", source, f"core.{module}.render")
+
+
+class TheLicenceFlagsThatPadlockADemo(unittest.TestCase):
+    """Two feature names look obvious and are wrong, and both are invisible
+    until someone clicks — which on demo day is in front of the customer."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "devtools"))
+        import mint
+        self.mint = mint
+
+    def test_there_is_no_gerber_feature_so_minting_one_fails(self):
+        import plans
+        self.assertNotIn("gerber", plans.FEATURES,
+                         "Gerber is gated on 'boq' — main_window._open_gerber")
+        with self.assertRaises(SystemExit) as caught:
+            self.mint.parse_features("core,gerber")
+        self.assertIn("boq", str(caught.exception))
+
+    def test_the_brief_s_own_mint_line_is_accepted(self):
+        self.assertEqual(
+            self.mint.parse_features("core,boq,email,reel,inbox"),
+            ["core", "boq", "email", "reel", "inbox"])
+
+    def test_email_without_inbox_warns_about_email_automation(self):
+        import io
+        from contextlib import redirect_stderr
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.mint.parse_features("core,boq,email")
+        self.assertIn("inbox", err.getvalue())

@@ -176,16 +176,29 @@ year of daily use that is gigabytes in a hidden folder. Show the size in
 Settings with a "keep the last N runs" option. Never delete without asking —
 that history is their work. *A few hours.*
 
-### 11. Chrome profile lock after a crash
+### 11. Chrome profile lock after a crash — **fixed**
 
-If Prism crashes, a leftover browser lock can make every later run fail with
-"profile appears to be in use". Clear a stale lock on startup, and add a
-"Close Prism's browser" item to the sidebar. *A few hours.*
+If Prism crashed, a leftover browser held the profile and every later run
+failed. Chrome allows one browser per profile folder, so the next launch
+handed over to the orphan and exited, and the driver reported "cannot connect
+to chrome at 127.0.0.1:…" — which Prism showed as a Chrome *version*
+mismatch, sending people to update a browser that was fine.
 
-### 12. Disk full during a video render
+`automation._release_profile()` now closes it before launching, gracefully
+first so a just-completed login is not lost, and says so in the log. Settings
+→ Status has a **Close Prism's browser** button for the manual case.
 
-Check free space before starting, and say so up front. Settings are already
-safe — Prism writes them in a way that survives a power cut. *An hour.*
+Note there is no lock *file* on Windows — Chrome guards a profile with a
+kernel object — so this finds the owning process rather than deleting a file.
+
+### 12. Disk full during a video render — **fixed**
+
+`ffmpeg.check_space()` is called before either renderer starts. A disk that
+filled mid-encode gave FFmpeg's own "No space left on device" at minute four
+of a seven-minute job and left a truncated .mp4 that looked like a file; the
+same fact stated up front costs nothing. A probe that cannot measure the disk
+does **not** block the render — refusing on a failed probe would turn a
+diagnostic into an outage.
 
 ### 13. A task queue gives up too easily on a slow server
 
@@ -195,9 +208,18 @@ A licence *refusal* should stop the whole queue — that is correct. A licence
 
 ### 14. Windows has not been properly tested
 
-The messages about missing FFmpeg and microphone support are written for a
-Mac. A customer on a fresh Windows machine hits both and gets Mac
-instructions. Needs a real pass on a Windows box before selling one.
+**The two messages this entry named are fixed.** `wakeword.install_hint()`
+branches per platform, `ffmpeg.MISSING` is platform-neutral and Prism fetches
+FFmpeg itself, and `friendly.py`'s microphone advice now gives the Windows
+permission path beside the macOS one. The SmartScreen/Gatekeeper answers in
+`support_kb.py` always covered both.
+
+**The heading is still true.** What has actually been verified on Windows is
+what CI does: the bundle builds, starts, and — since the packaging gate began
+launching a browser rather than checking a file exists — renders. Everything
+a person does with their hands is still unverified there: the add-ons, the
+first-run wizard, the licence screen, attachments reaching a tool, files
+coming back from one. Needs a real pass on a Windows box before selling one.
 
 ---
 

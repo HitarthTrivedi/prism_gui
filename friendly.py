@@ -359,12 +359,21 @@ _rule(r"ffmpeg",
            "Nothing else changes on this computer, and everything else in "
            "Prism works without it.")))
 
+# Both operating systems, not one. This offered the macOS permission screen
+# and nothing else — so a Windows customer, whose commonest cause is exactly
+# the same permission being off, was handed the settings path of an OS they
+# are not running and left with no route of their own. Windows is most of
+# the customers this is sold to. (KNOWN_ISSUES #14 names FFmpeg and the
+# microphone together; the FFmpeg half was fixed long ago and only this was
+# left.)
 _rule(r"pyaudio|portaudio|microphone",
       Problem(
           "The microphone isn't available",
           "Prism couldn't reach the microphone, so speaking your task isn't "
           "available on this computer.",
           ("Check that no other program is using the microphone.",
+           "On Windows, open Settings → Privacy & security → Microphone and "
+           "make sure desktop apps are allowed to use it.",
            "On a Mac, look in System Settings → Privacy & Security → "
            "Microphone and make sure Prism is allowed.",
            "Everything else works — just type the task instead.")))
