@@ -69,6 +69,14 @@ class PastedCommandsStayCommands(unittest.TestCase):
         self.assertLess(body.index("_drain_pending_lines"),
                         body.index("_q_confirm(msg"))
 
+    def test_readline_is_active_so_input_reads_one_line(self):
+        """Without readline, input() reads the tty through C stdio, which
+        buffers a whole chunk: a paste's second line hides inside libc
+        where select()-based draining cannot see it, and leaks out at the
+        next Y/n prompt. Watched auto-answer 'No' on two real runs."""
+        src = open(PRISM_PY, encoding="utf-8").read()
+        self.assertIn("import readline", src)
+
 
 class RoutingFailuresSpeakEnglish(unittest.TestCase):
 
