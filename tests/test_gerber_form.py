@@ -228,14 +228,16 @@ class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
         report = os.path.join(cls.dir, "readme.rep")
         with open(report, "w") as f:
             f.write("Material: FR4, board thickness 1.6 mm, copper 1 oz,\n"
-                    "surface finish HASL lead free, V-CUT scoring.\n")
+                    "I/L 0.5 oz, surface finish HASL lead free, V-CUT "
+                    "scoring,\ngreen solder mask, UL E123456.\n")
         drill = os.path.join(cls.dir, "job.txt")
         with open(drill, "w") as f:
             f.write("M48\nT1C0.018\n%\nT1\nX1Y1\nG85X2Y2\nM30\n")
         cls.job = {
             "answers": {**JOB["answers"],
                         "min_annular_ring_mm": 0.1397,
-                        "drill_tools": 10},
+                        "drill_tools": 10,
+                        "array_grid": "2 x 3"},
             "drills": JOB["drills"],
             "smt": [{"name": "top.gtl", "count": 5}],
             "files": [
@@ -253,7 +255,8 @@ class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
         labels = ["Min Annular Ring", "No. of Tools", "Smt Side",
                   "SM Sides", "Legend Sides", "Slots", "Material Type",
                   "Mat. Thickness", "Cu. Wt Finish", "Final Finish",
-                  "Scoring", "E.T."]
+                  "Scoring", "E.T.", "S&R", "I/L Wt Finish", "SM Color",
+                  "UL CODE"]
         for i, label in enumerate(labels, 1):
             ws.cell(row=i, column=1, value=label)
         wb.save(tpl)
@@ -279,8 +282,14 @@ class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
         self.assertEqual(self._value("Material Type"), "FR-4")
         self.assertEqual(self._value("Mat. Thickness"), "1.6 mm")
         self.assertEqual(self._value("Cu. Wt Finish"), "1 oz")
+        self.assertEqual(self._value("I/L Wt Finish"), "0.5 oz")
         self.assertEqual(self._value("Final Finish"), "HASL")
         self.assertEqual(self._value("Scoring"), "YES")
+        self.assertEqual(self._value("SM Color"), "GREEN")
+        self.assertEqual(self._value("UL CODE"), "E123456")
+
+    def test_s_and_r_is_the_measured_array_grid(self):
+        self.assertEqual(self._value("S&R"), "2 x 3")
 
     def test_what_the_job_does_not_know_stays_blank(self):
         self.assertIsNone(self._value("E.T."))
