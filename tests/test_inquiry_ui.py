@@ -112,6 +112,23 @@ def message(subject="Enquiry", sender="Mr Patel <purchase@shaktiauto.in>",
     return inbox.parse_message(msg.as_bytes(), uid=1)
 
 
+# The fixture's Date header is +0530, and register._clock converts a mail
+# timestamp to the READER's local zone — correct behaviour, since the column
+# means "when it reached us". So "09:14" is only the right answer in India:
+# on a UTC machine the same instant is 03:44, and these assertions failed on
+# the first CI run of this suite for no reason but geography.
+#
+# Derived, the way the Berlin-offset test below already derives its own
+# expectation. Still proves the pipeline — parsed, converted, formatted —
+# without encoding one developer's timezone as the definition of correct.
+_FIXTURE_DATE = "Mon, 10 Aug 2026 09:14:00 +0530"
+
+
+def _local_clock(header: str = _FIXTURE_DATE) -> str:
+    from email.utils import parsedate_to_datetime
+    return parsedate_to_datetime(header).astimezone().strftime("%H:%M")
+
+
 def ready_cfg(folder: str) -> dict:
     return {"api_key": "", "inquiry": {
         "account": {"address": "sales@acme.co.in", "password": "p",
@@ -755,7 +772,8 @@ class ColourCarriesMeaning(unittest.TestCase):
         register.save([register.from_message(message())],
                       mailflow.Paths(self.folder).register_csv)
         self.dialog._refresh_register()
-        self.assertIn("09:14", self.dialog.register_table.item(0, 1).text())
+        self.assertIn(_local_clock(),
+                      self.dialog.register_table.item(0, 1).text())
 
 
 class CheckingWithoutBeingAsked(unittest.TestCase):

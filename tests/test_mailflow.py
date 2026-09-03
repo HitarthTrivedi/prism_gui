@@ -57,6 +57,23 @@ def raw_mail(*, subject="Enquiry", sender="Mr Patel <purchase@shaktiauto.in>",
     return msg.as_bytes()
 
 
+# The fixture's Date header is +0530, and register._clock converts a mail
+# timestamp to the READER's local zone — correct behaviour, since the column
+# means "when it reached us". So "09:14" is only the right answer in India:
+# on a UTC machine the same instant is 03:44, and these assertions failed on
+# the first CI run of this suite for no reason but geography.
+#
+# Derived, the way the Berlin-offset test below already derives its own
+# expectation. Still proves the pipeline — parsed, converted, formatted —
+# without encoding one developer's timezone as the definition of correct.
+_FIXTURE_DATE = "Mon, 10 Aug 2026 09:14:00 +0530"
+
+
+def _local_clock(header: str = _FIXTURE_DATE) -> str:
+    from email.utils import parsedate_to_datetime
+    return parsedate_to_datetime(header).astimezone().strftime("%H:%M")
+
+
 def message(**kw):
     return inbox.parse_message(raw_mail(**kw), uid=kw.pop("uid", 1))
 
@@ -1516,7 +1533,7 @@ class TheTimeAnInquiryArrived(unittest.TestCase):
 
     def test_the_clock_time_is_recorded(self):
         row = register.from_message(message())
-        self.assertEqual(row["Time received"], "09:14")
+        self.assertEqual(row["Time received"], _local_clock())
 
     def test_it_is_the_senders_time_converted_to_ours(self):
         """A Date header carries the sender's offset. Filed raw, a 09:00
@@ -1547,7 +1564,8 @@ class TheTimeAnInquiryArrived(unittest.TestCase):
         folder = tempfile.mkdtemp()
         path = os.path.join(folder, "inquiries.csv")
         register.save([register.from_message(message())], path)
-        self.assertEqual(register.load(path)[0]["Time received"], "09:14")
+        self.assertEqual(register.load(path)[0]["Time received"],
+                         _local_clock())
 
 
 class ReadingWhatTheCustomerAnswered(unittest.TestCase):
