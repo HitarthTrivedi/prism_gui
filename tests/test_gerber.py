@@ -1329,3 +1329,42 @@ class PadsAgainstAnIndependentImplementation(unittest.TestCase):
         self.assertAlmostEqual(job["answers"]["min_smt_pad_mm"], min(narrow),
                                delta=0.002)
         self.assertEqual(len(holes), job["answers"]["drill_count"])
+
+
+class TheAnnularRingIsMeasuredNotAssumed(unittest.TestCase):
+    """Pad radius minus hole radius at every drilled position with a pad
+    over it. The trap this class witnesses: the drill file and the Gerbers
+    on a real job carried DIFFERENT origins (pads at x≈260, holes at x≈5),
+    and every lookup missed until the offset was voted out of the data —
+    every hole-to-its-own-pad pair repeats the true offset, random pairs
+    scatter."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not os.path.isdir(REAL):
+            raise unittest.SkipTest("sample jobs not on this machine")
+        src = os.path.join(REAL,
+                           "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
+        if not os.path.exists(src):
+            raise unittest.SkipTest("the EI job is not on this machine")
+        paths = G.gather([src])
+        _name, group = G.split_jobs(paths)[0]
+        cls.answers = G.analyse(group)["answers"]
+
+    def test_the_ei_job_reads_its_known_ring(self):
+        # Ø0.46 vias in Ø0.74 pads → (0.74 − 0.46) / 2 ≈ 0.14 mm.
+        ring = self.answers["min_annular_ring_mm"]
+        self.assertIsNotNone(ring)
+        self.assertAlmostEqual(ring, 0.1397, places=3)
+        self.assertEqual(self.answers["annular_holes_at_min"], 10)
+
+    def test_the_tool_count_is_the_drill_files_own(self):
+        self.assertEqual(self.answers["drill_tools"], 10)
+
+    def test_a_job_with_no_pads_over_holes_says_none_not_zero(self):
+        src = os.path.join(REAL, "101942 Gerber Rev01(V2.0)")
+        if not os.path.isdir(src):
+            raise unittest.SkipTest("job not on this machine")
+        _name, group = G.split_jobs(G.gather([src]))[0]
+        a = G.analyse(group)["answers"]
+        self.assertIsNone(a["min_annular_ring_mm"])

@@ -215,6 +215,83 @@ class TheUnitsFollowTheUsersChoice(unittest.TestCase):
                          os.path.join(self.dir, "x.xlsx"), units="cm")
 
 
+@unittest.skipUnless(HAVE, "openpyxl not installed")
+class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
+    """Beyond the nine headline figures: annular ring, tool count, which
+    sides carry SMT/mask/legend, slots, and the stackup facts the CAM
+    tool's own report states. A fact the job does not carry leaves the
+    client's cell blank — never guessed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        report = os.path.join(cls.dir, "readme.rep")
+        with open(report, "w") as f:
+            f.write("Material: FR4, board thickness 1.6 mm, copper 1 oz,\n"
+                    "surface finish HASL lead free, V-CUT scoring.\n")
+        drill = os.path.join(cls.dir, "job.txt")
+        with open(drill, "w") as f:
+            f.write("M48\nT1C0.018\n%\nT1\nX1Y1\nG85X2Y2\nM30\n")
+        cls.job = {
+            "answers": {**JOB["answers"],
+                        "min_annular_ring_mm": 0.1397,
+                        "drill_tools": 10},
+            "drills": JOB["drills"],
+            "smt": [{"name": "top.gtl", "count": 5}],
+            "files": [
+                {"name": "top.gtl", "role": "copper_top", "path": ""},
+                {"name": "top.gts", "role": "mask_top", "path": ""},
+                {"name": "bot.gbs", "role": "mask_bottom", "path": ""},
+                {"name": "top.gto", "role": "silk_top", "path": ""},
+                {"name": "job.txt", "role": "drill", "path": drill},
+                {"name": "readme.rep", "role": "report", "path": report},
+            ],
+        }
+        tpl = os.path.join(cls.dir, "big-form.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        labels = ["Min Annular Ring", "No. of Tools", "Smt Side",
+                  "SM Sides", "Legend Sides", "Slots", "Material Type",
+                  "Mat. Thickness", "Cu. Wt Finish", "Final Finish",
+                  "Scoring", "E.T."]
+        for i, label in enumerate(labels, 1):
+            ws.cell(row=i, column=1, value=label)
+        wb.save(tpl)
+        out = os.path.join(cls.dir, "big-filled.xlsx")
+        GF.fill_form(cls.job, tpl, out)
+        cls.ws = openpyxl.load_workbook(out).active
+
+    def _value(self, label):
+        for row in self.ws.iter_rows():
+            if row[0].value == label:
+                return row[1].value
+        raise AssertionError(label)
+
+    def test_the_measured_extras_land(self):
+        self.assertEqual(self._value("Min Annular Ring"), 0.14)
+        self.assertEqual(self._value("No. of Tools"), 10)
+        self.assertEqual(self._value("Smt Side"), "TOP")
+        self.assertEqual(self._value("SM Sides"), "BOTH")
+        self.assertEqual(self._value("Legend Sides"), "TOP")
+        self.assertEqual(self._value("Slots"), "YES")   # the G85 in the file
+
+    def test_the_cam_reports_own_words_fill_the_stackup(self):
+        self.assertEqual(self._value("Material Type"), "FR-4")
+        self.assertEqual(self._value("Mat. Thickness"), "1.6 mm")
+        self.assertEqual(self._value("Cu. Wt Finish"), "1 oz")
+        self.assertEqual(self._value("Final Finish"), "HASL")
+        self.assertEqual(self._value("Scoring"), "YES")
+
+    def test_what_the_job_does_not_know_stays_blank(self):
+        self.assertIsNone(self._value("E.T."))
+        # A bare job with no files carries none of the extras.
+        bare = GF._job_extras({"answers": {}})
+        self.assertIsNone(bare["sm_sides"])
+        self.assertIsNone(bare["smt_side"])
+        self.assertNotIn("slots", bare)
+        self.assertNotIn("material_type", bare)
+
+
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
     def test_the_gui_offers_and_uses_the_clients_format(self):
