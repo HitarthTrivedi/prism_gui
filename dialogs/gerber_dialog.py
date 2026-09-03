@@ -286,9 +286,14 @@ class GerberDialog(PrismDialog):
                 f"{os.path.splitext(os.path.basename(template))[0]}"
                 " (filled).xlsx")
             try:
+                # The ask-box text rides along: a Gerber export rarely
+                # states material/colour/finish, but the estimator knows
+                # them — "FR4 1.6mm 1oz green mask HASL" typed once fills
+                # those cells too.
                 result = form.fill_form(
                     job, template, out, meta={"part": name},
-                    units=self.cfg.get("gerber_units") or "mm")
+                    units=self.cfg.get("gerber_units") or "mm",
+                    notes=self.ask.text().strip())
             except Exception as e:                      # noqa: BLE001
                 self.status.setText(
                     i18n.t("Couldn't fill the client's form: ") + str(e))

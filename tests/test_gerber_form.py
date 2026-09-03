@@ -291,6 +291,19 @@ class EveryExtractableFactLandsAndTheRestStayBlank(unittest.TestCase):
     def test_s_and_r_is_the_measured_array_grid(self):
         self.assertEqual(self._value("S&R"), "2 x 3")
 
+    def test_the_estimators_own_note_fills_what_no_report_states(self):
+        """A Gerber export rarely carries material/colour/finish (the real
+        Argus job's reports contain none) — the ask-box note does."""
+        extras = GF._job_extras(
+            {"answers": {}},
+            notes="FR4 1.6mm thick, 1oz copper, blue mask, ENIG, UL E77777")
+        self.assertEqual(extras["material_type"], "FR-4")
+        self.assertEqual(extras["material_thickness"], "1.6 mm")
+        self.assertEqual(extras["copper_weight"], "1 oz")
+        self.assertEqual(extras["sm_color"], "BLUE")
+        self.assertEqual(extras["final_finish"], "ENIG")
+        self.assertEqual(extras["ul_code"], "E77777")
+
     def test_what_the_job_does_not_know_stays_blank(self):
         self.assertIsNone(self._value("E.T."))
         # A bare job with no files carries none of the extras.
