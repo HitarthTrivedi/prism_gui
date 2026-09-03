@@ -87,10 +87,18 @@ jobs:
       # place packaging/prism.spec's collect_data_files(playwright) — and so
       # PyInstaller — can see it. Unset, this step still downloads Chromium,
       # but to a path the frozen build never ships.
+      #
+      # `--no-shell` skips chrome-headless-shell, the separate binary a bare
+      # `launch(headless=True)` resolves to since Playwright 1.49.
+      # packaging/prism.spec strips it from the bundle anyway, so downloading
+      # it only lengthened the build — and core/browser.py now launches with
+      # channel="chromium", which is what makes the full build the one that
+      # runs. Those three have to agree; if this flag is ever removed, check
+      # the other two first.
       - name: Install Chromium for Prism Studio
         env:
           PLAYWRIGHT_BROWSERS_PATH: "0"
-        run: playwright install chromium
+        run: playwright install --no-shell chromium
 
       # PyAudio needs PortAudio headers and has no wheel on some platforms;
       # the app runs without it (voice input just reports itself unavailable),

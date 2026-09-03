@@ -112,6 +112,40 @@ def _selftest(app) -> int:
         reel_ok, reel_err = False, str(e)
     ffmpeg_ok, ffmpeg_err = CB.reel_available()
 
+    # Prism Studio's browser — the ONE thing this self-test did not look at,
+    # and the thing that shipped broken. Every Windows and macOS build for
+    # months carried a Chromium it could not launch: packaging/prism.spec
+    # trimmed chrome-headless-shell out of the bundle while the code asked
+    # Playwright for exactly that binary, and the first anyone knew was a
+    # customer's "Render failed: Executable doesn't exist at …\\chrome-
+    # headless-shell.exe". The build passed every gate it had, because none of
+    # them ever asked whether a browser could start.
+    #
+    # Fatal only once frozen. In a frozen build the browser is supposed to be
+    # INSIDE the bundle, so its absence is a broken build and nothing a user
+    # can fix; a source checkout that has not run `playwright install` is an
+    # ordinary state and is reported below with voice input instead.
+    studio_ok, studio_err = CB.studio_available()
+
+    # The dependencies nothing else here would notice. Every one of them is
+    # imported lazily, inside the function that needs it, so a build that
+    # missed one starts perfectly and fails months later on the one screen
+    # that uses it — python-docx when a customer attaches a Word file,
+    # openpyxl when they load a rate list, dnspython when setup looks up
+    # their mail server. packaging/prism.spec names all of them as hidden
+    # imports precisely because the analyser cannot see them; this is what
+    # proves the naming worked.
+    import importlib
+    missing_deps = []
+    for module, what in (("docx", "reading .docx attachments"),
+                         ("pypdf", "reading PDF attachments"),
+                         ("openpyxl", "reading .xlsx rate lists"),
+                         ("dns.resolver", "finding a customer's mail server")):
+        try:
+            importlib.import_module(module)
+        except Exception as e:                          # noqa: BLE001
+            missing_deps.append(f"{module} ({what}): {e}")
+
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
     # module import cleanly; ssl.create_default_context() only fails once it
@@ -158,7 +192,13 @@ def _selftest(app) -> int:
         (f"BOQ add-on (ezdxf){'' if boq_ok else f' — {boq_err}'}", boq_ok),
         (f"Reel add-on (Pillow + renderer)"
          f"{'' if reel_ok else f' — {reel_err}'}", reel_ok),
+        (f"bundled dependencies"
+         f"{'' if not missing_deps else ' — ' + '; '.join(missing_deps)}",
+         not missing_deps),
     ]
+    if paths.is_frozen():
+        checks.append((f"Prism Studio browser (Chromium)"
+                       f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
     from main_window import MainWindow
     win = MainWindow()
     win.show()
@@ -171,6 +211,10 @@ def _selftest(app) -> int:
     ok, why = wakeword.available()
     print(f"  {'✓' if ok else '!'} voice input{'' if ok else f' — {why}'}"
           "  (optional — needs PortAudio on the machine)")
+    if not paths.is_frozen():
+        print(f"  {'✓' if studio_ok else '!'} Prism Studio browser"
+              f"{'' if studio_ok else f' — {studio_err}'}"
+              "  (optional from source — `playwright install chromium`)")
     # ffmpeg_path()'s message is a multi-line install guide; one line is enough
     # here. split() rather than splitlines()[0] so an exception that stringifies
     # to "" can't turn a diagnostic into an IndexError.

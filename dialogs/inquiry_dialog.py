@@ -1806,8 +1806,56 @@ class InquiryDialog(QWidget):
             .replace("{value}", target.get("Order value", "") or value_text))
 
     # ── running a check ───────────────────────────────────────────────────
+    def _is_the_open_screen(self) -> bool:
+        """Is this panel the screen currently on show?
+
+        Asked of the stack rather than through isVisible(). isVisible() is
+        true only if EVERY ancestor is visible too, so it also answers "no"
+        while the main window happens to be hidden — during the licence gate,
+        for instance — and a question that should have been asked would be
+        silently dropped. Which page a stack is showing is the thing actually
+        being asked about here, and it does not depend on the window above it.
+
+        No stack in the parent chain means this was built standalone (tests
+        do that, ~30 times), and something nobody has put on screen must not
+        open a modal.
+        """
+        node = self.parentWidget()
+        while node is not None:
+            if isinstance(node, QStackedWidget):
+                return node.currentWidget() is self
+            node = node.parentWidget()
+        return False
+
     def _first_look(self, auto_check: bool = False):
         if self._closed:
+            return
+        # Only ask about setup on the screen the person is actually looking
+        # at. MainWindow builds this panel at startup (main_window.py, next
+        # to every other screen) and __init__ ends with self.enter(), which
+        # arms the deferred callback below — so on every launch with no
+        # mailbox configured, Prism opened a blocking "This needs your
+        # mailbox set up first. Set it up now?" over the dashboard, before
+        # the user had clicked anything or shown any interest in Email
+        # automation. Reproduced by building MainWindow and turning the
+        # event loop for 300ms: one modal, every time.
+        #
+        # It is the same callback that hangs the test suite. The panel is
+        # constructed ~30 times across tests/test_inquiry_ui.py, each one
+        # arming this; any instance not explicitly closed leaks its
+        # singleShot into whichever later test next spins the event loop,
+        # which then blocks on a modal no headless run can answer. closeEvent
+        # documents `_closed` as the guard for that — it only works for the
+        # instances a test remembers to close, and visibility covers the rest
+        # for the same reason it is right in the product: a screen nobody is
+        # looking at has no business opening a modal.
+        #
+        # The real path is unaffected. _open_inquiry_dialog() calls enter()
+        # and then setCurrentIndex(INQUIRY_WORK) in the same slot, so by the
+        # time this zero-delay callback is delivered the panel is the stack's
+        # current page — which is exactly the moment the question is worth
+        # asking.
+        if not self._is_the_open_screen():
             return
         if not is_ready(self.cfg):
             answer = QMessageBox.question(

@@ -1275,8 +1275,10 @@ class MainWindow(QMainWindow):
                 self, "BOQ",
                 "The BOQ add-on needs the ezdxf library to measure drawings:\n\n"
                 "    pip install ezdxf\n\n"
-                "A .dwg also needs a converter — `brew install libredwg` on "
-                f"macOS.\n\nDetail: {err}")
+                "A .dwg also needs a converter — install ODA File Converter "
+                "(free, all platforms) from opendesign.com, or "
+                "`brew install libredwg` on macOS. A .dxf needs neither."
+                f"\n\nDetail: {err}")
             return
         BoqDialog(self.cfg, self.attachments, self).exec()
 

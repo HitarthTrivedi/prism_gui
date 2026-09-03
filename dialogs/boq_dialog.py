@@ -75,6 +75,35 @@ class BoqDialog(PrismDialog):
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
 
+        # Say which format works BEFORE a drawing is attached, not in an error
+        # afterwards.
+        #
+        # .dwg is Autodesk's closed format, and reading it needs a separate
+        # converter Prism is not allowed to ship: ODA File Converter is only
+        # distributed through a registration form with an EULA, and its licence
+        # forbids redistribution. So on a machine without one, a customer who
+        # attached the obvious file got told to go and install a program —
+        # after picking the file, naming the job and pressing the button.
+        #
+        # .dxf needs none of that. Every CAD program exports it in one step,
+        # ezdxf reads it directly, and it is the same geometry. Making that the
+        # expected input is the difference between a five-minute detour and a
+        # dead end — and it costs the customer one menu item they already know.
+        #
+        # Shown only when this machine genuinely has no converter: a client who
+        # has installed one can attach .dwg all day and must not be nagged
+        # about a problem they do not have.
+        if not self.boq.find_dwg_converter():
+            dxf_note = QLabel(
+                "Attaching a drawing? Save it as <b>DXF</b> first — in AutoCAD "
+                "that is File → Save As → <i>AutoCAD DXF</i>, and most other "
+                "CAD programs have the same option. Prism measures DXF "
+                "directly. A .dwg needs an extra converter this computer "
+                "does not have.")
+            dxf_note.setObjectName("note")
+            dxf_note.setWordWrap(True)
+            root.addWidget(dxf_note)
+
         # Only appears once a drawing has actually been measured.
         self.meas_box = QGroupBox("Measured from your drawing")
         meas_l = QVBoxLayout(self.meas_box)

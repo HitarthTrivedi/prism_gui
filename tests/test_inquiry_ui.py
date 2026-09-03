@@ -495,9 +495,15 @@ class TheScreen(unittest.TestCase):
                       self.dialog.followups_empty.title.text())
 
     def test_a_quiet_quotation_appears_on_the_chase_list(self):
+        # Dated RELATIVE to today, not `today.replace(day=1)`. The fixture
+        # sets followup_days=3, so the old date was only far enough in the
+        # past from the 4th of the month onward — this test failed on the
+        # 1st, 2nd and 3rd of every month, and passed for the other 28 days.
+        # A test whose answer depends on the date it is run is worse than no
+        # test: the red is ignored, and then the real regression is too.
         row = register.from_message(message())
         register.mark_quoted(row, "QTN/26-27/0001", 142500,
-                             date.today().replace(day=1))
+                             date.today() - timedelta(days=7))
         register.save([row], mailflow.Paths(self.folder).register_csv)
         self.dialog._refresh_register()
         self.assertIn("QTN/26-27/0001", self.dialog.followups.item(0, 0).text())
@@ -2663,6 +2669,74 @@ class TheFeatureIsSellable(unittest.TestCase):
         import plans
         pitch = plans.FEATURES["inbox"].pitch.lower()
         self.assertIn("stops twice", pitch)
+
+
+class TheSetupQuestionOnlyInterruptsItsOwnScreen(unittest.TestCase):
+    """`__init__` ends with `self.enter()`, which arms a zero-delay
+    `_first_look()`. MainWindow builds this panel at STARTUP, next to every
+    other screen — so with no mailbox configured, Prism opened a blocking
+    "This needs your mailbox set up first. Set it up now?" over the dashboard
+    on every launch, before the user had shown any interest in Email
+    automation. Reproduced by building MainWindow and turning the event loop
+    for 250ms: one modal, every time.
+
+    The same callback is what makes this suite unreliable. The panel is
+    constructed ~30 times in this file; any instance not explicitly closed
+    leaks its singleShot into whichever later test next drives the event
+    loop, which then blocks on a modal no headless run can answer — the hang
+    the comments in `closeEvent` and in the quotation-layout test above are
+    both written around.
+    """
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(prefix="prism-modal-")
+        self.asked = []
+        patch = mock.patch.object(
+            UI.QMessageBox, "question",
+            staticmethod(lambda *a, **k: self.asked.append(a[2])
+                         or UI.QMessageBox.No))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _unready(self) -> dict:
+        return {"api_key": "k", "workspace": self.folder}
+
+    def test_a_panel_nobody_has_opened_asks_nothing(self):
+        dialog = UI.InquiryDialog(self._unready())
+        self.addCleanup(dialog.close)
+        _app.processEvents()
+        self.assertEqual(self.asked, [])
+
+    def test_a_standalone_panel_is_not_the_open_screen(self):
+        dialog = UI.InquiryDialog(self._unready())
+        self.addCleanup(dialog.close)
+        self.assertFalse(dialog._is_the_open_screen())
+
+    def test_a_stacked_panel_that_is_not_current_is_not_the_open_screen(self):
+        from PySide6.QtWidgets import QStackedWidget, QWidget
+        stack = QStackedWidget()
+        self.addCleanup(stack.deleteLater)
+        other = QWidget()
+        stack.addWidget(other)
+        dialog = UI.InquiryDialog(self._unready())
+        stack.addWidget(dialog)
+        stack.setCurrentWidget(other)
+        self.assertFalse(dialog._is_the_open_screen())
+
+    def test_the_panel_the_user_navigated_to_still_gets_asked(self):
+        """The question is worth asking — on the screen it is about. This is
+        the half a visibility check got wrong: isVisible() is false whenever
+        any ancestor is hidden, so a main window hidden behind the licence
+        gate would have silently swallowed it."""
+        from PySide6.QtWidgets import QStackedWidget
+        stack = QStackedWidget()
+        self.addCleanup(stack.deleteLater)
+        dialog = UI.InquiryDialog(self._unready())
+        stack.addWidget(dialog)
+        stack.setCurrentWidget(dialog)
+        self.assertTrue(dialog._is_the_open_screen())
+        dialog._first_look()
+        self.assertEqual(len(self.asked), 1)
 
 
 if __name__ == "__main__":

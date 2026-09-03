@@ -122,6 +122,52 @@ class AnUploadedFileIsNotPastedTwice(unittest.TestCase):
         self.assertIn("Three lines of brief.", F.context_block([att], uploaded=True))
 
 
+class AWordFileIsReadWhole(unittest.TestCase):
+    """`Document.paragraphs` is body paragraphs only — it does not descend
+    into tables. On this repo's own sample_boq.docx that read 1,924 of
+    13,138 characters: nine tables, 111 rows, gone. A BOQ, a quotation, a
+    rate list and a purchase order are all mostly table, so what was thrown
+    away was the reason the file was attached at all."""
+
+    def setUp(self):
+        try:
+            import docx
+        except Exception:                       # noqa: BLE001
+            self.skipTest("python-docx is not installed")
+        d = docx.Document()
+        d.add_paragraph("Quotation for J K Cement")
+        table = d.add_table(rows=2, cols=3)
+        table.rows[0].cells[0].text = "Sr No."
+        table.rows[0].cells[1].text = "Item description"
+        table.rows[0].cells[2].text = "Total Value (INR)"
+        table.rows[1].cells[0].text = "1"
+        table.rows[1].cells[1].text = "OBMS 1400mm"
+        table.rows[1].cells[2].text = "142500"
+        d.add_paragraph("Terms: 30 days")
+        self.path = os.path.join(tempfile.mkdtemp(prefix="prism-docx-"),
+                                 "quotation.docx")
+        d.save(self.path)
+
+    def test_the_numbers_in_the_table_are_read(self):
+        text = F.attach(self.path)["text"] or ""
+        self.assertIn("142500", text)
+        self.assertIn("OBMS 1400mm", text)
+
+    def test_the_prose_is_still_read(self):
+        text = F.attach(self.path)["text"] or ""
+        self.assertIn("Quotation for J K Cement", text)
+        self.assertIn("Terms: 30 days", text)
+
+    def test_a_table_lands_where_it_sits_in_the_document(self):
+        """Appending every table after all the prose would file a table's
+        numbers under the wrong heading — worse than omitting them."""
+        lines = [ln for ln in (F.attach(self.path)["text"] or "").splitlines()
+                 if ln.strip()]
+        self.assertEqual(lines[0], "Quotation for J K Cement")
+        self.assertTrue(any("142500" in ln for ln in lines))
+        self.assertEqual(lines[-1], "Terms: 30 days")
+
+
 class ThePipelineBuildsTheBlockAfterTheUpload(unittest.TestCase):
     """A source check: the block used to be built once, before any stage,
     so it could not know whether the upload had happened."""
