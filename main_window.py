@@ -41,7 +41,8 @@ from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from widgets.simple_panels import (
-    BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel, HistoryPanel,
+    BomPanel, BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel,
+    HistoryPanel,
 )
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
@@ -52,7 +53,8 @@ from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
-                     FFmpegWorker, UpdateWorker, ReelWorker)
+                     FFmpegWorker, UpdateWorker, FollowupRouteWorker,
+                     ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.ai_directory_dialog import AIDirectoryDialog
@@ -80,6 +82,10 @@ ARTIFACTS = 12
 # launcher panel (INQUIRY), never from the rail directly, so like WIZARD it
 # has no entry in _show_screen()'s name->index table either.
 INQUIRY_WORK = 13
+# BOM reuses the BOQ dialog (mode="bom") but has its own front-door panel and
+# its own screen. Appended LAST so nothing above renumbers; it IS a rail entry
+# and DOES have an entry in _show_screen()'s table below.
+BOM = 14
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -331,6 +337,8 @@ class MainWindow(QMainWindow):
         # what refreshes it on each visit — see _open_inquiry_dialog.
         self.inquiry_work_panel = InquiryDialog(self.cfg, self)
         self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
+        self.bom_panel = BomPanel(self.cfg)
+        self.screens.addWidget(self.bom_panel)              # BOM (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -361,6 +369,7 @@ class MainWindow(QMainWindow):
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.bom_panel.opened.connect(self._open_bom_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
         self.email_panel.open_compose.connect(self._open_email_dialog)
@@ -372,7 +381,8 @@ class MainWindow(QMainWindow):
         self.catalog_panel.navigate.connect(self._handle_command)
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
-        for panel in (self.boq_panel, self.gerber_panel, self.email_panel):
+        for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
+                      self.email_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -408,7 +418,7 @@ class MainWindow(QMainWindow):
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
                  "email": EMAIL, "support": SUPPORT, "gerber": GERBER,
-                 "artifacts": ARTIFACTS}.get(name, HOME)
+                 "artifacts": ARTIFACTS, "bom": BOM}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -442,7 +452,7 @@ class MainWindow(QMainWindow):
             SETTINGS: "config", GUIDE: "guide", CATALOG: "catalog",
             HISTORY: "runs", BOQ: "boq", EMAIL: "email",
             SUPPORT: "support", GERBER: "gerber",
-            ARTIFACTS: "artifacts"}.get(index, "home"))
+            ARTIFACTS: "artifacts", BOM: "bom"}.get(index, "home"))
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:
@@ -1095,6 +1105,8 @@ class MainWindow(QMainWindow):
             self._open_email()
         elif key == "boq":
             self._open_boq()
+        elif key == "bom":
+            self._open_bom()
         elif key == "gerber":
             self._open_gerber()
         elif key == "inquiry":
@@ -1280,7 +1292,45 @@ class MainWindow(QMainWindow):
                 "`brew install libredwg` on macOS. A .dxf needs neither."
                 f"\n\nDetail: {err}")
             return
-        BoqDialog(self.cfg, self.attachments, self).exec()
+        dlg = BoqDialog(self.cfg, self.attachments, self)
+        dlg.exec()
+        # A BOQ runs in its own dialog and never touches the main workbench's
+        # completion path, so the post-completion follow-up was never offered
+        # after one. Bridge it in now the dialog has closed: hand its finished
+        # stages to the same refinement flow every routed run gets. The format
+        # stage's query label doubles as the Artifacts task key, so "what came
+        # back" shows the BOQ itself.
+        self._offer_followup_for_dialog(
+            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
+            getattr(dlg, "_all_responses", {}),
+            getattr(dlg, "_stage_agents_map", {}),
+            getattr(dlg, "_links", {}))
+
+    def _open_bom(self):
+        # Same front-door pattern as BOQ. Gated on the BOQ entitlement for now —
+        # there is no dedicated "bom" feature on the licence server yet, exactly
+        # like Gerber rides on "boq" (see the sidebar entry).
+        self._authorized_then("boq", "addon", lambda: self._show_screen("bom"))
+
+    def _open_bom_dialog(self):
+        ok, err = CB.boq_available()
+        if not ok:
+            QMessageBox.information(
+                self, "BOM",
+                "The BOM add-on needs the ezdxf library to measure drawings:\n\n"
+                "    pip install ezdxf\n\n"
+                "A .dwg also needs a converter — install the free ODA File "
+                f"Converter on Windows.\n\nDetail: {err}")
+            return
+        # Same dialog as BOQ, in BOM mode — it measures the drawing identically
+        # and writes a parts list instead of a quantities schedule.
+        dlg = BoqDialog(self.cfg, self.attachments, self, mode="bom")
+        dlg.exec()
+        self._offer_followup_for_dialog(
+            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
+            getattr(dlg, "_all_responses", {}),
+            getattr(dlg, "_stage_agents_map", {}),
+            getattr(dlg, "_links", {}))
 
     def _open_gerber(self):
         # Licence feature is "boq" for now — see the comment in
@@ -2403,6 +2453,200 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("All done — saved to History.", 6000)
         self._finish_queue()
+        self._offer_followup(responses, links)
+
+    # ── post-completion follow-up ─────────────────────────────────────────
+    def _offer_followup_for_dialog(self, query: str, responses: dict,
+                                   stage_agents: dict, links: dict):
+        """Bridge an add-on dialog's finished run into the post-completion
+        follow-up.
+
+        Add-on dialogs (BOQ, and the same gap exists for Reel/Email/Gerber)
+        run their own worker chains and never reach _on_run_done, so the
+        "anything to change?" refinement the main workbench offers was
+        invisible from inside them — you'd finish a BOQ and be offered nothing.
+        This primes the same instance state a routed run leaves behind — the
+        task label (so the follow-up's "what came back" resolves the file this
+        run saved to Artifacts), the stage→agent map (so the note routes to the
+        right step), and an empty routing (an add-on's stages are custom_stages,
+        not a routed plan) — then hands off to the ordinary _offer_followup. The
+        refinement then runs on the workbench and can itself be followed up,
+        exactly like any other run's.
+        """
+        if not responses:
+            return
+        self._last_query = query
+        self._stage_agents = dict(stage_agents or {})
+        self.routing = {}
+        # The refinement is its own small run, not a continuation of whatever
+        # last happened on the workbench: clear the recap accumulators so its
+        # completion window shows only the follow-up, not a stale earlier task.
+        # The queue counters are deliberately left alone — after any completed
+        # run they already read "no more tasks", which is what keeps the loop
+        # offering a further follow-up instead of advancing a phantom queue.
+        self._stage_results = []
+        self._task_runs = []
+        self._offer_followup(responses, links or {})
+
+    def _offer_followup(self, responses: dict, links: dict = None):
+        """After a whole task finishes, offer a refinement. Prism reads the
+        note, works out which step it is about, and sends it to THAT step's
+        assigned agent (auto-routed) — resuming the SAME chat that step used,
+        and folding in any new attachments. The re-done result comes back and
+        this can offer another follow-up.
+
+        Skipped silently when there is nothing to refine or no Groq key to
+        route with — the follow-up is a bonus, never a blocker.
+        """
+        if not responses or not self.cfg.get("api_key"):
+            return
+        self._followup_links = links or {}
+        # Gather what THIS task PRODUCED, up front. The engine saves every
+        # stage's output (the BOQ PDF, the ChatGPT document, generated images)
+        # into the task's Artifacts folder, keyed by the task. These files are
+        # the REAL deliverable — an agentic tool leaves only messy process notes
+        # in the chat — so the dialog SHOWS them as "what came back", and the
+        # follow-up CARRIES them into the next step.
+        artifact_paths = []
+        try:
+            import os
+            art_dir = CB.config.artifact_task_dir(self._last_query)
+            artifact_paths = [os.path.join(art_dir, n)
+                              for n in sorted(os.listdir(art_dir))
+                              if os.path.isfile(os.path.join(art_dir, n))]
+        except Exception:                               # noqa: BLE001
+            pass
+        from dialogs.followup_dialog import FollowupDialog
+        dlg = FollowupDialog(self._result_summary(responses), self,
+                             artifacts=artifact_paths)
+        dlg.exec()
+        if not dlg.submitted():
+            return
+        self._followup_text = dlg.followup_text()
+        self._followup_responses = responses
+        # Attachments = files the person just added + the artifacts this task
+        # produced, so a follow-up step builds on the real deliverable.
+        atts = []
+        for p in list(dlg.file_paths()) + artifact_paths:
+            if p and p not in {a.get("path") for a in atts}:
+                try:
+                    atts.append(CB.files.attach(p))
+                except Exception:                       # noqa: BLE001
+                    pass
+        self._followup_attachments = atts
+        # Explicit agent name WINS over auto-detect. "give it to Perplexity"
+        # means the Perplexity step — not a guess, and not a silent fall-back
+        # to "the last AI" when the Groq classify can't run. Only when no agent
+        # is named do we ask the classifier what the note is about.
+        low = self._followup_text.lower()
+        for s, agent in self._stage_agents.items():
+            if agent and s in responses and agent.lower() in low:
+                self.statusBar().showMessage(
+                    i18n.t("Sending your follow-up to {agent}.").format(
+                        agent=agent), 4000)
+                self._on_followup_routed(s)
+                return
+        # Auto-route: which finished step is this follow-up about?
+        info = [{"stage": s,
+                 "agent": self._stage_agents.get(s, ""),
+                 "summary": (texts[0][:160].replace("\n", " ") if texts else "")}
+                for s, texts in responses.items()]
+        self.statusBar().showMessage(
+            i18n.t("Working out which step your follow-up is for…"), 0)
+        worker = FollowupRouteWorker(self._followup_text, info, self.cfg)
+        worker.done.connect(self._on_followup_routed)
+        worker.failed.connect(lambda _e: self._on_followup_routed(""))
+        self._workers.append(worker)
+        worker.start()
+
+    def _on_followup_routed(self, target_stage: str):
+        """The classifier picked the step; send the follow-up to its agent by
+        re-running just that one stage (custom_stages) with the prior output as
+        context plus any new attachments."""
+        responses = getattr(self, "_followup_responses", {})
+        if not responses:
+            return
+        if target_stage not in responses:              # unsure → the last step
+            target_stage = list(responses.keys())[-1]
+        agent = self._stage_agents.get(target_stage, "")
+        prior = "\n\n".join(responses.get(target_stage) or [])
+        att_note = (" New file(s) are attached to this chat — use them."
+                    if getattr(self, "_followup_attachments", None) else "")
+        prompt = (
+            f"Earlier, for this task, you produced:\n\n{prior}\n\n"
+            f"The person now wants this change: {self._followup_text}\n\n"
+            f"Redo your part with that change and give the full updated "
+            f"result.{att_note}")
+        resume_url = (getattr(self, "_followup_links", {}) or {}).get(
+            target_stage, "")
+        self._set_stage("run")
+        self._start_followup_run(target_stage, agent, prompt,
+                                 getattr(self, "_followup_attachments", []),
+                                 resume_url)
+
+    def _start_followup_run(self, stage: str, agent: str, prompt: str,
+                            attachments: list, resume_url: str = ""):
+        """Run exactly one stage — the follow-up — reusing the run surface, so
+        a follow-up shows and finishes like any other run (and can itself offer
+        another follow-up when it completes). `resume_url`, when known, reopens
+        the SAME conversation the stage answered in, so the follow-up continues
+        that chat with its full context instead of starting a fresh one."""
+        run_agents = {stage: agent}
+        cfg_for_run = dict(self.cfg)
+        cfg_for_run["agents"] = {**self._stage_agents, **run_agents}
+        # Bring the workbench's RUNNING view to the front. A follow-up often
+        # starts while the person is looking at the Artifacts screen (checking
+        # what came back) — without this the run proceeds on a hidden workbench
+        # and there's no way back to it, the "it went off to a new task and I
+        # can't get back" bug. The outer screen is forced to the workbench; the
+        # inner stack shows RUNNING below.
+        self._show_screen("workbench")
+        self._set_stage("run")
+        self.output_panel.clear()
+        self.output_panel.set_plan(run_agents)
+        self.output_panel.set_task(self._followup_text)
+        self.input_panel.set_state("running")
+        self._run_finished = False
+        self.output_panel.set_finished(False)
+        self.output_panel.set_running(True)
+        self.work_stack.setCurrentIndex(RUNNING)
+        worker = AutomationWorker(
+            self.routing, cfg_for_run, attachments, self._followup_text,
+            custom_stages=[(stage, agent, [prompt])],
+            resume_urls=({stage: resume_url} if resume_url else None))
+        awake.acquire()
+        self._active_run = worker
+        worker.stage_event.connect(self._on_stage_event)
+        worker.done.connect(self._on_run_done)
+        worker.failed.connect(self._on_run_failed)
+        self._workers.append(worker)
+        worker.start()
+
+    def _result_summary(self, responses: dict) -> str:
+        """Recap for the follow-up dialog: the FINAL result first, then the
+        earlier steps — each labelled by what it did, in the run's real
+        execution order. Earlier this showed whichever step happened to be
+        first non-empty, which surfaced the research step instead of the
+        finished deliverable; and a task with several outputs must show them
+        all, not just one."""
+        from widgets.agents_panel import STAGE_COPY
+        # `_stage_agents` is filled in execution order from stage_start events;
+        # its last key is the final step. Fall back to the responses' own order.
+        order = list(self._stage_agents.keys()) or list(responses.keys())
+        # Any responded step not in that order (defensive) goes first-run-order.
+        for s in responses:
+            if s not in order:
+                order.append(s)
+        parts = []
+        for stage in reversed(order):               # final step leads
+            body = "\n\n".join(t for t in (responses.get(stage) or [])
+                               if t and t.strip())
+            if not body:
+                continue
+            title = (STAGE_COPY.get(stage) or (None, stage.title()))[1]
+            clip = body[:900] + ("…" if len(body) > 900 else "")
+            parts.append(f"▸ {title}\n{clip}")
+        return "\n\n".join(parts)
 
     def _on_run_failed(self, error: str):
         awake.release()

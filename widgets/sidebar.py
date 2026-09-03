@@ -120,9 +120,9 @@ ADDONS = [
     # a disabled control that cannot be clicked, focused or activated is not a
     # control, it is a caption. Rendering it as one is honest and it hands its
     # slot in the twelve-control budget back to History.
-    ("bom", "BOM & Stock", "list",
-     "Coming soon — match a parts list against your stock and get the "
-     "shortage list", SOON, theme.NEUTRAL[500]),
+    ("bom", "BOM", "list",
+     "Bill of Materials — the parts list to fabricate it, measured from a CAD "
+     "drawing or a written spec", "boq", theme.ACCENT),
 ]
 
 # Everything that is neither WORK nor an add-on.

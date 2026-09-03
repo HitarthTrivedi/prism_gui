@@ -106,6 +106,7 @@ _warn_about_sibling()
 
 from core import config as config          # noqa: E402
 from core import agents as agents          # noqa: E402
+from core import bom as bom                # noqa: E402
 from core import lang as lang              # noqa: E402
 from core import router as router          # noqa: E402
 

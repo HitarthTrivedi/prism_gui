@@ -829,3 +829,110 @@ class ThePromptHasToActuallyLand(unittest.TestCase):
         self.assertIn("_text_landed", source,
                       "the contenteditable branch used to return on "
                       "'is the box non-empty', which is not the same question")
+
+
+# ── 9. the merge with Harsh's artifact capture ───────────────────────────────
+
+class TheDownloadButtonPathActuallyFindsTheButton(unittest.TestCase):
+    """The incoming feature — capture a file served through a Download button
+    — could not work on ChatGPT or Claude. _click_download_control built its
+    selector as f"{scope}a[download]" where scope is a selector LIST, so it
+    matched the message DIV, clicked it, returned True, and the caller then
+    waited 45s for a download that was never going to start."""
+
+    def test_the_control_selector_is_scoped_branch_by_branch(self):
+        source = inspect.getsource(automation._click_download_control)
+        self.assertIn("_within(", source)
+        # Code lines only — the comment above the fix quotes the broken form
+        # to explain it, and the first version of this test matched that.
+        code = [ln for ln in source.splitlines()
+                if not ln.lstrip().startswith("#")]
+        self.assertFalse([ln for ln in code if 'f"{scope}' in ln])
+
+    def test_a_container_is_not_clicked_as_if_it_were_a_control(self):
+        """Belt to the braces: one future selector slip should cost an early
+        exit, not 45 seconds spent on a clicked <div>."""
+        source = inspect.getsource(automation._click_download_control)
+        self.assertIn("tag_name", source)
+
+    def test_chromes_download_folder_is_handed_back(self):
+        """Page.setDownloadBehavior is a SESSION setting. Left redirected,
+        every later download in that browser — including the user's own,
+        since Prism keeps the browser open — landed in a temp folder."""
+        source = inspect.getsource(automation._harvest_via_download)
+        self.assertIn("_restore_downloads", source)
+        self.assertIn('"behavior": "default"',
+                      inspect.getsource(automation._restore_downloads))
+
+    def test_the_newest_download_wins_not_the_alphabetical_one(self):
+        source = inspect.getsource(automation._harvest_via_download)
+        self.assertIn("getmtime", source)
+        self.assertNotIn("sorted(fresh)[0]", source)
+
+
+class TheOdaVersionSortIsNumeric(unittest.TestCase):
+    """Ours sorted the Windows ODA glob reverse-lexicographically, so
+    "ODAFileConverter 9.0" outranked "25.4.0" — "9" beats "2" a character at
+    a time. The old test passed by luck: 25 vs 26 both start with a 2."""
+
+    def setUp(self):
+        self.boq = CB.get_boq()
+
+    def test_nine_does_not_beat_twenty_five(self):
+        key = self.boq._oda_version_key
+        nine = key(r"C:\Program Files\ODA\ODAFileConverter 9.0\ODAFileConverter.exe")
+        big = key(r"C:\Program Files\ODA\ODAFileConverter 25.4.0\ODAFileConverter.exe")
+        self.assertGreater(big, nine)
+
+    def test_a_version_less_folder_loses_to_any_versioned_one(self):
+        key = self.boq._oda_version_key
+        self.assertEqual(
+            key(r"C:\Program Files\ODA\ODAFileConverter\ODAFileConverter.exe"),
+            (0, 0, 0))
+
+    def test_a_two_part_version_still_ranks(self):
+        key = self.boq._oda_version_key
+        self.assertGreater(
+            key(r"C:\ODA\ODAFileConverter 25.6\ODAFileConverter.exe"),
+            key(r"C:\ODA\ODAFileConverter\ODAFileConverter.exe"))
+
+    def test_the_windows_glob_sorts_by_that_key(self):
+        source = inspect.getsource(self.boq._installed_converter_paths)
+        self.assertIn("_oda_version_key", source)
+
+
+class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
+    """Third trap of the same shape as the brief's two. BOM is gated on
+    'boq', so `--features core,bom` passes the name check and still padlocks
+    BOM."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "devtools"))
+        import mint
+        self.mint = mint
+
+    def _stderr_of(self, features: str) -> str:
+        import io
+        from contextlib import redirect_stderr
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.mint.parse_features(features)
+        return err.getvalue()
+
+    def test_bom_is_reported_as_unlocking_nothing(self):
+        self.assertIn("bom", self._stderr_of("core,boq,bom"))
+
+    def test_a_gated_feature_is_silent(self):
+        self.assertEqual(self._stderr_of("core,boq,reel,inbox"), "")
+
+    def test_core_is_never_reported(self):
+        """It is the base entitlement and legitimately ungated."""
+        self.assertNotIn("'core'", self._stderr_of("core,boq,reel,inbox"))
+
+    def test_the_gate_list_is_read_from_source_not_hardcoded(self):
+        """A hardcoded list is how the first two traps survived."""
+        source = inspect.getsource(self.mint._ungated_features)
+        self.assertIn("_authorized_then", source)
+        self.assertIn("main_window.py", source)

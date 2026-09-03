@@ -96,7 +96,41 @@ def parse_features(raw: str) -> list[str]:
         print("mint: note — 'email' is the draft-and-send screen. Email "
               "AUTOMATION needs 'inbox', which is not in this licence.",
               file=sys.stderr)
+
+    # The other half of the same trap: a feature that IS declared and that
+    # nothing actually gates on. 'bom' is the live example — the BOM add-on
+    # is gated on 'boq' (main_window._open_bom), so `--features core,bom`
+    # passes the name check above and still padlocks BOM. Three add-ons now
+    # sit on 'boq': BOQ, BOM and Gerber.
+    #
+    # Computed from the source rather than listed here, so it cannot go stale
+    # the moment somebody adds a gate — the entire point being that a
+    # hardcoded list is how the first two traps survived.
+    for name in sorted(set(wanted) & _ungated_features()):
+        print(f"mint: note — nothing in Prism is gated on {name!r}, so this "
+              "flag unlocks nothing. Check which feature the screen you mean "
+              "actually asks for.", file=sys.stderr)
     return wanted
+
+
+def _ungated_features() -> set:
+    """Declared in plans.FEATURES, but nothing calls _authorized_then on it.
+
+    'core' is excluded: it is the base entitlement and is legitimately never
+    gated on directly.
+    """
+    import re
+    import plans
+
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        with open(os.path.join(here, "main_window.py"), encoding="utf-8") as f:
+            gated = set(re.findall(r'_authorized_then\(\s*"([a-z]+)"', f.read()))
+    except OSError:
+        return set()
+    if not gated:                       # the regex stopped matching — say
+        return set()                    # nothing rather than warn on everything
+    return {f for f in plans.FEATURES if f not in gated} - {"core"}
 
 
 def build_claims(args, device_fp: str) -> dict:
