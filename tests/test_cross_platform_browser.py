@@ -743,3 +743,89 @@ class TheLicenceFlagsThatPadlockADemo(unittest.TestCase):
         with redirect_stderr(err):
             self.mint.parse_features("core,boq,email")
         self.assertIn("inbox", err.getvalue())
+
+
+# ── 8. the prompt that was never actually sent ───────────────────────────────
+
+class _Composer:
+    """A chat composer, as far as the typing code can tell.
+
+    `holds` is what is really in the box — which is the whole point: the run
+    that prompted this reported "uploaded 1 file(s) → prompt 1/1" over a
+    ChatGPT tab whose message box was empty, then waited 300s for a reply to
+    a question nobody had been asked.
+    """
+
+    def __init__(self, holds: str = "", tag: str = "DIV"):
+        self.holds = holds
+        self.tag = tag
+        self.keys: list = []
+
+    def send_keys(self, *value):
+        self.keys.append(value)
+
+
+class _TypingDriver:
+    def __init__(self, composer):
+        self.composer = composer
+
+    def execute_script(self, script, *args):
+        return self.composer.holds
+
+    def find_element(self, by, selector):
+        return self.composer
+
+
+class ThePromptHasToActuallyLand(unittest.TestCase):
+
+    PROMPT = ("Act as a senior social-media copywriter. Your ONLY task is: "
+              "write the reel script.\n\nSTRICT PIPELINE RULES:\n1. Perform "
+              "ONLY the task above.")
+
+    def test_an_empty_box_is_not_success(self):
+        self.assertFalse(automation._text_landed("", self.PROMPT))
+
+    def test_leftover_text_from_the_last_prompt_is_not_success(self):
+        """The old check was `innerText.trim().length > 0`, so the previous
+        prompt still sitting in the editor counted as this one landing."""
+        self.assertFalse(
+            automation._text_landed("Write me a BOQ for CCTV", self.PROMPT))
+
+    def test_a_partial_insert_is_not_success(self):
+        half = self.PROMPT[:len(self.PROMPT) // 2]
+        self.assertFalse(automation._text_landed(half, self.PROMPT))
+
+    def test_a_rich_editor_reflowing_whitespace_is_still_success(self):
+        """ProseMirror legitimately normalises blank lines — that must not
+        read as a failure, or every prompt would retry forever."""
+        self.assertTrue(
+            automation._text_landed(" ".join(self.PROMPT.split()), self.PROMPT))
+
+    def test_the_text_actually_being_there_is_success(self):
+        self.assertTrue(automation._text_landed(self.PROMPT, self.PROMPT))
+
+    def test_a_composer_still_holding_the_prompt_did_not_send_it(self):
+        """`submitted = True` only ever meant `btn.click()` did not raise.
+        With an empty composer ChatGPT has no send button, so the wait timed
+        out, ENTER went to an empty box, and nothing happened — silently."""
+        composer = _Composer(holds=self.PROMPT)
+        driver = _TypingDriver(composer)
+        self.assertFalse(automation._prompt_was_sent(
+            driver, composer, self.PROMPT, timeout=1))
+
+    def test_a_composer_that_emptied_did_send_it(self):
+        composer = _Composer(holds="")
+        driver = _TypingDriver(composer)
+        self.assertTrue(automation._prompt_was_sent(
+            driver, composer, self.PROMPT, timeout=1))
+
+    def test_the_run_loop_refuses_to_wait_on_a_prompt_it_never_sent(self):
+        source = inspect.getsource(automation.run)
+        self.assertIn("nothing_was_sent", source)
+        self.assertIn("never received the prompt", source)
+
+    def test_fast_type_verifies_rather_than_trusting_the_editor(self):
+        source = inspect.getsource(automation._fast_type)
+        self.assertIn("_text_landed", source,
+                      "the contenteditable branch used to return on "
+                      "'is the box non-empty', which is not the same question")
