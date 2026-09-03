@@ -19,6 +19,7 @@ Selenium/Playwright object at exactly the boundary the bug lived on.
 from __future__ import annotations
 
 import base64
+import inspect
 import os
 import sys
 import tempfile
@@ -415,6 +416,44 @@ class OnlyPrismsOwnChromeIsClosed(unittest.TestCase):
         ps = (f" 5150 /bin/bash -c echo {self.marker} >> notes.txt\n"
               f" 5151 python3 /home/om/tools/inspect.py {self.marker}\n")
         self.assertEqual(automation._posix_chrome_pids(ps, self.marker), [])
+
+    def test_being_unable_to_look_is_not_the_same_as_finding_nothing(self):
+        """On Windows this shells out to PowerShell. If that fails —
+        execution policy, WMI off, no powershell.exe — returning [] would
+        read as "the profile is free", _release_profile would do nothing,
+        and the customer would get "cannot connect to chrome" back with no
+        clue why. The one platform the guard exists for is the one where the
+        probe is most likely to fail."""
+        with mock.patch.object(automation.subprocess, "check_output",
+                               side_effect=OSError("powershell not found")):
+            self.assertIsNone(automation._chrome_pids_using_profile())
+
+    def test_a_probe_that_could_not_run_says_so(self):
+        said = []
+        with mock.patch.object(automation, "_chrome_pids_using_profile",
+                               return_value=None), \
+             mock.patch.object(automation.ui, "warn", said.append):
+            self.assertEqual(automation._release_profile(), 0)
+        self.assertTrue(any("leftover Chrome" in s for s in said))
+
+    def test_finding_nothing_is_silent(self):
+        said = []
+        with mock.patch.object(automation, "_chrome_pids_using_profile",
+                               return_value=[]), \
+             mock.patch.object(automation.ui, "warn", said.append):
+            self.assertEqual(automation._release_profile(), 0)
+        self.assertEqual(said, [])
+
+    def test_the_windows_probe_carries_no_quote_for_windows_to_mangle(self):
+        """Python builds a Windows command line with list2cmdline, which
+        escapes an embedded " as \\" — and powershell's -Command does not
+        unescape it the way a C program's argv would, so the script arrives
+        as a parse error. A `-Filter "Name='chrome.exe'"` would have failed
+        the whole probe on the only platform that runs it."""
+        source = inspect.getsource(automation._chrome_pids_using_profile)
+        script = source.split("Get-CimInstance", 1)[1].split("]", 1)[0]
+        self.assertNotIn('\\"', script)
+        self.assertIn("-eq 'chrome.exe'", script)
 
     def test_chrome_helper_processes_count_too(self):
         ps = (f" 4021 /opt/chrome/chrome {self.marker}\n"
