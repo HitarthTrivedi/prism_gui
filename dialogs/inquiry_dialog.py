@@ -2658,7 +2658,7 @@ class InquiryDialog(QWidget):
             self._focus_row = row if row else None
             self._focus_key = row.get("Inquiry no", "") if row else ""
             keys = (["po", "remove_order", "folder", "history"]
-                    if item.message_id else
+                    if getattr(item, "message_id", None) else
                     ["record_po", "phone", "lost", "folder", "history"])
             title = (self._row_title(row) if row else
                      f"{item.inquiry_no} · {item.message.from_addr}")
