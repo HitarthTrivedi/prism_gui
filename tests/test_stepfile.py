@@ -21,11 +21,15 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "prism_terminal"))
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 from core import stepfile as SF  # noqa: E402
 
 HAVE = SF.available()[0]
-REAL = ("/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/"
-        "step_file_demo/Assem1.STEP")
+REAL = sample_jobs.path("step_file_demo", "Assem1.STEP")
 
 
 def _box_with_hole(path: str):
@@ -106,7 +110,8 @@ class TheBriefForTheImageAgent(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE and os.path.exists(REAL),
-                     "cadquery or the demo assembly not on this machine")
+                     "cadquery missing, or " + (sample_jobs.missing(
+                         "step_file_demo", "Assem1.STEP") or ""))
 class TheCustomersOwnEnclosure(unittest.TestCase):
     """Witnessed against the fab's hand-made drawing sheet."""
 
@@ -351,7 +356,8 @@ class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE and os.path.exists(REAL),
-                     "cadquery or the demo assembly not on this machine")
+                     "cadquery missing, or " + (sample_jobs.missing(
+                         "step_file_demo", "Assem1.STEP") or ""))
 class ChangesOnTheCustomersEnclosure(unittest.TestCase):
     """Witnessed on the real assembly: one hole grows, names and every
     other figure hold still."""

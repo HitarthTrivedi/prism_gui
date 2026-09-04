@@ -14,6 +14,89 @@ permissions:
   contents: write   # needed only by the release job
 
 jobs:
+  # ~1,500 tests that had never run in CI once. The workflow built the app on
+  # three platforms and smoke-tested that the bundle starts, which says
+  # nothing about whether it still WORKS — three lanes change prompt
+  # assembly, worker lifetimes and merge-heavy files in the same week, and
+  # the first anyone heard about a regression was a rehearsal.
+  #
+  # Two things had to be fixed before this job could exist at all:
+  #   · tests/test_sign_manifest.py read a gitignored dev signing key at
+  #     module scope, so on any runner it raised during COLLECTION and took
+  #     the whole suite down with it — not a failing test, a suite that
+  #     could not start.
+  #   · the suite needed a --deselect for a test that hung rather than
+  #     failed. That hang was a modal leaking out of an unclosed dialog and
+  #     is fixed at source, so `python -m pytest` now runs clean.
+  #
+  # continue-on-error DELIBERATELY, for now: a job that flaps during freeze
+  # week trains everyone to ignore it. Flip it to false once the suite has
+  # been green twice on Windows — that is the whole point of running it here.
+  tests:
+    name: Tests · ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux
+          - os: windows-latest
+            label: Windows
+          - os: macos-14
+            label: macOS
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # core.* lives in the engine submodule
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # PySide6 needs these even under the offscreen platform plugin.
+      - name: Install Qt's runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xfixes0 libdbus-1-3 portaudio19-dev \
+            libpulse0
+        # libpulse0 is for QtMultimedia, which dlopen()s the platform audio
+        # stack — without it the video/audio preview tests skip rather than
+        # run. They no longer FAIL without it (the product falls back, and
+        # the tests now say so), but a skip that never lifts is a test
+        # nobody is running.
+
+      - name: Install PortAudio (macOS)
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      # No PRISM_LICENSE_OFFLINE_DEV here, and never add it. It is read inside
+      # licensing._unreachable_answer(), so it changes the ANSWER a revoked
+      # licence gets rather than any round trip — it cannot make a hanging
+      # test finish, and it makes the revocation test pass for the wrong
+      # reason. tests/conftest.py strips it per test; this must not put it back.
+      #
+      # --timeout because a hung test burns the whole job's budget and reports
+      # nothing, which is exactly the failure this suite has form for.
+      - name: Run the test suite
+        run: python -m pytest --timeout=300
+
+      - name: Scenario checks
+        run: python -m devtools.scenarios
+
   build:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
@@ -87,10 +170,32 @@ jobs:
       # place packaging/prism.spec's collect_data_files(playwright) — and so
       # PyInstaller — can see it. Unset, this step still downloads Chromium,
       # but to a path the frozen build never ships.
+      #
+      # `--no-shell` skips chrome-headless-shell, the separate binary a bare
+      # `launch(headless=True)` resolves to since Playwright 1.49.
+      # packaging/prism.spec strips it from the bundle anyway, so downloading
+      # it only lengthened the build — and core/browser.py now launches with
+      # channel="chromium", which is what makes the full build the one that
+      # runs. Those three have to agree; if this flag is ever removed, check
+      # the other two first.
+      #
+      # `--with-deps` on Linux, and it is load-bearing: the runner installs
+      # Qt's libraries above but never Chromium's, which are a different set
+      # (libnss3, libgbm1, libasound2, libcups2 …). Without them the browser
+      # launches and dies immediately, and the smoke test — which now starts
+      # a real browser rather than checking a file exists — failed with
+      # "Target page, context or browser has been closed" on Linux while
+      # Windows and macOS passed, because those two have the equivalents
+      # built in.
+      #
+      # Not on Windows/macOS: install-deps is a Linux apt/dnf routine, and
+      # the flag needs a sudo the other two runners do not want.
       - name: Install Chromium for Prism Studio
         env:
           PLAYWRIGHT_BROWSERS_PATH: "0"
-        run: playwright install chromium
+        run: >-
+          playwright install --no-shell
+          ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
 
       # PyAudio needs PortAudio headers and has no wheel on some platforms;
       # the app runs without it (voice input just reports itself unavailable),

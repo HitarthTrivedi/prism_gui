@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QVBoxLayout, QWidget)
@@ -31,6 +31,7 @@ import app_meta
 import i18n
 import licensing
 import theme
+from workers import _Worker
 from dialogs.base import PrismDialog
 from widgets import controls as C
 from widgets import icons
@@ -93,7 +94,7 @@ def format_key(text: str) -> str:
     return "-".join(["PRSM"] + [g for g in groups if g]) if body else ""
 
 
-class _ActivateWorker(QThread):
+class _ActivateWorker(_Worker):
     """One activation attempt, off the UI thread.
 
     A corporate proxy can hold a connection for the full timeout, and a frozen

@@ -15,6 +15,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUI = os.path.dirname(HERE)
 sys.path.insert(0, GUI)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
 
 # packaging/ has no __init__.py, and collides with the installed `packaging`
 # library under `import packaging.flatten_update_assets` — loaded by file
@@ -56,6 +58,11 @@ class FlatteningABuildDirectory(unittest.TestCase):
         self.assertEqual(len(names), 4)  # 2 files x 2 platforms, none clobbered
 
     def test_symlinks_are_skipped_not_copied(self):
+        # Windows needs Administrator or Developer Mode for this.
+        # Without either it is an environment fact, not a bug.
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
         os.symlink("Prism", os.path.join(self.root, "prism-link"))
         count = flatten_update_assets.flatten(self.root, self.out, "linux-x64")
         self.assertEqual(count, 2)  # the symlink itself doesn't count

@@ -23,6 +23,11 @@ import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 import core_bridge as CB  # noqa: E402
 
 G = CB.get_gerber()
@@ -32,7 +37,7 @@ try:
 except Exception:                                   # noqa: BLE001
     HAVE = False
 
-REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
+REAL = sample_jobs.path("gerber_test")
 
 # RS-274X, 3.4 format in mm: X600000 = 60.0000 mm.
 HEADER = "%FSLAX34Y34*%\n%MOMM*%\n"
@@ -272,7 +277,8 @@ class RefusingToDestroyALayer(unittest.TestCase):
         self.assertIn("outline", str(caught.exception).lower())
 
 
-@unittest.skipUnless(HAVE and os.path.isdir(REAL), "sample jobs not here")
+@unittest.skipUnless(HAVE and os.path.isdir(REAL),
+                     "gerbonara/shapely missing, or " + (sample_jobs.missing("gerber_test") or ""))
 class TheRealSampleJob(unittest.TestCase):
 
     def test_the_real_panel_keeps_all_five_boards(self):

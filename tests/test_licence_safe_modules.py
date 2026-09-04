@@ -26,12 +26,31 @@ GPL_ONLY = (
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "release", "prism_terminal",
-             ".venv", "node_modules"}
+             ".venv", "venv", "env", ".env", "node_modules", "site-packages"}
+
+
+def _is_virtualenv(folder: str) -> bool:
+    """A virtualenv, whatever somebody named it.
+
+    Named exclusion alone was not enough, and the failure was worse than a
+    noisy test: this scanner exists to prove PRISM does not import a
+    GPL-only Qt module, and it walked a venv called `venv` (the list only
+    had `.venv`), found PySide6's OWN bundled QtQuick3D under
+    site-packages, and reported a licence violation that does not exist.
+    Surfaced on the first Windows run of this suite.
+
+    A false positive on a licence check is the kind of red somebody
+    switches off, and then it catches nothing at all. So the venv test is
+    structural — pyvenv.cfg is written by every venv and virtualenv — not a
+    list of names to keep adding to.
+    """
+    return os.path.exists(os.path.join(folder, "pyvenv.cfg"))
 
 
 def _sources():
     for folder, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS
+                   and not _is_virtualenv(os.path.join(folder, d))]
         for name in files:
             if name.endswith((".py", ".qss", ".qml")):
                 path = os.path.join(folder, name)

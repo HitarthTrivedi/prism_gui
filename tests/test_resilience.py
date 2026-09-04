@@ -15,6 +15,8 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
 
 import core_bridge  # noqa: F401,E402
 import cloud  # noqa: E402
@@ -264,6 +266,11 @@ class CloudSources(unittest.TestCase):
         real = os.path.join(home, "Library", "CloudStorage",
                             "GoogleDrive-a@b.com", "My Drive")
         os.makedirs(real)
+        # Windows needs Administrator or Developer Mode for this.
+        # Without either it is an environment fact, not a bug.
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
         os.symlink(real, os.path.join(home, "Google Drive"))
         with mock.patch("os.path.expanduser", return_value=home):
             paths_seen = [os.path.realpath(s["path"]) for s in cloud.sources()]

@@ -209,7 +209,12 @@ class Folders(unittest.TestCase):
         change must find their runs where they left them, not an empty list."""
         with mock.patch.object(W.paths, "user_dir",
                                side_effect=lambda *p: os.path.join("/home/x/.prism", *p)):
-            self.assertEqual(W.runs_dir(W.SOLO, {}), "/home/x/.prism/runs")
+            # os.path.join, not a literal: the mock builds the path with
+            # os.path.join, so on Windows it comes back with backslashes and a
+            # hardcoded "/home/x/.prism/runs" can never match. The assertion is
+            # about WHICH folder, not which separator.
+            self.assertEqual(W.runs_dir(W.SOLO, {}),
+                             os.path.join("/home/x/.prism", "runs"))
 
     def test_a_member_gets_their_own_runs_folder(self):
         got = W.runs_dir("sales-ravi", self.cfg)

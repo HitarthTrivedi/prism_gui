@@ -138,15 +138,31 @@ class TheLocalServer(unittest.TestCase):
         self.assertIn("__ed-bar", body)
         self.assertIn("Hello", body)
 
+    def _wait_for(self, collected: list, timeout: float = 5.0):
+        """Wait for a callback the server runs AFTER it has replied.
+
+        serve()'s handler writes the HTTP response and only then calls
+        on_save/on_render — deliberately, so the browser is not left hanging
+        while a render starts. So a POST returning does not mean the callback
+        has run, and asserting on the list the instant _post() returns was a
+        race: it passed most of the time and failed roughly one run in six,
+        which is the worst way for a test to be wrong.
+        """
+        import time
+        deadline = time.monotonic() + timeout
+        while not collected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return collected
+
     def test_save_and_render_reach_their_callbacks_cleaned(self):
         edit = {"scene": 0, "path": [0, 0], "dx": 30, "dy": -12, "scale": 1.1}
         answer = self._post("/save", {"edits": [edit, {"scene": "junk"}]})
         self.assertTrue(answer["ok"])
-        self.assertEqual(len(self.saved), 1)
+        self.assertEqual(len(self._wait_for(self.saved)), 1)
         self.assertEqual(self.saved[0][0]["dx"], 30)
         self.assertEqual(len(self.saved[0]), 1)         # the junk one dropped
         self._post("/render", {"edits": [edit]})
-        self.assertEqual(len(self.rendered), 1)
+        self.assertEqual(len(self._wait_for(self.rendered)), 1)
 
     def test_anything_else_is_404(self):
         import urllib.error

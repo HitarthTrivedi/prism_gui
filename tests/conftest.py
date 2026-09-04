@@ -74,6 +74,17 @@ import warnings
 
 import pytest
 
+# Qt needs a display and CI runners have none. Set BEFORE any test module is
+# imported — conftest.py is the one file pytest guarantees it loads first, so
+# this is the only place that works for the whole suite at once.
+#
+# Several GUI test modules already do this themselves, and that is exactly
+# why it belongs here too: os.environ.setdefault at module scope only takes
+# effect if that module happens to be the first one pytest imports. Alphabetical
+# collection decided whether the suite ran headless — which is not a thing that
+# should be decided by a filename.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 _OFFLINE_DEV = "PRISM_LICENSE_OFFLINE_DEV"
 
 # Long enough for a stub-answered thread to finish (microseconds) or a real

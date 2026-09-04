@@ -135,13 +135,33 @@ class AskPanel(QWidget):
         else:
             self.add_paths([path])
 
-    def add_paths(self, paths: list[str]):
-        fresh = [p for p in paths if p and p not in self._paths]
+    def add_paths(self, paths: list[str], emit: bool = True):
+        # Normalise to an absolute path before comparing and storing. On
+        # Windows QFileDialog returns forward-slash paths while os/attach() use
+        # backslashes, so a plain string compare let the SAME file in twice —
+        # the duplicate chip. normcase folds slash + case for the compare; the
+        # stored value stays a real absolute path.
+        have = {os.path.normcase(p) for p in self._paths}
+        fresh = []
+        for p in paths:
+            if not p:
+                continue
+            ap = os.path.abspath(os.path.expanduser(p))
+            key = os.path.normcase(ap)
+            if key in have:
+                continue
+            have.add(key)
+            fresh.append(ap)
         if not fresh:
             return
         self._paths += fresh
         self._refresh_chips()
-        self.files_added.emit(fresh)
+        # `emit=False` lets an owner add chips WITHOUT re-triggering its own
+        # files_added handler. An owner that absorbs files (classify, then
+        # add_paths the results) would otherwise re-enter through the signal
+        # and classify — and count templates/images — a second time.
+        if emit:
+            self.files_added.emit(fresh)
 
     def paths(self) -> list[str]:
         return list(self._paths)

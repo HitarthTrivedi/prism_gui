@@ -13,7 +13,39 @@ from PySide6.QtCore import QThread, Signal
 import core_bridge as CB
 
 
-class AuthorizeWorker(QThread):
+# Every worker that has been started and not yet finished keeps itself in here.
+#
+# A QThread that is garbage-collected while its underlying thread is still
+# running triggers a Qt *fatal* — "QThread: Destroyed while thread is still
+# running" — which aborts the whole process (a 0xC0000409 fast-fail on Windows,
+# with no Python traceback to show for it). The trap is that a Signal.connect()
+# does NOT keep the emitter alive, so a worker held only through its `done`/
+# `failed` connections has an effective refcount of zero the moment the caller's
+# own reference goes: a dialog closing, an attribute being reassigned to the
+# next run's worker, or simply a local going out of scope. The next garbage
+# collection then destroys it mid-run and Prism dies.
+#
+# Making each worker anchor ITSELF here from start() until its finished signal
+# fires removes that whole class of crash: no call site can drop a running
+# worker by accident, because the worker is never only referenced by the call
+# site. The set drains itself — _forget runs on the GUI thread when the thread
+# has actually finished, so the eventual destruction is always safe.
+_running: "set[QThread]" = set()
+
+
+class _Worker(QThread):
+    """A QThread that cannot be garbage-collected while it is still running."""
+
+    def start(self, *args, **kwargs):
+        _running.add(self)
+        self.finished.connect(self._forget)
+        super().start(*args, **kwargs)
+
+    def _forget(self):
+        _running.discard(self)
+
+
+class AuthorizeWorker(_Worker):
     """Ask the licence server whether this run may go ahead.
 
     On its own thread because the answer takes a network round trip and the
@@ -40,7 +72,7 @@ class AuthorizeWorker(QThread):
                 False, message=f"Couldn't check your licence: {e}"))
 
 
-class RouteWorker(QThread):
+class RouteWorker(_Worker):
     done = Signal(dict)
     failed = Signal(str)
 
@@ -56,17 +88,21 @@ class RouteWorker(QThread):
             self.failed.emit(str(e))
 
 
-class AutomationWorker(QThread):
+class AutomationWorker(_Worker):
     stage_event = Signal(str, dict)
     done = Signal(dict, dict)
     failed = Signal(str)
 
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
                  custom_stages=None, chatgpt_analysis: bool = True,
-                 reel_design_stage: str = "", motion_design_stage: str = ""):
+                 reel_design_stage: str = "", motion_design_stage: str = "",
+                 resume_urls: dict | None = None):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        # {stage: conversation_url} — a follow-up resumes the SAME chat the
+        # stage answered in, instead of opening a fresh one. None = normal run.
+        self.resume_urls = resume_urls
         # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
         # instead of going through the router's fixed categories; the engine
         # accepts them directly. None = ordinary routed run, unchanged.
@@ -118,6 +154,8 @@ class AutomationWorker(QThread):
                 kwargs["reel_design_stage"] = self.reel_design_stage
             if self.motion_design_stage:
                 kwargs["motion_design_stage"] = self.motion_design_stage
+            if self.resume_urls:
+                kwargs["resume_urls"] = self.resume_urls
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
@@ -129,7 +167,46 @@ class AutomationWorker(QThread):
             self.failed.emit(str(e))
 
 
-class RecordWorker(QThread):
+class FollowupRouteWorker(_Worker):
+    """Work out which finished step a post-completion follow-up is about, so the
+    note goes to that step's assigned agent — Prism's "assign it automatically"
+    rule, applied to refinements. A quick Groq classify (JSON mode)."""
+    done = Signal(str)      # target stage key ("" = unsure/none)
+    failed = Signal(str)
+
+    def __init__(self, followup: str, stages_info: list, cfg: dict):
+        super().__init__()
+        self.followup = followup
+        self.stages_info = stages_info   # [{"stage","agent","summary"}]
+        self.cfg = cfg
+
+    def run(self):
+        try:
+            import json
+            lines = "\n".join(
+                f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
+                for s in self.stages_info)
+            keys = ", ".join(f'"{s["stage"]}"' for s in self.stages_info)
+            prompt = (
+                "A multi-step task just finished. The steps that ran, each with "
+                "its category key, the tool that did it, and a snippet of its "
+                f"output:\n\n{lines}\n\n"
+                f'The user now says: "{self.followup}"\n\n'
+                "Which ONE step should handle this follow-up? Choose the step "
+                "whose work the follow-up is about. Reply with ONLY a JSON "
+                'object: {"stage": "<one of the keys above>"}. Valid keys: '
+                f"{keys}. If genuinely unsure, use the last key."
+            )
+            out = CB.router.groq_chat(
+                self.cfg.get("api_key", ""), self.cfg.get("model", ""),
+                prompt, json_mode=True, timeout=45)
+            data = json.loads(out)
+            self.done.emit(str(data.get("stage", "")).strip())
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class RecordWorker(_Worker):
     """Push-to-talk: recording starts as soon as this thread runs, and stops
     the instant .stop() is called from the GUI thread (e.g. a toggle
     button's second click) — no terminal/keypress dependency."""
@@ -153,7 +230,7 @@ class RecordWorker(QThread):
             self.failed.emit(str(e))
 
 
-class InterpretWorker(QThread):
+class InterpretWorker(_Worker):
     done = Signal(dict)
     failed = Signal(str)
 
@@ -168,7 +245,7 @@ class InterpretWorker(QThread):
             self.failed.emit(str(e))
 
 
-class SendWorker(QThread):
+class SendWorker(_Worker):
     """The email blast. SMTP login, then one message per recipient with a
     provider-friendly pause between them — minutes of blocking for a real
     list, which is exactly as long as the window would be frozen if this ran
@@ -214,7 +291,7 @@ class SendWorker(QThread):
                 str(e), email_cfg.get("address", ""), email_cfg.get("port", "")))
 
 
-class VerifyWorker(QThread):
+class VerifyWorker(_Worker):
     """Log in and hang up, to check the account before a real blast."""
     done = Signal(str)   # "" == fine, else the reason
 
@@ -235,7 +312,7 @@ class VerifyWorker(QThread):
                 str(e), email_cfg.get("address", ""), email_cfg.get("port", "")))
 
 
-class FindWorker(QThread):
+class FindWorker(_Worker):
     done = Signal(dict)
     failed = Signal(str)
 
@@ -250,7 +327,7 @@ class FindWorker(QThread):
             self.failed.emit(str(e))
 
 
-class MeasureWorker(QThread):
+class MeasureWorker(_Worker):
     """Parse a CAD drawing off the UI thread.
 
     A 13 MB DWG takes ~40 s to convert and measure. Doing that inline froze
@@ -278,7 +355,7 @@ class MeasureWorker(QThread):
             self.failed.emit(str(e))
 
 
-class GerberWorker(QThread):
+class GerberWorker(_Worker):
     """Measure a PCB job (or several) off the UI thread.
 
     A twelve-layer board with 187,674 traces on one layer takes minutes —
@@ -314,7 +391,7 @@ class GerberWorker(QThread):
             self.failed.emit(str(e))
 
 
-class GerberCleanWorker(QThread):
+class GerberCleanWorker(_Worker):
     """Clean a job outside its board outline, off the UI thread — a
     twelve-layer job is a few seconds of reading and writing, which is
     enough to look frozen inline."""
@@ -337,7 +414,7 @@ class GerberCleanWorker(QThread):
             self.failed.emit(str(e))
 
 
-class ReelWorker(QThread):
+class ReelWorker(_Worker):
     """Render the reel off the UI thread.
 
     A 30-second reel is 900 frames of drawing plus encoding — around 16
@@ -366,7 +443,7 @@ class ReelWorker(QThread):
             self.failed.emit(str(e))
 
 
-class MotionWorker(QThread):
+class MotionWorker(_Worker):
     """Render a Motion Graphics project to MP4 off the UI thread."""
     progress = Signal(int, int)  # frames done, total
     done = Signal(str)           # output path
@@ -389,7 +466,7 @@ class MotionWorker(QThread):
 
 # ── Email automation ──────────────────────────────────────────────────────────
 
-class InboxVerifyWorker(QThread):
+class InboxVerifyWorker(_Worker):
     """Find the mail server and check the password, off the UI thread.
 
     A wrong host means a DNS timeout, and three of those in a row is most of a
@@ -415,7 +492,7 @@ class InboxVerifyWorker(QThread):
             self.done.emit({}, str(e))
 
 
-class InboxCheckWorker(QThread):
+class InboxCheckWorker(_Worker):
     """One run of the daily loop: fetch, sort, register, work out what is due.
 
     Everything it does is a read, so it is safe to run on a timer and safe to
@@ -447,7 +524,7 @@ class InboxCheckWorker(QThread):
             self.failed.emit(str(e))
 
 
-class POReadWorker(QThread):
+class POReadWorker(_Worker):
     """Read one purchase order into fields, off the UI thread.
 
     Seconds rather than minutes — one direct Groq call — but a frozen window
@@ -476,7 +553,7 @@ class POReadWorker(QThread):
 
 # ── Help & support ────────────────────────────────────────────────────────────
 
-class SupportWorker(QThread):
+class SupportWorker(_Worker):
     """One answer from the support assistant, off the UI thread.
 
     Uses the customer's own Groq key — the same one that plans their work —
@@ -510,7 +587,7 @@ class SupportWorker(QThread):
             self.failed.emit(str(e))
 
 
-class DraftWorker(QThread):
+class DraftWorker(_Worker):
     """Write one email using the AI tools in the customer's own browser.
 
     Minutes, not seconds: it opens Chrome, types the prompt into whichever
@@ -558,7 +635,7 @@ class DraftWorker(QThread):
             self.progress.emit("Reading the answer…")
 
 
-class UpdateWorker(QThread):
+class UpdateWorker(_Worker):
     """Check for, and if one exists download+stage, a Phase 1 in-app update
     — off the UI thread, same reasoning as FFmpegWorker above (a manifest
     fetch plus however many changed files add up to real seconds, and a
@@ -593,7 +670,7 @@ class UpdateWorker(QThread):
             self.failed.emit(str(e))
 
 
-class FFmpegWorker(QThread):
+class FFmpegWorker(_Worker):
     """Download and install FFmpeg, off the UI thread.
 
     30 MB over an office connection is a minute of nothing, and a frozen

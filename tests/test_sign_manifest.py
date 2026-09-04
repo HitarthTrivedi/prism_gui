@@ -26,10 +26,38 @@ import unittest
 
 GUI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SIGN_SCRIPT = os.path.join(GUI_DIR, "devtools", "sign_manifest.py")
-DEV_KEY = open(os.path.join(GUI_DIR, "devtools", "dev-signing-key.hex"),
-              encoding="utf-8").read().strip().splitlines()[0]
+DEV_KEY_PATH = os.path.join(GUI_DIR, "devtools", "dev-signing-key.hex")
 
 
+def _dev_key() -> str | None:
+    """The dev signing key, or None on a machine that does not have one.
+
+    Read HERE rather than at module scope, and that is the whole point:
+    dev-signing-key.hex is gitignored (see devtools/mint.py), so it does not
+    exist on a fresh clone or on any CI runner. As a module-level
+    `open(...)` this raised FileNotFoundError during pytest COLLECTION,
+    which aborts the entire run — every other test file included, none of
+    which has anything to do with signing.
+
+    That is why the suite has never run in CI: not a failing test, a suite
+    that could not start. A missing key must skip this file and nothing
+    else.
+    """
+    try:
+        with open(DEV_KEY_PATH, encoding="utf-8") as f:
+            return f.read().strip().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+
+
+DEV_KEY = _dev_key()
+
+# Named with the path in it, because the reason a machine skips these has a
+# fix ("generate a dev key") and a silent 's' does not carry it.
+_NO_KEY = f"no dev signing key at {DEV_KEY_PATH} — see devtools/mint.py"
+
+
+@unittest.skipUnless(DEV_KEY, _NO_KEY)
 class TheDowngradeGuardIsScopedPerPlatform(unittest.TestCase):
     """Runs the real script as a subprocess, with its own private copy of
     devtools/ (so its per-platform tracker files land in a temp dir, never

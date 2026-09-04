@@ -353,15 +353,27 @@ a = Analysis(
 )
 
 # `playwright install chromium` (.github/workflows/build.yml) pulls in two
-# things nothing in this codebase calls: chromium-headless-shell (only used
-# via the explicit channel="chromium-headless-shell" launch option —
-# core/reel_web.py and core/motion/render.py both just do
-# p.chromium.launch(), never that) and playwright's OWN bundled ffmpeg (only
+# things nothing in this codebase calls: chromium-headless-shell and
+# playwright's OWN bundled ffmpeg (only
 # for its record_video_dir option, which nothing here uses either — Reel
 # already carries imageio-ffmpeg for its own encoding). Together they were
 # ~265MB of a ~730MB playwright payload for code with no path that reaches
 # them, verified by grepping prism_terminal/core for "headless_shell" and
 # "record_video" before writing this.
+#
+# THAT GREP WAS THE WRONG TEST, and this filter shipped a broken Windows and
+# macOS build for it. Playwright 1.49 made `launch(headless=True)` — a plain
+# p.chromium.launch(), which is what the code does — resolve to
+# chrome-headless-shell rather than to Chromium; its registry decides it, not
+# the caller, so no amount of grepping the caller could have shown it. Every
+# packaged render died on Playwright's own "Executable doesn't exist at …\
+# chromium_headless_shell-1234\chrome-headless-shell-win64\…", reported from
+# a customer's Windows machine.
+#
+# What makes trimming it correct AGAIN is core/browser.py: every launch site
+# now goes through launch_chromium(), which passes channel="chromium" and so
+# runs the full build this bundle does carry. Do not remove that without
+# putting the shell back — the two changes are one change.
 #
 # This can't be done by filtering `datas` before Analysis(): playwright ships
 # its OWN PyInstaller hook (playwright/_impl/__pyinstaller/hook-playwright.*

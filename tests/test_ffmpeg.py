@@ -65,8 +65,18 @@ class _Scratch(unittest.TestCase):
 
 class Resolution(_Scratch):
 
-    def _exe(self, name="ffmpeg") -> str:
-        path = os.path.join(self.dir, name)
+    def _exe(self, name: str | None = None) -> str:
+        """A stand-in FFmpeg in the tools directory, named as this OS names it.
+
+        The default used to be the literal "ffmpeg", which is the name on
+        POSIX and NOT the name on Windows — `downloaded()` looks for
+        `_exe_name()`, and `_install_from_wheel` writes `_exe_name()`, so
+        a file called "ffmpeg" on Windows is one nothing would ever find.
+        Two tests below therefore looked for a copy that could not be
+        there, and Windows CI reported the product broken when it was the
+        test that was wrong.
+        """
+        path = os.path.join(self.dir, name or ffmpeg._exe_name())
         with open(path, "w") as f:
             f.write("#!/bin/sh\n")
         os.chmod(path, 0o755)
@@ -101,11 +111,21 @@ class Resolution(_Scratch):
         path = self._exe()
         self.assertEqual(ffmpeg.downloaded(), path)
 
+    @unittest.skipIf(sys.platform.startswith("win"),
+                     "NTFS has no executable bit — os.access(X_OK) is True "
+                     "for any file that exists, so there is no such state "
+                     "to put a file into here")
     def test_a_non_executable_file_does_not_count(self):
         """A half-written download, or one antivirus stripped. Better to fall
         through and fetch it again than to hand FFmpeg's path to a subprocess
-        that will fail with 'permission denied'."""
-        path = os.path.join(self.dir, "ffmpeg")
+        that will fail with 'permission denied'.
+
+        POSIX only, and that is a property of the filesystem rather than a
+        gap: Windows has no bit to clear, so `_usable` cannot make this
+        distinction there. It does not need to — `_install_from_wheel`
+        writes to `.part` and `os.replace`s it, so a partial download never
+        appears at the final path on any platform."""
+        path = os.path.join(self.dir, ffmpeg._exe_name())
         with open(path, "w") as f:
             f.write("x")
         os.chmod(path, 0o644)

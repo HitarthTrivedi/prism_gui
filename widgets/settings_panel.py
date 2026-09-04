@@ -1149,6 +1149,8 @@ class SettingsPanel(QWidget):
         col.addWidget(self._buttons([
             C.button(i18n.t("Copy my Chrome logins again"), "secondary",
                      on_click=self._reseed_profile),
+            C.button(i18n.t("Close Prism's browser"), "secondary",
+                     on_click=self._close_browser),
         ]))
 
     def _detect_chrome(self, field: QLineEdit):
@@ -1166,6 +1168,46 @@ class SettingsPanel(QWidget):
         parsed = ok and CB.get_automation().parse_chrome_version(field.text())
         self.cfg["chrome_version"] = str(parsed) if parsed else ""
         self._after_save(i18n.t("Saved."))
+
+    def _close_browser(self):
+        """Shut Prism's browser, including one left behind by a crash.
+
+        Prism leaves its Chrome open on purpose between runs — a slow tool
+        often finishes in its tab after Prism stops watching. The cost is
+        that a crash, or a Login-tabs window somebody left open, leaves a
+        Chrome holding the profile, and Chrome allows only one browser per
+        profile folder: the next run's launch hands over to that one and
+        exits, and chromedriver reports "cannot connect to chrome".
+
+        Runs recover from this by themselves now (automation._release_profile
+        clears it before launching), so this is the manual escape hatch
+        KNOWN_ISSUES #11 asked for — the thing to press when something is
+        wrong and nobody wants to reason about why. Both halves: the driver
+        this session owns, and any orphan holding the profile.
+        """
+        ok, err = self._safe(CB.automation_available) or (False, "")
+        if not ok:
+            QMessageBox.warning(self, i18n.t("Chrome"), i18n.t(
+                "Automation isn't available: {error}").format(error=err))
+            return
+        automation = CB.get_automation()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            automation.shutdown()
+            closed = automation._release_profile()
+        except Exception as error:                     # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, i18n.t("Chrome"), i18n.t(
+                "Couldn't close the browser: {error}").format(error=error))
+            return
+        QApplication.restoreOverrideCursor()
+        QMessageBox.information(
+            self, i18n.t("Chrome"),
+            i18n.t("Prism's browser is closed. The next run will open a fresh "
+                   "one — your logins are kept.")
+            if closed else
+            i18n.t("Prism's browser was not running. Nothing to close, and "
+                   "your logins are untouched."))
 
     def _reseed_profile(self):
         """Re-copies cookies from the customer's everyday Chrome into Prism's

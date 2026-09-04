@@ -241,14 +241,13 @@ each their own folders on a shared drive.
 ## Tests
 
 ```bash
-python3 -m pytest tests/ -q --deselect \
-  "tests/test_gates.py::TaskQueue::test_each_task_is_planned_in_turn"
+python3 -m pytest tests/ -q
 
 python3 -m devtools.scenarios        # 148 end-to-end scenario checks
 python3 devtools/inbox_demo.py       # the inbox pipeline on sample mail
 ```
 
-705 tests, plus the 148 scenarios. Nothing in either suite touches the network:
+1,465 tests, plus the 148 scenarios. Nothing in either suite touches the network:
 IMAP and Groq are both faked, because a test that needs a mail server is a test
 nobody runs.
 
@@ -266,12 +265,20 @@ with the hatch open, a revoked licence's offline fallback is granted and
 `tests/conftest.py` now strips the variable per test, so the suite is
 insulated either way — but do not put it back in the invocation.
 
-**That one deselect is not decoration.** `test_each_task_is_planned_in_turn`
-builds a real `MainWindow`, which reaches for the licence server, and it hangs
-rather than failing — so a plain `pytest tests/` appears to freeze. It is
-pre-existing and unrelated to any recent work; it hangs on a clean tree at
-older commits too. Left in place rather than quietly deleted, because a hanging
-test is a real problem and deleting it would only hide it.
+**The deselect this file used to demand is gone, and so is the hang.**
+`test_each_task_is_planned_in_turn` builds a real `MainWindow` and used to
+hang rather than fail, so a plain `pytest tests/` appeared to freeze. The
+cause was never that test: `InquiryDialog.__init__` ends with `enter()`,
+which arms a zero-delay `_first_look()`, and `MainWindow` builds that panel
+at startup — so the first test to drive the event loop with an unconfigured
+mailbox blocked on a modal `QMessageBox.question` nothing headless could
+answer. `_first_look()` now asks only on the screen the user actually has
+open (see `_is_the_open_screen`), which fixed the same bug in the product:
+Prism was opening that question over the dashboard on every launch.
+
+Also gone: `test_a_quiet_quotation_appears_on_the_chase_list` dated its
+quotation `today.replace(day=1)` against a `followup_days=3` fixture, so it
+failed on the 1st, 2nd and 3rd of every month and passed the other 28 days.
 
 ## Files
 

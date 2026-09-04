@@ -157,6 +157,41 @@ _rule(r"rate list or.*cost sheet",
            "Come back and press Prepare a quotation again.")))
 
 # ── the browser ───────────────────────────────────────────────────────────
+# BEFORE the "browser window was closed" rule, because it has to be: a Chrome
+# that never STARTED reports "cannot connect to chrome at 127.0.0.1:53695 —
+# from chrome not reachable", and "chrome not reachable" is in that rule's
+# pattern. Read as a closed window, the advice became "everything you finished
+# is in History, start the run again" — for a run that had not started, and
+# would fail the same way every time until the leftover Chrome was closed.
+#
+# Which is what this actually is, nearly always: Chrome allows one browser per
+# profile folder, so a second launch on the same folder hands over to the
+# first and exits. See core/automation.py's _release_profile(), which now
+# clears that before launching — this rule is what to say when it could not.
+_rule(r"cannot connect to chrome at",
+      Problem(
+          "Chrome closed before Prism could use it",
+          "Prism opens its own Chrome window to do the work. That window "
+          "started and then closed again immediately — nearly always because "
+          "another copy of Prism's Chrome was already running in the "
+          "background and only one can use it at a time.",
+          ("Close every Chrome window, including any Prism opened for signing "
+           "in, then try again.",
+           "If it happens again, restart the computer — that clears it for "
+           "certain.",
+           "If you use antivirus or company security software, it may be "
+           "stopping Prism from starting Chrome. Allow Prism through it.")))
+
+_rule(r"could not determine browser executable",
+      Problem(
+          "Google Chrome isn't installed",
+          "Prism does its work inside Google Chrome, using your own logins. "
+          "It can't find Chrome on this computer.",
+          ("Install Google Chrome from google.com/chrome.",
+           "Open it once and sign in to the AI tools you use.",
+           "Come back to Prism and try again.",
+           "It has to be Chrome — Prism cannot use Edge, Safari or Firefox.")))
+
 # BEFORE the version-mismatch rule below, and the order is the whole point.
 #
 # A "no such window" error arrives with a Selenium stack trace, and every
@@ -293,14 +328,22 @@ _rule(r"file not found|no such file|filenotfound",
 # ── optional extras ───────────────────────────────────────────────────────
 _rule(r"ezdxf|libredwg|\.dwg",
       Problem(
-          "Prism can't read that drawing yet",
-          "Reading CAD drawings needs an extra component that isn't installed "
-          "on this computer.",
-          ("Send us this message and we'll send you the one-line install.",
-           "In the meantime, save the drawing as DXF from your CAD program — "
-           "Prism reads that directly.",
+          "Save the drawing as DXF and it will work",
+          "Prism measures DXF drawings directly. A .dwg is Autodesk's own "
+          "closed format, and reading one needs a separate converter that "
+          "isn't installed here — but the same drawing saved as DXF needs "
+          "nothing at all.",
+          # DXF first, and it used to be second, behind "send us this message
+          # and we'll send you the one-line install". That put a wait on
+          # support in front of a fix the person can do in ten seconds
+          # without anybody's help — for the same drawing, with no loss of
+          # accuracy, since DXF carries the identical geometry.
+          ("In your CAD program: File → Save As → AutoCAD DXF. Attach that "
+           "file instead.",
            "Or describe the job in words instead of attaching a drawing; the "
-           "BOQ add-on works from a written spec too."),
+           "BOQ add-on works from a written spec too.",
+           "If you would rather attach .dwg files directly, tell us and we'll "
+           "send you the free converter to install once."),
           ask_support=True))
 
 _rule(r"ffmpeg",
@@ -316,12 +359,21 @@ _rule(r"ffmpeg",
            "Nothing else changes on this computer, and everything else in "
            "Prism works without it.")))
 
+# Both operating systems, not one. This offered the macOS permission screen
+# and nothing else — so a Windows customer, whose commonest cause is exactly
+# the same permission being off, was handed the settings path of an OS they
+# are not running and left with no route of their own. Windows is most of
+# the customers this is sold to. (KNOWN_ISSUES #14 names FFmpeg and the
+# microphone together; the FFmpeg half was fixed long ago and only this was
+# left.)
 _rule(r"pyaudio|portaudio|microphone",
       Problem(
           "The microphone isn't available",
           "Prism couldn't reach the microphone, so speaking your task isn't "
           "available on this computer.",
           ("Check that no other program is using the microphone.",
+           "On Windows, open Settings → Privacy & security → Microphone and "
+           "make sure desktop apps are allowed to use it.",
            "On a Mac, look in System Settings → Privacy & Security → "
            "Microphone and make sure Prism is allowed.",
            "Everything else works — just type the task instead.")))

@@ -41,7 +41,27 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "prism_terminal"))
 
+# Where the real customer jobs live on this machine — an env var with the
+# old hardcoded Mac path as its fallback. See tests/sample_jobs.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
+
 from core import gerber as G  # noqa: E402
+
+# shapely is optional to core.gerber and NOT optional to these tests.
+# core/gerber.py degrades quietly without it — `if not HAVE_SHAPELY` returns
+# "not measured" for copper spacing, pitch and SMT pads — so every test that
+# asserts one of those numbers fails with a bare None instead of skipping.
+# That is what 23 of the failures on the first Windows CI run of this suite
+# actually were: one absent package, reported 23 times as a Windows bug.
+#
+# tests/test_gerber_clean.py already guards on `HAVE_GERBONARA and
+# HAVE_SHAPELY`; this file had no guard at all, which is the only reason the
+# two behaved differently on the same machine.
+_NEEDS_SHAPELY = unittest.skipUnless(
+    G.HAVE_SHAPELY,
+    "shapely not installed — core.gerber returns 'not measured' for every "
+    "spacing/pitch figure without it (pip install shapely)")
 
 
 def _write(dirpath: str, name: str, body: str) -> str:
@@ -109,6 +129,7 @@ DRILL_EXCELLON = """
     """
 
 
+@_NEEDS_SHAPELY
 class TheBoardIsItsOutlineNotItsInk(unittest.TestCase):
 
     def setUp(self):
@@ -184,6 +205,7 @@ class TrackWidthCarriesItsOwnContext(unittest.TestCase):
         self.assertEqual([round(w["width_mm"], 3) for w in widths], [0.2])
 
 
+@_NEEDS_SHAPELY
 class SpacingTellsTheRuleFromTheOutlier(unittest.TestCase):
 
     def test_the_gap_is_between_copper_edges_not_centrelines(self):
@@ -315,6 +337,7 @@ class DrillsSurviveBothFormatsTheyArriveIn(unittest.TestCase):
         self.assertTrue(any("No drill file" in w for w in job["warnings"]))
 
 
+@_NEEDS_SHAPELY
 class ModalCodesAndPolarityOrder(unittest.TestCase):
     """Two defects found by measuring the same boards with an unrelated
     library (gerbonara) and an unrelated method (raster + distance
@@ -409,6 +432,7 @@ class ModalCodesAndPolarityOrder(unittest.TestCase):
         self.assertAlmostEqual(G.layer_copper(layer).area, 100.0, places=1)
 
 
+@_NEEDS_SHAPELY
 class LetteringInCopperIsNotATrack(unittest.TestCase):
     """Boards carry text: part numbers, revision marks, a logo, etched into
     the copper beside the tracks. It is copper. It is not a conductor.
@@ -555,7 +579,7 @@ class AgainstTheCustomersOwnCheckSheet(unittest.TestCase):
 
     def _job(self, name):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         src = os.path.join(REAL, name)
         if not os.path.exists(src):
             self.skipTest("sample missing")
@@ -605,7 +629,7 @@ class AgainstAnIndependentImplementation(unittest.TestCase):
         # this job, and the exact construct Prism was fixed to handle.
         warnings.filterwarnings("ignore", category=SyntaxWarning)
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
 
     def test_object_counts_match_on_the_2013_job(self):
         from gerbonara import GerberFile
@@ -737,9 +761,10 @@ class TheNumbersGoOutButTheDesignDoesNot(unittest.TestCase):
         self.assertIn("Reply with the measured figures below", brief)
 
 
-REAL = "/Users/hitarthtrivedi/Documents/PythonProgram/prism-ai-flow/gerber_test"
+REAL = sample_jobs.path("gerber_test")
 
 
+@_NEEDS_SHAPELY
 class TheRulebookIsNotTheBoard(unittest.TestCase):
     """A .RUL file is the designer's rulebook: what the board was ALLOWED to
     use. The copper is what it actually uses. A speed limit and a radar
@@ -889,7 +914,7 @@ class EveryJobWeHaveStillReadsRight(unittest.TestCase):
 
     def _measure(self, name):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         if (self.samples[name].get("slow")
                 and not os.environ.get("PRISM_SLOW_TESTS")):
             # The twelve-layer board takes five minutes. That is fine for a
@@ -957,7 +982,7 @@ class TheJobsOwnCamReportIsAWitness(unittest.TestCase):
 
     def test_the_2018_job_reproduces_its_own_cam_report(self):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         src = os.path.join(REAL, "CAM for EI-500DT-CYP-TOP-001-V2 ERP53.rar")
         if not os.path.exists(src):
             self.skipTest("sample missing")
@@ -1101,6 +1126,7 @@ OUTLINE_GAPPY = """
     """
 
 
+@_NEEDS_SHAPELY
 class AnArrayIsSeveralBoardsNotOneBigOne(unittest.TestCase):
     """The customer's word is "array". Five boards on a panel priced as one
     196 x 195 mm board is the wrong price, and that is what the reader did
@@ -1190,6 +1216,7 @@ class EveryFigureIsShownToTwoDecimals(unittest.TestCase):
                                                  (name, row))
 
 
+@_NEEDS_SHAPELY
 class PitchIsBetweenSeparatePads(unittest.TestCase):
 
     def setUp(self):
@@ -1210,6 +1237,7 @@ class PitchIsBetweenSeparatePads(unittest.TestCase):
         self.assertIn("8. Min pad pitch        0.50 mm", G.answers_text(self.job))
 
 
+@_NEEDS_SHAPELY
 class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):
 
     def test_the_narrow_side_of_the_smallest_pad_without_a_hole(self):
@@ -1248,6 +1276,7 @@ class AnSmtPadHasNoHoleUnderIt(unittest.TestCase):
         self.assertIn("every pad has a hole", G.answers_text(job))
 
 
+@_NEEDS_SHAPELY
 class AnOutlineThatDoesNotQuiteClose(unittest.TestCase):
 
     def test_gaps_of_a_few_hundredths_are_joined_and_named(self):
@@ -1268,7 +1297,7 @@ class PadsAgainstAnIndependentImplementation(unittest.TestCase):
 
     def setUp(self):
         if not os.path.isdir(REAL):
-            self.skipTest("sample jobs not on this machine")
+            self.skipTest(sample_jobs.missing("gerber_test"))
         try:
             import gerbonara            # noqa: F401
         except ImportError:

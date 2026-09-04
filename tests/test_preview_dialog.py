@@ -35,6 +35,26 @@ class Classifying(unittest.TestCase):
             self.assertEqual(_classify(f"a{ext}"), "other")
 
 
+# QtMultimedia imports a Qt module that dlopen()s the platform audio stack —
+# libpulse on Linux. PySide6 being installed does NOT mean it can load: a
+# headless runner without libpulse.so.0 raises ImportError from the import
+# itself.
+#
+# The PRODUCT handles that: open_preview() wraps the construction in
+# `except ImportError` and shows "open in the default app" instead — which
+# is deliberate, because packaging/prism.spec excludes QtMultimedia from
+# shipped builds on purpose. These two tests construct PreviewDialog
+# DIRECTLY, so they bypass the very guard that makes it safe, and failed on
+# CI for a thing the product copes with.
+try:
+    from PySide6.QtMultimedia import QMediaPlayer  # noqa: F401
+    _HAVE_MULTIMEDIA, _WHY_NOT = True, ""
+except Exception as _e:                             # noqa: BLE001
+    _HAVE_MULTIMEDIA, _WHY_NOT = False, (
+        f"Qt multimedia will not load here ({_e}) — the shipped build "
+        "excludes it too, and open_preview() falls back rather than crashing")
+
+
 class EveryViewerActuallyConstructs(unittest.TestCase):
     """Every kind PreviewDialog claims to handle must build without raising —
     a header-icon KeyError here previously crashed the whole process (a Qt
@@ -70,12 +90,14 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
         dlg = PreviewDialog(path, "pdf")
         dlg.reject()
 
+    @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
     def test_video(self):
         from dialogs.preview_dialog import PreviewDialog
         path = self._file("a.mp4", b"not a real mp4")
         dlg = PreviewDialog(path, "video")
         dlg.reject()
 
+    @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
     def test_audio(self):
         from dialogs.preview_dialog import PreviewDialog
         path = self._file("a.mp3", b"not a real mp3")
@@ -168,6 +190,32 @@ class OpenPreviewDispatch(unittest.TestCase):
                                return_value=0) as m:
             PD.open_preview(path)
             m.assert_called_once()
+
+
+class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
+    """The path a real customer takes. packaging/prism.spec excludes
+    QtMultimedia and QtPdf from shipped builds on purpose, so on every
+    installed copy of Prism these viewers CANNOT construct — and clicking a
+    video in Artifacts must offer the default app, not raise.
+
+    Never covered: the class above builds PreviewDialog directly, which is
+    the one path that has no guard. So the guard that every shipped build
+    depends on was the untested one.
+    """
+
+    def test_an_importerror_becomes_the_open_externally_dialog(self):
+        import dialogs.preview_dialog as PD
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "a.mp4")
+        with open(path, "wb") as f:
+            f.write(b"not a real mp4")
+        shown = []
+        with mock.patch.object(PD, "PreviewDialog",
+                               side_effect=ImportError("no libpulse")), \
+             mock.patch.object(PD, "UnsupportedPreviewDialog") as fallback:
+            fallback.return_value.exec.side_effect = lambda: shown.append(path)
+            PD.open_preview(path)
+        self.assertEqual(shown, [path])
 
 
 if __name__ == "__main__":

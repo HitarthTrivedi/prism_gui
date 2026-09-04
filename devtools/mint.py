@@ -23,6 +23,20 @@ import os
 import sys
 import time
 
+# Windows consoles are cp1252 and cannot encode the characters below — see
+# packaging/build.py for the CI failure that found this. Degrade, don't die.
+#
+# Under __main__ only: at import time sys.stdout belongs to the importer,
+# not to us. devtools/mint.py is imported by five test files, so at module
+# level this block would re-encode pytest's own capture stream as a side
+# effect of collecting a test — a script reaching into its caller's I/O.
+if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cryptography.hazmat.primitives import serialization as _ser
@@ -57,6 +71,82 @@ def sign(claims: dict, private: Ed25519PrivateKey) -> str:
     return f"{T.PREFIX}.{payload_b64}.{T.b64u_encode(signature)}"
 
 
+def parse_features(raw: str) -> list[str]:
+    """--features, split and CHECKED against what the app actually gates on.
+
+    Two names look obvious and are wrong, and both padlock something in
+    front of a customer:
+
+      · **Gerber is gated on `boq`.** There is no "gerber" feature at all —
+        main_window._open_gerber() calls _authorized_then("boq", …), because
+        nothing on the licence server sells Gerber separately yet. So
+        `--features core,gerber` locks the most expensive add-on on the
+        price book AND the flag it was locked by means nothing.
+      · **Email automation is gated on `inbox`.** `email` is a DIFFERENT
+        row — the draft-and-send screen. Minting `email` and expecting the
+        automation screen to open gets a padlock.
+
+    Both are invisible until the moment someone clicks, which on demo day is
+    in front of the person being sold to. A typo should fail here, at mint
+    time, in front of a developer who can retype it.
+    """
+    import plans
+
+    wanted = [f.strip() for f in raw.split(",") if f.strip()]
+    unknown = [f for f in wanted if f not in plans.FEATURES]
+    if unknown:
+        known = ", ".join(sorted(plans.FEATURES))
+        hint = ""
+        if "gerber" in unknown:
+            hint += "\n  Gerber is gated on 'boq' — there is no 'gerber' feature."
+        if "email" in unknown:      # defensive: 'email' is real, but pair it
+            hint += "\n  Email automation needs 'inbox'; 'email' is the draft screen."
+        raise SystemExit(
+            f"unknown feature(s): {', '.join(unknown)}\n"
+            f"  known features: {known}{hint}")
+    # 'email' IS a real feature, so the check above cannot catch the commonest
+    # mistake of all — asking for it and expecting Email AUTOMATION.
+    if "email" in wanted and "inbox" not in wanted:
+        print("mint: note — 'email' is the draft-and-send screen. Email "
+              "AUTOMATION needs 'inbox', which is not in this licence.",
+              file=sys.stderr)
+
+    # The other half of the same trap: a feature that IS declared and that
+    # nothing actually gates on. 'bom' is the live example — the BOM add-on
+    # is gated on 'boq' (main_window._open_bom), so `--features core,bom`
+    # passes the name check above and still padlocks BOM. Three add-ons now
+    # sit on 'boq': BOQ, BOM and Gerber.
+    #
+    # Computed from the source rather than listed here, so it cannot go stale
+    # the moment somebody adds a gate — the entire point being that a
+    # hardcoded list is how the first two traps survived.
+    for name in sorted(set(wanted) & _ungated_features()):
+        print(f"mint: note — nothing in Prism is gated on {name!r}, so this "
+              "flag unlocks nothing. Check which feature the screen you mean "
+              "actually asks for.", file=sys.stderr)
+    return wanted
+
+
+def _ungated_features() -> set:
+    """Declared in plans.FEATURES, but nothing calls _authorized_then on it.
+
+    'core' is excluded: it is the base entitlement and is legitimately never
+    gated on directly.
+    """
+    import re
+    import plans
+
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        with open(os.path.join(here, "main_window.py"), encoding="utf-8") as f:
+            gated = set(re.findall(r'_authorized_then\(\s*"([a-z]+)"', f.read()))
+    except OSError:
+        return set()
+    if not gated:                       # the regex stopped matching — say
+        return set()                    # nothing rather than warn on everything
+    return {f for f in plans.FEATURES if f not in gated} - {"core"}
+
+
 def build_claims(args, device_fp: str) -> dict:
     now = int(args.now or time.time())
     license_end = now + args.days * DAY
@@ -69,7 +159,7 @@ def build_claims(args, device_fp: str) -> dict:
         "cust": args.customer,
         "plan": args.plan,
         "kind": args.kind,
-        "feat": [f.strip() for f in args.features.split(",") if f.strip()],
+        "feat": parse_features(args.features),
         "seats": args.seats,
         "dev": device_fp,
         "iat": now,
@@ -166,7 +256,7 @@ def cmd_lease(args) -> int:
     claims = L.build_claims(
         kid=args.kid, license_id=args.license_id, device_fp=device_fp,
         scope=[s.strip() for s in args.scopes.split(",") if s.strip()],
-        features=[f.strip() for f in args.features.split(",") if f.strip()],
+        features=parse_features(args.features),
         metered=args.metered, jti=args.jti, now=now, ttl=args.ttl,
         offline=args.offline)
     lease_str = sign_lease(claims, private)
