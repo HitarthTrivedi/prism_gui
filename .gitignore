@@ -39,3 +39,6 @@ integrations/token.json
 # would put thousands of lines of third-party prose in our diffs for no gain.
 .agents/
 .claude/skills/
+
+# devtools/apollo_probe.py writes screenshots and a profile copy here
+devtools/apollo_probe_out/

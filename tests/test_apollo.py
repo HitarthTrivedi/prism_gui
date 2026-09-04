@@ -256,5 +256,99 @@ class FiltersAreDecidedBeforeApolloOpens(unittest.TestCase):
         self.assertEqual(_apollo_fallback_query(""), "")
 
 
+class ProseGoesToTheAiBox(unittest.TestCase):
+    """The screenshot that started this: the pipeline prompt sitting in
+    Apollo's small "Search people" keyword box, zero rows underneath. Apollo
+    has exactly one field that reads sentences — the "Use Apollo AI to find
+    the right prospects" box — and that is where a brief with no filter block
+    must go. Its shape was read off the live page with Playwright
+    (devtools/apollo_probe.py), so these pin what was measured."""
+
+    # Measured on the live app: a 4,000-character paste survived intact and
+    # the input carries no maxlength. Anything the registry allows above this
+    # is a guess, not a measurement.
+    MEASURED_CAPACITY = 4000
+
+    def test_the_registry_points_at_the_ai_box_not_the_keyword_box(self):
+        cfg = A.AGENT_REGISTRY["Apollo"]
+        sel = cfg.get("ai_prompt_selector", "")
+        self.assertIn("role='combobox'", sel)
+        self.assertIn("placeholder^='Example:'", sel)
+        # The toolbar keyword box must never be what the prose lands in.
+        self.assertNotIn("finder-toolbar-search-input", sel)
+        self.assertNotIn("Search people", sel)
+
+    def test_the_ai_box_is_brought_back_by_reset_not_search_with_ai(self):
+        """A restored session reopens the People page with last run's search
+        still applied, and the box gone. "Reset filters" brings it back.
+        "Search with AI" does not — it starts an assistant chat about the
+        current search and spends one of the account's chats, which is how
+        two chats went in one afternoon of testing."""
+        cfg = A.AGENT_REGISTRY["Apollo"]
+        self.assertEqual(cfg["ai_prompt_reset"], "Reset filters")
+        self.assertNotIn("ai_prompt_opener", cfg)
+        import inspect
+        from core import automation
+        self.assertNotIn("Search with AI",
+                         inspect.getsource(automation._apollo_ai_box)
+                         .split('"""')[2])   # the code, not the docstring
+
+    def test_the_cap_never_exceeds_what_the_box_was_seen_to_keep(self):
+        self.assertLessEqual(A.AGENT_REGISTRY["Apollo"]["ai_prompt_max_chars"],
+                             self.MEASURED_CAPACITY)
+
+    def test_the_assistant_is_given_time_to_think(self):
+        """It brewed for 22s and baked for 11s more on a one-line prompt
+        before the filters landed. A 45-second wait would read an empty grid."""
+        self.assertGreaterEqual(A.AGENT_REGISTRY["Apollo"]["ai_prompt_wait"], 90)
+
+    def test_the_prose_is_kept_as_prose_on_one_line(self):
+        """The box is an <input>. A newline sent into it is Enter, and Enter
+        submits — the live smoke put 'India.Verif' in the box and would have
+        fired the second line as a second, chat-spending prompt."""
+        from core.automation import _apollo_ai_text
+        brief = ("Find estimation managers at plastic injection mould "
+                 "manufacturers in India.\n  Only verified emails.\n")
+        out = _apollo_ai_text(brief)
+        self.assertNotIn("\n", out)
+        self.assertEqual(out, "Find estimation managers at plastic injection "
+                              "mould manufacturers in India. Only verified "
+                              "emails.")
+
+    def test_an_oversized_brief_is_cut_at_a_word_not_mid_word(self):
+        from core.automation import _apollo_ai_text
+        out = _apollo_ai_text(" ".join(f"word{i}" for i in range(2000)), cap=1000)
+        self.assertLessEqual(len(out), 1000)
+        self.assertRegex(out, r"word\d+$")
+        self.assertIn(out.split()[-1], {f"word{i}" for i in range(2000)})
+
+    def test_an_unbroken_wall_of_text_is_still_capped(self):
+        from core.automation import _apollo_ai_text
+        self.assertEqual(len(_apollo_ai_text("x" * 9000, cap=4000)), 4000)
+
+    def test_the_total_tile_is_read_the_way_apollo_writes_it(self):
+        """'246.4M' is the whole database, '0' is a tile still loading, '8'
+        is a search that has been filtered. Only the last means done."""
+        from core.automation import _apollo_total_count, _APOLLO_FILTERED_BELOW
+        self.assertEqual(_apollo_total_count("246.4M"), 246_400_000)
+        self.assertEqual(_apollo_total_count("1.2K"), 1_200)
+        self.assertEqual(_apollo_total_count("8"), 8)
+        self.assertEqual(_apollo_total_count("12,340"), 12_340)
+        self.assertIsNone(_apollo_total_count(""))
+        self.assertIsNone(_apollo_total_count("Total"))
+        self.assertGreater(_apollo_total_count("246.4M"), _APOLLO_FILTERED_BELOW)
+        self.assertFalse(0 < _apollo_total_count("0") < _APOLLO_FILTERED_BELOW)
+
+    def test_the_keyword_box_is_the_last_resort_only(self):
+        """Read the runner: the AI box is tried before the keyword search,
+        and the keyword search is only reached when the AI box declined."""
+        import inspect
+        from core import automation
+        src = inspect.getsource(automation._run_apollo)
+        self.assertLess(src.index("_apollo_ai_prompt("),
+                        src.index("_apollo_fallback_query("))
+        self.assertIn("if not prompted:", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

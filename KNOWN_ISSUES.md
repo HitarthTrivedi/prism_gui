@@ -299,6 +299,14 @@ Apollo is a search screen, not a chatbot, and its fields reject anything over
 200 characters. Prism now tells the previous step to hand over a short filter
 block instead of prose, and drives Apollo through its own search URL.
 
+When there is no filter block, the brief now goes into the one box on Apollo
+that does read sentences — the "Use Apollo AI to find the right prospects"
+field on the People page — and Apollo's own assistant turns it into filters.
+Earlier builds typed it into the small "Search people" keyword box beside the
+filter button, which matched nobody. Each prompt spends one assistant chat;
+the free plan shows how many are left inside the assistant panel, and at zero
+Prism drops to a plain keyword search instead.
+
 ### 12. Canva taking over every image
 
 Connecting Canva to ChatGPT made every post come back as a flat template.

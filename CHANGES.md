@@ -10,6 +10,50 @@ Tests: **1075 passing** (16 skipped, 1 deselected — see
 
 ---
 
+# Round 11 — the Apollo prompt lands in the box that reads prose
+
+A live run with Apollo as the first stage ended with the pipeline prompt
+sitting in Apollo's small "Search people" keyword box and a table of zero
+rows. That box is a plain keyword match; a sentence in it finds nobody.
+
+**Was:** with no `HANDOFF FOR APOLLO` block to build a URL from,
+`_run_apollo()` typed six words of the brief into whatever the first
+`input[placeholder*='Search']` on the page was — the toolbar keyword box.
+
+**Now:** the brief goes into the "Use Apollo AI to find the right prospects"
+field (`input[role='combobox'][placeholder^='Example:']`). Enter hands it to
+Apollo's AI Assistant, which opens as a side panel, thinks for 30–60 seconds
+and applies Titles / company keywords / Location to the People grid — the
+same grid `_capture()` already reads. Prism waits for the **Total** tile to
+move off the unfiltered count (or for rows) before capturing. The keyword
+box is now the last resort, reached only when the AI box is missing or the
+account shows `0 CHATS LEFT`; a filtered URL search that matches nobody also
+gets one try through the AI box.
+
+**One trap, found the expensive way:** the box only renders while no
+search is applied, and a restored Prism session brings the People page back
+with last run's keywords still set. The button labelled **Search with AI**
+does not bring the box back — it opens an assistant chat about the current
+search and spends a chat doing it. **Reset filters** does, and so does the
+bare `#/people` route; `_apollo_ai_box()` tries those and never touches
+the other button.
+
+**Why these selectors:** found with Playwright on the live app, not guessed.
+Apollo's `zp_*` classes are hashed per deploy; the role and the rotating
+"Example: …" placeholder are stable. The box kept a 4,000-character paste
+with no `maxlength`, so `ai_prompt_max_chars` is a measured figure. The
+probe is kept as `devtools/apollo_probe.py` for the next time Apollo moves
+things around.
+
+**Cost to the user:** one assistant chat per prompt. The free plan allows
+five a month, which is why the URL route stays first whenever a filter block
+exists.
+
+*Files:* `core/agents.py`, `core/automation.py`, `tests/test_apollo.py`,
+`devtools/apollo_probe.py`, `KNOWN_ISSUES.md`
+
+---
+
 # Round 10 — Prism knows when a newer Prism exists (1.3.1)
 
 The licence server has sent `latest_version` and `min_supported_version` on
