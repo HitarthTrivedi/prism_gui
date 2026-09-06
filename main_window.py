@@ -68,25 +68,58 @@ from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
 COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
-# screens of the body stack the rail switches between
-HOME, WORKBENCH, INQUIRY, SETTINGS = 0, 1, 2, 3
-GUIDE, CATALOG, HISTORY, BOQ, EMAIL, SUPPORT, GERBER = 4, 5, 6, 7, 8, 9, 10
-# Appended, not inserted — nothing else renumbers. Reached only from
-# _first_run(), never from the rail, so it has no entry in _show_screen()'s
-# name->index table.
-WIZARD = 11
-# Appended after WIZARD rather than inserted earlier, so nothing above
-# renumbers — unlike WIZARD, this one IS reachable from the rail and DOES
-# have an entry in _show_screen()'s table below.
-ARTIFACTS = 12
-# The Email automation working screen — reached only by drilling in from the
-# launcher panel (INQUIRY), never from the rail directly, so like WIZARD it
-# has no entry in _show_screen()'s name->index table either.
-INQUIRY_WORK = 13
-# BOM reuses the BOQ dialog (mode="bom") but has its own front-door panel and
-# its own screen. Appended LAST so nothing above renumbers; it IS a rail entry
-# and DOES have an entry in _show_screen()'s table below.
-BOM = 14
+
+# ── the body stack ──────────────────────────────────────────────────────────
+# ONE ordered table. THE ORDER IS THE INDEX, and everything else about screen
+# identity is derived from it: the integer constants below, the name->index
+# lookup _show_screen() switches on, and the index->name lookup that keeps the
+# rail lit.
+#
+# Those were four separate hand-maintained sites, in the highest-churn file in
+# the repository, and the fourth was written out as the literal inverse of the
+# third. A fifth -- the addWidget() call order that actually ASSIGNS these
+# integers -- was enforced by nothing but a trailing comment per line. Adding
+# or renaming one screen meant getting five places right, and the only symptom
+# of missing one is the app quietly showing the wrong screen.
+#
+# The addWidget order is now asserted against this table by
+# tests/test_screen_registry.py, so the comment is no longer the enforcement.
+#
+# Appending is still the safe move -- these integers are positions, so
+# inserting renumbers everything after it -- but nothing has to be renumbered
+# BY HAND any more.
+SCREENS = (
+    "home", "workbench", "inquiry", "config", "guide", "catalog",
+    "runs", "boq", "email", "support", "gerber",
+    "wizard",           # reached only from _first_run(), never by name
+    "artifacts",
+    "inquiry_work",     # reached only by drilling in from the launcher panel
+    "bom",
+)
+_INDEX = {name: i for i, name in enumerate(SCREENS)}
+
+# The two that exist as pages but are NOT addressable by name. Asking
+# _show_screen() for either falls through to HOME, exactly as before -- they
+# were simply absent from the old hand-written table.
+_UNROUTED = {"wizard", "inquiry_work"}
+SCREEN_INDEX = {n: i for n, i in _INDEX.items() if n not in _UNROUTED}
+SCREEN_NAME = {i: n for n, i in SCREEN_INDEX.items()}
+
+HOME = _INDEX["home"]
+WORKBENCH = _INDEX["workbench"]
+INQUIRY = _INDEX["inquiry"]
+SETTINGS = _INDEX["config"]
+GUIDE = _INDEX["guide"]
+CATALOG = _INDEX["catalog"]
+HISTORY = _INDEX["runs"]
+BOQ = _INDEX["boq"]
+EMAIL = _INDEX["email"]
+SUPPORT = _INDEX["support"]
+GERBER = _INDEX["gerber"]
+WIZARD = _INDEX["wizard"]
+ARTIFACTS = _INDEX["artifacts"]
+INQUIRY_WORK = _INDEX["inquiry_work"]
+BOM = _INDEX["bom"]
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -422,11 +455,7 @@ class MainWindow(QMainWindow):
             self.inquiry_work_panel.on_leave()
             self.cfg = CB.config.load()
             self.inquiry_panel.cfg = self.cfg
-        index = {"home": HOME, "workbench": WORKBENCH,
-                 "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
-                 "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
-                 "email": EMAIL, "support": SUPPORT, "gerber": GERBER,
-                 "artifacts": ARTIFACTS, "bom": BOM}.get(name, HOME)
+        index = SCREEN_INDEX.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -455,12 +484,7 @@ class MainWindow(QMainWindow):
         # this, every screen but Home passed "", which set_current() ignored,
         # so the rail sat permanently lit on Home wherever you actually were:
         # the app could never tell you where you are.
-        self.sidebar.set_current({
-            HOME: "home", WORKBENCH: "workbench", INQUIRY: "inquiry",
-            SETTINGS: "config", GUIDE: "guide", CATALOG: "catalog",
-            HISTORY: "runs", BOQ: "boq", EMAIL: "email",
-            SUPPORT: "support", GERBER: "gerber",
-            ARTIFACTS: "artifacts", BOM: "bom"}.get(index, "home"))
+        self.sidebar.set_current(SCREEN_NAME.get(index, "home"))
 
     # ── licence ─────────────────────────────────────────────────────────────
     def _licence_banner(self) -> QWidget:

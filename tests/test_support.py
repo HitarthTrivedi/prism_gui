@@ -158,9 +158,25 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
         self.assertIn("support", settings, "and be listed on that screen")
 
     def test_the_window_has_a_screen_for_it(self):
+        """This used to grep _show_screen's SOURCE TEXT for '"support"'.
+
+        That stopped working the moment screen identity moved into
+        main_window.SCREENS -- the behaviour was unchanged and provably
+        correct (tests/test_screen_registry.py builds a real window and
+        checks the page that comes up), but the literal was no longer spelled
+        inside that particular method. A test of how code is WRITTEN fails on
+        a refactor that changes nothing about what it DOES, and it fails in a
+        way that looks like a broken feature.
+
+        SCREEN_INDEX is the table _show_screen actually looks the name up in,
+        so asserting against it tests the routing rather than the spelling.
+        """
         import main_window
-        src = inspect.getsource(main_window.MainWindow._show_screen)
-        self.assertIn('"support"', src)
+        self.assertIn(
+            "support", main_window.SCREEN_INDEX,
+            "the help screen has no entry in main_window.SCREENS, so every "
+            "answer that points a stuck customer at 'support' would silently "
+            "drop them on Home instead")
 
     def test_every_topic_icon_actually_draws(self):
         """icons.pixmap raises on a name it doesn't know — at runtime that
