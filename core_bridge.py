@@ -180,6 +180,15 @@ def get_boq():
     return boq
 
 
+def get_boq_price():
+    """The pricing + Excel-export half of the BOQ add-on (core.boq_price).
+    Separate from get_boq() because measurement (boq) and pricing/output
+    (boq_price) are cleanly split — RA bills and rate analysis will land in
+    the pricing module without touching the measurement one."""
+    from core import boq_price
+    return boq_price
+
+
 def gerber_available() -> tuple[bool, str]:
     """core.gerber has no hard dependency of its own — shapely is optional,
     same as ezdxf is for BOQ, and the module degrades rather than fails

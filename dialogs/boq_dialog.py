@@ -14,10 +14,13 @@ from __future__ import annotations
 import os
 import time
 
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QColor, QBrush, QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
     QPlainTextEdit, QLineEdit, QMessageBox, QCheckBox, QProgressBar,
-    QComboBox, QWidget,
+    QComboBox, QWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QDoubleSpinBox, QFileDialog, QAbstractItemView, QSizePolicy,
 )
 
 import core_bridge as CB
@@ -61,10 +64,18 @@ class BoqDialog(PrismDialog):
                    "machine. Nothing is measured by an AI."),
             icon="file", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(self._doc)
-        self.resize(780, 700)
-        self.setMinimumSize(620, 600)
+        self.resize(700, 720)
+        self.setMinimumSize(560, 540)
         self.cfg = cfg
         self.boq = CB.get_boq()
+        self.boqp = CB.get_boq_price()
+        # Start priced against the bundled indicative rates so the grid is
+        # useful the moment a drawing is measured; "Load rate list…" swaps in
+        # the user's own price list or a DSR/SOR export.
+        try:
+            self._rate_items = self.boqp.starter_rate_items()
+        except Exception:                               # noqa: BLE001
+            self._rate_items = []
         # The research + write-up prompts come from core.bom in BOM mode and
         # core.boq in BOQ mode; measurement, interpretation and roles_text
         # always come from self.boq (they are mode-independent).
@@ -175,6 +186,113 @@ class BoqDialog(PrismDialog):
         self.meas_box.setVisible(False)
         root.addWidget(self.meas_box)
 
+        # ── Price it → a tender-ready Excel BOQ (deterministic) ─────────────
+        # The measured quantities, priced. No AI touches a number here:
+        # quantities are the measured ones (locked), rates come from a library
+        # or are typed, and every amount/tax/total is a LIVE formula in the
+        # exported .xlsx — the estimator opens it and keeps working. Hidden
+        # until a drawing has been measured, because pricing needs quantities.
+        self.price_box = QGroupBox(
+            f"Price it — export a tender-ready Excel {self._noun}")
+        pv = QVBoxLayout(self.price_box)
+        phint = QLabel(i18n.t(
+            "Quantities are measured and locked. Set a rate per line, or load "
+            "your price list / SOR to auto-fill rates where the unit matches. "
+            "Unpriced lines are shaded; totals update live."))
+        phint.setObjectName("note")
+        phint.setWordWrap(True)
+        pv.addWidget(phint)
+
+        self.rate_table = QTableWidget(0, 6)
+        self.rate_table.setHorizontalHeaderLabels(
+            ["Section", "Description", "Unit", "Qty", "Rate ₹", "Amount ₹"])
+        self.rate_table.verticalHeader().setVisible(False)
+        self.rate_table.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked
+            | QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
+        # Fixed, compact widths for everything except Description (which soaks up
+        # the slack). ResizeToContents was letting the table demand ~1600px of
+        # width and drag the whole dialog wide; explicit widths + an internal
+        # horizontal scrollbar keep the table inside the window instead.
+        self.rate_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.rate_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        header = self.rate_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for c in (0, 2, 3, 4, 5):
+            header.setSectionResizeMode(c, QHeaderView.Interactive)
+        for col, w in ((0, 132), (2, 58), (3, 58), (4, 80), (5, 96)):
+            self.rate_table.setColumnWidth(col, w)
+        self.rate_table.setMinimumHeight(200)
+        self.rate_table.setMinimumWidth(320)
+        self.rate_table.itemChanged.connect(self._on_rate_cell_changed)
+        pv.addWidget(self.rate_table)
+
+        controls = QWidget()
+        crow = QHBoxLayout(controls)
+        crow.setContentsMargins(0, 0, 0, 0)
+        crow.setSpacing(theme.SPACE_2)
+        crow.setSpacing(theme.SPACE_1)
+        self.load_rates_btn = self.button(
+            i18n.t("Load rates…"), "secondary", small=True,
+            on_click=self._load_rate_list)
+        self.add_row_btn = self.button(
+            i18n.t("Add"), "secondary", small=True,
+            on_click=lambda: (self._add_price_row(), self._recompute_totals()))
+        crow.addWidget(self.load_rates_btn)
+        crow.addWidget(self.add_row_btn)
+        crow.addSpacing(theme.SPACE_2)
+        # Compact: the "%" lives in the spinner suffix, so the labels stay short
+        # and the whole row fits without widening the dialog.
+        clab = QLabel(i18n.t("Cont.")); clab.setObjectName("meta")
+        crow.addWidget(clab)
+        self.contingency_spin = QDoubleSpinBox()
+        self.contingency_spin.setRange(0, 100)
+        self.contingency_spin.setDecimals(1)
+        self.contingency_spin.setValue(3.0)
+        self.contingency_spin.setSuffix(" %")
+        self.contingency_spin.setMaximumWidth(78)
+        self.contingency_spin.valueChanged.connect(self._recompute_totals)
+        crow.addWidget(self.contingency_spin)
+        glab = QLabel(i18n.t("GST")); glab.setObjectName("meta")
+        crow.addWidget(glab)
+        # A preset picker, not a free number: works-contract GST is a fixed set
+        # (18% standard, 12% some works, 5% specified) — typing an arbitrary
+        # rate like 15% is simply wrong, so it isn't offered.
+        self.gst_combo = QComboBox()
+        for pct in ("18", "12", "5"):
+            self.gst_combo.addItem(f"{pct} %", pct)
+        self.gst_combo.setMaximumWidth(78)
+        self.gst_combo.currentIndexChanged.connect(self._recompute_totals)
+        crow.addWidget(self.gst_combo)
+        self.interstate_cb = QCheckBox(i18n.t("IGST"))
+        self.interstate_cb.setToolTip(i18n.t(
+            "Inter-state supply — one IGST line instead of CGST + SGST"))
+        self.interstate_cb.toggled.connect(self._recompute_totals)
+        crow.addWidget(self.interstate_cb)
+        crow.addStretch(1)
+        pv.addWidget(controls)
+
+        totals = QWidget()
+        trow = QHBoxLayout(totals)
+        trow.setContentsMargins(0, 0, 0, 0)
+        self.total_label = QLabel("")
+        self.total_label.setObjectName("h4")
+        # Ignored width + wrap: this label must never demand its full one-line
+        # width (which dragged the whole dialog ~1600px wide). It takes the slack
+        # the button leaves and wraps if the window is narrow.
+        self.total_label.setWordWrap(True)
+        self.total_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        trow.addWidget(self.total_label, 1)
+        self.export_btn = self.button(
+            f"Export priced Excel {self._noun}", "primary", small=True,
+            on_click=self._export_priced_xlsx)
+        trow.addWidget(self.export_btn)
+        pv.addWidget(totals)
+
+        self.price_box.setVisible(False)
+        root.addWidget(self.price_box)
+
         # Which AIs run the BOQ. Defaults to the agents configured in Settings,
         # but re-pickable per BOQ: the write-up tool (Claude vs ChatGPT vs …)
         # and the standards-research tool (Perplexity vs Consensus vs …) each
@@ -193,8 +311,10 @@ class BoqDialog(PrismDialog):
         research_opts = list(cats.get("research", {}).get("agents", [])) or ["Perplexity"]
         self.writer_combo = QComboBox()
         self.writer_combo.addItems(writer_opts)
+        self.writer_combo.setMaximumWidth(170)
         self.research_combo = QComboBox()
         self.research_combo.addItems(research_opts)
+        self.research_combo.setMaximumWidth(170)
         _preselect(self.writer_combo,
                    cfg_agents.get("content") or cfg_agents.get("brains"))
         _preselect(self.research_combo,
@@ -331,6 +451,9 @@ class BoqDialog(PrismDialog):
             f"Saved so you can check every number → {self.csv_path}"
             + (f"\n⚠ {note}" if note else ""))
         self._set_busy(False, "Measured from the drawing itself — not by an AI.")
+        # Build the priced grid from the measured quantities — the deterministic
+        # path to a tender-ready Excel, alongside the AI write-up below.
+        self._populate_pricing()
         # If the user already pressed "Make my BOQ" while this was measuring,
         # start it now — with the measured quantities it was waiting for.
         if self._run_pending:
@@ -343,6 +466,212 @@ class BoqDialog(PrismDialog):
         # see the error and decide (they can still run a derived/spec BOQ).
         self._run_pending = False
         QMessageBox.warning(self, "BOQ", error)
+
+    # ── pricing → tender-ready Excel (deterministic; no AI touches a number) ──
+
+    def _populate_pricing(self):
+        """Build the pricing grid from the measured quantities and reveal it.
+        Rates pre-fill from the loaded library only where the unit matches — a
+        length is never priced at a per-cum rate; every other line waits for a
+        rate the user enters."""
+        if not self.q:
+            return
+        try:
+            boq = self.boqp.boq_from_measured(
+                self.q, rate_items=self._rate_items, title=self._doc)
+        except Exception:                               # noqa: BLE001
+            return
+        self._fill_table(boq.items)
+        self.price_box.setVisible(True)
+
+    def _fill_table(self, items):
+        self.rate_table.blockSignals(True)
+        self.rate_table.setRowCount(0)
+        for it in items:
+            self._add_price_row(it)
+        self.rate_table.blockSignals(False)
+        self._recompute_all()
+
+    def _add_price_row(self, item=None):
+        r = self.rate_table.rowCount()
+        prev = self.rate_table.blockSignals(True)
+        self.rate_table.insertRow(r)
+        measured = bool(item and item.source.startswith("measured"))
+        values = [
+            item.section if item else "Additional items",
+            item.description if item else "",
+            item.unit if item else "nos",
+            f"{float(item.quantity):g}" if item else "1",
+            (f"{float(item.rate):g}" if (item and item.priced) else ""),
+            "",
+        ]
+        for c, val in enumerate(values):
+            cell = QTableWidgetItem(val)
+            if c in (3, 4, 5):
+                cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            if c == 5 or (c == 3 and measured):   # amount & measured qty: locked
+                cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
+            self.rate_table.setItem(r, c, cell)
+        if item and item.remark:
+            self.rate_table.item(r, 1).setToolTip(item.remark)
+        self._recompute_row(r)
+        self.rate_table.blockSignals(prev)
+
+    def _cell_text(self, r, c):
+        it = self.rate_table.item(r, c)
+        return it.text().strip() if it else ""
+
+    def _cell_decimal(self, r, c):
+        from decimal import Decimal, InvalidOperation
+        try:
+            return Decimal(self._cell_text(r, c).replace(",", "") or "0")
+        except (InvalidOperation, ValueError):
+            return Decimal(0)
+
+    def _recompute_row(self, r):
+        prev = self.rate_table.blockSignals(True)
+        qty = self._cell_decimal(r, 3)
+        rate = self._cell_decimal(r, 4)
+        amount = self.boqp.quoting.rupees(qty * rate)
+        acell = self.rate_table.item(r, 5)
+        if acell is None:
+            acell = QTableWidgetItem()
+            acell.setFlags(acell.flags() & ~Qt.ItemIsEditable)
+            acell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.rate_table.setItem(r, 5, acell)
+        acell.setText(f"{amount:,.2f}")
+        # Flag an unpriced row with the app's own error tone — background AND
+        # ink together (theme.ERR_BG/ERR_INK), the same pairing every Prism
+        # status pill uses. Setting only the background (as this first did) left
+        # the theme's default light text on a light tint — unreadable, and out
+        # of step with the palette. Priced rows clear BOTH back to the default.
+        if rate <= 0:
+            bg, fg = QColor(theme.ERR_BG), QColor(theme.ERR_INK)
+        else:
+            bg, fg = QBrush(), QBrush()
+        for c in range(6):
+            cell = self.rate_table.item(r, c)
+            if cell is not None:
+                cell.setBackground(bg)
+                cell.setForeground(fg)
+        self.rate_table.blockSignals(prev)
+
+    def _recompute_all(self):
+        for r in range(self.rate_table.rowCount()):
+            self._recompute_row(r)
+        self._recompute_totals()
+
+    def _on_rate_cell_changed(self, item):
+        if item.column() in (2, 3, 4):      # unit / qty / rate change the amount
+            self._recompute_row(item.row())
+        self._recompute_totals()
+
+    def _recompute_totals(self, *_):
+        boq = self._collect_boq()
+        total = boq.grand_total()
+        try:
+            shown = self.boqp.quoting.indian_currency(total)
+        except Exception:                               # noqa: BLE001
+            shown = f"₹ {total:,.2f}"
+        msg = f"Grand total (incl. GST): {shown}"
+        n = len(boq.unpriced())
+        if n:
+            msg += f"    ·    {n} item(s) still unpriced"
+        self.total_label.setText(msg)
+
+    def _collect_boq(self):
+        from datetime import date
+        from decimal import Decimal
+        items = []
+        for r in range(self.rate_table.rowCount()):
+            desc = self._cell_text(r, 1)
+            if not desc:
+                continue
+            items.append(self.boqp.BoqItem(
+                description=desc,
+                unit=self._cell_text(r, 2) or "nos",
+                quantity=self._cell_decimal(r, 3),
+                rate=self._cell_decimal(r, 4),
+                section=self._cell_text(r, 0) or "Measured Works"))
+        return self.boqp.Boq(
+            title=self._doc, items=items,
+            project=(self.ask.text().strip()[:120] if hasattr(self, "ask") else ""),
+            date=date.today().strftime("%d-%m-%Y"),
+            contingency_pct=Decimal(str(self.contingency_spin.value())),
+            gst_pct=Decimal(self.gst_combo.currentData()),
+            interstate=self.interstate_cb.isChecked())
+
+    def _load_rate_list(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Load rate list"), "",
+            "Rate lists (*.xlsx *.xlsm *.csv);;All files (*)")
+        if not path:
+            return
+        try:
+            items = self.boqp.quoting.load_rates(path)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, self._noun,
+                                f"Couldn't read that rate list:\n\n{e}")
+            return
+        self._rate_items = items
+        self._reprice_blanks()
+        self.status.setText(
+            f"Loaded {len(items)} rates from {os.path.basename(path)} — filled "
+            "matching blank rates; your typed rates were kept.")
+
+    def _reprice_blanks(self):
+        """Fill only the still-blank rate cells from the current library, and
+        only where the unit matches — never overwrite a rate the user typed."""
+        prev = self.rate_table.blockSignals(True)
+        for r in range(self.rate_table.rowCount()):
+            if self._cell_text(r, 4):
+                continue
+            desc = self._cell_text(r, 1)
+            unit = self._cell_text(r, 2)
+            if not desc:
+                continue
+            matches = self.boqp.quoting.match_item(desc, self._rate_items)
+            if matches and self.boqp.quoting.is_confident(matches):
+                best = matches[0].item
+                if self.boqp._units_match(unit, best.unit):
+                    self.rate_table.item(r, 4).setText(f"{float(best.rate):g}")
+        self.rate_table.blockSignals(prev)
+        self._recompute_all()
+
+    def _export_priced_xlsx(self):
+        import time
+        boq = self._collect_boq()
+        if not boq.items:
+            QMessageBox.information(
+                self, self._noun,
+                "Nothing to price yet — measure a drawing or add an item first.")
+            return
+        unpriced = boq.unpriced()
+        if unpriced:
+            ans = QMessageBox.question(
+                self, self._noun,
+                f"{len(unpriced)} item(s) have no rate yet — they'll export as "
+                "₹0 and be shaded red in the sheet.\n\nExport anyway?",
+                QMessageBox.Yes | QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
+        try:
+            os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+            out = os.path.join(CB.config.RUNS_DIR,
+                               f"boq_priced_{int(time.time())}.xlsx")
+            self.boqp.write_boq_xlsx(boq, out)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, self._noun,
+                                f"Couldn't write the Excel BOQ:\n\n{e}")
+            return
+        try:
+            CB.config.save_artifact(
+                out, os.path.basename(self.cad_path or out),
+                kind="boq", task=f"{self._doc} — priced")
+        except Exception:                               # noqa: BLE001
+            pass
+        self.status.setText(f"Priced {self._noun} saved → {out}")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(out))
 
     # ── voice ───────────────────────────────────────────────────────────
 
