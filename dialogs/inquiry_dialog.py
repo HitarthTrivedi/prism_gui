@@ -260,6 +260,7 @@ class _TableOrEmpty(QStackedWidget):
 # to reach into this 4,000-line dialog at MODULE SCOPE for these three names
 # -- the only widget->dialog import in the tree that was not a deferred "open
 # this modal", and so a real load-order dependency.
+from addons import names, registry      # noqa: E402
 from inquiry_config import (            # noqa: E402,F401
     COUNTED_TABS, TAB_INDEX, TABS,
 )
@@ -3402,15 +3403,20 @@ class InquiryDialog(QWidget):
                        "also works from a written specification — open it from "
                        "the sidebar and describe the job instead."))
             return
-        files = CB.get_files()
-        attachments = []
-        for path in drawings:
-            try:
-                attachments.append(files.attach(path))
-            except Exception:
-                continue
-        from dialogs.boq_dialog import BoqDialog
-        BoqDialog(self.cfg, attachments, self).exec()
+        # Hand the drawings to whoever measures drawings, by INTENT rather
+        # than by import. This used to construct BoqDialog directly, which
+        # meant Inquiry knew BOQ's module, its class, its constructor and --
+        # the subtle one -- that an "attachment" is whatever
+        # CB.get_files().attach() returns. That last is BOQ's own data
+        # shaping, done here, in somebody else's file.
+        #
+        # Now Inquiry hands over plain paths. If nothing offers the intent
+        # (not built, not installed) the handler is simply absent and this
+        # returns, rather than opening something that cannot work.
+        owner, handler = registry.offering(names.MEASURE_DRAWING)
+        if owner is None:
+            return
+        registry.resolve(handler)(self, self.cfg, drawings)
 
     # ── preparing a quotation ─────────────────────────────────────────────
     def _prepare_quotation(self):

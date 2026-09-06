@@ -628,7 +628,7 @@ class TheDwgConverterIsFoundWhereItInstalls(unittest.TestCase):
         picked the file, named the job and pressed the button — turns a menu
         item they already know into a dead end."""
         from PySide6.QtWidgets import QLabel
-        from dialogs.boq_dialog import BoqDialog
+        from addons.boq.dialog import BoqDialog
         with mock.patch.object(self.boq, "find_dwg_converter", return_value=None):
             dialog = BoqDialog({"api_key": "k"}, [])
         self.addCleanup(dialog.deleteLater)
@@ -638,7 +638,7 @@ class TheDwgConverterIsFoundWhereItInstalls(unittest.TestCase):
 
     def test_a_client_who_has_a_converter_is_not_nagged(self):
         from PySide6.QtWidgets import QLabel
-        from dialogs.boq_dialog import BoqDialog
+        from addons.boq.dialog import BoqDialog
         with mock.patch.object(self.boq, "find_dwg_converter",
                                return_value="/usr/bin/ODAFileConverter"):
             dialog = BoqDialog({"api_key": "k"}, [])

@@ -250,12 +250,10 @@ class TheDottedReferencesResolve(unittest.TestCase):
                                   % (a.key, field, dotted, exc))
                     self.assertIsNotNone(got)
 
-    def test_offer_handlers_live_inside_their_own_addon(self):
-        """Not resolved yet, on purpose: the hand-off is wired at S8, and
-        addons/<key>/contract.py does not exist until then. What IS checkable
-        now is that no add-on has declared a handler pointing into somebody
-        else's package -- which would be the import ban, laundered through a
-        string."""
+    def test_offer_handlers_live_inside_their_own_addon_and_resolve(self):
+        """An add-on must answer for its own offers, out of its own package.
+        A handler pointing into somebody else's package would be the import
+        ban laundered through a string."""
         for a in registry.REGISTRY:
             for offer in a.offers:
                 with self.subTest(addon=a.key, intent=offer.intent):
@@ -263,6 +261,56 @@ class TheDottedReferencesResolve(unittest.TestCase):
                         offer.handler.startswith("addons.%s." % a.key),
                         "%s offers %s through %r, which is not in its own "
                         "package" % (a.key, offer.intent, offer.handler))
+                    try:
+                        got = registry.resolve(offer.handler)
+                    except Exception as exc:            # noqa: BLE001
+                        self.fail("%s offers %s through %r, which does not "
+                                  "resolve: %s"
+                                  % (a.key, offer.intent, offer.handler, exc))
+                    self.assertTrue(
+                        callable(got),
+                        "%r is not callable, so the hand-off would fail at "
+                        "the moment a user clicks rather than here"
+                        % offer.handler)
+
+    def test_no_addon_reaches_into_another_addons_package_undeclared(self):
+        """The string version of the import ban.
+
+        Every dotted reference a manifest makes must name its own package --
+        unless the manifest DECLARES the borrowing with provided_by, which
+        exists so that the one real case in this build (BOM opens BOQ's
+        dialog with mode="bom") is visible and tested rather than hidden in
+        a string nobody reads.
+        """
+        for a in registry.REGISTRY:
+            for field in ("panel", "dialog", "entry"):
+                dotted = getattr(a, field, "")
+                if not dotted or not dotted.startswith("addons."):
+                    continue
+                owner = dotted.split(".")[1]
+                if owner == a.key:
+                    continue
+                with self.subTest(addon=a.key, field=field):
+                    self.assertEqual(
+                        owner, a.provided_by,
+                        "%s.%s points into addons/%s/, which is another "
+                        "add-on's package. If that is deliberate, declare it "
+                        "with provided_by=%r and say why; if it is not, the "
+                        "two add-ons are not independent and one of them "
+                        "cannot be shipped, sold or owned separately."
+                        % (a.key, field, owner, owner))
+
+    def test_provided_by_names_a_real_addon(self):
+        for a in registry.REGISTRY:
+            if not a.provided_by:
+                continue
+            with self.subTest(addon=a.key):
+                self.assertIn(
+                    a.provided_by, registry.keys(),
+                    "%s declares provided_by=%r, which is not an add-on"
+                    % (a.key, a.provided_by))
+                self.assertNotEqual(a.provided_by, a.key,
+                                    "an add-on cannot borrow from itself")
 
 
 class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):

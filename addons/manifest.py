@@ -112,6 +112,23 @@ class Addon:
     dialog: str = ""                  # a modal
     entry: str = ""                   # anything else
 
+    # The add-on whose package this one's `dialog` lives in.
+    #
+    # Normally empty, and the contract test requires it to be: an add-on
+    # naming a module inside another add-on's package is the import ban
+    # laundered through a string, and it is exactly the coupling this whole
+    # structure exists to remove.
+    #
+    # BOM is the one honest exception in this build. It has its own rail row,
+    # its own screen and its own front-door panel, but the thing it opens IS
+    # BOQ's dialog with mode="bom" -- it was built that way, as a mode flag
+    # inside somebody else's file, which is the clearest illustration in the
+    # repository of why the add-on split is worth doing. Declaring the
+    # dependency makes it visible and testable instead of hidden in a string;
+    # it does not make it good. The fix is for BOM to own a dialog, or for
+    # both to be one add-on with two front doors.
+    provided_by: str = ""
+
     # ── whether it can run at all ────────────────────────────────────────
     probe: str = ""                   # "core_bridge:gerber_available"
     remedy: str = ""                  # offered when the probe says no

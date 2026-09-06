@@ -45,7 +45,10 @@ MANIFEST = Addon(
     # implementation detail an intent name is supposed to hide -- and the
     # clearest illustration of why the add-on split is worth doing, since
     # today "a whole new add-on" means "a mode flag in someone else's file".
-    dialog="dialogs.boq_dialog:BoqDialog",
+    dialog="addons.boq.dialog:BoqDialog",
+    panel="addons.bom.panel:BomPanel",
+    # Declared, not smuggled. See manifest.Addon.provided_by.
+    provided_by="boq",
     probe="core_bridge:boq_available",
     kind="bom",
     run_prefixes=("BOM — ", "/bom "),

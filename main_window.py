@@ -41,7 +41,8 @@ from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
-from widgets.boq_panel import BomPanel, BoqPanel
+from addons.bom.panel import BomPanel
+from addons.boq.panel import BoqPanel
 from widgets.catalog_panel import CatalogPanel
 from widgets.email_panel import EmailPanel
 from addons.gerber.panel import GerberPanel
@@ -62,7 +63,7 @@ import wakeword
 from wakeword import WakeWordListener
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
-from dialogs.boq_dialog import BoqDialog
+from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
 from dialogs.reel_dialog import ReelDialog
 from dialogs.motion_dialog import MotionDialog

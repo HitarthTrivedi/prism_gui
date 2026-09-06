@@ -15,7 +15,8 @@ MANIFEST = Addon(
     order=20,
     shelves=(RAIL, HOME),
     screen="boq",
-    dialog="dialogs.boq_dialog:BoqDialog",
+    dialog="addons.boq.dialog:BoqDialog",
+    panel="addons.boq.panel:BoqPanel",
     # The probe runs AFTER the licence check, never before: a customer who
     # has not bought BOQ should be told that, not sent off to install ezdxf
     # for a feature they still will not be able to open.
