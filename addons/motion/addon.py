@@ -28,7 +28,11 @@ MANIFEST = Addon(
     icon="video",
     tone=ACCENT,
     order=60,
-    shelves=(HOME,),           # see addons/reel/addon.py for why
+    # HOME ONLY, and for a stronger reason than Reel's: this add-on cannot
+    # run at all (see `status` above), so a rail row would advertise
+    # something that opens nothing. Settled 2026-09-07 and pinned by
+    # tests/test_addon_contract.py's GOLDEN_HOME.
+    shelves=(HOME,),
     dialog="addons.motion.dialog:MotionDialog",
     probe="core_bridge:motion_available",
     remedy="ffmpeg",

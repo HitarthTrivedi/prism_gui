@@ -13,14 +13,17 @@ MANIFEST = Addon(
     icon="video",
     tone=ACCENT,
     order=50,
-    # HOME ONLY, and that is the live behaviour, not an oversight of this
-    # file: widgets/sidebar.py has no reel row (Reel's slot went to
-    # Artifacts, inside the rail's twelve-control budget) while
-    # widgets/home_panel.py does. Both remain reachable by command, which is
-    # exactly why they still need a licence gate. Whether the rail should
-    # gain them back is a product decision, deliberately NOT taken here --
-    # this stage changes no behaviour; changing the shelf is its own commit
-    # so that reverting the decision does not revert the mechanism.
+    # HOME ONLY. Settled 2026-09-07, after the two shelf tables had disagreed
+    # about it for months: Reel's rail row went to Artifacts inside the rail's
+    # twelve-control budget, and the budget is at 12 of 12 -- putting Reel back
+    # means taking something else off.
+    #
+    # It stays reachable by command, which is exactly why its licence gate
+    # matters: there is no shelf row standing between an unlicensed user and
+    # the capability, and the router can put Prism Reel into a plan without
+    # anybody clicking anything. See `agents=` below.
+    #
+    # Pinned by tests/test_addon_contract.py's GOLDEN_HOME / GOLDEN_RAIL.
     shelves=(HOME,),
     dialog="addons.reel.dialog:ReelDialog",
     probe="core_bridge:reel_available",

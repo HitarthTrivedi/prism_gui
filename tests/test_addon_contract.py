@@ -322,17 +322,64 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     then it is what makes the rewiring provably behaviour-neutral.
     """
 
-    def test_the_rail_and_home_shelves_match_the_hand_written_tables(self):
+    # ── the golden shelves ───────────────────────────────────────────────
+    # Written out as literals ON PURPOSE. Comparing the registry to
+    # sidebar.ADDONS was the right test while that table was hand-written;
+    # now that it is a comprehension over the registry, such a test compares
+    # the registry to itself and would pass ANY membership. A golden test has
+    # to be a second, independent statement of the answer or it is decoration.
+    #
+    # These lists are a decision, not an observation. reel and motion are on
+    # Home and not on the rail, and that was settled on 2026-09-07:
+    #
+    #   · the rail is at 12 of 12 controls and Reel already gave its row to
+    #     Artifacts, so a rail row costs something else its place;
+    #   · Motion cannot run at all -- core/motion/render.py sets
+    #     _DISABLED_PENDING_ASSET_FIX -- so a rail row would advertise a
+    #     feature that opens nothing.
+    #
+    # Both remain reachable by command, which is exactly why their licence
+    # gate matters and why tests/test_addon_gates.py covers them.
+    #
+    # Changing a shelf means changing this list in the same commit. That is
+    # the point: for months sidebar.ADDONS and home_panel.ADDONS disagreed
+    # about these two while home_panel.py carried a comment saying it "must
+    # never drift from" the rail.
+    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "email", "bom"]
+    GOLDEN_HOME = ["inquiry", "boq", "gerber", "email", "reel", "motion", "bom"]
+
+    def test_the_rail_shelf_is_what_we_decided(self):
+        self.assertEqual(
+            [a.key for a in registry.shelf(manifest.RAIL)], self.GOLDEN_RAIL,
+            "the rail's membership changed. If that was deliberate, update "
+            "GOLDEN_RAIL in the same commit and say why in the manifest that "
+            "changed; if it was not, an add-on has silently appeared on or "
+            "vanished from the shelf customers navigate by.")
+
+    def test_the_home_shelf_is_what_we_decided(self):
+        self.assertEqual(
+            [a.key for a in registry.shelf(manifest.HOME)], self.GOLDEN_HOME,
+            "the Home shelf's membership changed -- see GOLDEN_RAIL's note.")
+
+    def test_the_rail_is_home_minus_the_command_only_addons(self):
+        """The relationship the two tables could never express while there
+        were two of them, and the reason one `order` reproduces both."""
+        self.assertEqual(
+            [k for k in self.GOLDEN_HOME if k in self.GOLDEN_RAIL],
+            self.GOLDEN_RAIL,
+            "the rail is no longer a subset of Home in the same order, so "
+            "the same add-on now appears in two different positions "
+            "depending on which screen you are looking at")
+
+    def test_the_derived_tables_still_agree_with_the_registry(self):
+        """Not tautological: sidebar and home_panel could stop deriving --
+        somebody could paste a literal list back in, which is precisely what
+        this restructure removed."""
         import widgets.home_panel as home_panel
         import widgets.sidebar as sidebar
-        self.assertEqual([a.key for a in registry.shelf(manifest.RAIL)],
-                         [row[0] for row in sidebar.ADDONS],
-                         "the registry's rail shelf no longer reproduces "
-                         "widgets/sidebar.ADDONS")
-        self.assertEqual([a.key for a in registry.shelf(manifest.HOME)],
-                         [row[0] for row in home_panel.ADDONS],
-                         "the registry's home shelf no longer reproduces "
-                         "widgets/home_panel.ADDONS")
+        self.assertEqual([row[0] for row in sidebar.ADDONS], self.GOLDEN_RAIL)
+        self.assertEqual([row[0] for row in home_panel.ADDONS],
+                         self.GOLDEN_HOME)
 
     def test_the_licence_gate_matches_the_rail_for_every_addon(self):
         import widgets.sidebar as sidebar
