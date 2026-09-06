@@ -311,7 +311,6 @@ licensing/
   status.py meter.py    state machine; Groq token metering
 widgets/
   icons.py              24x24 stroked line icons, tinted & cached
-  blueprint.py          the hairline frame + registration marks QSS can't draw
   controls.py           the square switch, tool chip, step mark, chips
   sidebar.py            the left rail, its shelves and their padlocks
   input_panel.py        the task card

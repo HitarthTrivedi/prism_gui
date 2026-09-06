@@ -106,7 +106,9 @@ def _selftest(app) -> int:
     # and Prism can fetch it at runtime (core/ffmpeg.py).
     try:
         from PIL import Image, ImageDraw   # noqa: F401
-        from core import reel              # noqa: F401
+        CB.get_reel()   # via the bridge: core_bridge is the only
+                        # module that may import the engine directly,
+                        # and tests/test_engine_facade.py enforces it.
         reel_ok, reel_err = True, ""
     except Exception as e:
         reel_ok, reel_err = False, str(e)
@@ -236,8 +238,7 @@ def _selftest(app) -> int:
     # build actually shipped one — which is the single fact this line exists
     # to establish, and the one that was wrong on Windows.
     try:
-        from core import ffmpeg as _ffmpeg
-        ffmpeg_which = _ffmpeg.describe()
+        ffmpeg_which = CB.get_ffmpeg().describe()
     except Exception:
         ffmpeg_which = "unknown"
     print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
