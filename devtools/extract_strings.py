@@ -190,6 +190,18 @@ COPY_TABLES = {
 EXTRA = [
     "Yes", "No", "OK", "Cancel", "Save", "Close", "Open", "Apply", "Retry",
     "Ignore", "Discard", "Help", "Reset", "Abort",
+    # The BOQ dialog's own name for the document it produces. It is chosen by
+    # a conditional and kept on an attribute --
+    #
+    #     self._doc = "Bill of Materials" if self.mode == "bom" else "Bill of Quantities"
+    #
+    # -- and then translated (`i18n.t(self._doc)`) and used as the window
+    # title. This scan reads literals in call arguments and in the copy
+    # tables; a literal assigned to an attribute is invisible to it, so both
+    # halves have to be listed here or the window title silently stops
+    # translating. "Bill of Quantities" was in the catalogue by historical
+    # accident and fell out the first time it was regenerated.
+    "Bill of Quantities", "Bill of Materials",
 ]
 
 

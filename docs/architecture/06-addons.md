@@ -4,18 +4,50 @@
 
 ---
 
-Each add-on is: a rail entry (with a padlock when unlicensed) → a licence
-check → a dialog or panel → one or more `QThread` workers → engine modules in
-`prism_terminal/core`.
+> **An add-on is now a folder and one line.** Each one lives in
+> `addons/<key>/` with a manifest that declares everything the shell needs to
+> know about it. This page describes what each add-on *does*; for how to
+> build one, read:
+>
+> * **[10 · Adding an add-on](10-adding-an-add-on.md)** — the recipe, end to
+>   end, with Gerber as the worked example
+> * **[9 · Boundaries](09-boundaries.md)** — what may depend on what, and the
+>   test that enforces each rule
+> * **[docs/ADDONS_MOVE_MAP.md](../ADDONS_MOVE_MAP.md)** — where every file
+>   went, and how to rebase a branch across the move
 
-| Add-on | Feature key | Rail group | Verified against real customer data? |
-|---|---|---|---|
-| [Email automation](#61-email-automation-inbox) | `inbox` | ADD-ONS | **Reading: yes. Sending & PO: no** |
-| [BOQ](#62-boq) | `boq` | ADD-ONS | Partially |
-| [Gerber](#63-gerber) | *(engine done, GUI in progress)* | ADD-ONS | **Yes — customer's own check sheet** |
-| [Email blast](#64-email-blast) | `email` | ADD-ONS | Yes |
-| [Reel / Studio](#65-reel--studio) | `reel` | ADD-ONS | Yes |
-| BOM & Stock | — | ADD-ONS | **Not built** — visibly *coming soon*, disabled on purpose |
+Each add-on is: a manifest in `addons/<key>/addon.py` → a shelf row derived
+from it → a licence check the shell applies → a panel or dialog → one or more
+`workers._Worker` threads → engine modules through `core_bridge`.
+
+| Add-on | Package | Feature key | Shelf | Verified against real customer data? |
+|---|---|---|---|---|
+| [Email automation](#61-email-automation-inbox) | `addons/inquiry/` | `inbox` | rail + Home | **Reading: yes. Sending & PO: no** |
+| [BOQ](#62-boq) | `addons/boq/` | `boq` | rail + Home | Partially |
+| [Gerber](#63-gerber) | `addons/gerber/` | `boq` † | rail + Home | **Yes — customer's own check sheet** |
+| [Email blast](#64-email-blast) | `addons/email/` | `email` | rail + Home | Yes |
+| [Reel / Studio](#65-reel--studio) | `addons/reel/` | `reel` | Home only ‡ | Yes |
+| Motion Graphics | `addons/motion/` | `reel` | Home only, **as a caption** ‡‡ | No — disabled at source |
+| BOM & Stock | `addons/bom/` | `boq` † | rail + Home | **Shipped** — a mode of the BOQ dialog |
+
+† **Not a typo.** Gerber rides `boq` because the licence server has no
+`gerber` key and gating on one nobody can be granted would deny everyone,
+including the single account testing it. BOM rides `boq` because it ships as
+a mode inside BOQ's dialog — a `bom` key exists in `plans.FEATURES` and is
+sellable, but the server has never been told about it. **Consequence for
+pricing: buying `bom` without `boq` gets you nothing, and buying `boq` gets
+you BOM free.**
+
+‡ Reel is not on the rail — its row went to Artifacts inside the rail's
+twelve-control budget. It is reachable from Home and by command, which is
+exactly why its licence gate matters.
+
+‡‡ Motion's tile is visible and not clickable, because
+`core/motion/render.py` sets `_DISABLED_PENDING_ASSET_FIX = True` and
+`is_available()` returns `False` unconditionally. That is declared as
+`status=SOON` in its manifest rather than hardcoded in a render method, which
+is where it used to live — alongside BOM, which had shipped and was being
+greyed out on the Home screen for months afterwards.
 
 > **Why a disabled shelf entry is deliberate:** a shelf that looks like a
 > product line is worth more in a demo than an empty gap.
@@ -353,27 +385,45 @@ with what the AI ever sees.
 
 ## 6.6 Cross-cutting: how an add-on is wired
 
-Adding one follows the same six steps every time.
+This used to be six hand-wiring steps across four shared files. It is now a
+manifest; **the shell reads it and does the rest.**
 
 ```mermaid
 flowchart LR
-    A["1 · Rail entry<br/>widgets/sidebar.py"] --> B["2 · MainWindow._open_&lt;name&gt;()"]
-    B --> C["3 · _authorized_then(feature, action, then)"]
-    C -->|denied| P["paywall.py — the pitch, not a failure"]
-    C -->|allowed| D["4 · _open_&lt;name&gt;_dialog()"]
-    D --> E["5 · QThread worker in workers.py"]
-    E --> F["6 · engine module via core_bridge.get_*()"]
-    F --> G["availability probe:<br/>*_available() → (bool, reason)"]
+    A["addons/&lt;key&gt;/addon.py<br/>MANIFEST = Addon(...)"] --> B["addons/registry.py<br/>one static import"]
+    B --> C["the rail, Home, History,<br/>the agent gate — all derived"]
+    B --> D["MainWindow routes on<br/>manifest.feature"]
+    D -->|denied| P["paywall.py — the pitch, not a failure"]
+    D -->|allowed| E["probe: manifest.probe<br/>→ (bool, reason)"]
+    E --> F["panel / dialog<br/>resolved from a dotted string"]
+    F --> G["workers._Worker"]
+    G --> H["engine via core_bridge"]
 ```
 
-**The availability probe is not optional.** Heavy dependencies (`selenium`,
-`ezdxf`, `shapely`, Pillow, FFmpeg) are probed lazily so a missing one produces
-a sentence the user can act on rather than an import error at boot — and so
-startup stays fast.
+The full recipe, with a real worked example, is
+**[10 · Adding an add-on](10-adding-an-add-on.md)**. What has NOT changed:
 
-**Feature keys** live in `plans.py` and are shared with the licence server.
-`AGENT_FEATURES = {'Prism Reel': 'reel', 'Prism Studio': 'reel'}` in
-`main_window.py` maps agent names onto feature keys for the plan rows.
+**The availability probe is still not optional.** Heavy dependencies
+(`selenium`, `ezdxf`, `shapely`, Pillow, FFmpeg) are probed lazily so a
+missing one produces a sentence the user can act on rather than an import
+error at boot — and so startup stays fast. It runs **after** the licence
+check, never before: a customer who has not bought BOQ should be told that,
+not sent off to install `ezdxf` for something they still cannot open.
+
+**Feature keys still live in `plans.py`** and are still shared with the
+licence server, which remains authoritative — if the two disagree the server
+wins, and `plans.py` is presentation only.
+
+**The routed-agent gate still exists**, because the rail cannot enforce it:
+the router can put Prism Reel into a plan without the customer ever touching
+a shelf row, and Reel does not have one. It is now declared per add-on
+(`agents=("Prism Reel", "Prism Studio")` in `addons/reel/addon.py`) rather
+than in a separate table in `main_window.py`.
+
+**What is gone:** the seven hand-maintained tables that used to have to agree
+— `sidebar.ADDONS`, `home_panel.ADDONS`, `simple_panels.ADDONS`,
+`_RUN_PREFIXES`, `AGENT_FEATURES`, the `_handle_command` branches, and the
+gate test's own copy. Three of them had already diverged.
 
 ---
 
