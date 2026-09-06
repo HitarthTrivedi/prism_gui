@@ -222,7 +222,12 @@ class FollowupRouteWorker(_Worker):
                 self.cfg.get("api_key", ""), self.cfg.get("model", ""),
                 prompt, json_mode=True, timeout=45)
             data = json.loads(out)
-            self.done.emit(str(data.get("stage", "")).strip())
+            stage = str(data.get("stage", "")).strip()
+            # Validate: the model must return one of the real keys. A made-up or
+            # empty stage becomes "unsure" ("") so the GUI asks rather than
+            # silently firing the wrong (possibly expensive) step.
+            valid = {s["stage"] for s in self.stages_info}
+            self.done.emit(stage if stage in valid else "")
         except Exception as e:
             self.failed.emit(str(e))
 

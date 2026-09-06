@@ -1304,7 +1304,8 @@ class MainWindow(QMainWindow):
             f"{dlg._doc} — {getattr(dlg, 'request', '')}",
             getattr(dlg, "_all_responses", {}),
             getattr(dlg, "_stage_agents_map", {}),
-            getattr(dlg, "_links", {}))
+            getattr(dlg, "_links", {}),
+            artifacts=getattr(dlg, "_produced_files", []))
 
     def _open_bom(self):
         # Same front-door pattern as BOQ. Gated on the BOQ entitlement for now —
@@ -1330,7 +1331,8 @@ class MainWindow(QMainWindow):
             f"{dlg._doc} — {getattr(dlg, 'request', '')}",
             getattr(dlg, "_all_responses", {}),
             getattr(dlg, "_stage_agents_map", {}),
-            getattr(dlg, "_links", {}))
+            getattr(dlg, "_links", {}),
+            artifacts=getattr(dlg, "_produced_files", []))
 
     def _open_gerber(self):
         # Licence feature is "boq" for now — see the comment in
@@ -1994,6 +1996,7 @@ class MainWindow(QMainWindow):
             return
 
         self._run_id = getattr(auth, "run_id", "")
+        self._followup_round = 0     # a fresh task resets the refinement-loop cap
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
@@ -2457,7 +2460,8 @@ class MainWindow(QMainWindow):
 
     # ── post-completion follow-up ─────────────────────────────────────────
     def _offer_followup_for_dialog(self, query: str, responses: dict,
-                                   stage_agents: dict, links: dict):
+                                   stage_agents: dict, links: dict,
+                                   artifacts: list | None = None):
         """Bridge an add-on dialog's finished run into the post-completion
         follow-up.
 
@@ -2476,6 +2480,11 @@ class MainWindow(QMainWindow):
         if not responses:
             return
         self._last_query = query
+        # Files the dialog produced directly. Its Excel/PDF/CSV are saved under
+        # their OWN Artifacts task folders, which the query-keyed gather in
+        # _offer_followup would otherwise miss (bug: only the query folder was
+        # read, so a BOQ follow-up never carried the priced Excel or tender PDF).
+        self._followup_extra_artifacts = [p for p in (artifacts or []) if p]
         self._stage_agents = dict(stage_agents or {})
         self.routing = {}
         # The refinement is its own small run, not a continuation of whatever
@@ -2498,8 +2507,17 @@ class MainWindow(QMainWindow):
         Skipped silently when there is nothing to refine or no Groq key to
         route with — the follow-up is a bonus, never a blocker.
         """
-        if not responses or not self.cfg.get("api_key"):
+        if not responses:
             return
+        # Loop cap: after several refinements in a row, offering yet another
+        # usually means the task should be restarted, not endlessly nudged.
+        if getattr(self, "_followup_round", 0) >= 5:
+            self.statusBar().showMessage(
+                i18n.t("That's several refinements — if it still isn't right, "
+                       "start a fresh task."), 6000)
+            return
+        # No Groq key no longer blocks the whole follow-up: the classify step
+        # degrades to an explicit-agent match or a manual step pick below.
         self._followup_links = links or {}
         # Gather what THIS task PRODUCED, up front. The engine saves every
         # stage's output (the BOQ PDF, the ChatGPT document, generated images)
@@ -2507,15 +2525,49 @@ class MainWindow(QMainWindow):
         # the REAL deliverable — an agentic tool leaves only messy process notes
         # in the chat — so the dialog SHOWS them as "what came back", and the
         # follow-up CARRIES them into the next step.
-        artifact_paths = []
+        import os
+        # The files THIS task produced, from two sources, merged and de-duped:
+        #  (1) files a dialog told us it produced directly (its Excel/PDF/CSV),
+        #      which live under their own task folders, and
+        #  (2) the query's Artifacts folder (where the engine saved each stage's
+        #      harvested browser output).
+        raw = list(getattr(self, "_followup_extra_artifacts", []))
         try:
-            import os
             art_dir = CB.config.artifact_task_dir(self._last_query)
-            artifact_paths = [os.path.join(art_dir, n)
-                              for n in sorted(os.listdir(art_dir))
-                              if os.path.isfile(os.path.join(art_dir, n))]
+            raw += [os.path.join(art_dir, n) for n in sorted(os.listdir(art_dir))]
         except Exception:                               # noqa: BLE001
             pass
+        # Keep real deliverables only: no `.link.txt` URL sidecars (one-line
+        # conversation links, not files), nothing over 40 MB (a rendered video
+        # must not be shipped as a follow-up upload), de-duped, existing files.
+        artifact_paths, seen = [], set()
+        for p in raw:
+            if not p or p in seen or p.endswith(".link.txt"):
+                continue
+            try:
+                if not os.path.isfile(p) or os.path.getsize(p) > 40 * 1024 * 1024:
+                    continue
+            except OSError:
+                continue
+            seen.add(p)
+            artifact_paths.append(p)
+        self._followup_extra_artifacts = []     # consumed; don't leak to the loop
+        # If no real file was produced — a stage whose deliverable is plain chat
+        # text with no Download button — write the result to a Markdown file so
+        # the follow-up still shows and carries a concrete artifact, not just a
+        # recap. (Full canvas/DOM capture for such stages is a separate engine
+        # effort; this is the safe GUI-side floor.)
+        if not artifact_paths:
+            try:
+                summ = self._result_summary(responses)
+                if summ.strip():
+                    md = os.path.join(
+                        CB.config.artifact_task_dir(self._last_query), "result.md")
+                    with open(md, "w", encoding="utf-8") as f:
+                        f.write(summ)
+                    artifact_paths = [md]
+            except Exception:                           # noqa: BLE001
+                pass
         from dialogs.followup_dialog import FollowupDialog
         dlg = FollowupDialog(self._result_summary(responses), self,
                              artifacts=artifact_paths)
@@ -2524,8 +2576,7 @@ class MainWindow(QMainWindow):
             return
         self._followup_text = dlg.followup_text()
         self._followup_responses = responses
-        # Attachments = files the person just added + the artifacts this task
-        # produced, so a follow-up step builds on the real deliverable.
+        # Attachments = files the person just added + the produced deliverables.
         atts = []
         for p in list(dlg.file_paths()) + artifact_paths:
             if p and p not in {a.get("path") for a in atts}:
@@ -2538,14 +2589,23 @@ class MainWindow(QMainWindow):
         # means the Perplexity step — not a guess, and not a silent fall-back
         # to "the last AI" when the Groq classify can't run. Only when no agent
         # is named do we ask the classifier what the note is about.
+        import re
         low = self._followup_text.lower()
         for s, agent in self._stage_agents.items():
-            if agent and s in responses and agent.lower() in low:
+            # Word-boundary match, not substring — "unlike ChatGPT, shorten it"
+            # must NOT force-route to the ChatGPT step.
+            if agent and s in responses and re.search(
+                    rf"\b{re.escape(agent.lower())}\b", low):
                 self.statusBar().showMessage(
                     i18n.t("Sending your follow-up to {agent}.").format(
                         agent=agent), 4000)
                 self._on_followup_routed(s)
                 return
+        # No agent named. With a Groq key, ask the classifier which step; without
+        # one, ask the person rather than guessing.
+        if not self.cfg.get("api_key"):
+            self._on_followup_routed(self._pick_followup_stage(responses))
+            return
         # Auto-route: which finished step is this follow-up about?
         info = [{"stage": s,
                  "agent": self._stage_agents.get(s, ""),
@@ -2559,16 +2619,56 @@ class MainWindow(QMainWindow):
         self._workers.append(worker)
         worker.start()
 
+    def _pick_followup_stage(self, responses: dict) -> str:
+        """Ask which finished step a follow-up is about — used when there's no
+        Groq key to auto-route, or the classifier came back unsure. Returns the
+        stage key, or "" if the person cancelled."""
+        from widgets.agents_panel import STAGE_COPY
+        order = list(self._stage_agents.keys()) or list(responses.keys())
+        stages = [s for s in order if s in responses]
+        if len(stages) <= 1:
+            return stages[0] if stages else ""
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.t("Which step?"))
+        box.setText(i18n.t("Which step is your follow-up about?"))
+        picks = {}
+        for s in stages:
+            name = (STAGE_COPY.get(s) or (None, s.title()))[1]
+            agent = self._stage_agents.get(s, "")
+            b = box.addButton(name + (f"  ·  {agent}" if agent else ""),
+                              QMessageBox.AcceptRole)
+            picks[b] = s
+        box.addButton(i18n.t("Cancel"), QMessageBox.RejectRole)
+        box.exec()
+        return picks.get(box.clickedButton(), "")
+
     def _on_followup_routed(self, target_stage: str):
-        """The classifier picked the step; send the follow-up to its agent by
-        re-running just that one stage (custom_stages) with the prior output as
-        context plus any new attachments."""
+        """Send the follow-up to a finished step's agent by re-running just that
+        one stage (custom_stages) with the prior output + any new attachments."""
         responses = getattr(self, "_followup_responses", {})
         if not responses:
             return
-        if target_stage not in responses:              # unsure → the last step
-            target_stage = list(responses.keys())[-1]
+        # An invalid/empty target means the classifier was unsure — ASK which
+        # step rather than silently firing the last (maybe expensive) one.
+        if target_stage not in responses:
+            target_stage = self._pick_followup_stage(responses)
+        if not target_stage:                # the person cancelled the pick
+            self.statusBar().clearMessage()
+            return
         agent = self._stage_agents.get(target_stage, "")
+        # Confirm before re-running a slow/premium make-stage — a mis-route there
+        # costs minutes and (on metered tools) money.
+        if target_stage in {"media", "presentation", "development", "visual"}:
+            from widgets.agents_panel import STAGE_COPY
+            name = (STAGE_COPY.get(target_stage)
+                    or (None, target_stage.title()))[1]
+            if QMessageBox.question(
+                    self, i18n.t("Send follow-up?"),
+                    i18n.t("This re-runs the {name} step ({agent}), a slow one. "
+                           "Send it?").format(name=name, agent=agent or "?"),
+                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                self.statusBar().clearMessage()
+                return
         prior = "\n\n".join(responses.get(target_stage) or [])
         att_note = (" New file(s) are attached to this chat — use them."
                     if getattr(self, "_followup_attachments", None) else "")
@@ -2591,6 +2691,12 @@ class MainWindow(QMainWindow):
         another follow-up when it completes). `resume_url`, when known, reopens
         the SAME conversation the stage answered in, so the follow-up continues
         that chat with its full context instead of starting a fresh one."""
+        # The refined output the engine is about to save is keyed by this
+        # follow-up text (the query passed below), so re-point _last_query at it.
+        # Otherwise the NEXT follow-up re-reads the ORIGINAL task's folder and
+        # shows/attaches stale files instead of the ones just refined.
+        self._last_query = self._followup_text
+        self._followup_round = getattr(self, "_followup_round", 0) + 1
         run_agents = {stage: agent}
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = {**self._stage_agents, **run_agents}

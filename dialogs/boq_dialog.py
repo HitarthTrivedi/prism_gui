@@ -83,6 +83,10 @@ class BoqDialog(PrismDialog):
 
         self.cad_path = ""
         self.dxf_path = ""      # readable DXF from measuring (a .dwg is converted)
+        # Real files this session produced (CSV, priced Excel, tender PDF) — handed
+        # to the post-completion follow-up so it carries the actual deliverables,
+        # which live under their own Artifacts task folders the run's own key misses.
+        self._produced_files: list[str] = []
         self.templates: list[dict] = []
         self.images: list[dict] = []
         self.notes: list[dict] = []
@@ -478,6 +482,7 @@ class BoqDialog(PrismDialog):
         self.csv_path = os.path.join(
             CB.config.RUNS_DIR, f"boq_quantities_{int(time.time())}.csv")
         self.boq.write_quantities_csv(q, self.csv_path)
+        self._produced_files.append(self.csv_path)
         # A real, usable file — the numbers a customer or estimator would
         # want to keep even if they never open the formatted deck. RUNS_DIR
         # is a hidden working folder; Artifacts is where a copy survives.
@@ -713,6 +718,7 @@ class BoqDialog(PrismDialog):
                 kind="boq", task=f"{self._doc} — priced")
         except Exception:                               # noqa: BLE001
             pass
+        self._produced_files.append(out)
         self.status.setText(f"Priced {self._noun} saved → {out}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(out))
 
@@ -753,6 +759,7 @@ class BoqDialog(PrismDialog):
                 kind="boq", task=f"{self._doc} — tender PDF")
         except Exception:                               # noqa: BLE001
             pass
+        self._produced_files.append(path)
         self.status.setText(f"Tender PDF saved → {path}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
