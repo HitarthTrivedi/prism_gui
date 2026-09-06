@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+from addons import registry
 import i18n
 import theme
 import wakeword
@@ -55,6 +56,15 @@ class BoqDialog(PrismDialog):
         self.mode = "bom" if mode == "bom" else "boq"
         self._doc = "Bill of Materials" if self.mode == "bom" else "Bill of Quantities"
         self._noun = "BOM" if self.mode == "bom" else "BOQ"
+        # The run-title prefix comes from this add-on's OWN manifest, so this
+        # dialog and History cannot disagree about it. They did, silently,
+        # from 6b16cbb until now: that commit scaffolded BOM mode and
+        # switched these titles from a hardcoded "BOQ" to self._doc, so every
+        # run was recorded as "Bill of Quantities — …" while the prefix table
+        # still said "BOQ — ". History matched none of them — no chip, no
+        # prefix stripped, and the front door could not find its own recent
+        # runs. Nothing raised, so nothing said so.
+        self._run_prefix = registry.by_key(self.mode).run_prefixes[0]
         super().__init__(
             i18n.t(self._doc),
             i18n.t("Attach a drawing and it is measured here, on this "
@@ -323,7 +333,7 @@ class BoqDialog(PrismDialog):
         try:
             CB.config.save_artifact(
                 self.csv_path, os.path.basename(self.cad_path), kind="boq",
-                task=f"{self._doc} — {self.request}")
+                task=f"{self._run_prefix}{self.request}")
         except Exception:                               # noqa: BLE001
             pass
         note = "  ".join(notes)
@@ -528,7 +538,7 @@ class BoqDialog(PrismDialog):
                 pass
 
         self._worker = AutomationWorker(
-            {}, self.cfg, files, f"{self._doc} — {self.request}",
+            {}, self.cfg, files, f"{self._run_prefix}{self.request}",
             custom_stages=[("format", self.writer_agent, [prompt])],
             chatgpt_analysis=False)
         self._worker.done.connect(self._on_written)

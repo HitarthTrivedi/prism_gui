@@ -25,7 +25,13 @@ MANIFEST = Addon(
     # Matched against titles written as f-strings inside the dialog. Never
     # translate these: a translated prefix matches nothing and History
     # silently empties in Hindi.
-    run_prefixes=("BOQ — ", "/boq "),
+    # "Bill of Quantities — " is here for run records written between
+    # 6b16cbb (which scaffolded BOM mode and replaced the hardcoded "BOQ"
+    # with self._doc) and the fix. Every BOQ run in that window is titled
+    # with the long form, and History matched none of them. Keeping it means
+    # those records are recognised retrospectively rather than staying
+    # orphaned; the dialog writes the short form again from now on.
+    run_prefixes=("BOQ — ", "Bill of Quantities — ", "/boq "),
     engine=("boq",),
     # What Inquiry actually needs when an order arrives with a drawing
     # attached. Inquiry hands paths; BOQ decides what an attachment is --

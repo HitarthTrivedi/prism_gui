@@ -51,7 +51,9 @@ MANIFEST = Addon(
     provided_by="boq",
     probe="core_bridge:boq_available",
     kind="bom",
-    run_prefixes=("BOM — ", "/bom "),
+    # "Bill of Materials — " for records written before the fix; see the
+    # matching note in addons/boq/addon.py.
+    run_prefixes=("BOM — ", "Bill of Materials — ", "/bom "),
     engine=("boq",),
     offers=(Offer(names.LIST_PARTS,
                   "addons.bom.contract:open_with_files",
