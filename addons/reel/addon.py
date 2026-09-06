@@ -6,6 +6,7 @@ from addons.manifest import ACCENT, HOME, Addon
 MANIFEST = Addon(
     key="reel",
     label="Reel / Studio",
+    chip="Reel",                # the history pill has no room for both names
     feature="reel",
     tip="A short video from a task",
     blurb="A short video from a task",

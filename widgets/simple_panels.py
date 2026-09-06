@@ -47,6 +47,7 @@ import core_bridge as CB
 import dashboard_data as DATA
 import i18n
 import theme
+from addons import registry
 from widgets import controls as C
 from widgets import icons
 
@@ -74,14 +75,13 @@ LABELS = {
 }
 
 # Which add-on wrote a run record, in the word a History row wears.
-ADDONS = {
-    "boq": "BOQ",
-    "bom": "BOM",
-    "gerber": "Gerber",
-    "email": "Email",
-    "reel": "Reel",
-    "motion": "Motion",
-}
+# DERIVED from addons/registry.py. This was the third list of the same
+# add-ons and it had its own membership again -- no inquiry, unlike the other
+# two -- which is now simply "the ones that write run records", i.e. the ones
+# with a kind. The short names come from the manifest's `chip` field: the
+# pill has room for "Reel", not "Reel / Studio".
+ADDONS = {a.kind or a.key: a.chip_label()
+          for a in registry.REGISTRY if a.run_prefixes}
 
 # History's date groups, coarsest last. Returned by _bucket() and translated
 # at render time — the literals are here so the extractor can see them.
@@ -107,14 +107,17 @@ _CATEGORY_ICONS = {
 #   gerber_dialog.py:247  f"Gerber — {…}"
 #   email_dialog.py:604   f"/email {goal}"
 #   prism.py (the CLI)    "/boq …", "/email …", "/reel …"
-_RUN_PREFIXES = (
-    ("boq", ("BOQ — ", "/boq ")),
-    ("bom", ("BOM — ", "/bom ")),
-    ("gerber", ("Gerber — ", "/gerber ")),
-    ("email", ("/email ",)),
-    ("reel", ("/reel ",)),
-    ("motion", ("motion — ", "/motion ")),
-)
+# DERIVED. The hand-written version carried a comment listing the four OTHER
+# files whose f-strings it was matching against -- boq_dialog, gerber_dialog,
+# email_dialog and the CLI's prism.py -- with nothing tying them together and
+# no test that would notice if one changed. Change a title f-string and
+# History silently stopped recognising that add-on's runs.
+#
+# They still have to agree with those f-strings; what has changed is that
+# there is now one place to look, and tests/test_addon_contract.py asserts
+# these are unique and never translatable.
+_RUN_PREFIXES = tuple((a.kind or a.key, a.run_prefixes)
+                      for a in registry.REGISTRY if a.run_prefixes)
 
 # dashboard_data.recent_runs() substitutes this when a record carries no query
 # at all. Matching the sentinel is the only way, from the shaped row, to tell

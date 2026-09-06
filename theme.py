@@ -476,6 +476,28 @@ def apply_role(hue: int) -> None:
                     ACCENT_RAMP[700], NEUTRAL[800], "#486077"]
 
 
+def tone(name: str) -> str:
+    """Resolve an add-on's tone TOKEN to a colour, at call time.
+
+    addons/manifest.py stores a token ("accent", "ok", "warn", "muted")
+    rather than a colour, and this is where it becomes one. The lateness is
+    the whole point.
+
+    widgets/sidebar.py used to hold theme.ACCENT/OK/WARN directly in its
+    ADDONS table, which freezes them at IMPORT time -- before apply_role()
+    has run. Because apply_role rebinds ACCENT but not OK or WARN, a frozen
+    accent stayed Prism blue in a role that had moved everything else while
+    the OK and WARN rows looked fine, so the staleness only ever affected
+    some of the shelf and was correspondingly hard to see.
+
+    Reading the module global here means the answer is whatever apply_role
+    last set, which is exactly what that function's own docstring asks for:
+    "A derived constant that is not on this list is a latent bug."
+    """
+    return {"accent": ACCENT, "ok": OK, "warn": WARN,
+            "muted": NEUTRAL[400]}.get(name, ACCENT)
+
+
 def role_stylesheet(qss: str, hue: int) -> str:
     """Rewrite every accent hex in the stylesheet to the role's hue.
 

@@ -1,11 +1,24 @@
 """Motion Graphics — a scene-graph video with camera, charts and diagrams."""
 from __future__ import annotations
 
-from addons.manifest import ACCENT, HOME, Addon
+from addons.manifest import ACCENT, HOME, SOON, Addon
 
 MANIFEST = Addon(
     key="motion",
     label="Motion Graphics",
+    # NOT built yet, and this is the honest place to say so. The engine's own
+    # core/motion/render.py carries _DISABLED_PENDING_ASSET_FIX = True and
+    # is_available() returns False unconditionally, so CB.motion_available()
+    # can never say yes in this release.
+    #
+    # Until now that fact lived in a hardcoded tuple inside a render method --
+    # `soon = key in ("bom", "motion")` in widgets/home_panel.py -- which is
+    # an EIGHTH place add-on identity was written down, and not even a table.
+    # It is also why BOM was unclickable: BOM shipped and works
+    # (boq_available() is True), but it was still sitting in that tuple next
+    # to Motion, which genuinely does not.
+    status=SOON,
+    chip="Motion",              # the history pill has no room for both words
     # The same licence feature as Reel/Studio -- Motion is the same "media"
     # capability tier, not a separate purchase, matching the existing
     # "Prism Reel"/"Prism Studio" -> "reel" agent mapping.

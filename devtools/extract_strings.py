@@ -168,6 +168,19 @@ COPY_TABLES = {
     "STATUS_COPY", "STATES", "STEP_COPY", "COPY", "LABELS", "TIPS",
     "PLACEHOLDERS", "SKIP", "SOON",
     "MORE", "ADDONS", "DIRECT", "SECTIONS", "CARDS", "TABS", "STEPS",
+    # addons/<key>/addon.py's `MANIFEST = Addon(...)`. The rail and Home
+    # tables are now comprehensions over the registry, so their labels and
+    # tips are no longer literals where this scan can see them -- they live
+    # in the manifests instead, and without this line every add-on's name and
+    # description would silently ship untranslatable.
+    #
+    # _is_copy() already sorts the wheat from the chaff in an Addon call:
+    # "Gerber" is copy; "gerber" and "accent" are rejected as lowercase;
+    # "addons.gerber.contract:open_with_files" is rejected for the dot; and
+    # "Gerber — " is rejected for the trailing space -- which is exactly what
+    # the run prefixes need, since a TRANSLATED prefix would match nothing and
+    # History would silently empty in Hindi.
+    "MANIFEST",
     "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
     "ROW_ACTIONS", "REGISTER_RANGES", "OPEN_LABEL",
 }

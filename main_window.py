@@ -31,6 +31,7 @@ import paths
 import theme
 import updater
 import workspace
+from addons import registry
 from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.home_panel import HomePanel
@@ -131,11 +132,18 @@ def _retire_listener(listener, wait_ms: int = 3000) -> None:
 
     listener.finished.connect(_drop)
 
-# Routed agents that belong to a paid add-on. The rail gate alone would miss
-# these: the router can put Prism Reel into a plan without the customer ever
-# touching the Reel item in the sidebar.
-AGENT_FEATURES = {"Prism Reel": "reel", "Prism Studio": "reel",
-                  "Prism Motion": "reel"}
+# Routed agents that belong to a paid add-on, DERIVED from the manifests.
+# The rail gate alone would miss these: the router can put Prism Reel into a
+# plan without the customer ever touching the Reel item in the sidebar -- and
+# Reel is not even ON the rail, so for that one there is no other gate at all.
+#
+# The keys are AGENT_REGISTRY display names, which the licence server also
+# uses to key its published payload overrides. Renaming one silently breaks
+# both this gate and that payload row, which is why addons/<key>/addon.py
+# says so beside every `agents=` entry.
+AGENT_FEATURES = {agent: addon.feature
+                  for addon in registry.REGISTRY
+                  for agent in addon.agents}
 
 
 class MainWindow(QMainWindow):

@@ -93,6 +93,11 @@ class Addon:
     # ── how it is drawn ──────────────────────────────────────────────────
     tip: str = ""                     # rail hover copy
     blurb: str = ""                   # Home summary row copy
+    # The short form, for the width-constrained history pill. A real third
+    # piece of copy, not a truncation: the shelf says "Reel / Studio" and
+    # "Motion Graphics" where the pill has room only for "Reel" and "Motion".
+    # Empty means "same as label", which is true of every other add-on.
+    chip: str = ""
     icon: str = "file"
     tone: str = ACCENT
     order: int = 100
@@ -130,6 +135,9 @@ class Addon:
     # ── talking to other add-ons ─────────────────────────────────────────
     offers: tuple[Offer, ...] = ()
     wants: tuple[str, ...] = ()
+
+    def chip_label(self) -> str:
+        return self.chip or self.label
 
     def on_shelf(self, shelf: str) -> bool:
         return shelf in self.shelves and self.status != HIDDEN
