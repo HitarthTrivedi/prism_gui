@@ -21,7 +21,8 @@ MANIFEST = Addon(
     # PRECONDITION the route puts in front of the compose window when no
     # sending account is configured, and it is also reachable on its own from
     # the panel header; it is not the thing the add-on is for.
-    dialog="dialogs.email_dialog:EmailComposeDialog",
+    dialog="addons.email.dialog:EmailComposeDialog",
+    panel="addons.email.panel:EmailPanel",
     kind="email",
     # No display prefix, only the slash command: Email's runs are titled by
     # their subject line, which is the customer's text and therefore cannot

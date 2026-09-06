@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 import i18n
-import sent_log
+from addons.email import sent_log
 import theme
 from widgets import controls as C
 from widgets.controls import Card

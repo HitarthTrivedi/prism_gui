@@ -44,7 +44,7 @@ from widgets.tour import TourOverlay
 from addons.bom.panel import BomPanel
 from addons.boq.panel import BoqPanel
 from widgets.catalog_panel import CatalogPanel
-from widgets.email_panel import EmailPanel
+from addons.email.panel import EmailPanel
 from addons.gerber.panel import GerberPanel
 from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
@@ -62,7 +62,7 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
 import wakeword
 from wakeword import WakeWordListener
 from dialogs.ai_directory_dialog import AIDirectoryDialog
-from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
+from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
 from dialogs.reel_dialog import ReelDialog

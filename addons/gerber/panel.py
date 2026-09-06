@@ -57,8 +57,3 @@ class GerberPanel(AddonFrontDoor):
              next((agents[s] for s in ("content", "brains")
                    if agents.get(s)), "")),
         ]
-
-
-# EmailPanel lives in widgets/email_panel.py now — a launcher in the shape
-# of the Email-automation screen, not a brochure. Re-exported here so the
-# import path the rest of the app and the tests use keeps working.

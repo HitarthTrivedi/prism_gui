@@ -4,9 +4,10 @@ Inquiry sends quotes, chasers and PO confirmations, and today does it by
 reaching for the mailer itself. Routing that through SEND_MAIL is what lets
 Email move into addons/email/ without Inquiry following it.
 
-The dialog still lives in dialogs/email_dialog.py -- Email has not moved
-yet -- and that is fine: a contract names where the work happens TODAY and
-changes when the work moves. Nothing outside this file has to know.
+Note what did NOT change when Email's dialog moved from dialogs/ into this
+package: the intent name, and therefore every caller. A contract names where
+the work happens today and is the only thing that has to be edited when the
+work moves. That is the property being bought.
 """
 from __future__ import annotations
 
@@ -29,5 +30,5 @@ def compose_with_files(parent, cfg: dict, paths, mode: str = "one") -> None:
         except Exception:                               # noqa: BLE001
             continue
 
-    from dialogs.email_dialog import EmailComposeDialog
+    from addons.email.dialog import EmailComposeDialog
     EmailComposeDialog(cfg, attachments, parent, mode=mode).exec()

@@ -1,4 +1,4 @@
-"""The Email add-on's front door — widgets/simple_panels.py::EmailPanel.
+"""The Email add-on's front door — addons/email/panel.py::EmailPanel.
 
 Before this, EmailSetupDialog only ever opened itself the first time, from
 MainWindow._open_email_dialog(), which is guarded by
@@ -17,11 +17,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
+from unittest import mock  # noqa: E402
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from dialogs.email_dialog import EmailSetupDialog  # noqa: E402
-from widgets.email_panel import EmailPanel  # noqa: E402
+import plans  # noqa: E402
+from addons.email.dialog import EmailSetupDialog  # noqa: E402
+from addons.email.panel import EmailPanel  # noqa: E402
+from test_gates import GateTest  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -53,23 +56,51 @@ class TheChangeAccountDoor(unittest.TestCase):
         change.click()
         self.assertEqual(seen, ["setup"])
 
-    def test_main_window_wires_it_to_the_setup_dialog(self):
-        """A source check, in keeping with how this app already proves the
-        inquiry screen is routed (tests/test_inquiry_ui.py::ItIsOnTheShelf) —
-        constructing a real MainWindow pulls in the licence client for a test
-        that is really about one signal connection."""
-        path = os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), "main_window.py")
-        with open(path, encoding="utf-8") as f:
-            source = f.read()
-        self.assertIn("email_panel.change_account.connect(self._open_email_setup)",
-                      source)
-        self.assertIn("def _open_email_setup(self):", source)
-        setup_body = source.split("def _open_email_setup(self):", 1)[1]
-        setup_body = setup_body.split("\n    def ", 1)[0]
-        self.assertNotIn("is_configured", setup_body,
-                         "must open unconditionally, not only when unset")
-        self.assertIn("EmailSetupDialog(self.cfg, self)", setup_body)
+class MainWindowActuallyWiresIt(GateTest):
+    """This was a SOURCE CHECK -- it read main_window.py as text and grepped
+    for "email_panel.change_account.connect(self._open_email_setup)".
+
+    Its own docstring gave the reason: "constructing a real MainWindow pulls
+    in the licence client for a test that is really about one signal
+    connection." That was true when it was written and is not any more --
+    test_gates.GateTest exists precisely to stub the licence client and build
+    a real window.
+
+    A source check tests how code is SPELLED. It passes if the line exists
+    and nothing connects it; it fails on a refactor that changes nothing
+    about behaviour; and it cannot see whether the signal actually arrives.
+    All three of those matter more than usual right now, because Email's
+    panel and dialog have just moved packages.
+    """
+
+    def test_change_account_opens_setup(self):
+        import main_window
+        self.grant(tuple(plans.FEATURES))
+        win = self._window()
+        with mock.patch.object(main_window.MainWindow,
+                               "_open_email_setup") as opened:
+            win.email_panel.change_account.emit()
+        self.assertTrue(
+            opened.called,
+            "the panel's Change account signal is not connected to the "
+            "window, so the button does nothing")
+
+    def test_setup_opens_even_when_an_account_is_already_configured(self):
+        """The bug this whole file defends. EmailSetupDialog used to open
+        only from the compose route, behind `not is_configured(cfg)` -- so
+        once an account was saved there was no way back in short of editing
+        the config file by hand. A wrong password had no door."""
+        import main_window
+        self.grant(tuple(plans.FEATURES))
+        win = self._window()
+        win.cfg = {"email": {"address": "sales@acme.co.in", "password": "p"}}
+        with mock.patch.object(main_window, "EmailSetupDialog") as dialog:
+            dialog.return_value.exec.return_value = 0
+            win._open_email_setup()
+        self.assertTrue(
+            dialog.called,
+            "_open_email_setup did not open the dialog when an account was "
+            "already configured -- the door has closed again")
 
 
 class ThePasswordNeverReadsAsLost(unittest.TestCase):
