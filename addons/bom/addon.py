@@ -6,7 +6,17 @@ from addons.manifest import ACCENT, RAIL, HOME, Addon, Offer
 
 MANIFEST = Addon(
     key="bom",
-    label="BOM",
+    # "BOM & Stock" is what the customer actually bought -- it is the name in
+    # plans.FEATURES["bom"] and it was already the name on Home. The rail said
+    # just "BOM", a fourth drift on the same add-on. The SKU name wins: it is
+    # the one a customer can match against their licence.
+    #
+    # Safe on the shelf despite the ampersand, because AddonRow draws its name
+    # through an _Elided QLabel rather than through the button's own setText,
+    # and QLabel does not read "&" as an accelerator. sidebar._amp() is for the
+    # rows that DO use setText.
+    label="BOM & Stock",
+    chip="BOM",                 # the history pill, where there is no room
     # Rides "boq" for a different reason than Gerber does. A "bom" key DOES
     # exist in plans.FEATURES and is sellable -- but the licence server has
     # never been told about it, and the add-on ships as a mode inside the BOQ

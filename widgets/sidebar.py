@@ -276,6 +276,10 @@ class AddonRow(QPushButton):
     CHIP = 24
 
     def __init__(self, label: str, icon_name: str, hue: str, parent=None):
+        # No _amp() here, deliberately, even though this IS a QPushButton:
+        # the name is drawn by the _Elided QLabel below rather than by the
+        # button's own text, and QLabel does not read "&" as an accelerator.
+        # Escaping it would put a literal "&&" on the shelf.
         super().__init__(parent)
         self.setObjectName("navSub")
         self.setCursor(Qt.PointingHandCursor)
