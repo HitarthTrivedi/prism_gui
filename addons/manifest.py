@@ -107,7 +107,8 @@ class Addon:
     # Dotted "module:attr" strings, resolved lazily by the registry. Strings
     # rather than imports so this module stays stdlib-only and so the shell
     # never imports an add-on to find out that it exists.
-    screen: str = ""                  # a panel in the main stack
+    screen: str = ""                  # the stack page's name
+    panel: str = ""                   # "addons.gerber.panel:GerberPanel"
     dialog: str = ""                  # a modal
     entry: str = ""                   # anything else
 

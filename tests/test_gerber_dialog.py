@@ -31,8 +31,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sample_jobs  # noqa: E402
 
-from dialogs import gerber_dialog as GD  # noqa: E402
-from dialogs.gerber_dialog import GerberDialog  # noqa: E402
+from addons.gerber import dialog as GD  # noqa: E402
+from addons.gerber.dialog import GerberDialog  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -159,7 +159,7 @@ class AnAgentOnlyEverSeesTheNumbers(unittest.TestCase):
                 "measuring did not finish in time on this machine")
 
     def _capture_write(self, context=""):
-        import dialogs.gerber_dialog as mod
+        import addons.gerber.dialog as mod
         seen = {}
 
         class Fake:
@@ -242,7 +242,7 @@ class WithNoWritingAgentConfigured(unittest.TestCase):
                 "measuring did not finish in time on this machine")
 
     def test_it_warns_instead_of_calling_an_agent_with_nothing_set_up(self):
-        import dialogs.gerber_dialog as mod
+        import addons.gerber.dialog as mod
         with mock.patch.object(mod.QMessageBox, "warning") as warned, \
              mock.patch.object(mod, "AutomationWorker") as auto:
             self.dlg._write_up()
@@ -333,7 +333,7 @@ class TheDialogMeasuresARealJob(unittest.TestCase):
         if not _measure_and_join(dlg, [self._two_fast_jobs_folder()],
                                  timeout_s=30):
             self.skipTest("measuring did not finish in time on this machine")
-        import dialogs.gerber_dialog as mod
+        import addons.gerber.dialog as mod
         fired = []
         # This path shows QMessageBox.information — a real modal — before it
         # ever gets near AutomationWorker. Patch it rather than let it block
@@ -409,7 +409,7 @@ class TheAIFillSeesOnlyTheDocuments(unittest.TestCase):
     exactly the user's documents — never a path into the Gerber job."""
 
     def test_only_extra_docs_reach_the_worker(self):
-        import dialogs.gerber_dialog as mod
+        import addons.gerber.dialog as mod
         dlg = _dialog()
         # A measured job with a filled form, staged by hand.
         doc = os.path.join(tempfile.mkdtemp(), "inquiry.csv")

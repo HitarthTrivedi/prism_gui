@@ -220,6 +220,35 @@ def _selftest(app) -> int:
     checks.append(("main window", win.isVisible()))
     checks.append(("sidebar", win.sidebar.width() > 0))
 
+    # ── the add-on census ────────────────────────────────────────────────
+    # The single worst failure mode this restructure can produce: an add-on
+    # invisible to PyInstaller's analyser, so development is perfect, the
+    # build succeeds, and the customer opens a windowed executable with an
+    # empty shelf and no console to say why.
+    #
+    # Counting is not enough -- a manifest is just data and will import
+    # anywhere. So this also RESOLVES every dotted reference each manifest
+    # names, which is what actually proves the panels and dialogs reached
+    # the archive. packaging/smoke_test.py runs this against the real
+    # executable, which is the only place the answer can differ.
+    from addons import registry
+    unresolved = []
+    for addon in registry.REGISTRY:
+        for field in ("panel", "dialog", "probe"):
+            dotted = getattr(addon, field, "")
+            if not dotted:
+                continue
+            try:
+                if registry.resolve(dotted) is None:
+                    unresolved.append(f"{addon.key}.{field}={dotted}")
+            except Exception as exc:                    # noqa: BLE001
+                unresolved.append(f"{addon.key}.{field}={dotted} ({exc})")
+    checks.append((f"add-ons registered ({len(registry.REGISTRY)})",
+                   len(registry.REGISTRY) == registry.EXPECTED))
+    checks.append(("add-on entry points resolve"
+                   + (f" — {', '.join(unresolved)}" if unresolved else ""),
+                   not unresolved))
+
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

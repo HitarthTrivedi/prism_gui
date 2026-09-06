@@ -27,7 +27,10 @@ MANIFEST = Addon(
     order=30,
     shelves=(RAIL, HOME),
     screen="gerber",
-    dialog="dialogs.gerber_dialog:GerberDialog",
+    # The first add-on whose dotted strings point INSIDE its own package.
+    # Everything else still names its current home; this one has moved.
+    dialog="addons.gerber.dialog:GerberDialog",
+    panel="addons.gerber.panel:GerberPanel",
     probe="core_bridge:gerber_available",
     kind="gerber",
     run_prefixes=("Gerber — ", "/gerber "),
