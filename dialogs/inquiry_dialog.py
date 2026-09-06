@@ -255,18 +255,14 @@ class _TableOrEmpty(QStackedWidget):
 # for; the two "All …" tabs last because they are for looking things up, not
 # for the day's work. The numbers in the labels are the reading order and
 # are what the tests pin.
-TABS = [
-    ("to_quote", "1 · To quote"),
-    ("waiting", "2 · No answer yet"),
-    ("replies", "3 · They answered"),
-    ("orders", "4 · Order came"),
-    ("register", "5 · All inquiries"),
-    ("arrived", "6 · All mail"),
-]
-TAB_INDEX = {key: index for index, (key, _label) in enumerate(TABS)}
-# Tabs whose title carries a live count. The reference tabs do not: "All
-# inquiries (312)" is not a number anybody acts on.
-COUNTED_TABS = ("to_quote", "waiting", "replies", "orders")
+# Moved to inquiry_config.py and re-exported here, so everything that already
+# imports them from this module keeps working. widgets/inquiry_panel.py used
+# to reach into this 4,000-line dialog at MODULE SCOPE for these three names
+# -- the only widget->dialog import in the tree that was not a deferred "open
+# this modal", and so a real load-order dependency.
+from inquiry_config import (            # noqa: E402,F401
+    COUNTED_TABS, TAB_INDEX, TABS,
+)
 
 DRAWING_EXTENSIONS = (".dwg", ".dxf", ".pdf")
 
