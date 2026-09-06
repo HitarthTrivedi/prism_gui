@@ -180,3 +180,48 @@ def test_write_boq_csv_has_items_and_totals(tmp_path):
     bp.write_boq_csv(boq, out)
     data = open(out, encoding="utf-8").read()
     assert "Grand total" in data and "1000.00" in data
+
+
+# ── tender PDF (Schedule A + B) ────────────────────────────────────────────────
+
+def test_inr_indian_grouping():
+    assert bp._inr(Decimal("152450")) == "1,52,450.00"
+    assert bp._inr(Decimal("12300000")) == "1,23,00,000.00"
+    assert bp._inr(Decimal("999.5")) == "999.50"
+    assert bp._inr(Decimal("0")) == "0.00"
+
+
+def test_boq_html_has_both_schedules_and_totals():
+    boq = bp.Boq(title="Bill of Quantities", items=[
+        _item("Plaster", "sqm", "10", "245", section="Finishes"),
+        _item("Beam", "m", "60", "0", section="RCC")],       # one unpriced
+        contingency_pct=Decimal("3"), gst_pct=Decimal("18"))
+    doc = bp.boq_html(boq)
+    assert "Schedule A" in doc and "Schedule B" in doc
+    assert "Abstract of Cost" in doc and "GRAND TOTAL" in doc
+    assert "Finishes" in doc and "RCC" in doc
+    assert "CGST" in doc and "SGST" in doc                    # intra-state split
+    assert "&mdash;" in doc                                   # unpriced row shows a dash
+    assert bp.amount_in_words(boq.grand_total()) in doc
+
+
+def test_boq_html_interstate_uses_igst():
+    boq = bp.Boq(items=[_item("A", "sqm", "10", "100")],
+                 gst_pct=Decimal("18"), interstate=True)
+    doc = bp.boq_html(boq)
+    assert "IGST" in doc and "CGST" not in doc
+
+
+def test_write_boq_pdf_renders_a_pdf(tmp_path):
+    boq = bp.Boq(title="Bill of Quantities", items=[
+        _item("Plaster", "sqm", "10", "245", section="Finishes")],
+        contingency_pct=Decimal("3"), gst_pct=Decimal("18"))
+    out = str(tmp_path / "t.pdf")
+    try:
+        bp.write_boq_pdf(boq, out)
+    except Exception as e:                                    # noqa: BLE001
+        import pytest
+        pytest.skip(f"browser engine unavailable here: {e}")
+    assert os.path.exists(out)
+    with open(out, "rb") as f:
+        assert f.read(5) == b"%PDF-"

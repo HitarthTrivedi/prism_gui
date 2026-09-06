@@ -88,6 +88,27 @@ class RouteWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class BoqPdfWorker(_Worker):
+    """Render the tender PDF off the UI thread. Launching Chromium and printing
+    the Schedule A+B document takes a second or two; the window must not freeze
+    while it does."""
+
+    done = Signal(str)      # output path
+    failed = Signal(str)
+
+    def __init__(self, boq, out_path: str):
+        super().__init__()
+        self._boq = boq
+        self._out = out_path
+
+    def run(self):
+        try:
+            path = CB.get_boq_price().write_boq_pdf(self._boq, self._out)
+            self.done.emit(path)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class AutomationWorker(_Worker):
     stage_event = Signal(str, dict)
     done = Signal(dict, dict)
@@ -340,11 +361,13 @@ class MeasureWorker(_Worker):
     def __init__(self, path: str, unit: str = "", scope: list | None = None):
         super().__init__()
         self.path, self.unit, self.scope = path, unit, scope or []
+        self.dxf_path = ""      # the readable DXF (a .dwg gets converted to this)
 
     def run(self):
         try:
             boq = CB.get_boq()
             dxf_path, notes = boq.ensure_dxf(self.path)
+            self.dxf_path = dxf_path
             q = boq.measure(dxf_path)
             if self.unit:
                 boq.apply_known_unit(q, self.unit)

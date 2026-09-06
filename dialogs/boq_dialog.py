@@ -28,7 +28,7 @@ import i18n
 import theme
 import wakeword
 from dialogs.base import PrismDialog
-from workers import AutomationWorker, MeasureWorker, RecordWorker
+from workers import AutomationWorker, BoqPdfWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
 from widgets.ask_panel import AskPanel, MoreOptions
 from widgets.output_panel import short_duration
@@ -82,6 +82,7 @@ class BoqDialog(PrismDialog):
         self._pm = CB.bom if self.mode == "bom" else self.boq
 
         self.cad_path = ""
+        self.dxf_path = ""      # readable DXF from measuring (a .dwg is converted)
         self.templates: list[dict] = []
         self.images: list[dict] = []
         self.notes: list[dict] = []
@@ -90,6 +91,7 @@ class BoqDialog(PrismDialog):
         self.csv_path = ""
         self._worker = None
         self._rec = None
+        self._pdf_worker = None
         self._run_pending = False   # "Make my BOQ" pressed while still measuring
         # Task timing: t0 is when the run began, and _stage_log accumulates
         # (stage, seconds) as each stage finishes, so completion can report how
@@ -241,7 +243,7 @@ class BoqDialog(PrismDialog):
             on_click=lambda: (self._add_price_row(), self._recompute_totals()))
         crow.addWidget(self.load_rates_btn)
         crow.addWidget(self.add_row_btn)
-        crow.addSpacing(theme.SPACE_2)
+        crow.addStretch(1)          # actions on the left, tax params on the right
         # Compact: the "%" lives in the spinner suffix, so the labels stay short
         # and the whole row fits without widening the dialog.
         clab = QLabel(i18n.t("Cont.")); clab.setObjectName("meta")
@@ -270,24 +272,44 @@ class BoqDialog(PrismDialog):
             "Inter-state supply — one IGST line instead of CGST + SGST"))
         self.interstate_cb.toggled.connect(self._recompute_totals)
         crow.addWidget(self.interstate_cb)
-        crow.addStretch(1)
         pv.addWidget(controls)
 
+        # A clean total bar: a caption over the big figure, with a small unpriced
+        # note beneath, on the left; the deliverable buttons on the right. The
+        # figure is short so nothing wraps — the single wrapping label this
+        # replaced was the ungainly part.
         totals = QWidget()
         trow = QHBoxLayout(totals)
-        trow.setContentsMargins(0, 0, 0, 0)
-        self.total_label = QLabel("")
+        trow.setContentsMargins(0, theme.SPACE_2, 0, 0)
+        tcol = QVBoxLayout()
+        tcol.setContentsMargins(0, 0, 0, 0)
+        tcol.setSpacing(0)
+        cap = QLabel(i18n.t("Grand total (incl. GST)"))
+        cap.setObjectName("meta")
+        cap.setWordWrap(True)
+        self.total_label = QLabel("—")
         self.total_label.setObjectName("h4")
-        # Ignored width + wrap: this label must never demand its full one-line
-        # width (which dragged the whole dialog ~1600px wide). It takes the slack
-        # the button leaves and wraps if the window is narrow.
-        self.total_label.setWordWrap(True)
-        self.total_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        trow.addWidget(self.total_label, 1)
+        self.unpriced_label = QLabel("")
+        self.unpriced_label.setObjectName("meta")
+        self.unpriced_label.setStyleSheet(f"color:{theme.ERR_INK};")
+        self.unpriced_label.setWordWrap(True)
+        self.unpriced_label.setVisible(False)
+        tcol.addWidget(cap)
+        tcol.addWidget(self.total_label)
+        tcol.addWidget(self.unpriced_label)
+        trow.addLayout(tcol)
+        trow.addStretch(1)
+        # The tender PDF (Schedule A+B) is a works-BOQ deliverable; BOM mode,
+        # which bills a parts list, gets the Excel export only.
+        if self.mode == "boq":
+            self.pdf_btn = self.button(
+                i18n.t("Tender PDF"), "secondary", small=True,
+                on_click=self._export_tender_pdf)
+            trow.addWidget(self.pdf_btn, 0, Qt.AlignVCenter)
         self.export_btn = self.button(
-            f"Export priced Excel {self._noun}", "primary", small=True,
+            i18n.t("Export Excel"), "primary", small=True,
             on_click=self._export_priced_xlsx)
-        trow.addWidget(self.export_btn)
+        trow.addWidget(self.export_btn, 0, Qt.AlignVCenter)
         pv.addWidget(totals)
 
         self.price_box.setVisible(False)
@@ -311,26 +333,39 @@ class BoqDialog(PrismDialog):
         research_opts = list(cats.get("research", {}).get("agents", [])) or ["Perplexity"]
         self.writer_combo = QComboBox()
         self.writer_combo.addItems(writer_opts)
-        self.writer_combo.setMaximumWidth(170)
+        self.writer_combo.setMaximumWidth(150)
         self.research_combo = QComboBox()
         self.research_combo.addItems(research_opts)
-        self.research_combo.setMaximumWidth(170)
+        self.research_combo.setMaximumWidth(150)
         _preselect(self.writer_combo,
                    cfg_agents.get("content") or cfg_agents.get("brains"))
         _preselect(self.research_combo,
                    cfg_agents.get("research") or cfg_agents.get("brains"))
+        # ── Write it up with AI — the alternative to the priced export ──────
+        # A second card, matching "Price it" above: the AIs research the
+        # standards and format the document. Works with or without a drawing.
+        self.ai_box = QGroupBox(i18n.t("Write it up with AI"))
+        ai_l = QVBoxLayout(self.ai_box)
+        ai_l.setSpacing(theme.ROW_GAP)
+        ai_hint = QLabel(i18n.t(
+            "The AIs look up the standard sizes and norms and write the "
+            f"{self._noun} up as a formatted document — with or without a drawing."))
+        ai_hint.setObjectName("note")
+        ai_hint.setWordWrap(True)
+        ai_l.addWidget(ai_hint)
+
         picker = QWidget()
         prow = QHBoxLayout(picker)
         prow.setContentsMargins(0, 0, 0, 0)
         prow.setSpacing(theme.SPACE_2)
         wlab = QLabel(i18n.t("Write with")); wlab.setObjectName("meta")
-        rlab = QLabel(i18n.t("· Research with")); rlab.setObjectName("meta")
+        rlab = QLabel(i18n.t("· Research")); rlab.setObjectName("meta")
         prow.addWidget(wlab)
         prow.addWidget(self.writer_combo)
         prow.addWidget(rlab)
         prow.addWidget(self.research_combo)
         prow.addStretch(1)
-        root.addWidget(picker)
+        ai_l.addWidget(picker)
 
         # Everything technical lives here, shut by default.
         self.more = MoreOptions("More options")
@@ -351,8 +386,16 @@ class BoqDialog(PrismDialog):
             "Estimate items the drawing doesn't contain (marked as an estimate)")
         self.derive_cb.setChecked(True)
         self.more.add(self.derive_cb)
-        root.addWidget(self.more)
+        ai_l.addWidget(self.more)
 
+        self.result = QPlainTextEdit()
+        self.result.setReadOnly(True)
+        self.result.setPlaceholderText(f"Your {self._noun} will appear here.")
+        self.result.setMinimumHeight(120)
+        ai_l.addWidget(self.result, stretch=1)
+        root.addWidget(self.ai_box, stretch=1)
+
+        # Shared status line for both cards — measuring, exporting, or writing up.
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
@@ -361,21 +404,18 @@ class BoqDialog(PrismDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
-        self.result = QPlainTextEdit()
-        self.result.setReadOnly(True)
-        self.result.setPlaceholderText(f"Your {self._noun} will appear here.")
-        self.result.setMinimumHeight(120)
-        root.addWidget(self.result, stretch=1)
-
         self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
                                     icon_name="external", small=True,
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
         self.footer.add_utility(self.open_btn)
         self.footer.add_secondary(self.button(i18n.t("Close"), on_click=self.reject))
-        self.run_btn = self.button(f"Make my {self._noun}", "primary", icon_name="check",
-                                   on_click=self._run)
-        self.footer.set_primary(self.run_btn)
+        # Secondary, not the footer's primary: the priced export in the "Price
+        # it" card is now the main deliverable, so the AI write-up is the
+        # alternative rather than a second competing blue button.
+        self.run_btn = self.button(f"Make my {self._noun}", "secondary",
+                                   icon_name="check", on_click=self._run)
+        self.footer.add_secondary(self.run_btn)
 
         # Files already attached on the home screen come along automatically.
         if attachments:
@@ -426,6 +466,10 @@ class BoqDialog(PrismDialog):
 
     def _on_measured(self, q, notes: list):
         self.q = q
+        # The DXF the engine actually read (converted from a .dwg if needed) —
+        # attached to the AI write-up so it reads geometry with ezdxf in seconds
+        # instead of trying to build a converter itself.
+        self.dxf_path = getattr(self._measure_worker, "dxf_path", "")
         self.summary = self.boq.summary_text(q)
         self.meas_view.setPlainText(self.summary)
         self.meas_box.setVisible(True)
@@ -573,11 +617,10 @@ class BoqDialog(PrismDialog):
             shown = self.boqp.quoting.indian_currency(total)
         except Exception:                               # noqa: BLE001
             shown = f"₹ {total:,.2f}"
-        msg = f"Grand total (incl. GST): {shown}"
+        self.total_label.setText(shown)
         n = len(boq.unpriced())
-        if n:
-            msg += f"    ·    {n} item(s) still unpriced"
-        self.total_label.setText(msg)
+        self.unpriced_label.setText(f"{n} item(s) unpriced" if n else "")
+        self.unpriced_label.setVisible(bool(n))
 
     def _collect_boq(self):
         from datetime import date
@@ -672,6 +715,52 @@ class BoqDialog(PrismDialog):
             pass
         self.status.setText(f"Priced {self._noun} saved → {out}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(out))
+
+    def _export_tender_pdf(self):
+        """Render the Schedule A+B tender PDF — off the UI thread, because
+        launching the browser to print takes a second or two."""
+        import time
+        boq = self._collect_boq()
+        if not boq.items:
+            QMessageBox.information(
+                self, self._noun,
+                "Nothing to export yet — measure a drawing or add an item first.")
+            return
+        unpriced = boq.unpriced()
+        if unpriced:
+            ans = QMessageBox.question(
+                self, self._noun,
+                f"{len(unpriced)} item(s) have no rate yet — they'll show as "
+                "'—' and be excluded from the totals.\n\nExport the PDF anyway?",
+                QMessageBox.Yes | QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
+        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+        out = os.path.join(CB.config.RUNS_DIR, f"boq_tender_{int(time.time())}.pdf")
+        self._set_busy(True, "Rendering the tender PDF…")
+        self.pdf_btn.setEnabled(False)
+        self._pdf_worker = BoqPdfWorker(boq, out)
+        self._pdf_worker.done.connect(self._on_pdf_done)
+        self._pdf_worker.failed.connect(self._on_pdf_failed)
+        self._pdf_worker.start()
+
+    def _on_pdf_done(self, path: str):
+        self._set_busy(False, "")
+        self.pdf_btn.setEnabled(True)
+        try:
+            CB.config.save_artifact(
+                path, os.path.basename(self.cad_path or path),
+                kind="boq", task=f"{self._doc} — tender PDF")
+        except Exception:                               # noqa: BLE001
+            pass
+        self.status.setText(f"Tender PDF saved → {path}")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _on_pdf_failed(self, error: str):
+        self._set_busy(False, "")
+        self.pdf_btn.setEnabled(True)
+        QMessageBox.warning(self, self._noun,
+                            f"Couldn't render the tender PDF:\n\n{error}")
 
     # ── voice ───────────────────────────────────────────────────────────
 
@@ -850,9 +939,17 @@ class BoqDialog(PrismDialog):
             has_cad=bool(self.q))
 
         files = list(self.templates) + list(self.notes)
-        if self.q and self.cad_path:
+        # Attach the DXF the writer can actually read, for spatial context. For a
+        # .dwg source this is the DXF Prism ALREADY converted while measuring, so
+        # the writer reads the geometry with ezdxf in seconds instead of trying
+        # to build a converter itself. Prism has already measured it; the summary
+        # carries the numbers — this is only so the write-up can reason about
+        # WHERE things sit (zones, routes, counts) for any derived items.
+        dxf = self.dxf_path if self.dxf_path.lower().endswith(".dxf") else (
+            self.cad_path if self.cad_path.lower().endswith(".dxf") else "")
+        if self.q and dxf and os.path.exists(dxf):
             try:
-                files.insert(0, CB.files.attach(self.cad_path))
+                files.insert(0, CB.files.attach(dxf))
             except Exception:
                 pass
 
@@ -911,6 +1008,7 @@ class BoqDialog(PrismDialog):
         """
         for worker in (getattr(self, "_worker", None),
                        getattr(self, "_measure_worker", None),
+                       getattr(self, "_pdf_worker", None),
                        getattr(self, "_rec", None)):
             if worker is None or not worker.isRunning():
                 continue
