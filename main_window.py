@@ -41,10 +41,12 @@ from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
-from widgets.simple_panels import (
-    BomPanel, BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel,
-    HistoryPanel,
-)
+from widgets.boq_panel import BomPanel, BoqPanel
+from widgets.catalog_panel import CatalogPanel
+from widgets.email_panel import EmailPanel
+from widgets.gerber_panel import GerberPanel
+from widgets.guide_panel import GuidePanel
+from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
 from widgets.input_panel import InputPanel

@@ -21,7 +21,7 @@ import unittest
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from dialogs.email_dialog import EmailSetupDialog  # noqa: E402
-from widgets.simple_panels import EmailPanel  # noqa: E402
+from widgets.email_panel import EmailPanel  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 

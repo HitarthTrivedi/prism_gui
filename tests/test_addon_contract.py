@@ -309,16 +309,16 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
                     "says %r" % (agent, feature,
                                  registry.feature_of_agent(agent)))
 
-    def test_the_run_prefixes_match_simple_panels(self):
-        import widgets.simple_panels as simple_panels
+    def test_the_run_prefixes_match_the_panel_base(self):
+        import widgets.panel_base as panel_base
         live = {key: tuple(prefixes)
-                for key, prefixes in simple_panels._RUN_PREFIXES}
+                for key, prefixes in panel_base._RUN_PREFIXES}
         mine = {a.key: a.run_prefixes for a in registry.REGISTRY
                 if a.run_prefixes}
         self.assertEqual(
             mine, live,
             "the registry's run prefixes no longer reproduce "
-            "widgets/simple_panels._RUN_PREFIXES -- History would start "
+            "widgets/panel_base._RUN_PREFIXES -- History would start "
             "attributing runs to the wrong add-on, or to none")
 
 
