@@ -45,6 +45,7 @@ Qt at all. `tests/` may construct whatever it needs to test threading, and
 from __future__ import annotations
 
 import ast
+import inspect
 import os
 import sys
 import unittest
@@ -134,7 +135,7 @@ class TheAnchorActuallyAnchors(unittest.TestCase):
     """The inheritance check above passes just as happily if somebody guts
     _Worker.start(). These two assertions are what make it mean something."""
 
-    def test_a_running_worker_cannot_be_collected_and_is_released_after(self):
+    def test_a_running_worker_is_held_by_the_anchor(self):
         class _Trivial(workers._Worker):
             def run(self):
                 pass
@@ -152,17 +153,44 @@ class TheAnchorActuallyAnchors(unittest.TestCase):
                       "workers._Worker.start() no longer anchors the worker, "
                       "so a running worker can once again be garbage-collected "
                       "mid-run and abort the process")
-
         self.assertTrue(w.wait(5000), "the trivial worker never finished")
-        for _ in range(50):
-            _app.processEvents()
-            if w not in workers._running:
-                break
+
+    def test_the_anchor_set_drains(self):
+        """A set that only ever grows leaks every worker for the life of the
+        process, and the inheritance test above would not notice.
+
+        _forget is called DIRECTLY rather than by pumping the event queue.
+        Pumping is what the queued `finished` connection would do in the real
+        app, but in a shared-process test suite QApplication.processEvents()
+        also runs every OTHER test's deferred callbacks -- and this suite
+        leaves singleShot lambdas queued against dialogs whose C++ side is
+        already gone. Doing that here corrupted the heap and killed the whole
+        run (Windows 0xc0000374), several hundred tests after the one that
+        posted the callback. The connection itself is asserted separately
+        below, which is the half that pumping was supposed to prove.
+        """
+        class _Trivial(workers._Worker):
+            def run(self):
+                pass
+
+        w = _Trivial()
+        workers._running.add(w)
+        w._forget()
         self.assertNotIn(
             w, workers._running,
-            "the anchor set never drained: _forget did not run when the "
-            "thread finished, so every worker ever started leaks for the "
-            "lifetime of the process")
+            "workers._Worker._forget() no longer releases the worker, so the "
+            "anchor set grows without bound")
+
+    def test_start_wires_finished_to_forget(self):
+        """The other half of the drain: that _forget is actually connected to
+        something. Read from the source because PySide6 offers no way to
+        enumerate a signal's receivers."""
+        source = inspect.getsource(workers._Worker.start)
+        self.assertIn("_running.add", source,
+                      "start() no longer anchors the worker")
+        self.assertIn("finished.connect", source,
+                      "start() no longer arranges for the worker to be "
+                      "released when it finishes")
 
 
 if __name__ == "__main__":
