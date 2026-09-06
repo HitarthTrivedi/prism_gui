@@ -65,8 +65,8 @@ from dialogs.ai_directory_dialog import AIDirectoryDialog
 from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
-from dialogs.reel_dialog import ReelDialog
-from dialogs.motion_dialog import MotionDialog
+from addons.reel.dialog import ReelDialog
+from addons.motion.dialog import MotionDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 

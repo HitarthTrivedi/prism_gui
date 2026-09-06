@@ -22,7 +22,7 @@ MANIFEST = Addon(
     # this stage changes no behaviour; changing the shelf is its own commit
     # so that reverting the decision does not revert the mechanism.
     shelves=(HOME,),
-    dialog="dialogs.reel_dialog:ReelDialog",
+    dialog="addons.reel.dialog:ReelDialog",
     probe="core_bridge:reel_available",
     # FFmpeg specifically is something Prism can fix by itself, so it gets an
     # offer rather than an apology. Everything else missing (Pillow) is a

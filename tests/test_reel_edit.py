@@ -290,7 +290,7 @@ class TheWorkbenchCard(unittest.TestCase):
 class TheReelWindow(unittest.TestCase):
 
     def _dialog(self, runs_dir: str = ""):
-        from dialogs.reel_dialog import ReelDialog
+        from addons.reel.dialog import ReelDialog
         with mock.patch.object(CB.config, "RUNS_DIR",
                                runs_dir or tempfile.mkdtemp()):
             return ReelDialog({"agents": {"content": "ChatGPT"}}, [], None)
@@ -337,7 +337,7 @@ class TheReelWindow(unittest.TestCase):
         stop = mock.Mock()
         fake = mock.Mock()
         fake.serve.return_value = ("http://127.0.0.1:1/", stop)
-        import dialogs.reel_dialog as mod
+        import addons.reel.dialog as mod
         with mock.patch.object(CB, "get_reel_edit", return_value=fake), \
                 mock.patch.object(mod.QDesktopServices, "openUrl") as opened:
             d._edit_layout()
