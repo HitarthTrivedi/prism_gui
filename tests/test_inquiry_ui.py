@@ -38,9 +38,9 @@ from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
 from core import inbox, mailflow, register, triage  # noqa: E402
-from dialogs import inquiry_dialog as UI  # noqa: E402
-import dialogs.inquiry_setup_dialog as UI_SETUP  # noqa: E402
-from dialogs.inquiry_setup_dialog import (  # noqa: E402
+from addons.inquiry import dialog as UI  # noqa: E402
+import addons.inquiry.setup as UI_SETUP  # noqa: E402
+from addons.inquiry.setup import (  # noqa: E402
     InquirySetupDialog, is_ready, settings_of)
 from widgets import sidebar  # noqa: E402
 
@@ -1690,7 +1690,7 @@ class EverythingIsReadableAtTheSmallestSize(unittest.TestCase):
                                      f"{key}/{name} sticks out of the panel")
 
     def test_the_table_gets_the_height_and_nothing_is_squeezed(self):
-        from widgets.register_table import ROW_HEIGHT
+        from addons.inquiry.register_table import ROW_HEIGHT
         for key, _label in UI.TABS:
             page = self._show_tab(key)
             self.assertGreaterEqual(page.stack.height(), 4 * ROW_HEIGHT, key)

@@ -25,8 +25,9 @@ MANIFEST = Addon(
     # state of the book, not a working modal. The gate still runs first --
     # the screen reads a register the customer may not own.
     screen="inquiry",
-    # It hands drawings to whoever measures them. Today that is
-    # dialogs/inquiry_dialog.py importing BoqDialog directly; the intent is
-    # what lets that import go away without the button going with it.
+    # It hands drawings to whoever measures them, by intent rather than by
+    # import -- see addons/boq/contract.py for the other half. Inquiry no
+    # longer knows that BOQ exists, only that something might measure a
+    # drawing; if nothing does, the button is simply not drawn.
     wants=(names.MEASURE_DRAWING,),
 )

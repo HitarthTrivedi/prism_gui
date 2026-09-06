@@ -57,7 +57,7 @@ from workers import InboxVerifyWorker
 # They are pure functions over a dict -- no Qt, no engine -- and while they
 # lived in this file, anything that needed to ask "is the mailbox set up?"
 # had to import a 1,100-line Qt dialog to find out. dashboard_data.py (a root
-# DATA module that feeds Home) and widgets/inquiry_panel.py did exactly that,
+# DATA module that feeds Home) and addons/inquiry/panel.py did exactly that,
 # eight times between them, every one a deferred import inside a function
 # because a module-level one would have been an obvious cycle.
 #
@@ -68,7 +68,7 @@ from inquiry_config import (            # noqa: F401
 )
 
 # The old private spelling, still imported under that name from
-# widgets/inquiry_panel.py. See inquiry_config.is_complete.
+# addons/inquiry/panel.py. See inquiry_config.is_complete.
 _complete = is_complete
 
 

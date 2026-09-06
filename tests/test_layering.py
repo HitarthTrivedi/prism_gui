@@ -7,14 +7,17 @@ complains, and the layering violation only shows up when you try to move
 one of the two modules -- which is exactly what the add-ons migration does.
 
   1. dashboard_data.py -- a root DATA module, the one that feeds the Home
-     screen -- imported dialogs/inquiry_setup_dialog.py to ask whether a
-     mailbox was configured. Home therefore depended on a 1,100-line Qt
-     dialog, and Email automation could not be extracted into an add-on
-     without dragging Home along with it.
+     screen -- imported what was then dialogs/inquiry_setup_dialog.py to ask
+     whether a mailbox was configured. Home therefore depended on a
+     1,100-line Qt dialog, and Email automation could not be extracted into
+     an add-on without dragging Home along with it.
 
-  2. widgets/inquiry_panel.py imported dialogs/inquiry_dialog.py AT MODULE
-     SCOPE for two constants -- a 4,313-line dialog pulled in at import time
-     for a list of tab labels.
+  2. what was then widgets/inquiry_panel.py imported
+     dialogs/inquiry_dialog.py AT MODULE SCOPE for two constants -- a
+     4,313-line dialog pulled in at import time for a list of tab labels.
+
+(Both of those files now live in addons/inquiry/. They could not have,
+while this was true of them -- which is the point.)
 
 Both now read inquiry_config.py, which is plain functions over a dict with
 no Qt in it at all.

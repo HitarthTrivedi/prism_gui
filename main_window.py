@@ -35,8 +35,8 @@ from addons import registry
 from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.home_panel import HomePanel
-from widgets.inquiry_panel import InquiryPanel
-from dialogs.inquiry_dialog import InquiryDialog
+from addons.inquiry.panel import InquiryPanel
+from addons.inquiry.dialog import InquiryDialog
 from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
@@ -1278,7 +1278,7 @@ class MainWindow(QMainWindow):
         the working screen in the middle has nothing to show.
         """
         from PySide6.QtWidgets import QDialog
-        from dialogs.inquiry_setup_dialog import InquirySetupDialog
+        from addons.inquiry.setup import InquirySetupDialog
         dialog = InquirySetupDialog(self.cfg, self)
         if dialog.exec() == QDialog.Accepted:
             self.cfg = dialog.cfg

@@ -1,14 +1,15 @@
 """Reading Email automation's settings out of the config dict.
 
 Pure functions over a plain dict. No Qt, no engine, no widgets -- which is
-the point: they were trapped inside dialogs/inquiry_setup_dialog.py, a
-1,100-line Qt dialog, and everything that needed to ask "is the mailbox set
-up?" had to import a dialog to find out.
+the point: they were trapped inside a 1,100-line Qt setup dialog, and
+everything that needed to ask "is the mailbox set up?" had to import that
+dialog to find out.
 
 That inverted the layering in two places that matter:
 
-  dashboard_data.py     a root DATA module, feeding Home, importing a dialog
-  widgets/inquiry_panel.py   a widget importing a dialog, six times over
+  dashboard_data.py           a root DATA module, feeding Home, importing
+                              a dialog
+  the inquiry panel           a widget importing a dialog, six times over
 
 Both worked only because every one of those eight imports is inside a
 function rather than at module scope -- a deferred import is a circular
@@ -17,7 +18,7 @@ could not be extracted into an add-on without dragging Home along with it,
 since Home reads the register through dashboard_data.
 
 The dialog now imports these from here and re-exports them, so nothing that
-already said `from dialogs.inquiry_setup_dialog import is_ready` breaks.
+already said `from addons.inquiry.setup import is_ready` breaks.
 
 ────────────────────────────────────────────────────────────────────────────
 Several mailboxes, one register
@@ -36,7 +37,7 @@ import os
 DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Prism Inquiries")
 
 # ── the working screen's tabs ────────────────────────────────────────────
-# Here rather than in dialogs/inquiry_dialog.py because widgets/inquiry_panel.py
+# Here rather than in addons/inquiry/dialog.py because addons/inquiry/panel.py
 # needs them and was importing a 4,313-line dialog AT MODULE SCOPE to get
 # them -- the one widget->dialog import in the tree that is not a deferred
 # "open this modal", and therefore a real load-order dependency rather than a
@@ -88,7 +89,7 @@ def is_complete(account: dict) -> bool:
     """Enough of a mailbox to attempt a connection.
 
     Named `_complete` while it lived in the dialog, and imported under that
-    name from widgets/inquiry_panel.py anyway -- a private name with an
+    name from addons/inquiry/panel.py anyway -- a private name with an
     outside caller is just a public name nobody renamed. `_complete` stays
     available as an alias so no existing import breaks.
     """

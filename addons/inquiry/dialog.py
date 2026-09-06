@@ -53,7 +53,7 @@ import core_bridge as CB
 import i18n
 import theme
 from dialogs.base import PrismDialog
-from dialogs.inquiry_setup_dialog import (
+from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
 from widgets import controls as C
@@ -216,11 +216,11 @@ INTENT_COLOURS = {
 }
 
 
-# Moved to dialogs/quotation_dialog.py and re-exported, so that
+# Moved to addons/inquiry/quotation.py and re-exported, so that
 # `UI.QuotationDialog` and friends keep resolving wherever they are
 # already written. The import is one-way: nothing in quotation_dialog
 # imports back from here.
-from dialogs.quotation_dialog import (        # noqa: E402,F401
+from addons.inquiry.quotation import (        # noqa: E402,F401
     DRAWING_EXTENSIONS, QuotationDialog, _CompareDialog, _POReviewDialog,
     _default_body, _quantity_of, _warning_css,
 )
@@ -266,7 +266,7 @@ class _TableOrEmpty(QStackedWidget):
 # for the day's work. The numbers in the labels are the reading order and
 # are what the tests pin.
 # Moved to inquiry_config.py and re-exported here, so everything that already
-# imports them from this module keeps working. widgets/inquiry_panel.py used
+# imports them from this module keeps working. addons/inquiry/panel.py used
 # to reach into this 4,000-line dialog at MODULE SCOPE for these three names
 # -- the only widget->dialog import in the tree that was not a deferred "open
 # this modal", and so a real load-order dependency.

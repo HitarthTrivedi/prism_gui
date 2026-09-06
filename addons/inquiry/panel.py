@@ -78,7 +78,7 @@ class _FrontDoor(C.EmptyState):
 
 class InquiryPanel(QWidget):
     # The tab index of the working window to open on — see
-    # dialogs.inquiry_dialog.TABS. 0 is "To quote".
+    # addons.inquiry.dialog.TABS. 0 is "To quote".
     open_dialog = Signal(int)
     # The front door's "Check my mail now" specifically: open the working
     # window AND start a check immediately, rather than leaving the owner to

@@ -2,11 +2,13 @@
 
 No add-on may import another. But real work crosses them: an order comes in
 through Email automation and somebody has to measure the drawing that came
-with it. Today that is done by dialogs/inquiry_dialog.py importing
-dialogs/boq_dialog.py and constructing it directly -- which makes Inquiry
-know BOQ's module path, its class name, its constructor signature, how its
-attachments are shaped, and implicitly that the customer is entitled to it.
-Five couplings for one button.
+with it.
+
+That used to be done by Inquiry importing BOQ's dialog and constructing it,
+which made Inquiry know BOQ's module path, its class name, its constructor
+signature, how its attachments are shaped, and implicitly that the customer
+is entitled to it. Five couplings for one button, and five reasons the two
+files could not move independently.
 
 An intent replaces all five. Inquiry asks the host for MEASURE_DRAWING;
 whichever add-on offers it answers, gated by the same licence check every

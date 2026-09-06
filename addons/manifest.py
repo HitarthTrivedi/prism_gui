@@ -61,7 +61,7 @@ class Offer:
     """Work this add-on will do for another one, named by intent.
 
     The whole point of the add-on model is that no add-on imports another.
-    inquiry_dialog currently imports BoqDialog directly and therefore knows
+    Inquiry used to import BoqDialog directly and therefore knew
     five things about BOQ: its module, its class, its constructor, how it
     shapes attachments, and implicitly that the user is entitled to it. An
     Offer replaces all five with one string from addons/names.py.

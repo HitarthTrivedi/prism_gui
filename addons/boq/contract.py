@@ -1,6 +1,6 @@
 """What BOQ will do for another add-on, and the only way in from outside.
 
-Before this, dialogs/inquiry_dialog.py did:
+Before this, addons/inquiry/dialog.py did:
 
     files = CB.get_files()
     attachments = []

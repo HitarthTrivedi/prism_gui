@@ -46,7 +46,7 @@ import core_bridge as CB  # noqa: E402
 import dashboard_data as DATA  # noqa: E402
 import licensing  # noqa: E402
 from licensing.status import LicenseState  # noqa: E402
-from widgets.inquiry_panel import TABS, InquiryPanel  # noqa: E402
+from addons.inquiry.panel import TABS, InquiryPanel  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -265,7 +265,7 @@ class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
         self.assertEqual(DATA.inquiry_stats(self.cfg)["waiting"], 0)
 
     def test_the_working_dialog_is_still_reachable(self):
-        from widgets.inquiry_panel import OPEN_LABEL
+        from addons.inquiry.panel import OPEN_LABEL
         panel = InquiryPanel(self.cfg)
         fired = []
         # OPEN_LABEL ("Open Email automation") hands off with no check

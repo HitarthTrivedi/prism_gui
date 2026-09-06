@@ -1,11 +1,11 @@
 """Quoting: the price that goes out, and the two windows around it.
 
-Peeled out of dialogs/inquiry_dialog.py, which was 4,622 lines and four or
+Peeled out of addons/inquiry/dialog.py, which was 4,622 lines and four or
 five distinct screens welded together. QuotationDialog alone is a whole
 second product surface -- the customer never thinks of "quoting" as part of
 "reading the inbox", and it did not need to live in the same file.
 
-Nothing here changed on the way out; this is a move. dialogs/inquiry_dialog.py
+Nothing here changed on the way out; this is a move. addons/inquiry/dialog.py
 imports these names back and re-exports them, so every existing
 `UI.QuotationDialog` in the tests keeps resolving and findChild() keeps
 working (it matches on the class object, not on where it was defined).
@@ -36,7 +36,7 @@ import core_bridge as CB
 import i18n
 import theme
 from dialogs.base import PrismDialog
-from dialogs.inquiry_setup_dialog import (
+from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
 from widgets import controls as C

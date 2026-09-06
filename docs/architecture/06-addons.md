@@ -34,10 +34,10 @@ that.
 
 | Layer | File | Lines |
 |---|---|---:|
-| Screen | `dialogs/inquiry_dialog.py` | 2,618 |
-| Setup | `dialogs/inquiry_setup_dialog.py` | 1,013 |
-| Panel | `widgets/inquiry_panel.py` | 675 |
-| Table | `widgets/register_table.py` | — |
+| Screen | `addons/inquiry/dialog.py` | 2,618 |
+| Setup | `addons/inquiry/setup.py` | 1,013 |
+| Panel | `addons/inquiry/panel.py` | 675 |
+| Table | `addons/inquiry/register_table.py` | — |
 | Workers | `InboxCheckWorker`, `POReadWorker`, `DraftWorker`, `SendWorker`, `InboxVerifyWorker` | — |
 | Engine | `inbox` · `triage` · `register` · `quoting` · `po` · `mailflow` · `mailer` · `sop` · `drafting` | 4,046 |
 | Read-only views | `dashboard_data.register_view()`, `waiting_view()`, `inquiry_stats()` | — |
