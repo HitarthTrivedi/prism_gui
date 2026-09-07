@@ -238,6 +238,11 @@ def nuitka_args() -> list[str]:
         # string is invisible to any analyser. Without this the Nuitka build
         # can compile cleanly and open with an empty shelf.
         "--include-package=addons",
+        # The shell. main.py imports it directly so Nuitka would follow it
+        # anyway, but the add-on panels are reached through DOTTED STRINGS in
+        # the manifests, and everything they import comes in behind them.
+        # Naming it costs one line and removes the need to reason about that.
+        "--include-package=shell",
         "--include-package=undetected_chromedriver",
         "--include-package=selenium",
         "--include-package=cryptography",

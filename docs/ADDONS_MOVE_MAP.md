@@ -32,6 +32,32 @@ quotation surface (`QuotationDialog`, `_CompareDialog`, `_POReviewDialog`)
 now lives in **`addons/inquiry/quotation.py`**. It is re-exported from
 `addons/inquiry/dialog.py`, so `UI.QuotationDialog` still resolves.
 
+## The shell moved too
+
+Everything that is Prism itself, rather than one of its features, is now
+under `shell/`. **Whole directories moved, so this is one rule, not a list:**
+
+| Was | Is now |
+| --- | --- |
+| `widgets/…` | `shell/widgets/…` |
+| `dialogs/…` | `shell/dialogs/…` |
+| `main_window.py` | `shell/main_window.py` |
+| `workers.py` | `shell/workers.py` |
+
+So `from widgets.controls import button` → `from shell.widgets.controls import
+button`, and `import main_window` → `from shell import main_window`. Nothing
+inside any of those files changed except its own imports.
+
+The top level now states the architecture rather than burying it:
+
+```
+addons/          the features
+shell/           the app itself
+licensing/       entitlements
+packaging/       how it ships
+prism_terminal/  the engine (submodule)
+```
+
 ## Split
 
 `widgets/simple_panels.py` (1,581 lines, six screens) is **gone**:
@@ -82,7 +108,7 @@ gone.** If you imported `EmailPanel` from `simple_panels`, import it from
 | --- | --- |
 | `main.py`, `app_meta.py`, `updater.py`, `apply_update.py`, `update_manifest.py`, `paths.py`, `licensing/`, `packaging/` | The **build contract surface**. The things that depend on these are not Python imports — a PyInstaller spec, a Nuitka command line, a few lines of YAML. Move one and nothing fails until a release. `tests/test_repo_layout.py` pins them |
 | `inquiry_config.py` | Home reads it through `dashboard_data`. Putting it inside the Inquiry add-on would make Home depend on that add-on, which is the coupling the whole restructure removes |
-| `shell/workers.py` | 20 worker classes patched by name in four test files. Splitting it is separate work |
+| `shell/workers.py` | It moved into `shell/`, but was **not split**: 20 worker classes are patched by name in four test files, and separating them is its own piece of work |
 | `integrations/gdrive.py`, `shell/dialogs/drive_dialog.py` | Drive is the only add-on with a `datas` coupling to `prism.spec`, and its `google_client.json` is gitignored — so it exists on some build machines and not others, and a mismatch is invisible on any machine lacking it |
 | `prism_terminal/` | The engine. Untouched by this migration, entirely |
 

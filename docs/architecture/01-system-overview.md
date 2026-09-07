@@ -42,9 +42,9 @@ explain nearly every architectural decision:
 flowchart TB
     subgraph GUI["prism_gui  —  this repository"]
         direction TB
-        M["main.py · main_window.py"]
-        W["widgets/ · dialogs/"]
-        WK["workers.py  (QThread wrappers)"]
+        M["main.py"]
+        SH["shell/<br/>main_window · workers<br/>widgets/ · dialogs/"]
+        AD["addons/<br/>inquiry · boq · bom · gerber<br/>email · reel · motion"]
         L["licensing/"]
         S["theme · i18n · identity · roles<br/>workspace · friendly · diagnostics · paths"]
         CBR["core_bridge.py"]
@@ -58,7 +58,8 @@ flowchart TB
 
     CFG[("~/.prism/config.json<br/>one file, both apps")]
 
-    M --> W --> WK --> CBR
+    M --> SH --> CBR
+    SH --> AD --> CBR
     CBR -->|"sys.path insert + import"| CORE
     CLI --> CORE
     GUI --- CFG
@@ -88,16 +89,17 @@ flowchart TB
     U["User"]
 
     subgraph P["PRESENTATION  —  Qt main thread only"]
-        SB["sidebar · home_panel · input_panel<br/>agents_panel · output_panel · files_panel<br/>prompt_panel · settings_panel · support_panel"]
-        DL["dialogs/  —  setup · licence · paywall<br/>inquiry · boq · gerber · reel · email · history"]
+        SB["shell/widgets/ — sidebar · home_panel · input_panel<br/>agents_panel · output_panel · files_panel<br/>prompt_panel · settings_panel · support_panel"]
+        DL["shell/dialogs/  —  base · licence · paywall · history<br/>addons/&lt;key&gt;/  —  inquiry · boq · bom · gerber · reel · motion"]
     end
 
-    subgraph O["ORCHESTRATION  —  the only file that decides"]
-        MW["main_window.py<br/>owns every worker, every column,<br/>the queue and the run lifecycle"]
+    subgraph O["ORCHESTRATION"]
+        MW["shell/main_window.py<br/>navigation, the licence gate,<br/>the queue and the run lifecycle"]
+        AR["addons/registry.py<br/>which add-ons exist —<br/>the shell never names one"]
     end
 
     subgraph C["CONCURRENCY  —  one QThread per job"]
-        WK["workers.py<br/>Route · Automation · Record · Interpret<br/>Send · Verify · Find · Measure · Gerber<br/>Reel · InboxCheck · PORead · Draft · Support<br/>Authorize · FFmpeg"]
+        WK["shell/workers.py<br/>Route · Automation · Record · Interpret<br/>Send · Verify · Find · Measure · Gerber<br/>Reel · InboxCheck · PORead · Draft · Support<br/>Authorize · FFmpeg"]
     end
 
     subgraph E["ENGINE  —  prism_terminal/core, shared with the CLI"]
