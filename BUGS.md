@@ -6,11 +6,21 @@ the BOQ pipeline end-to-end (24-08-2026) and the Reel pipeline end-to-end
 
 Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX.
 
+> **When an entry leaves this file.** Not when the fix is written — when the
+> fix is **on `main`**, and either the mistake is now structurally impossible
+> or a test pins it.
+>
+> An entry ending *"any new X must remember to Y"* is not finished. It is a
+> bug with a delay on it. Entry 0a is the worked example: the same defect was
+> fixed six times by three people across four weeks, five of those as
+> per-call-site patches, because the rule lived in a sentence rather than in a
+> test. See `docs/architecture/09-boundaries.md`.
+
 ---
 
 ## Fixed, pending review
 
-### 0a. Native crash — QThread destroyed while still running — FIXED, uncommitted 🔴
+### 0a. Native crash — QThread destroyed while still running — CLOSED 🔴
 - **Symptom:** the window opens, then Prism vanishes a few seconds later with no
   Python traceback. Windows logs a fast-fail — `python.exe … Qt6Core.dll …
   c0000409` (BEX64). Reproduced on `followup-artifact-capture` by opening BOQ and
@@ -33,10 +43,15 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
 - **Verified:** a standalone repro (start a QThread, drop its only reference,
   `gc.collect()` while running) fast-fails `0xC0000409` before the fix and exits 0
   after; the live app now runs well past the old ~15–30 s crash window.
-- **Action:** review + commit; any new background thread must subclass
-  `workers._Worker`, never `QThread` directly.
+- **Closed 07-09-2026.** On `main`, and no longer a rule anybody has to
+  remember: `tests/test_worker_mandate.py` fails on any `class X(QThread)`
+  outside the `_Worker` definition, and separately asserts that `_Worker`
+  still anchors and releases (the inheritance check alone would pass if
+  somebody gutted `start()`). It found two survivors on its first run --
+  `wakeword.WakeWordListener`, the ORIGINAL instance of this bug, and
+  `drive_dialog._Job`, which had worked around it by hand. Both converted.
 
-### 0. Ghost-window flash on panel rebuilds — FIXED, uncommitted 🟡
+### 0. Ghost-window flash on panel rebuilds — FIXED, on `main` 🟡
 - **Symptom:** navigating to Settings (and any rebuilt panel) flashed a tiny
   top-level OS window with a titlebar and DWM open-animation.
 - **Cause:** `setParent(None)` on a *visible* widget promotes it to a top-level
@@ -47,8 +62,14 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
   `output_panel.py`, `support_panel.py`, `agents_panel.py`, `controls.py`,
   `home_panel.py`. The `home_panel._active_host` case is safe because
   `_fill_active()` re-asserts visibility after re-add.
-- **Action:** review + commit; carry the `hide()`-first rule into any future
-  `_drop`-style rebuild code.
+- **On `main`. Still a rule that lives in a sentence, though** -- the
+  `hide()`-first rule has to be remembered at 12 sites across 8 files and
+  nothing enforces it. A test that flags `setParent(None)` without a
+  preceding `hide()` in the same block would close this properly; see the
+  note at the top of this file.
+- Note on the paths above: `simple_panels.py` was split in the add-ons
+  restructure and `inquiry_panel.py` moved. The fix travelled with them --
+  see `docs/ADDONS_MOVE_MAP.md`.
 
 ---
 
@@ -134,6 +155,46 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
   chat titles in Claude. Harmless, but looks broken in front of a customer.
 - **Fix:** keep scaffolding out of the first line the tool renders; put the
   human-readable request first, scaffold below.
+
+---
+
+### 11. Any test that pumps the Qt event loop kills the whole suite 🔴
+- **Symptom:** `Windows fatal exception: code 0xc0000374` — heap corruption —
+  several hundred tests after the test that actually caused it. The traceback
+  names an *innocent* test, because the damage was done earlier.
+- **Cause:** panels are built and destroyed all over the suite, and
+  `addons/inquiry/dialog.py` posts `QTimer.singleShot(0, lambda:
+  self._first_look(...))` capturing `self`. Under pytest **no event loop ever
+  runs**, so those callbacks are never delivered and never discarded — they
+  accumulate, holding Python wrappers around C++ objects destroyed long ago.
+  The first thing to call `processEvents()` runs them all, against freed
+  memory.
+- **Found by:** writing a test that legitimately needed to pump events, and
+  watching it take the run down. `tests/test_worker_mandate.py` now calls
+  `_forget()` directly and asserts the wiring by source inspection instead.
+- **Why it is not fixed here:** `tests/conftest.py` drains straggler
+  *threads* between tests but has no equivalent for the event queue, and
+  adding one changes how every test in the suite is isolated. It also has an
+  in-flight branch against it (`feature/chrome-profile-and-inbox`).
+- **Fix:** an autouse fixture that drains posted events between tests, or
+  `QCoreApplication.removePostedEvents()` on teardown. Until then: **do not
+  call `processEvents()`, `exec()` or `QEventLoop` in a test.**
+
+### 12. The licence server's published payload can go stale silently 🟠
+- **Symptom:** none, which is the problem. Customers get behaviour from an
+  old snapshot and nothing anywhere says so.
+- **Cause:** `/v1/payload` serves a **hand-copied** extract of
+  `prism_terminal/core/agents.py`'s selectors and timings,
+  `core/router.py`'s prompt templates, and `pros_cons.txt`. Nothing detects
+  when those source files change. The client's only defence is
+  `licensing/payload.py`'s "refuse and use built-in config" on a schema
+  failure — which does not fire for content that is merely *out of date*.
+- **Related trap:** the override rows are keyed by `AGENT_REGISTRY` **display
+  names** (`"ChatGPT"`, `"Prism Reel"`). Rename one and its published row
+  silently stops matching. Moving files is free; renaming these is not — see
+  `docs/architecture/09-boundaries.md` §5.
+- **Fix:** record a checksum of the three sources at publish time and compare
+  it in CI, so a drift is a red build rather than a quiet regression.
 
 ---
 

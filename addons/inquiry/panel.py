@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 import dashboard_data as DATA
 import i18n
 import theme
-from dialogs.inquiry_dialog import TAB_INDEX, TABS  # noqa: F401 — re-exported
+from inquiry_config import TAB_INDEX, TABS  # noqa: F401 — re-exported
 from widgets import controls as C
 from widgets.controls import Card, IconPad, Pill
 
@@ -78,7 +78,7 @@ class _FrontDoor(C.EmptyState):
 
 class InquiryPanel(QWidget):
     # The tab index of the working window to open on — see
-    # dialogs.inquiry_dialog.TABS. 0 is "To quote".
+    # addons.inquiry.dialog.TABS. 0 is "To quote".
     open_dialog = Signal(int)
     # The front door's "Check my mail now" specifically: open the working
     # window AND start a check immediately, rather than leaving the owner to
@@ -267,7 +267,7 @@ class InquiryPanel(QWidget):
 
     def _auto_minutes(self) -> int:
         try:
-            from dialogs.inquiry_setup_dialog import settings_of
+            from inquiry_config import settings_of
             return int((settings_of(self.cfg) or {}).get("auto_minutes", 0) or 0)
         except Exception:                   # noqa: BLE001
             return 0
@@ -322,7 +322,7 @@ class InquiryPanel(QWidget):
         return card
 
     def _mailboxes(self) -> QWidget | None:
-        from dialogs.inquiry_setup_dialog import accounts_of
+        from inquiry_config import accounts_of
         accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
         if not accounts:
             return None
@@ -344,7 +344,7 @@ class InquiryPanel(QWidget):
         same screen greets it again. The way out is Check, not Setup — this
         state now offers whichever one is actually missing.
         """
-        from dialogs.inquiry_setup_dialog import accounts_of
+        from inquiry_config import accounts_of
         configured = any(a.get("address") for a in accounts_of(self.cfg))
 
         if configured:
@@ -371,7 +371,7 @@ class InquiryPanel(QWidget):
         complete, the folder the CSV will be written to, and the register's
         own status vocabulary. A customer waiting for their first check should
         be able to see where it is going to land and what it will say."""
-        from dialogs.inquiry_setup_dialog import accounts_of, settings_of
+        from inquiry_config import accounts_of, settings_of
         accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
         if not accounts:
             return []                   # nothing configured, nothing to state
@@ -428,7 +428,7 @@ class InquiryPanel(QWidget):
         """One configured mailbox. `_complete` is the setup dialog's own test
         for a mailbox Prism can actually sign in to — a half-entered one is
         exactly the reason a first check finds nothing."""
-        from dialogs.inquiry_setup_dialog import _complete
+        from inquiry_config import is_complete
         card = Card()
         col = card.body((theme.SPACE_4, theme.SPACE_4,
                          theme.SPACE_4, theme.SPACE_4), spacing=0)
@@ -437,7 +437,7 @@ class InquiryPanel(QWidget):
         head.addWidget(IconPad("inbox", theme.ACCENT, 30, theme.R_CONTROL, 15))
         head.addWidget(C.label(account.get("address", ""), level="SUPPORT",
                                colour=theme.TEXT, weight=500), stretch=1)
-        ready = bool(_complete(account))
+        ready = bool(is_complete(account))
         head.addWidget(Pill(i18n.t("Ready") if ready
                             else i18n.t("Needs a password"),
                             "ok" if ready else "warn"))
@@ -481,7 +481,7 @@ class InquiryPanel(QWidget):
         """"Watching sales@… and 2 more — one register." — or "" for one
         mailbox, where the standing blurb says everything already."""
         try:
-            from dialogs.inquiry_setup_dialog import accounts_of
+            from inquiry_config import accounts_of
             addresses = [a.get("address", "") for a in accounts_of(self.cfg)
                          if a.get("address")]
         except Exception:                   # noqa: BLE001

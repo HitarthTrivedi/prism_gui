@@ -16,7 +16,7 @@ comment in the code should point here; this file should point back at the code.
 
 ## One register, one writer — several machines is deferred
 
-**Where:** `dialogs/inquiry_dialog.py`, `check_now()` and the module
+**Where:** `addons/inquiry/dialog.py`, `check_now()` and the module
 docstring; `docs/EMAIL_AUTOMATION.md` §2 and §5.
 
 **Done so far:** several MAILBOXES feed one register — the check walks the
@@ -44,7 +44,7 @@ passwords on the shared office PC — heard from two firms, not one.
 
 ## Scanned purchase orders — typed-in boxes, not OCR
 
-**Where:** `dialogs/inquiry_dialog.py`, `_po_read_failed()` and
+**Where:** `addons/inquiry/dialog.py`, `_po_read_failed()` and
 `_POReviewDialog`; the engine's honest refusal is `po.looks_scanned()` /
 `po.SCANNED_ADVICE`.
 

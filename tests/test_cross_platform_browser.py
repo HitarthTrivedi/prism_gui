@@ -37,6 +37,34 @@ import core_bridge as CB  # noqa: E402
 automation = CB.get_automation()
 from core import browser  # noqa: E402
 
+
+def _has_playwright() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        return True
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
+_HAS_PLAYWRIGHT = _has_playwright()
+
+# The module docstring above says none of these tests needs a browser. That is
+# true of every class except AvailabilityMeansTheBinaryIsThere, which calls the
+# REAL browser.available() -- and its first statement is `import playwright`.
+# On a machine without the package it returns INSTALL_HINT and never reaches
+# the binary check the class exists to test.
+#
+# Two of those tests then FAIL, and -- worse -- two PASS FOR THE WRONG REASON:
+# they assert `"playwright install chromium" in why`, and INSTALL_HINT happens
+# to contain that exact substring. So "Chromium is missing" and "Playwright is
+# missing" are indistinguishable to the assertion, and the class quietly stops
+# testing the distinction it is named after.
+SKIP_NO_PLAYWRIGHT = unittest.skipUnless(
+    _HAS_PLAYWRIGHT, "playwright is not installed on this host, so "
+                     "browser.available() answers from its import check and "
+                     "never reaches the binary check these tests are about "
+                     "(pip install playwright && playwright install chromium)")
+
 # The BOQ screen's guidance is checked by building the real dialog, and Qt
 # aborts the process outright if a QWidget is constructed with no
 # QApplication — same bootstrap every other dialog test module uses.
@@ -120,12 +148,14 @@ class AvailabilityMeansTheBinaryIsThere(unittest.TestCase):
         self._cached = browser._cached_path
         self.addCleanup(setattr, browser, "_cached_path", self._cached)
 
+    @SKIP_NO_PLAYWRIGHT
     def test_no_binary_is_not_available(self):
         browser._cached_path = None
         ok, why = browser.available()
         self.assertFalse(ok)
         self.assertIn("playwright install chromium", why)
 
+    @SKIP_NO_PLAYWRIGHT
     def test_a_binary_is_available(self):
         browser._cached_path = "/somewhere/chrome"
         self.assertEqual(browser.available(), (True, ""))
@@ -139,6 +169,7 @@ class AvailabilityMeansTheBinaryIsThere(unittest.TestCase):
         self.assertIn("launch_chromium", source)
         self.assertIn("screenshot", source)
 
+    @SKIP_NO_PLAYWRIGHT
     def test_a_browser_that_will_not_start_is_reported_not_raised(self):
         """It runs inside packaging/smoke_test.py, where an exception is a
         traceback instead of a named failure."""
@@ -150,6 +181,7 @@ class AvailabilityMeansTheBinaryIsThere(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("Executable doesn't exist", why)
 
+    @SKIP_NO_PLAYWRIGHT
     def test_studio_reports_the_same_answer(self):
         """core.reel_web.available() must not have its own opinion — it is
         the one the GUI asks before offering the button."""
@@ -596,7 +628,7 @@ class TheDwgConverterIsFoundWhereItInstalls(unittest.TestCase):
         picked the file, named the job and pressed the button — turns a menu
         item they already know into a dead end."""
         from PySide6.QtWidgets import QLabel
-        from dialogs.boq_dialog import BoqDialog
+        from addons.boq.dialog import BoqDialog
         with mock.patch.object(self.boq, "find_dwg_converter", return_value=None):
             dialog = BoqDialog({"api_key": "k"}, [])
         self.addCleanup(dialog.deleteLater)
@@ -606,7 +638,7 @@ class TheDwgConverterIsFoundWhereItInstalls(unittest.TestCase):
 
     def test_a_client_who_has_a_converter_is_not_nagged(self):
         from PySide6.QtWidgets import QLabel
-        from dialogs.boq_dialog import BoqDialog
+        from addons.boq.dialog import BoqDialog
         with mock.patch.object(self.boq, "find_dwg_converter",
                                return_value="/usr/bin/ODAFileConverter"):
             dialog = BoqDialog({"api_key": "k"}, [])

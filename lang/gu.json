@@ -59,7 +59,6 @@
     "Click to leave this step out of the run": "આ પગલું દોડમાંથી બહાર રાખવા ક્લિક કરો",
     "Click to run this step with a different tool": "આ પગલું બીજા ટૂલથી ચલાવવા ક્લિક કરો",
     "Close": "બંધ કરો",
-    "Coming soon — match a parts list against your stock and get the shortage list": "જલદી આવે છે — પાર્ટ્સની યાદી તમારા સ્ટોક સાથે મેળવીને ઘટની યાદી મેળવો",
     "Companies to approach, with verified emails": "સંપર્ક કરવા જેવી કંપનીઓ, ચકાસેલા ઈમેલ સાથે",
     "Connect Google Drive": "Google Drive જોડો",
     "Continue without it": "એના વગર આગળ વધો",
@@ -80,7 +79,6 @@
     "Diagnostics": "તપાસ અહેવાલ",
     "Dictate the task instead of typing": "ટાઇપ કરવાને બદલે બોલીને કામ કહો",
     "Discard": "કાઢી નાખો",
-    "Done. Check the numbers against the saved file above.": "થઈ ગયું. ઉપર સાચવેલી ફાઈલ સામે આંકડા મેળવી લો.",
     "Double-click to attach": "જોડવા માટે ડબલ-ક્લિક કરો",
     "Draft & send an email from attached files": "જોડેલી ફાઈલોમાંથી ઈમેલ લખો અને મોકલો",
     "Drawing unit, if you know it — e.g. meters": "ડ્રોઇંગનો એકમ, ખબર હોય તો — જેમ કે મીટર",
@@ -129,7 +127,6 @@
     "Make a Reel": "રીલ બનાવો",
     "Make a plan": "યોજના બનાવો",
     "Make a plan first — this fills in once Prism picks the steps.": "પહેલાં યોજના બનાવો — Prism પગલાં પસંદ કરે એટલે આ ચાલુ થશે.",
-    "Make my BOQ": "મારું BOQ બનાવો",
     "Make my reel": "મારી રીલ બનાવો",
     "Make the images": "ચિત્રો બનાવો",
     "Make the video": "વીડિયો બનાવો",
@@ -232,7 +229,6 @@
     "Team": "ટીમ",
     "Team members": "ટીમના સભ્યો",
     "Team workspace": "ટીમનું સહિયારું ફોલ્ડર",
-    "Tell me what the BOQ is for — or attach a drawing.": "કહો BOQ શેના માટે છે — કે ડ્રોઇંગ જોડી દો.",
     "Tell me what the reel is about.": "કહો રીલ શેના વિશે છે.",
     "That doesn't look like an email address.": "આ ઈમેલ સરનામા જેવું લાગતું નથી.",
     "The agent returned nothing.": "એજન્ટે કશું પાછું આપ્યું નહીં.",
@@ -249,7 +245,6 @@
     "Voice": "અવાજ",
     "Waiting for you to approve it in your browser…": "તમારા બ્રાઉઝરમાં મંજૂરીની રાહ જોઈએ છીએ…",
     "Wake word": "વેક વર્ડ",
-    "What do you need a BOQ for?": "BOQ શેના માટે જોઈએ?",
     "What happened": "શું થયું",
     "What should the reel be about?": "રીલ શેના વિશે હોય?",
     "What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points": "ડ્રોઇંગનાં ચિહ્નોનો શો અર્થ છે, જો શીટ પર ન લખ્યું હોય — જેમ કે વર્તુળ = લાઇટ પોઇન્ટ",
@@ -260,7 +255,6 @@
     "Writes a file describing what happened. Your API key, passwords and licence key are not in it.": "એક ફાઈલ લખે છે જેમાં હોય છે કે શું થયું. તમારી API કી, પાસવર્ડ અને લાઇસન્સ કી એમાં હોતાં નથી.",
     "Yes": "હા",
     "You picked this": "તમે આ પસંદ કર્યું",
-    "Your BOQ will appear here.": "તમારું BOQ અહીં દેખાશે.",
     "Your licence is tied to this computer. Quote this code if you ever need us to free up a seat.": "તમારું લાઇસન્સ આ જ કમ્પ્યુટર સાથે જોડાયેલું છે. સીટ ખાલી કરાવવી હોય તો આ કોડ જણાવો.",
     "Your own runs. Each role's work stays in its own folder.": "તમારી પોતાની દોડ. દરેક ભૂમિકાનું કામ પોતાના જ ફોલ્ડરમાં રહે છે.",
     "Your plan": "તમારી યોજના",
@@ -308,5 +302,5 @@
     "Date": "તારીખ",
     "Sent to {who}.": "{who} ને મોકલાયું."
   },
-  "count": 305
+  "count": 299
 }

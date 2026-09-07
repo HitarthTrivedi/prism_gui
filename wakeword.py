@@ -24,9 +24,10 @@ import os
 import sys
 import io
 import wave
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
 import core_bridge as CB
+from workers import _Worker
 
 # audioop was deleted from the stdlib in Python 3.13 (PEP 594), and pyaudio is
 # an optional extra that needs PortAudio on the box. Neither may be present —
@@ -73,7 +74,17 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
-class WakeWordListener(QThread):
+class WakeWordListener(_Worker):
+    """The listener that started it all.
+
+    This is where the "QThread destroyed while still running" crash was first
+    hit, and `stop()` below is the bounded-wait mitigation written for it.
+    Subclassing `_Worker` is the structural half: the worker anchors itself
+    from start() until finished, so the case `stop()` documents and cannot
+    fix -- "this can legitimately return False and the caller has to keep the
+    object alive itself" -- no longer depends on the caller doing so.
+    """
+
     heard = Signal()       # "Prism" was detected — GUI should start a normal take
     error = Signal(str)
 

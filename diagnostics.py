@@ -119,8 +119,7 @@ def install() -> None:
 
     try:
         import core_bridge as CB
-        ui = CB.router.ui if hasattr(CB.router, "ui") else None
-        from core import ui as engine_ui           # noqa: F811
+        engine_ui = CB.get_ui()
         existing = getattr(engine_ui, "_sink", None)
 
         def sink(level, text):

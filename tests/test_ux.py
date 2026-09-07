@@ -114,7 +114,7 @@ class EveryErrorIsAnswerable(unittest.TestCase):
                         "when we don't know, the honest step is 'send it to us'")
 
     def test_the_no_rate_list_message_keeps_its_own_words_not_the_generic_one(self):
-        """dialogs/inquiry_dialog.py's quotation flow already writes an
+        """addons/inquiry/dialog.py's quotation flow already writes an
         actionable sentence for this; it must not be thrown away for
         "Something went wrong" just because no rule recognised it."""
         problem = friendly.explain(

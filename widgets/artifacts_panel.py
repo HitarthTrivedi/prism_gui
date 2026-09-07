@@ -30,7 +30,7 @@ import i18n
 import theme
 from widgets import controls as C
 from widgets.files_panel import kind_label, size_label
-from widgets.simple_panels import _Page, _bucket
+from widgets.panel_base import Page, bucket_for
 
 # Extension -> the same "kind" vocabulary core.files.attach() uses, so
 # kind_label() (built for attachment chips) reads correctly here too without
@@ -152,7 +152,7 @@ def _chat_link(path: str) -> str:
         return ""
 
 
-class ArtifactsPanel(_Page):
+class ArtifactsPanel(Page):
     TITLE = "Artifacts"
     BLURB = ("Everything Prism has generated for you — reels, images, "
              "documents — kept here even after you close it.")
@@ -222,7 +222,7 @@ class ArtifactsPanel(_Page):
         paths.sort(key=os.path.getmtime, reverse=True)
         groups: list[tuple[str, list]] = []
         for path in paths:
-            bucket = _bucket("", os.path.getmtime(path))
+            bucket = bucket_for("", os.path.getmtime(path))
             if not groups or groups[-1][0] != bucket:
                 groups.append((bucket, []))
             groups[-1][1].append(path)

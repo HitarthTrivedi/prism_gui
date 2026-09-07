@@ -263,6 +263,20 @@ def get_files():
     return files
 
 
+def get_ui():
+    """The engine's own output layer, for installing a sink into.
+
+    core.ui writes to a Rich console, which in a windowed build has
+    nowhere to go -- set_sink() is the hook that mirrors those lines
+    somewhere a GUI user can see them, and diagnostics.install() is the
+    one caller. Exposed here rather than imported directly so that
+    core_bridge stays the only module that touches the engine; see
+    tests/test_engine_facade.py.
+    """
+    from core import ui
+    return ui
+
+
 def get_drafting():
     from core import drafting
     return drafting

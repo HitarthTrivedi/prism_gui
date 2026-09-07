@@ -27,10 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PySide6.QtCore import Signal, QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-import sent_log  # noqa: E402
-from dialogs import email_dialog as ED  # noqa: E402
-from dialogs.email_dialog import EmailComposeDialog  # noqa: E402
-from widgets.email_panel import EmailPanel, LIST_LABEL, ONE_LABEL  # noqa: E402
+from addons.email import sent_log  # noqa: E402
+from addons.email import dialog as ED  # noqa: E402
+from addons.email.dialog import EmailComposeDialog  # noqa: E402
+from addons.email.panel import EmailPanel, LIST_LABEL, ONE_LABEL  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 

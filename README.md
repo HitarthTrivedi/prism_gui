@@ -7,6 +7,18 @@ purpose-built add-ons for small manufacturers: read the inbox and keep an
 inquiry register, take quantities off a CAD drawing, send email from your own
 account.
 
+> **Working on Prism? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.** It is
+> short, and following it is not optional — it is what keeps four people able
+> to ship at the same time.
+>
+> | | |
+> |---|---|
+> | [CONTRIBUTING.md](CONTRIBUTING.md) | How we work: the rules, and how to land your work |
+> | [docs/architecture/10-adding-an-add-on.md](docs/architecture/10-adding-an-add-on.md) | Building an add-on, end to end |
+> | [docs/architecture/09-boundaries.md](docs/architecture/09-boundaries.md) | Every rule, and the test that enforces it |
+> | [docs/ADDONS_MOVE_MAP.md](docs/ADDONS_MOVE_MAP.md) | Where a file went, and how to rebase across the move |
+> | [OWNERS.md](OWNERS.md) | Who is looking after what, this sprint |
+
 It has **no engine of its own**: `core_bridge.py` imports `prism_terminal`'s
 `core/` package directly, so routing, browser automation, voice and
 file-finding are the exact same code the CLI uses. Both apps read and write the
@@ -86,16 +98,25 @@ capped at 1360×880, floor 1060×640).
 Three fixed columns. The old `QDockWidget`s are gone: nothing can be dragged
 out, closed, or lost behind a tab, so there is no View menu either.
 
-- **Rail** (left) — brand, then the primary destinations (Home, How to use
-  Prism, AI tools, History, Settings), the wake-word switch, and three grouped
-  shelves:
-  - **ADD-ONS** — Email automation, BOQ, Email, and BOM & Stock (visibly
-    *coming soon*, disabled on purpose: a shelf that looks like a product line
-    is worth more in a demo than an empty gap). Anything not in your licence
-    shows a padlock and opens the pitch rather than failing.
-  - **WORKSPACE** — Status, Login tabs.
-  - **CONFIGURE** — Licence, Agents, Language, Your role, Profile, API key,
-    Chrome.
+- **Rail** (left) — brand, then two named groups, Settings, and the pinned
+  foot (wake word, profile). **The budget is twelve controls and two
+  headings**, fitting at 768px with no scroll; anything new has to displace
+  something.
+  - **WORK** — New task, Home, History, Artifacts: the destinations that
+    bracket a run.
+  - **ADD-ONS** — Email automation, BOQ, Gerber, Email, BOM & Stock. This
+    shelf is **generated from `addons/registry.py`**, not hand-listed, so it
+    cannot drift from the Home screen the way it used to. Anything not in
+    your licence shows a padlock and opens the pitch rather than failing.
+  - **Settings** — one row under a hairline. It owns everything that
+    configures Prism; the old WORKSPACE and CONFIGURE shelves are sections of
+    that screen now, so every field is editable where you land rather than
+    behind a second dialog.
+
+  Reel / Studio and Motion Graphics are reachable from Home and by command
+  but have no rail row — Reel's slot went to Artifacts, and Motion cannot run
+  yet. That is a decision, recorded in their manifests and pinned by
+  `tests/test_addon_contract.py`.
 
   Below that, a **Favorites** shelf — star a file or folder once, click it
   later instead of re-describing it.
@@ -166,11 +187,26 @@ they said back → Waiting on a reply → The order came.**
 It stops twice on purpose — before a price goes to a customer, and before a
 purchase order is accepted.
 
-### BOQ, Email, Reel
+### BOQ, BOM, Gerber, Email, Reel, Motion
+
+Each lives in `addons/<key>/` and is declared by one manifest. The
+authoritative list is `addons/registry.py`; this is the plain-English version.
 
 - **BOQ** — quantities off a CAD drawing (DXF via `ezdxf`) or from a written
   spec. Counts and measures; **you** price it. The Rate and Amount columns are
   deliberately left blank.
+- **BOM & Stock** — the parts list to fabricate an assembly, off the same
+  drawing or spec. It is BOQ's dialog in a different mode, which is why its
+  manifest declares `provided_by="boq"` rather than pretending to own a
+  window it does not. **Gated on the `boq` key**, not `bom`: a `bom` feature
+  exists in `plans.py` but the licence server has never been told about it,
+  so buying `bom` alone gets you nothing and buying `boq` gets you this free.
+- **Gerber** — PCB size, track width and spacing, drill sizes and counts,
+  measured out of the Gerber files by Prism itself. **The design files are
+  never attached to anything** — only the measured numbers reach the AI
+  stage. Also rides the `boq` key, because there is no `gerber` key on the
+  licence server yet and gating on one nobody can be granted would deny
+  everyone, including the account testing it.
 - **Email** — recipients from an attached CSV and/or addresses in the goal
   text, a **Search for their public email** fallback, a draft generated through
   a normal pipeline stage (editable), then confirm-and-send from *your own*
@@ -188,6 +224,17 @@ purchase order is accepted.
   reply was what made the old output look like a slide deck — a scene got
   about 278 characters, which is a headline and a subhead. See
   `CHANGES.md` → Round 6.
+- **Motion Graphics** — a scene-graph video with camera, charts and diagrams.
+  **Not available in this release**: `core/motion/render.py` sets
+  `_DISABLED_PENDING_ASSET_FIX`, so `is_available()` returns `False` and the
+  tile is a caption rather than a button. Declared `status=SOON` in its
+  manifest, which is what makes that a fact about the add-on instead of a
+  hardcoded pair of keys in a render method.
+
+Reel, Studio and Motion share the `reel` key — one media capability tier, not
+three purchases. Reel and Motion have no rail row and are reached from Home or
+by command, which is why their licence gate carries the whole weight: the
+router can put Prism Reel into a plan without anybody clicking a shelf.
 
 ## Licensing
 
@@ -282,13 +329,25 @@ failed on the 1st, 2nd and 3rd of every month and passed the other 28 days.
 
 ## Files
 
+Where a file went in the add-ons restructure: **`docs/ADDONS_MOVE_MAP.md`**.
+
 ```
 main.py                 entry point; fonts, stylesheet, licence gate, self-test
-main_window.py          the only file that makes decisions; owns all workers & columns
-core_bridge.py          puts prism_terminal/core on sys.path, re-exports it
-workers.py              QThread wrappers (routing, automation, voice, find, inbox, send, draft, ffmpeg)
-plans.py                what each plan includes — the single source for the paywall
-theme.py                Industry design tokens, and the per-role accent hue
+main_window.py          the shell: navigation, the licence gate, the pipeline.
+                        It no longer knows WHICH add-ons exist — it reads the
+                        registry. See docs/architecture/01-system-overview.md
+core_bridge.py          the ONLY door to prism_terminal/core. Nothing else
+                        may import the engine (tests/test_engine_facade.py)
+workers.py              background threads. Every one subclasses _Worker,
+                        which is what stops a running thread being collected
+                        and aborting the process (tests/test_worker_mandate.py)
+plans.py                what each plan includes — the single source for the
+                        paywall, and shared with the licence server
+inquiry_config.py       Email automation's settings as plain functions over a
+                        dict — no Qt, so Home can read them without importing
+                        an add-on
+theme.py                Industry design tokens, the per-role accent hue, and
+                        tone() — which resolves an add-on's colour LATE
 i18n.py                 interface translation; patches Qt before any widget exists
 identity.py roles.py    who is signed in, and what colour their copy is
 workspace.py            per-member folders on a shared drive
@@ -296,45 +355,58 @@ friendly.py             any error -> title, plain English, numbered next steps
 diagnostics.py          crash logs to ~/.prism/logs
 paths.py                resource resolution, frozen and from source
 app_meta.py             name, version, bundle id, support details
+updater.py              in-app updates. UPDATE_REPO is compiled into every
+                        shipped binary and cannot be overridden at runtime
 favorites.py            starred file/folder persistence
 wakeword.py             best-effort "Prism" wake-word listener
 awake.py cloud.py       keep-awake during long runs; cloud file attach
 style.qss               the Industry theme — everything QSS can express
 assets/fonts/           Barlow + Barlow Condensed (OFL), vendored
-lang/                   language packs
+lang/                   language packs + _catalogue.json (the translatable set)
 
-licensing/
-  client.py             HTTP to the licence server; timeouts sized for a cold host
+addons/                 ONE FOLDER PER ADD-ON. This is where feature work goes.
+  manifest.py           the Addon dataclass — what an add-on IS, as data
+  registry.py           every add-on, one STATIC import each. The only shared
+                        file an add-on touches, and it is append-only
+  names.py              the intent vocabulary add-ons use to ask each other
+                        for work without importing each other
+  inquiry/              Email automation: dialog, quotation, setup, panel,
+                        register_table
+  boq/  bom/  gerber/   measured off a drawing or a Gerber job
+  email/                compose and send, plus sent_log
+  reel/  motion/        video. Motion is status=SOON — it cannot run yet
+
+  ...and inside every one of those add-on folders, the same four things:
+      <key>/addon.py        the manifest — stdlib only
+      <key>/contract.py     what this add-on does for another one
+      <key>/panel.py        its front-door screen
+      <key>/dialog.py       its working window
+
+licensing/              never imports Qt; the paywall is injected
+  client.py             HTTP to the licence server
   token.py store.py     verify offline, cache locally
-  device.py             machine fingerprint (seat counting)
-  keys.py               Ed25519 public keys; DEVELOPMENT ones trusted from source only
+  device.py             machine fingerprint — OS identifiers only, so moving
+                        files cannot orphan a customer's activation
+  keys.py               Ed25519 public keys; DEVELOPMENT ones from source only
   status.py meter.py    state machine; Groq token metering
-widgets/
-  icons.py              24x24 stroked line icons, tinted & cached
-  blueprint.py          the hairline frame + registration marks QSS can't draw
-  controls.py           the square switch, tool chip, step mark, chips
-  sidebar.py            the left rail, its shelves and their padlocks
+widgets/                the shell and the shared kit — NOT feature code
+  panel_base.py         Page, AddonFrontDoor, the run-row, the copy tables
+  guide_panel.py catalog_panel.py history_panel.py
+  sidebar.py            the left rail — its shelf is DERIVED from the registry
+  home_panel.py         same shelf, same source
+  icons.py controls.py  the icon set; the square switch, chips, step marks
   input_panel.py        the task card
   agents_panel.py       the plan (owns the stage -> plain-English copy map)
-  files_panel.py        "Files you mentioned"
-  prompt_panel.py       "Behind the scenes"
-  output_panel.py       live per-step results
-  ask_panel.py          the "what do you want?" box, shared by every add-on screen
-  markdown.py           markdown -> Qt rich text
-dialogs/
-  setup_dialog.py       Setup, with per-section deep links from the rail
-  license_dialog.py     activation, expiry, licence problems
-  paywall.py            what a locked add-on is, and what it costs
-  inquiry_setup_dialog.py  mailbox, files, terms, who's who — asked once
-  inquiry_dialog.py     the five-tab Email automation screen
-  boq_dialog.py reel_dialog.py email_dialog.py
-  history_dialog.py     past runs, re-rendered out of their stored JSON
-  completion_dialog.py  what each step produced, once a run ends
-  problem_dialog.py     friendly.py's output, with a diagnostics-file offer
-  guide_dialog.py       "How to use Prism", for someone who has never used AI
-  drive_dialog.py       pick a file out of Google Drive like one off the disk
-  ai_directory_dialog.py  the tool catalogue
-devtools/               mint.py (licence keys), scenarios.py, inbox_demo.py — never shipped
+  files_panel.py output_panel.py prompt_panel.py ask_panel.py markdown.py
+dialogs/                the shell's own windows only
+  base.py               PrismDialog — every dialog's frame
+  license_dialog.py paywall.py legal_dialog.py contact_dialog.py
+  history_dialog.py completion_dialog.py followup_dialog.py problem_dialog.py
+  guide_dialog.py preview_dialog.py ai_directory_dialog.py
+  drive_dialog.py       Google Drive — deliberately NOT an add-on package yet:
+                        it is the only one with a datas coupling to prism.spec
+devtools/               mint.py (licence keys), extract_strings.py — never shipped
 packaging/              prism.spec, build.py, smoke_test.py
-tests/                  588 tests; nothing here reaches the network
+tests/                  the suite, including the boundary guards that make
+                        docs/architecture/09-boundaries.md executable
 ```
