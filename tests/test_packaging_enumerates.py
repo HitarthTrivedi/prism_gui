@@ -46,7 +46,8 @@ def _walk_engine() -> list[str]:
     core = os.path.join(ENGINE, "core")
     found = ["core"]
     for folder, dirs, files in os.walk(core):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        dirs[:] = [d for d in dirs
+                   if d != "__pycache__" and not d.startswith(".")]
         rel = os.path.relpath(folder, core)
         package = "core" if rel == "." else "core." + rel.replace(os.sep, ".")
         if package != "core":
@@ -90,6 +91,17 @@ class TheEngineWalkReachesSubpackages(unittest.TestCase):
                           if n.endswith(".py") and n != "__init__.py"]
         self.assertNotIn("core.motion.render", old)
         self.assertIn("core.motion.render", _walk_engine())
+
+    def test_hidden_cache_directories_are_not_modules(self):
+        found = _walk_engine()
+        self.assertFalse(
+            any(part.startswith(".") for name in found for part in name.split(".")),
+            "a hidden cache directory was turned into a PyInstaller hidden import")
+        source = _read(SPEC)
+        self.assertIn(
+            'not d.startswith(".")', source,
+            "prism.spec must reject hidden metadata directories such as "
+            "core/.pytest_cache")
 
 
 class TheBuildKnowsAboutAddons(unittest.TestCase):

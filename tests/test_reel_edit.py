@@ -638,9 +638,13 @@ if not ok:
     print("NOT_AVAILABLE:" + why)
     sys.exit(0)
 from playwright.sync_api import sync_playwright
+from core import browser as prism_browser
 try:
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        # Use the same full-Chromium channel as production.  CI deliberately
+        # installs with --no-shell, so a bare launch asks for an artifact we
+        # intentionally do not ship and turns this release check into a skip.
+        b = prism_browser.launch_chromium(p)
         page = b.new_page()
         page.set_content("<h1>customer machine smoke test</h1>")
         assert page.inner_text("h1") == "customer machine smoke test"

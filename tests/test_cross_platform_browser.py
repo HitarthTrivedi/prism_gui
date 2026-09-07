@@ -169,6 +169,13 @@ class AvailabilityMeansTheBinaryIsThere(unittest.TestCase):
         self.assertIn("launch_chromium", source)
         self.assertIn("screenshot", source)
 
+    def test_the_build_gate_retries_a_surface_that_is_not_ready_yet(self):
+        """A newly started off-screen Chromium can very rarely acknowledge
+        set_content before its first screenshot surface is paintable."""
+        source = inspect.getsource(browser.selftest)
+        self.assertGreaterEqual(source.count("page.screenshot"), 2)
+        self.assertIn("page.wait_for_timeout(100)", source)
+
     @SKIP_NO_PLAYWRIGHT
     def test_a_browser_that_will_not_start_is_reported_not_raised(self):
         """It runs inside packaging/smoke_test.py, where an exception is a

@@ -205,7 +205,12 @@ def _engine_modules() -> list[str]:
     core = os.path.join(ENGINE_DIR, "core")
     found = ["core"]
     for folder, dirs, files in os.walk(core):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        # pytest leaves .pytest_cache below packages it exercises.  Any hidden
+        # directory is metadata rather than an importable Python package; if
+        # it reaches this walk it becomes an invalid hidden import such as
+        # ``core..pytest_cache`` and dirties (or can break) release builds.
+        dirs[:] = [d for d in dirs
+                   if d != "__pycache__" and not d.startswith(".")]
         rel = os.path.relpath(folder, core)
         package = "core" if rel == "." else "core." + rel.replace(os.sep, ".")
         if package != "core":
