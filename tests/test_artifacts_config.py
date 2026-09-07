@@ -66,14 +66,47 @@ class GroupingByTask(unittest.TestCase):
         with open(about, encoding="utf-8") as f:
             self.assertIn("make a reel for instgram for this brand", f.read())
 
-    def test_inside_a_run_the_file_is_named_by_kind(self):
+    def test_inside_a_run_the_file_is_named_by_the_job_and_its_kind(self):
         self.CFG.begin_run("the nova launch")
         a = self.CFG.save_artifact(self._src.name, "the nova launch", kind="artwork",
                                    task="the nova launch")
         b = self.CFG.save_artifact(self._src.name, "the nova launch", kind="artwork",
                                    task="the nova launch")
-        self.assertEqual(os.path.basename(a), "Artwork.png")
-        self.assertEqual(os.path.basename(b), "Artwork 2.png")
+        self.assertEqual(os.path.basename(a), "the nova launch — Artwork.png")
+        self.assertEqual(os.path.basename(b), "the nova launch — Artwork 2.png")
+
+    def test_a_titled_run_is_filed_and_named_by_its_title(self):
+        folder = self.CFG.begin_run("make a reel for instgram for this brand",
+                                    title="Instagram reel · brand guide")
+        self.assertEqual(os.path.basename(os.path.dirname(folder)),
+                         "Instagram reel · brand guide")
+        a = self.CFG.save_artifact(self._src.name, "x", kind="reel",
+                                   task="make a reel for instgram for this brand")
+        self.assertEqual(os.path.basename(a), "Instagram reel · brand guide — Reel.png")
+        with open(os.path.join(folder, self.CFG.ABOUT_FILE), encoding="utf-8") as f:
+            about = f.read()
+        self.assertIn("Instagram reel · brand guide", about)
+        self.assertIn("make a reel for instgram for this brand", about)
+        self.assertEqual(self.CFG.current_run_title(), "Instagram reel · brand guide")
+
+    def test_the_fallback_title_is_the_first_words_never_cut_on_a_joining_word(self):
+        self.assertEqual(self.CFG.fallback_title("make a reel for instgram for this brand"),
+                         "make a reel for instgram for this brand")
+        self.assertEqual(self.CFG.fallback_title("make me a poster of a spring"),
+                         "make me a poster of a spring")
+        self.assertEqual(self.CFG.fallback_title("can we make a platform like github but "
+                                                  "more personalized for developers"),
+                         "can we make a platform like github")
+        self.assertEqual(self.CFG.fallback_title("write it up for the board and for "
+                                                  "the auditors and the bank"),
+                         "write it up for the board")
+        self.assertEqual(self.CFG.fallback_title(""), "Task")
+
+    def test_a_models_title_is_tidied(self):
+        self.assertEqual(self.CFG.tidy_title('  "Instagram Reel — Brand Guide." '),
+                         "Instagram Reel — Brand Guide")
+        self.assertEqual(self.CFG.tidy_title("Two\nlines"), "Two")
+        self.assertEqual(len(self.CFG.tidy_title("x" * 90)), 60)
 
     def test_a_caller_that_never_announced_its_run_still_gets_a_folder(self):
         self.CFG.begin_run("")

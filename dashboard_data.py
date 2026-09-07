@@ -95,7 +95,11 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
                 seen.add(name.lower())
                 tools.append(name)
         out.append({
-            "title": (record.get("query") or "").strip() or "Untitled task",
+            # The planner's short name for the job when the run has one;
+            # the request verbatim for records from before titles existed.
+            "title": ((record.get("title") or "").strip()
+                      or (record.get("query") or "").strip() or "Untitled task"),
+            "query": (record.get("query") or "").strip(),
             "tools": tools,
             # `when` from inside the try above, NOT a second getmtime. The
             # guard up there exists because Home is built during

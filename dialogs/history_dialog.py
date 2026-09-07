@@ -288,7 +288,10 @@ class HistoryDialog(PrismDialog):
             day, clock = _when(path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    query = (json.load(f) or {}).get("query", "")
+                    rec = json.load(f) or {}
+                # The planner's short name for the job, when the run has
+                # one; the request verbatim for older records.
+                query = (rec.get("title") or "").strip() or rec.get("query", "")
             except Exception:
                 query = "(unreadable run file)"
             item = QListWidgetItem()

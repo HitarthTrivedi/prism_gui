@@ -2481,6 +2481,10 @@ class MainWindow(QMainWindow):
         # — so a follow-up from History attaches THIS run's output, not
         # everything ever made under the same words.
         record["artifacts"] = CB.config.current_run_dir()
+        # The planner's short name for the job — what History and Home show
+        # instead of the request verbatim.
+        record["title"] = ((self.routing or {}).get("_title")
+                           or CB.config.current_run_title() or "")
         if error:
             record["error"] = error
         # Stamped with who ran it, so a run file is self-describing even if it
@@ -2906,7 +2910,8 @@ class MainWindow(QMainWindow):
         worker = StudioFollowupWorker(self.cfg, spec, agent, design_url,
                                       self._followup_text, attachments,
                                       images=images, context=context,
-                                      task=getattr(self, "_last_query", ""))
+                                      task=getattr(self, "_last_query", ""),
+                                      title=(self.routing or {}).get("_title", ""))
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)

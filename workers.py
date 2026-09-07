@@ -494,13 +494,14 @@ class StudioFollowupWorker(_Worker):
 
     def __init__(self, cfg: dict, spec: dict, agent: str, design_url: str,
                  change: str, attachments: list | None = None,
-                 images: str = "", context: str = "", task: str = ""):
+                 images: str = "", context: str = "", task: str = "",
+                 title: str = ""):
         super().__init__()
         self.cfg, self.spec, self.agent = cfg, spec, agent
         self.design_url, self.change = design_url, change
         self.attachments = list(attachments or [])
         self.images, self.context = images or "", context or ""
-        self.task = task or ""
+        self.task, self.title = task or "", title or ""
         self._stop = threading.Event()
 
     def stop(self):
@@ -514,7 +515,7 @@ class StudioFollowupWorker(_Worker):
             out, spec_path, note = CB.get_automation().studio_followup(
                 self.cfg, self.spec, self.agent, self.design_url, self.change,
                 attachments=self.attachments, images=self.images,
-                context=self.context, task=self.task,
+                context=self.context, task=self.task, title=self.title,
                 on_event=lambda k, p: self.stage_event.emit(k, p),
                 on_progress=lambda d, t: self.progress.emit(d, t))
             self.done.emit(out, spec_path, note)

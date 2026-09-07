@@ -20,6 +20,62 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
 
 ## Fixed, pending review
 
+### R1–R10. The Reel Studio round (07-09-2026, branch `reel-studio-fixes`)
+Found by running the product on Linux (source checkout, real ChatGPT), one
+reel end to end, then the follow-up, then the editor. Each entry names the
+test that pins it; none is a rule that lives in a sentence.
+
+- **R1. A ticked plan step with no prompt made the engine wait out 300 s on a
+  tab it never typed into 🔴.** "Find the people" ticked by hand → upload, no
+  prompt, full cap, twice. `custom_stages` bypassed `_needed_stages`' empty
+  filter and the "never received the prompt" guard sits inside the loop that
+  had nothing to loop over. Fix: the engine skips a browser stage with no
+  prompt (`stage_skipped`, before a tab opens); the plan screen offers to run
+  without it, naming the step. Pinned: `test_unprompted_stage.py`,
+  `test_gates.py::UnpromptedStepGate`.
+- **R2. The planner's JSON died on a raw quote inside a prompt string 🔴.**
+  `Expecting ',' delimiter: line 16 column 49`, twice in a row, bare
+  `json.loads`, no retry. Fix: `router._parse_plan` repairs, then re-asks once
+  in Groq's `json_mode`. Pinned: `test_router_json.py`.
+- **R3. Generated and attached PNGs lost their alpha; a wordmark reached the
+  film as one red "d" 🟠.** `assets.cutout` flattened to RGB, read the
+  transparent pixels' colour as "the background", cleared every pixel near it.
+  Fix: real alpha is kept; a flat card is cut edge-inward with a soft,
+  defringed boundary; the manifest tells the truth (and how to use an opaque
+  photo). Pinned: `test_asset_cutout.py`.
+- **R4. The Studio checker could not see two texts printed over each other
+  🟠.** One fault on a reel with four collisions. Fix: pairwise text-box
+  overlap and 3×3 partial-cover sampling in `__check`; counters/continuity and
+  an asset plan in the prompts. Pinned: `test_layout_overlap.py` (real
+  Chromium, including the reel that started this), `test_asset_plan.py`.
+- **R5. The deb VLC died on Play — `libpthread.so.0: undefined symbol:
+  __libc_pthread_init` 🔴 (Linux dev) / 🟠 (frozen).** Prism launched from a
+  VS Code-snap terminal inherits `GTK_PATH`; the packaged build has the same
+  shape via PyInstaller's `LD_LIBRARY_PATH`. Fix: `paths.scrub_environment()`
+  at startup, for every child Prism opens. Pinned: `test_environment_scrub.py`.
+- **R6. Follow-ups were one-time only, and a reel's never reached its own chat
+  🟠.** The follow-up run's completion replaced the session with its one
+  stage; the classifier routed a reel to the local renderer. Fix: a merged
+  session per task; a planned follow-up (artwork → design chat → re-film, or a
+  relay of steps in their own chats); `studio_followup`; History offers one;
+  waits raised. Pinned: `test_followup_session.py`, `test_followup_plan.py`,
+  `test_studio_followup.py`.
+- **R7. Unticking "Make the images" changed nothing 🟠.** Studio's image maker
+  is inserted by the engine on a config key the plan never touches. Fix:
+  `skip_stages` from the plan screen, honoured by the insertion. Pinned:
+  `test_skip_imagery.py`.
+- **R8. Every run with the same words shared one Artifacts folder; a
+  follow-up attached twelve files from four runs 🟠.** Fix: one folder per run
+  (`config.begin_run`), cards per run, the run record remembers its folder.
+  Pinned: `test_artifacts_config.py`, `test_artifacts_panel.py`.
+- **R9. Names: the request verbatim everywhere, and every chat titled by its
+  own opening line ("Senior Creative Director Task") 🟡.** Fix: the planner
+  writes `_title`; folders, files, History and Home use it; each step's first
+  message opens `Prism · <title> · <step>`. Pinned: `test_run_titles.py`.
+- **R10. `ReelDialog._on_rendered` raised `AttributeError: request` on a reel
+  reopened from disk and re-rendered from the editor 🔴.** `self.request` was
+  only set by `_run`. Fix: initialised in `__init__`. Not separately pinned.
+
 ### 0a. Native crash — QThread destroyed while still running — CLOSED 🔴
 - **Symptom:** the window opens, then Prism vanishes a few seconds later with no
   Python traceback. Windows logs a fast-fail — `python.exe … Qt6Core.dll …
