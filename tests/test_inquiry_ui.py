@@ -42,7 +42,7 @@ from addons.inquiry import dialog as UI  # noqa: E402
 import addons.inquiry.setup as UI_SETUP  # noqa: E402
 from addons.inquiry.setup import (  # noqa: E402
     InquirySetupDialog, is_ready, settings_of)
-from widgets import sidebar  # noqa: E402
+from shell.widgets import sidebar  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -631,13 +631,13 @@ class ItIsOnTheShelf(unittest.TestCase):
     def test_the_icon_exists(self):
         """A name with no glyph behind it draws nothing — an invisible button
         on the rail, which reads as a broken build rather than a missing icon."""
-        from widgets import icons
+        from shell.widgets import icons
         known = set(icons._STROKED) | set(icons._FILLED)
         self.assertIn(self._entry()[2], known)
 
     def test_the_main_window_routes_it(self):
         with open(os.path.join(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))), "main_window.py"),
+                os.path.abspath(__file__))), "shell", "main_window.py"),
                 encoding="utf-8") as f:
             source = f.read()
         self.assertIn('key == "inquiry"', source)

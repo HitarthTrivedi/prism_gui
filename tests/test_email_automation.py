@@ -556,7 +556,7 @@ class TheRailStillSellsIt(unittest.TestCase):
         """The name moved with the customer's own words; the licence feature
         underneath did not move at all — a renamed SKU would strand every
         existing key."""
-        from widgets.sidebar import ADDONS
+        from shell.widgets.sidebar import ADDONS
         entry = next(e for e in ADDONS if e[0] == "inquiry")
         self.assertEqual(entry[1], "Email automation")
         self.assertEqual(entry[4], "inbox")

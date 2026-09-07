@@ -52,12 +52,12 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
-from dialogs.base import PrismDialog
+from shell.dialogs.base import PrismDialog
 from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
-from widgets import controls as C
-from workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
+from shell.widgets import controls as C
+from shell.workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
 
 # What each sorted category is called on screen. The engine's keys are English
 # identifiers; these are the words a customer reads.
@@ -2172,7 +2172,7 @@ class InquiryDialog(QWidget):
             self.status.setText(message.split("\n")[0])
             return
         try:
-            from dialogs.problem_dialog import show_problem
+            from shell.dialogs.problem_dialog import show_problem
             show_problem(self, message)
         except Exception:
             QMessageBox.warning(self, i18n.t("Email automation"), message)

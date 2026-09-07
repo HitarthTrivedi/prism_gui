@@ -9,7 +9,7 @@ Before this, addons/inquiry/dialog.py did:
             attachments.append(files.attach(path))
         except Exception:
             continue
-    from dialogs.boq_dialog import BoqDialog
+    from shell.dialogs.boq_dialog import BoqDialog
     BoqDialog(self.cfg, attachments, self).exec()
 
 Five things Inquiry knew about BOQ: its module path, its class name, its

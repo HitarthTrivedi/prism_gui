@@ -74,7 +74,7 @@ class MainWindowActuallyWiresIt(GateTest):
     """
 
     def test_change_account_opens_setup(self):
-        import main_window
+        from shell import main_window
         self.grant(tuple(plans.FEATURES))
         win = self._window()
         with mock.patch.object(main_window.MainWindow,
@@ -90,7 +90,7 @@ class MainWindowActuallyWiresIt(GateTest):
         only from the compose route, behind `not is_configured(cfg)` -- so
         once an account was saved there was no way back in short of editing
         the config file by hand. A wrong password had no door."""
-        import main_window
+        from shell import main_window
         self.grant(tuple(plans.FEATURES))
         win = self._window()
         win.cfg = {"email": {"address": "sales@acme.co.in", "password": "p"}}

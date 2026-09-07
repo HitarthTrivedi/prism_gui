@@ -113,15 +113,15 @@ windowed, no console. See `09-boundaries.md` §2.
 
 ## 3. Build the front door and the dialog
 
-Subclass `AddonFrontDoor` from `widgets/panel_base.py` for the panel. It is
+Subclass `AddonFrontDoor` from `shell/widgets/panel_base.py` for the panel. It is
 already a declarative manifest in all but name — `ICON`, `HUE`, `HEADLINE`,
 `DETAIL`, `ACTION`, `STEPS`, `PLACEHOLDERS`, `KIND` as class attributes, plus
 `opened`/`open_run`/`navigate` signals. Read `addons/gerber/panel.py`; it is
 64 lines and most of them are copy.
 
-For the dialog, subclass `PrismDialog` from `dialogs/base.py`.
+For the dialog, subclass `PrismDialog` from `shell/dialogs/base.py`.
 
-**Any background work subclasses `workers._Worker`.** Never `QThread`
+**Any background work subclasses `shell.workers._Worker`.** Never `QThread`
 directly — see `09-boundaries.md` §3 for what that costs.
 
 **Reach the engine through `core_bridge` only.** `CB.get_gerber()`,
@@ -214,8 +214,8 @@ merely importing on your machine — which is the difference between a red
 
 ## What you do NOT have to touch
 
-`widgets/sidebar.py`, `widgets/home_panel.py`, `main_window.py`,
-`widgets/panel_base.py`'s tables, `packaging/prism.spec`.
+`shell/widgets/sidebar.py`, `shell/widgets/home_panel.py`, `shell/main_window.py`,
+`shell/widgets/panel_base.py`'s tables, `packaging/prism.spec`.
 
 The rail, the Home shelf, History's run attribution, the routed-agent gate
 and the build's module list all read the registry. That is the whole point:

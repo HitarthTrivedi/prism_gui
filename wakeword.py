@@ -27,7 +27,7 @@ import wave
 from PySide6.QtCore import Signal
 
 import core_bridge as CB
-from workers import _Worker
+from shell.workers import _Worker
 
 # audioop was deleted from the stdlib in Python 3.13 (PEP 594), and pyaudio is
 # an optional extra that needs PortAudio on the box. Neither may be present —

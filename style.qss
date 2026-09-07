@@ -45,7 +45,7 @@
    spent a sixth of the vertical budget on a greeting.
 
    QSS has no letter-spacing property; the tracked labels (kickers, brand,
-   window title) set it on their QFont in widgets/controls.py.
+   window title) set it on their QFont in shell/widgets/controls.py.
 
    ── Shape ─────────────────────────────────────────────────────────────────
    Three radii, not thirteen:
@@ -977,7 +977,7 @@ QListWidget::item:selected {
 /* ── headers and toolbars ────────────────────────────────────────────────
    The two standard bands: PageHeader is fixed at the top of a screen and never
    scrolls; SectionHeader sits above a group of cards inside the scroll. Both
-   are drawn by widgets/controls.py so every screen gets the same one. */
+   are drawn by shell/widgets/controls.py so every screen gets the same one. */
 #pageHeader {
     background: #f4f5f6;
     border: none;

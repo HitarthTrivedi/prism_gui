@@ -369,7 +369,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
         licensing.reload = lambda: _licence(features)
 
     def test_without_the_feature_it_goes_through_the_gate(self):
-        import main_window
+        from shell import main_window
         self._grant({"core"})
         asked = []
         with mock.patch.object(main_window.MainWindow, "_authorized_then",
@@ -380,7 +380,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
             self.assertNotEqual(win.screens.currentIndex(), main_window.INQUIRY)
 
     def test_with_the_feature_it_reaches_the_screen(self):
-        import main_window
+        from shell import main_window
         self._grant({"core", "inbox"})
         with mock.patch.object(main_window.MainWindow, "_authorized_then",
                                lambda self, feat, act, then: then()):
@@ -391,7 +391,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
     def test_a_locked_row_stays_clickable(self):
         """A padlocked add-on opens its pitch. A disabled one sells nothing
         and is indistinguishable from something broken."""
-        import main_window
+        from shell import main_window
         self._grant({"core"})
         win = main_window.MainWindow()
         win.refresh_licence_ui()
@@ -410,7 +410,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
         been able to reach the licence server" and an "Enter a licence key"
         button, which reads as being asked to buy what they have paid for.
         """
-        import main_window
+        from shell import main_window
 
         stale = LicenseState(status=licensing.STALE, plan="Growth",
                              customer="Test", kind="team",
@@ -439,7 +439,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
         CALLED it for ten minutes, so this pins the schedule rather than the
         repaint — without it, disabling the singleShot calls leaves the other
         test passing and the customer still staring at a stale banner."""
-        import main_window
+        from shell import main_window
         from PySide6.QtCore import QTimer
 
         self._grant({"core", "inbox"})
@@ -460,7 +460,7 @@ class TheLicenceGateStillHolds(unittest.TestCase):
             f"licence fixes itself must not wait that long to be told")
 
     def test_an_owned_add_on_is_not_marked_locked(self):
-        import main_window
+        from shell import main_window
         self._grant({"core", "inbox"})
         win = main_window.MainWindow()
         win.refresh_licence_ui()
@@ -483,7 +483,7 @@ class TheScreenStaysInStepWithTheStore(unittest.TestCase):
     def test_refresh_picks_up_a_register_written_after_load(self):
         """The dialog works the register while the screen is behind it, so the
         screen is stale the moment the dialog closes."""
-        import main_window
+        from shell import main_window
         # Point the window at an empty folder of our own before building it.
         # Unpatched, MainWindow() loads the REAL config, so `_rows` starts
         # populated with the operator's actual customers and this assertion
@@ -505,7 +505,7 @@ class TheScreenStaysInStepWithTheStore(unittest.TestCase):
     def test_set_up_opens_setup_not_the_working_dialog(self):
         """It used to route through the working dialog, which opened setup
         itself — three stacked windows for one click."""
-        import main_window
+        from shell import main_window
         opened = []
         with mock.patch.object(main_window.MainWindow, "_open_inquiry_setup",
                                lambda self: opened.append("setup")), \
@@ -516,7 +516,7 @@ class TheScreenStaysInStepWithTheStore(unittest.TestCase):
             self.assertEqual(opened, ["setup"])
 
     def test_the_launcher_opens_the_working_dialog_on_the_tab_it_names(self):
-        import main_window
+        from shell import main_window
         opened = []
         with mock.patch.object(main_window.MainWindow, "_open_inquiry_dialog",
                                lambda self, tab=0: opened.append(tab)):

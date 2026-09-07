@@ -19,9 +19,9 @@ import core_bridge as CB
 import i18n
 import theme
 import wakeword
-from dialogs.base import PrismDialog
-from workers import AutomationWorker, RecordWorker, MotionWorker
-from widgets.ask_panel import AskPanel
+from shell.dialogs.base import PrismDialog
+from shell.workers import AutomationWorker, RecordWorker, MotionWorker
+from shell.widgets.ask_panel import AskPanel
 
 
 class MotionDialog(PrismDialog):

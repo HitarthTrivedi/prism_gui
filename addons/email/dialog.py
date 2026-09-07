@@ -27,9 +27,9 @@ import core_bridge as CB
 import i18n
 from addons.email import sent_log
 import theme
-from dialogs.base import PrismDialog
-from widgets import controls as C
-from workers import AutomationWorker, SendWorker, VerifyWorker
+from shell.dialogs.base import PrismDialog
+from shell.widgets import controls as C
+from shell.workers import AutomationWorker, SendWorker, VerifyWorker
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 

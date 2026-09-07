@@ -374,7 +374,7 @@ class ClosingDuringARunMustNotAbort(unittest.TestCase):
     def _window(self, workers):
         """A MainWindow shell — just enough for _retire_workers, without
         building a real one (which reaches for the licence server)."""
-        import main_window
+        from shell import main_window
 
         win = main_window.MainWindow.__new__(main_window.MainWindow)
         win._workers = list(workers)
@@ -437,7 +437,7 @@ class ClosingDuringARunMustNotAbort(unittest.TestCase):
         """The unit above is worthless if nothing wires it to the close."""
         import ast
 
-        with open(_repo("main_window.py"), encoding="utf-8") as f:
+        with open(_repo("shell/main_window.py"), encoding="utf-8") as f:
             tree = ast.parse(f.read())
         close = next(n for n in ast.walk(tree)
                      if isinstance(n, ast.FunctionDef) and n.name == "closeEvent")

@@ -89,7 +89,7 @@ if _server_url:
 datas = [
     (os.path.join(GUI_DIR, "assets"), "assets"),
     (os.path.join(GUI_DIR, "style.qss"), "."),
-    # Read in-app via dialogs/legal_dialog.py (Settings → Help & more →
+    # Read in-app via shell/dialogs/legal_dialog.py (Settings → Help & more →
     # Legal) so a customer never needs a network connection just to read
     # what they agreed to.
     (os.path.join(GUI_DIR, "TERMS_OF_USE.md"), "."),

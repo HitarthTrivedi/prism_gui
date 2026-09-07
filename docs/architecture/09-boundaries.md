@@ -111,7 +111,7 @@ doors.
 
 | Rule | Enforced by |
 | --- | --- |
-| **Every background thread subclasses `workers._Worker`, never `QThread`** | `tests/test_worker_mandate.py` |
+| **Every background thread subclasses `shell.workers._Worker`, never `QThread`** | `tests/test_worker_mandate.py` |
 
 A `QThread` garbage-collected while its OS thread is still running makes Qt
 call `qFatal()`. That is a process abort — `0xC0000409` on Windows, no

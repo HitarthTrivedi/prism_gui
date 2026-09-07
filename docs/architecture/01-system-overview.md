@@ -133,7 +133,7 @@ flowchart TB
 > **One place decides. Widgets and dialogs do not.**
 
 Widgets emit signals and render what they are given. Dialogs collect input and
-return it. `workers.py` classes do one job off the UI thread and emit a result.
+return it. `shell/workers.py` classes do one job off the UI thread and emit a result.
 The engine knows nothing about Qt. Everything that decides *what happens next*
 — which worker to start, what to do with its result, when to persist, when to
 stop for a human — lives in the shell or in the add-on that owns that screen.
@@ -146,7 +146,7 @@ coherence.
 
 It is bad for four people shipping in parallel, and those two things trade
 against each other at exactly that file. Over ninety days every contributor
-edited `main_window.py`; it took 40 commits, and it and `workers.py` were the
+edited `shell/main_window.py`; it took 40 commits, and it and `shell/workers.py` were the
 two files that most often needed manual conflict resolution. Branches
 diverged there, sat unmerged, and their fixes never reached `main` — which is
 felt as *"the same bugs keep coming back"*.
@@ -279,9 +279,9 @@ sequenceDiagram
 | File | Lines | Responsibility |
 |---|---:|---|
 | `main.py` | 327 | Entry point, startup order, licence gate, `--selftest`, paywall registration |
-| `main_window.py` | 2,131 | The only decision-maker: owns all workers, all three columns, the task queue, the run lifecycle, all add-on entry points |
+| `shell/main_window.py` | 2,131 | The only decision-maker: owns all workers, all three columns, the task queue, the run lifecycle, all add-on entry points |
 | `core_bridge.py` | 258 | Puts `prism_terminal/core` on `sys.path`; lazy `get_*()` / `*_available()` accessors so heavy optional deps are probed, not imported at boot |
-| `workers.py` | 511 | 16 `QThread` wrappers — the entire concurrency surface |
+| `shell/workers.py` | 511 | 16 `QThread` wrappers — the entire concurrency surface |
 | `dashboard_data.py` | 355 | Read-only projections for Home and register screens (recent runs, counts, sparklines, register views, currency formatting) |
 | `theme.py` | 597 | Industry design tokens; per-role accent hue; stylesheet rewriting |
 | `i18n.py` | 441 | Interface translation; patches Qt before any widget exists; script-aware font stacks |
@@ -300,7 +300,7 @@ sequenceDiagram
 | `support_kb.py` | 1,618 | The support answer book |
 | `style.qss` | 45 KB | The Industry theme — everything QSS can express |
 
-### `widgets/` — presentation
+### `shell/widgets/` — presentation
 
 | File | Lines | Shows |
 |---|---:|---|
@@ -318,7 +318,7 @@ sequenceDiagram
 | `files_panel.py` | 374 | "Files you mentioned" |
 | `register_table.py`, `blueprint.py`, `ask_panel.py`, `prompt_panel.py`, `icons.py`, `markdown.py` | — | Register table, hairline frame with registration marks, shared ask box, "Behind the scenes", 24×24 stroked line icons, markdown → Qt rich text |
 
-### `dialogs/` — modal flows
+### `shell/dialogs/` — modal flows
 
 | File | Lines | Flow |
 |---|---:|---|

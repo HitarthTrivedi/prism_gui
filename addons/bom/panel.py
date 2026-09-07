@@ -7,7 +7,7 @@ rather than pretending to own a dialog it does not have.
 from __future__ import annotations
 
 import theme
-from widgets.panel_base import (
+from shell.widgets.panel_base import (
     AddonFrontDoor,
 )
 

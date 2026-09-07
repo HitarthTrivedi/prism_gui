@@ -33,7 +33,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import main_window                                      # noqa: E402
+from shell import main_window                                      # noqa: E402
 import plans                                            # noqa: E402
 from addons import manifest, registry                   # noqa: E402
 from test_gates import GateTest                         # noqa: E402
@@ -71,7 +71,7 @@ class TheTableIsSelfConsistent(unittest.TestCase):
         """Static half: the number of pages added must equal the number
         declared. Catches a page appended without a table entry, which would
         make every later index wrong."""
-        with open(os.path.join(ROOT, "main_window.py"),
+        with open(os.path.join(ROOT, "shell", "main_window.py"),
                   encoding="utf-8") as f:
             source = f.read()
         calls = re.findall(r"self\.screens\.addWidget\(", source)

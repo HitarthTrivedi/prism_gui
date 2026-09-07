@@ -141,20 +141,20 @@ class EveryErrorIsAnswerable(unittest.TestCase):
 
 class ProblemDialogBuilds(unittest.TestCase):
     def test_it_builds_for_every_real_error(self):
-        from dialogs.problem_dialog import ProblemDialog
+        from shell.dialogs.problem_dialog import ProblemDialog
         for context, error in REAL_ERRORS:
             dialog = ProblemDialog(friendly.explain(error, context),
                                    detail=str(error))
             self.assertTrue(dialog.windowTitle())
 
     def test_the_technical_detail_starts_hidden(self):
-        from dialogs.problem_dialog import ProblemDialog
+        from shell.dialogs.problem_dialog import ProblemDialog
         dialog = ProblemDialog(friendly.explain("session not created"),
                                detail="WebDriverException: chrome 131")
         self.assertFalse(dialog._detail_label.isVisible())
 
     def test_pressing_the_fix_button_reports_the_action(self):
-        from dialogs.problem_dialog import ProblemDialog
+        from shell.dialogs.problem_dialog import ProblemDialog
         dialog = ProblemDialog(friendly.explain("not signed in"))
         dialog._take_action()
         self.assertEqual(dialog.chosen_action, "login")
@@ -162,13 +162,13 @@ class ProblemDialogBuilds(unittest.TestCase):
 
 class Guide(unittest.TestCase):
     def test_every_topic_has_a_title_and_body(self):
-        from dialogs.guide_dialog import TOPICS
+        from shell.dialogs.guide_dialog import TOPICS
         for topic in TOPICS:
             self.assertTrue(topic.title)
             self.assertGreater(len(topic.body), 40, topic.title)
 
     def test_the_guide_avoids_jargon_too(self):
-        from dialogs.guide_dialog import TOPICS
+        from shell.dialogs.guide_dialog import TOPICS
         banned = ("prompt engineering", "llm", "api", "pipeline stage",
                   "selector", "agent registry", "oauth")
         for topic in TOPICS:
@@ -177,7 +177,7 @@ class Guide(unittest.TestCase):
                 self.assertNotIn(word, text, f"{word!r} in {topic.title}")
 
     def test_every_add_on_topic_names_the_feature_that_unlocks_it(self):
-        from dialogs.guide_dialog import TOPICS
+        from shell.dialogs.guide_dialog import TOPICS
         for topic in TOPICS:
             if topic.feature:
                 self.assertIn(topic.feature, plans.FEATURES, topic.title)
@@ -185,13 +185,13 @@ class Guide(unittest.TestCase):
     def test_locked_topics_are_still_listed(self):
         """The guide is the only place a customer can discover what else
         Prism does — a list with holes teaches them nothing."""
-        from dialogs.guide_dialog import TOPICS
+        from shell.dialogs.guide_dialog import TOPICS
         self.assertTrue([t for t in TOPICS if t.feature])
 
     def test_it_builds_and_shows_locked_items_greyed(self):
         from unittest import mock
         import licensing
-        from dialogs.guide_dialog import GuideDialog
+        from shell.dialogs.guide_dialog import GuideDialog
         core_only = type("S", (), {
             "usable": True, "status": "valid", "features": frozenset(["core"]),
             "message": "", "customer": "X", "plan": "p", "kind": "paid",
@@ -264,7 +264,7 @@ class Plans(unittest.TestCase):
                          "Prism Works")
 
     def test_the_paywall_can_pitch_every_feature(self):
-        from dialogs.paywall import PITCH
+        from shell.dialogs.paywall import PITCH
         for key in plans.FEATURES:
             self.assertIn(key, PITCH, f"no paywall copy for {key}")
             _name, _icon, text = PITCH[key]

@@ -85,7 +85,7 @@ class TheEngineContract(unittest.TestCase):
 class TheWorkerSwitch(unittest.TestCase):
 
     def test_skip_sets_the_event_the_engine_is_given(self):
-        from workers import AutomationWorker
+        from shell.workers import AutomationWorker
         w = AutomationWorker({}, {}, [], "task")
         self.assertFalse(w._skip.is_set())
         w.skip()
@@ -99,7 +99,7 @@ class TheWorkerSwitch(unittest.TestCase):
 class TheButton(unittest.TestCase):
 
     def _view(self):
-        from widgets.output_panel import OutputPanel
+        from shell.widgets.output_panel import OutputPanel
         return OutputPanel()
 
     def test_it_sits_beside_stop_and_only_while_running(self):

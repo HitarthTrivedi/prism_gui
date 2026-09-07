@@ -241,7 +241,7 @@ class TheWorkbenchCard(unittest.TestCase):
     HTML scenes)."""
 
     def _card(self):
-        from widgets.output_panel import StageCard
+        from shell.widgets.output_panel import StageCard
         return StageCard("media", "Prism Studio")
 
     def _reel_on_disk(self, spec) -> str:
@@ -273,14 +273,14 @@ class TheWorkbenchCard(unittest.TestCase):
         self.assertFalse(card.edit_btn.isVisibleTo(card))
 
     def test_the_panel_bubbles_it_and_the_window_answers(self):
-        from widgets.output_panel import OutputPanel
+        from shell.widgets.output_panel import OutputPanel
         src_panel = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "widgets", "output_panel.py"), encoding="utf-8").read()
+            "shell", "widgets", "output_panel.py"), encoding="utf-8").read()
         self.assertIn("card.edit_reel.connect(self.edit_reel.emit)", src_panel)
         src_win = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "main_window.py"), encoding="utf-8").read()
+            "shell", "main_window.py"), encoding="utf-8").read()
         self.assertIn("output_panel.edit_reel.connect(self._edit_reel_layout)",
                       src_win)
         self.assertIn("def _on_reel_edits_rendered", src_win)
@@ -392,7 +392,7 @@ class TheArtifactsScreen(unittest.TestCase):
         return hits[0] if hits else None
 
     def test_a_studio_reel_gets_an_edit_action(self):
-        from widgets.artifacts_panel import ArtifactsPanel
+        from shell.widgets.artifacts_panel import ArtifactsPanel
         folder = tempfile.mkdtemp()
         mp4 = self._reel_on_disk(folder, _spec())
         with mock.patch.object(CB.config, "ARTIFACTS_DIR", folder):
@@ -406,7 +406,7 @@ class TheArtifactsScreen(unittest.TestCase):
         self.assertEqual(seen, [mp4])
 
     def test_a_quick_reel_or_no_spec_gets_none(self):
-        from widgets.artifacts_panel import ArtifactsPanel
+        from shell.widgets.artifacts_panel import ArtifactsPanel
         folder = tempfile.mkdtemp()
         quick = self._reel_on_disk(
             folder, {"scenes": [{"type": "hook"}]}, "reel_2")
@@ -417,7 +417,7 @@ class TheArtifactsScreen(unittest.TestCase):
         self.assertIsNone(self._edit_button(panel._row(bare)))
 
     def test_a_non_video_artifact_gets_none(self):
-        from widgets.artifacts_panel import ArtifactsPanel
+        from shell.widgets.artifacts_panel import ArtifactsPanel
         folder = tempfile.mkdtemp()
         doc = os.path.join(folder, "quote.pdf")
         open(doc, "wb").write(b"\x00")
@@ -427,7 +427,7 @@ class TheArtifactsScreen(unittest.TestCase):
     def test_the_window_answers_it_the_same_way(self):
         src = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "main_window.py"), encoding="utf-8").read()
+            "shell", "main_window.py"), encoding="utf-8").read()
         self.assertIn(
             "self.artifacts_panel.edit_reel.connect(self._edit_reel_layout)",
             src)
@@ -438,7 +438,7 @@ class TheHistoryDialog(unittest.TestCase):
     editable than one still fresh on the workbench."""
 
     def _dialog(self):
-        from dialogs.history_dialog import HistoryDialog
+        from shell.dialogs.history_dialog import HistoryDialog
         with mock.patch.object(CB.config, "load", return_value={}):
             return HistoryDialog(None)
 
@@ -448,7 +448,7 @@ class TheHistoryDialog(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(record, f)
         from PySide6.QtWidgets import QListWidgetItem
-        from dialogs.history_dialog import _PATH_ROLE
+        from shell.dialogs.history_dialog import _PATH_ROLE
         item = QListWidgetItem()
         item.setData(_PATH_ROLE, path)
         return item
@@ -522,7 +522,7 @@ class TheHistoryDialog(unittest.TestCase):
     def test_the_window_answers_it_the_same_way(self):
         src = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "main_window.py"), encoding="utf-8").read()
+            "shell", "main_window.py"), encoding="utf-8").read()
         self.assertIn("dialog.edit_reel.connect(self._edit_reel_layout)", src)
 
 

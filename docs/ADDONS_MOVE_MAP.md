@@ -38,10 +38,10 @@ now lives in **`addons/inquiry/quotation.py`**. It is re-exported from
 
 | Now in | What |
 | --- | --- |
-| `widgets/panel_base.py` | `Page`, `AddonFrontDoor`, `bucket_for`, `_RunRow`, the copy tables and shared helpers |
-| `widgets/guide_panel.py` | `GuidePanel` |
-| `widgets/catalog_panel.py` | `CatalogPanel` |
-| `widgets/history_panel.py` | `HistoryPanel`, `_AbortedRow` |
+| `shell/widgets/panel_base.py` | `Page`, `AddonFrontDoor`, `bucket_for`, `_RunRow`, the copy tables and shared helpers |
+| `shell/widgets/guide_panel.py` | `GuidePanel` |
+| `shell/widgets/catalog_panel.py` | `CatalogPanel` |
+| `shell/widgets/history_panel.py` | `HistoryPanel`, `_AbortedRow` |
 | `addons/boq/panel.py` | `BoqPanel` |
 | `addons/bom/panel.py` | `BomPanel` |
 | `addons/gerber/panel.py` | `GerberPanel` |
@@ -82,8 +82,8 @@ gone.** If you imported `EmailPanel` from `simple_panels`, import it from
 | --- | --- |
 | `main.py`, `app_meta.py`, `updater.py`, `apply_update.py`, `update_manifest.py`, `paths.py`, `licensing/`, `packaging/` | The **build contract surface**. The things that depend on these are not Python imports — a PyInstaller spec, a Nuitka command line, a few lines of YAML. Move one and nothing fails until a release. `tests/test_repo_layout.py` pins them |
 | `inquiry_config.py` | Home reads it through `dashboard_data`. Putting it inside the Inquiry add-on would make Home depend on that add-on, which is the coupling the whole restructure removes |
-| `workers.py` | 20 worker classes patched by name in four test files. Splitting it is separate work |
-| `integrations/gdrive.py`, `dialogs/drive_dialog.py` | Drive is the only add-on with a `datas` coupling to `prism.spec`, and its `google_client.json` is gitignored — so it exists on some build machines and not others, and a mismatch is invisible on any machine lacking it |
+| `shell/workers.py` | 20 worker classes patched by name in four test files. Splitting it is separate work |
+| `integrations/gdrive.py`, `shell/dialogs/drive_dialog.py` | Drive is the only add-on with a `datas` coupling to `prism.spec`, and its `google_client.json` is gitignored — so it exists on some build machines and not others, and a mismatch is invisible on any machine lacking it |
 | `prism_terminal/` | The engine. Untouched by this migration, entirely |
 
 ---

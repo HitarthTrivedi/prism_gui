@@ -23,7 +23,7 @@ import i18n
 import paths
 import theme
 import updater
-from widgets import icons
+from shell.widgets import icons
 
 # MainWindow is imported inside main(), after i18n.start() has patched Qt.
 # Importing it here would be harmless today, but the moment a widget module
@@ -214,7 +214,7 @@ def _selftest(app) -> int:
     if paths.is_frozen():
         checks.append((f"Prism Studio browser (Chromium)"
                        f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
-    from main_window import MainWindow
+    from shell.main_window import MainWindow
     win = MainWindow()
     win.show()
     checks.append(("main window", win.isVisible()))
@@ -383,7 +383,7 @@ def main():
     if not _licence_gate():
         sys.exit(0)
 
-    from main_window import MainWindow
+    from shell.main_window import MainWindow
     win = MainWindow()
     win.show()
 
@@ -408,13 +408,13 @@ def _paywall(feature: str, parent, state) -> None:
     """Shown when a locked add-on is opened. Registered once, here, so the
     licensing package never has to import Qt."""
     from PySide6.QtWidgets import QDialog
-    from dialogs.paywall import PaywallDialog
+    from shell.dialogs.paywall import PaywallDialog
 
     sheet = PaywallDialog(feature, parent, state)
     sheet.exec()
     if sheet.relaunch_license:
         # Parented to the window rather than to the sheet, which is closing.
-        from dialogs.license_dialog import LicenseDialog
+        from shell.dialogs.license_dialog import LicenseDialog
         LicenseDialog(parent, mode="change").exec()
 
 
@@ -453,7 +453,7 @@ def _licence_gate() -> bool:
     from PySide6.QtWidgets import QDialog
 
     import licensing
-    from dialogs.license_dialog import LicenseDialog
+    from shell.dialogs.license_dialog import LicenseDialog
 
     licensing.set_paywall_handler(_paywall)
     # Server-published selector fixes from the last run, re-verified and applied

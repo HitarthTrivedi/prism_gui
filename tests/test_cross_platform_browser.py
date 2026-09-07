@@ -967,7 +967,7 @@ class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
         """A hardcoded list is how the first two traps survived."""
         source = inspect.getsource(self.mint._ungated_features)
         self.assertIn("_authorized_then", source)
-        self.assertIn("main_window.py", source)
+        self.assertIn("shell/main_window.py", source)
 
 
 # ── 10. the box-drawing characters Windows cannot print ──────────────────────

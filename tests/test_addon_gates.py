@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import plans                                            # noqa: E402
-import widgets.sidebar as sidebar                       # noqa: E402
+import shell.widgets.sidebar as sidebar                       # noqa: E402
 from test_gates import GateTest                         # noqa: E402
 
 # Rail key -> the licence feature it must not open without.
@@ -68,7 +68,7 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
         return self.grant([f for f in EVERYTHING if f != feature])
 
     def test_each_add_on_shows_the_paywall_instead_of_opening(self):
-        import main_window
+        from shell import main_window
         for key, feature in sorted(ADDON_FEATURES.items()):
             with self.subTest(addon=key, feature=feature):
                 self.paywalled.clear()
@@ -99,7 +99,7 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
     def test_a_licensed_add_on_still_opens(self):
         """The other half. A gate that denies everybody passes the test above
         and is just as broken."""
-        import main_window
+        from shell import main_window
         self.grant(EVERYTHING)
         win = self._window()
         with mock.patch.object(main_window.MainWindow,

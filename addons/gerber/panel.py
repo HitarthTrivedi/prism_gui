@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 import theme
-from widgets.panel_base import (
+from shell.widgets.panel_base import (
     AddonFrontDoor,
 )
 

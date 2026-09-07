@@ -25,11 +25,11 @@ from addons import registry
 import i18n
 import theme
 import wakeword
-from dialogs.base import PrismDialog
-from workers import AutomationWorker, MeasureWorker, RecordWorker
-from widgets import controls as C
-from widgets.ask_panel import AskPanel, MoreOptions
-from widgets.output_panel import short_duration
+from shell.dialogs.base import PrismDialog
+from shell.workers import AutomationWorker, MeasureWorker, RecordWorker
+from shell.widgets import controls as C
+from shell.widgets.ask_panel import AskPanel, MoreOptions
+from shell.widgets.output_panel import short_duration
 
 
 def _preselect(combo: QComboBox, value: str):

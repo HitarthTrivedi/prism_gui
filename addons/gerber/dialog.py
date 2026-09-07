@@ -26,10 +26,10 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
-from dialogs.base import PrismDialog
-from workers import AutomationWorker, GerberCleanWorker, GerberWorker
-from widgets import icons
-from widgets.ask_panel import AskPanel
+from shell.dialogs.base import PrismDialog
+from shell.workers import AutomationWorker, GerberCleanWorker, GerberWorker
+from shell.widgets import icons
+from shell.widgets.ask_panel import AskPanel
 
 # Every other add-on's numbers land in the hidden ~/.prism/runs folder, which
 # is exactly where a factory owner never thinks to look for the CSV they

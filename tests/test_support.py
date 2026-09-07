@@ -48,7 +48,7 @@ JARGON = ("traceback", "exception", "stacktrace", "selector", "webdriver",
 
 
 def _panel():
-    from widgets.support_panel import SupportPanel
+    from shell.widgets.support_panel import SupportPanel
     return SupportPanel()
 
 
@@ -121,7 +121,7 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
     def test_every_button_goes_somewhere_the_window_understands(self):
         """An action key the dispatcher has no branch for is a button that
         silently does nothing — and nothing else in the app would catch it."""
-        import main_window
+        from shell import main_window
         src = inspect.getsource(main_window.MainWindow._handle_command)
         for q in KB.all_questions():
             if q.answer.action:
@@ -133,8 +133,8 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
         """friendly's catch-all and the guide's last topic both send people
         here — checked against the same dispatcher, for the same reason."""
         import friendly
-        import main_window
-        from dialogs.guide_dialog import TOPICS
+        from shell import main_window
+        from shell.dialogs.guide_dialog import TOPICS
         src = inspect.getsource(main_window.MainWindow._handle_command)
         pointers = [t.action for t in TOPICS if t.action]
         generic = friendly.explain("something entirely unrecognised")
@@ -149,8 +149,8 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
         still get to it, so this asserts reachability rather than a location:
         it is in the rail, or it is in the Settings screen the rail still has.
         """
-        from widgets.sidebar import MORE, SECONDARY
-        from widgets.settings_panel import MORE_LINKS
+        from shell.widgets.sidebar import MORE, SECONDARY
+        from shell.widgets.settings_panel import MORE_LINKS
         rail = [key for key, _l, _i, _t in MORE]
         settings = [key for key, _l, _b in MORE_LINKS]
         self.assertIn("config", rail, "Settings must stay in the rail")
@@ -171,7 +171,7 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
         SCREEN_INDEX is the table _show_screen actually looks the name up in,
         so asserting against it tests the routing rather than the spelling.
         """
-        import main_window
+        from shell import main_window
         self.assertIn(
             "support", main_window.SCREEN_INDEX,
             "the help screen has no entry in main_window.SCREENS, so every "
@@ -181,7 +181,7 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
     def test_every_topic_icon_actually_draws(self):
         """icons.pixmap raises on a name it doesn't know — at runtime that
         would happen while building the topic list, taking the screen down."""
-        from widgets import icons
+        from shell.widgets import icons
         for t in KB.TOPICS:
             self.assertTrue(icons.pixmap(t.icon, 16), t.key)
 
@@ -370,7 +370,7 @@ class WhatTheAssistantIsTold(unittest.TestCase):
         self.assertLess(biggest, 14000, "context has grown past its budget")
 
     def test_the_assistant_is_told_to_refuse_rather_than_guess(self):
-        from widgets.support_panel import _SYSTEM
+        from shell.widgets.support_panel import _SYSTEM
         self.assertIn("Contact the team", _SYSTEM)
         for rule in ("ONLY", "Never guess"):
             self.assertIn(rule, _SYSTEM)
@@ -378,7 +378,7 @@ class WhatTheAssistantIsTold(unittest.TestCase):
 
 class TheAssistantTier(unittest.TestCase):
     def _open(self, **cfg):
-        from widgets.support_panel import SupportPanel
+        from shell.widgets.support_panel import SupportPanel
         p = SupportPanel(cfg)
         p._show_answer("empty-step")
         p._verdict("empty-step", solved=False)
@@ -427,7 +427,7 @@ class TheAssistantTier(unittest.TestCase):
         creative about which menu an option lives in is the one failure this
         tier cannot afford."""
         import core_bridge as CB
-        from workers import SupportWorker
+        from shell.workers import SupportWorker
         seen = {}
 
         def fake_chat(key, model, prompt, **kwargs):
@@ -449,7 +449,7 @@ class ContactingUs(unittest.TestCase):
         """Held on `self`, not returned from a helper — a QDialog with no
         Python reference is collected immediately and every later call raises
         "C++ object already deleted"."""
-        from dialogs.contact_dialog import ContactDialog
+        from shell.dialogs.contact_dialog import ContactDialog
         self.sheet = ContactDialog("Me: it broke\n\nPrism: sorry")
 
     def test_the_draft_already_contains_what_we_would_ask_for(self):

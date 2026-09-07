@@ -153,7 +153,7 @@ class ChoosingStudioRunsStudio(unittest.TestCase):
 class TheRendererFollowsTheChoice(unittest.TestCase):
 
     def test_the_worker_is_told_which_engine_to_use(self):
-        from workers import ReelWorker
+        from shell.workers import ReelWorker
         self.assertTrue(ReelWorker({}, "", studio=True).studio)
         self.assertFalse(ReelWorker({}, "").studio)
 
@@ -161,7 +161,7 @@ class TheRendererFollowsTheChoice(unittest.TestCase):
         """Same spec shape, same progress callback, different renderer — and
         picking the wrong one draws a Studio design in Pillow, which cannot
         read its CSS and produces a blank film."""
-        from workers import ReelWorker
+        from shell.workers import ReelWorker
         import inspect
         src = inspect.getsource(ReelWorker.run)
         self.assertIn("CB.get_studio() if self.studio else CB.get_reel()", src)

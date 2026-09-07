@@ -78,7 +78,7 @@ ARG_SLOTS = {
     "add_action": (1,),
     "_make_table": (0,),    # (headers, stretch, fit) — the column titles
 
-    # ── the shared component system (widgets/controls.py, dialogs/base.py) ──
+    # ── the shared component system (shell/widgets/controls.py, shell/dialogs/base.py) ──
     # These slots are not decoration: without an entry here EVERY positional
     # argument is scraped, and several of these take DATA in the first slot.
     # FileItem's first argument is a filename and MetricCard's second is a
@@ -142,7 +142,7 @@ TEXT_CALLS = {
     "_TabPage", "add_action", "_make_table",
     "QLabel", "QPushButton", "QCheckBox", "QRadioButton", "QGroupBox",
     "QAction", "QListWidgetItem", "QToolButton", "QTreeWidgetItem",
-    # Prism's own text helpers (widgets/controls.py) and local factories
+    # Prism's own text helpers (shell/widgets/controls.py) and local factories
     "heading", "meta", "kicker", "icon_label", "nav_button", "Section",
     "_action", "_tag", "_mini", "_section", "pill", "chip",
     # The shared component system. Every one of these puts words on screen,

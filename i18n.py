@@ -9,7 +9,7 @@ the wrong fit here for three reasons:
 
   · tr() only exists on QObject subclasses. Half of Prism's copy lives in
     plain module-level tables (sidebar.PRIMARY, agents_panel.STAGE_COPY) and
-    in helper functions in widgets/controls.py, none of which are QObjects.
+    in helper functions in shell/widgets/controls.py, none of which are QObjects.
   · it would mean editing ~300 call sites across 16 files, and every new
     string after that would silently ship untranslated with nothing to catch it.
   · it needs the Qt linguist toolchain in the build, for a desktop app whose

@@ -31,8 +31,8 @@ import dashboard_data as DATA
 import i18n
 import theme
 from inquiry_config import TAB_INDEX, TABS  # noqa: F401 — re-exported
-from widgets import controls as C
-from widgets.controls import Card, IconPad, Pill
+from shell.widgets import controls as C
+from shell.widgets.controls import Card, IconPad, Pill
 
 # The one primary on the populated screen. Named here so the tests and the
 # door both read it from one place.

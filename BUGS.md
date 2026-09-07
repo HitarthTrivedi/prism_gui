@@ -33,7 +33,7 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
   through its `done`/`failed` connections is dropped the instant the caller's own
   reference goes — a dialog closing, an attribute reassigned to the next run's
   worker, or a local going out of scope — and the next GC destroys it mid-run.
-- **Fix applied:** new `_Worker(QThread)` base in `workers.py` that anchors each
+- **Fix applied:** new `_Worker(QThread)` base in `shell/workers.py` that anchors each
   worker in a module-level `_running` set from `start()` until its `finished`
   signal fires (drains itself on the GUI thread, so the eventual destruction is
   always safe). All 20 workers inherit it; `dialogs/license_dialog._ActivateWorker`
@@ -58,7 +58,7 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
   window for the instant before `deleteLater()` lands. Windows clamps it to
   minimum titlebar width and animates it.
 - **Fix applied:** `widget.hide()` before every `setParent(None)` — 12 sites
-  across `widgets/settings_panel.py`, `simple_panels.py`, `inquiry_panel.py`,
+  across `shell/widgets/settings_panel.py`, `simple_panels.py`, `inquiry_panel.py`,
   `output_panel.py`, `support_panel.py`, `agents_panel.py`, `controls.py`,
   `home_panel.py`. The `home_panel._active_host` case is safe because
   `_fill_active()` re-asserts visibility after re-add.
@@ -236,7 +236,7 @@ Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX
   or model change ships blind. A ~50-input golden set with structural
   assertions is the known fix.
 - **No telemetry.** `SIGNALS.md` specs the product-signal layer; unbuilt. Note
-  its `main_window.py` hook line numbers are stale after the 24-08 interface
+  its `shell/main_window.py` hook line numbers are stale after the 24-08 interface
   rebuild — re-verify before building. September installs currently ship with
   no usage visibility.
 - **No offline licence grace.** `authorize()` has no fallback by design; a

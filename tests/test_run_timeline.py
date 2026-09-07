@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication                       # noqa: E402
 
-from widgets.output_panel import OutputPanel, short_duration     # noqa: E402
+from shell.widgets.output_panel import OutputPanel, short_duration     # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 

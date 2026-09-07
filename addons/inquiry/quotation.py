@@ -35,12 +35,12 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
-from dialogs.base import PrismDialog
+from shell.dialogs.base import PrismDialog
 from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
-from widgets import controls as C
-from workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
+from shell.widgets import controls as C
+from shell.workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
 
 
 DRAWING_EXTENSIONS = (".dwg", ".dxf", ".pdf")

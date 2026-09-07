@@ -18,7 +18,7 @@
 
 Each add-on is: a manifest in `addons/<key>/addon.py` → a shelf row derived
 from it → a licence check the shell applies → a panel or dialog → one or more
-`workers._Worker` threads → engine modules through `core_bridge`.
+`shell.workers._Worker` threads → engine modules through `core_bridge`.
 
 | Add-on | Package | Feature key | Shelf | Verified against real customer data? |
 |---|---|---|---|---|
@@ -396,7 +396,7 @@ flowchart LR
     D -->|denied| P["paywall.py — the pitch, not a failure"]
     D -->|allowed| E["probe: manifest.probe<br/>→ (bool, reason)"]
     E --> F["panel / dialog<br/>resolved from a dotted string"]
-    F --> G["workers._Worker"]
+    F --> G["shell.workers._Worker"]
     G --> H["engine via core_bridge"]
 ```
 
@@ -418,7 +418,7 @@ wins, and `plans.py` is presentation only.
 the router can put Prism Reel into a plan without the customer ever touching
 a shelf row, and Reel does not have one. It is now declared per add-on
 (`agents=("Prism Reel", "Prism Studio")` in `addons/reel/addon.py`) rather
-than in a separate table in `main_window.py`.
+than in a separate table in `shell/main_window.py`.
 
 **What is gone:** the seven hand-maintained tables that used to have to agree
 — `sidebar.ADDONS`, `home_panel.ADDONS`, `simple_panels.ADDONS`,

@@ -61,9 +61,9 @@ affects every add-on. **Review by someone other than the author.**
 | Area | Code | Steward |
 | --- | --- | --- |
 | The add-on contract | `addons/manifest.py`, `addons/registry.py`, `addons/names.py` | _unassigned_ |
-| The window and the rail | `main_window.py`, `widgets/sidebar.py`, `widgets/home_panel.py` | _unassigned_ |
-| Shared panel furniture | `widgets/panel_base.py` | _unassigned_ |
-| Workers | `workers.py` | _unassigned_ |
+| The window and the rail | `shell/main_window.py`, `shell/widgets/sidebar.py`, `shell/widgets/home_panel.py` | _unassigned_ |
+| Shared panel furniture | `shell/widgets/panel_base.py` | _unassigned_ |
+| Workers | `shell/workers.py` | _unassigned_ |
 | The engine façade | `core_bridge.py` | _unassigned_ |
 | Licensing | `licensing/**` | _unassigned_ |
 | Build and release | `packaging/**`, `.github/workflows/**`, `devtools/**` | _unassigned_ |

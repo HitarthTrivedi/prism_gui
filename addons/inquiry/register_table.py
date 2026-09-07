@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 import i18n
 import theme
-from widgets.controls import Pill
+from shell.widgets.controls import Pill
 
 # Column order is the reading order of the paper register it replaces: which
 # inquiry, whose it is, what they asked for, how many, what we quoted, where it

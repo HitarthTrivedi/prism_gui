@@ -27,8 +27,8 @@ from PySide6.QtWidgets import (
 import i18n
 from addons.email import sent_log
 import theme
-from widgets import controls as C
-from widgets.controls import Card
+from shell.widgets import controls as C
+from shell.widgets.controls import Card
 
 # The one primary on the populated screen and in the header.
 NEW_LABEL = "New email"

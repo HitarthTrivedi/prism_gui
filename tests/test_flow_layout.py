@@ -1,4 +1,4 @@
-"""widgets/controls.py::FlowLayout — the layout that stops a row of buttons
+"""shell/widgets/controls.py::FlowLayout — the layout that stops a row of buttons
 being cut off at the right edge of a narrow window.
 
 The owner photographed exactly that failure: seven buttons in a QHBoxLayout
@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication, QPushButton, QWidget  # noqa: E402
 
-from widgets import controls as C  # noqa: E402
+from shell.widgets import controls as C  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 

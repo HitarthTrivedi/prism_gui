@@ -375,14 +375,14 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
         """Not tautological: sidebar and home_panel could stop deriving --
         somebody could paste a literal list back in, which is precisely what
         this restructure removed."""
-        import widgets.home_panel as home_panel
-        import widgets.sidebar as sidebar
+        import shell.widgets.home_panel as home_panel
+        import shell.widgets.sidebar as sidebar
         self.assertEqual([row[0] for row in sidebar.ADDONS], self.GOLDEN_RAIL)
         self.assertEqual([row[0] for row in home_panel.ADDONS],
                          self.GOLDEN_HOME)
 
     def test_the_licence_gate_matches_the_rail_for_every_addon(self):
-        import widgets.sidebar as sidebar
+        import shell.widgets.sidebar as sidebar
         for row in sidebar.ADDONS:
             key, feature = row[0], row[4]
             with self.subTest(addon=key):
@@ -395,7 +395,7 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
                     % (key, feature, entry.feature))
 
     def test_the_agent_gate_matches_main_windows_table(self):
-        import main_window
+        from shell import main_window
         for agent, feature in main_window.AGENT_FEATURES.items():
             with self.subTest(agent=agent):
                 self.assertEqual(
@@ -405,7 +405,7 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
                                  registry.feature_of_agent(agent)))
 
     def test_the_run_prefixes_match_the_panel_base(self):
-        import widgets.panel_base as panel_base
+        import shell.widgets.panel_base as panel_base
         live = {key: tuple(prefixes)
                 for key, prefixes in panel_base._RUN_PREFIXES}
         mine = {a.key: a.run_prefixes for a in registry.REGISTRY

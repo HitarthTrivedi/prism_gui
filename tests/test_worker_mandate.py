@@ -55,7 +55,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication              # noqa: E402
 
-import workers                                          # noqa: E402
+from shell import workers                                          # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -65,7 +65,7 @@ SKIP_DIRS = {".git", "__pycache__", "build", "dist", "release", "videos",
              ".claude"}
 
 # The one place a bare QThread subclass is correct: the anchor itself.
-ANCHOR_FILE = "workers.py"
+ANCHOR_FILE = "shell/workers.py"
 ANCHOR_CLASS = "_Worker"
 
 

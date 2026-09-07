@@ -311,15 +311,24 @@ class FileDialogsAreLeftAlone(unittest.TestCase):
             r"QFileDialog\.get(?:OpenFileName|OpenFileNames|SaveFileName|"
             r"ExistingDirectory)\(\s*[^,)]+,\s*(?!i18n\.t\()[\"']")
         offenders = []
-        for folder in (".", "widgets", "dialogs"):
-            base = os.path.join(root, folder)
-            for name in sorted(os.listdir(base)):
-                if not name.endswith(".py"):
-                    continue
-                path = os.path.join(base, name)
-                with open(path, encoding="utf-8") as f:
-                    if pattern.search(f.read()):
-                        offenders.append(os.path.join(folder, name))
+        # WALKED, not listed. This used to be a flat scan of (".", "widgets",
+        # "dialogs"), which was every place a dialog lived. The restructure
+        # put the add-on dialogs in addons/<key>/ and the shell's in
+        # shell/dialogs/, so a flat listing would silently stop checking most
+        # of the app's file pickers while still passing.
+        paths = [os.path.join(root, n) for n in sorted(os.listdir(root))
+                 if n.endswith(".py")]
+        for folder in ("shell", "addons"):
+            for dirpath, dirs, files in os.walk(os.path.join(root, folder)):
+                dirs[:] = [d for d in dirs if d != "__pycache__"]
+                paths += [os.path.join(dirpath, n) for n in sorted(files)
+                          if n.endswith(".py")]
+
+        for path in paths:
+            with open(path, encoding="utf-8") as f:
+                if pattern.search(f.read()):
+                    offenders.append(
+                        os.path.relpath(path, root).replace(os.sep, "/"))
         self.assertFalse(offenders,
                          f"file-dialog captions not wrapped in i18n.t(): "
                          f"{offenders}")

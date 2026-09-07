@@ -259,7 +259,7 @@ class MeasuringNeverCallsAnAgent(unittest.TestCase):
 
     def test_gerber_worker_never_imports_automation(self):
         import inspect
-        import workers
+        from shell import workers
         src = inspect.getsource(workers.GerberWorker)
         self.assertNotIn("AutomationWorker", src)
         self.assertNotIn("automation", src.lower())

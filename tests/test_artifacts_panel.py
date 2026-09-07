@@ -24,7 +24,7 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
 
     def setUp(self):
         import core_bridge as CB
-        from widgets.artifacts_panel import ArtifactsPanel
+        from shell.widgets.artifacts_panel import ArtifactsPanel
         self.CB = CB
         self.Panel = ArtifactsPanel
         self._real_dir = CB.config.ARTIFACTS_DIR
@@ -58,7 +58,7 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
         self.assertTrue(any(n and "poster" in n.lower() for n in names))
 
     def test_the_folder_row_reports_how_many_files_it_holds(self):
-        from widgets.artifacts_panel import _folder_stats
+        from shell.widgets.artifacts_panel import _folder_stats
         task_dir = self.CB.config.artifact_task_dir("a busy task")
         self.CB.config.save_artifact(self._src.name, "one", kind="visual",
                                      task="a busy task")
@@ -71,7 +71,7 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
     def test_folder_stats_walks_into_nested_subfolders(self):
         """Gerber's cleaned-copy output keeps its own previews/ subfolder —
         the count must not stop at the first level."""
-        from widgets.artifacts_panel import _folder_stats
+        from shell.widgets.artifacts_panel import _folder_stats
         task_dir = self.CB.config.artifact_task_dir("a gerber job")
         nested = os.path.join(task_dir, "cleaned", "previews")
         os.makedirs(nested, exist_ok=True)
@@ -83,7 +83,7 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
         self.assertEqual(count, 2)
 
     def test_a_link_sidecar_is_not_counted_as_a_file(self):
-        from widgets.artifacts_panel import _folder_stats
+        from shell.widgets.artifacts_panel import _folder_stats
         task_dir = self.CB.config.artifact_task_dir("a chat task")
         dest = self.CB.config.save_artifact(
             self._src.name, "a poster", kind="visual", task="a chat task",

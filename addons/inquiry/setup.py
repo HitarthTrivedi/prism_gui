@@ -45,11 +45,11 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import i18n
-from dialogs.base import PrismDialog
+from shell.dialogs.base import PrismDialog
 import theme
-from widgets import controls as C
-from widgets import icons
-from workers import InboxVerifyWorker
+from shell.widgets import controls as C
+from shell.widgets import icons
+from shell.workers import InboxVerifyWorker
 
 # Moved to inquiry_config.py at the repo root, and re-exported here so that
 # nothing which already imports them from this module has to change.

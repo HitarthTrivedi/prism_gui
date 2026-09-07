@@ -134,7 +134,7 @@ class GateTest(unittest.TestCase):
         window that CAN plan, and say so itself rather than borrowing the
         answer from the machine.
         """
-        import main_window
+        from shell import main_window
         with mock.patch.object(main_window.MainWindow, "_first_run"):
             win = main_window.MainWindow()
         win.cfg = dict(win.cfg or {})
@@ -194,7 +194,7 @@ class WindowGates(GateTest):
     to gate shows up as an attempted open rather than a hung modal."""
 
     def test_locked_addon_does_not_open_its_dialog(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])            # no boq
         win = self._window()
         with mock.patch.object(main_window, "BoqDialog") as dialog:
@@ -203,7 +203,7 @@ class WindowGates(GateTest):
         self.assertEqual(self.paywalled, ["boq"])
 
     def test_owned_addon_gets_past_the_gate(self):
-        import main_window
+        from shell import main_window
         self.grant(["core", "boq"])
         win = self._window()
         # boq_available() is the dependency probe that runs *after* the gate;
@@ -220,7 +220,7 @@ class WindowGates(GateTest):
     def test_owned_addon_still_blocked_when_the_server_is_unreachable(self):
         """No offline fallback: owning BOQ is not enough, the server has to
         say yes at the moment it is opened."""
-        import main_window
+        from shell import main_window
         self.grant(["core", "boq"])
         win = self._window()
         with mock.patch.object(
@@ -235,7 +235,7 @@ class WindowGates(GateTest):
         warned.assert_called_once()
 
     def test_email_gate(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         with mock.patch.object(main_window, "EmailComposeDialog") as dialog:
@@ -317,7 +317,7 @@ class GettingOut(GateTest):
         self.assertIn("Stopping", win.output_panel.stop_btn.text())
 
     def test_a_cancelled_run_keeps_what_finished(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         win._stage_results = [{"stage": "brains", "agent": "Claude",
@@ -330,7 +330,7 @@ class GettingOut(GateTest):
         dialog.assert_called_once()          # the finished work is still shown
 
     def test_discard_clears_the_plan_but_keeps_attachments(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         win.routing = {"stages": {}}
@@ -342,7 +342,7 @@ class GettingOut(GateTest):
         self.assertEqual(len(win.attachments), 1)   # explicit choices survive
 
     def test_discard_can_be_backed_out_of(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         win.routing = {"stages": {}}
@@ -357,7 +357,7 @@ class PlanningIsAuthorised(GateTest):
     so it goes through the server like a run does."""
 
     def test_planning_asks_the_server(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         with mock.patch.object(main_window, "AuthorizeWorker",
@@ -369,7 +369,7 @@ class PlanningIsAuthorised(GateTest):
         router.assert_called_once()
 
     def test_planning_stops_when_the_server_says_no(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         with mock.patch.object(main_window, "AuthorizeWorker",
@@ -389,7 +389,7 @@ class RoutedAgentGate(GateTest):
     ever touching the rail, so the sidebar gate alone would leak it."""
 
     def test_locked_routed_agent_is_offered_as_a_drop(self):
-        import main_window
+        from shell import main_window
         from PySide6.QtWidgets import QMessageBox
         self.grant(["core"])            # no reel
         win = self._window()
@@ -412,7 +412,7 @@ class RoutedAgentGate(GateTest):
         self.assertIn("Claude", ran.values())
 
     def test_declining_the_drop_shows_the_pitch(self):
-        import main_window
+        from shell import main_window
         from PySide6.QtWidgets import QMessageBox
         self.grant(["core"])
         win = self._window()
@@ -456,7 +456,7 @@ class TaskQueue(GateTest):
         self.assertTrue(win.input_panel.route_btn.isEnabled())
 
     def test_each_task_is_planned_in_turn(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         self._queued(win, "task one", "task two", "task three")
@@ -510,7 +510,7 @@ class TaskQueue(GateTest):
                          ["Claude", "Apollo"])
 
     def test_a_failed_task_does_not_kill_the_queue(self):
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         win._task_queue = ["a", "b"]
@@ -526,7 +526,7 @@ class TaskQueue(GateTest):
     def test_a_licence_refusal_stops_the_whole_queue(self):
         """One refusal will refuse every task behind it — firing the rest at
         the server would be pure noise."""
-        import main_window
+        from shell import main_window
         self.grant(["core"])
         win = self._window()
         win._task_queue = ["a", "b", "c"]
@@ -566,7 +566,7 @@ class Attachments(GateTest):
     """
 
     def _window(self):
-        from main_window import MainWindow
+        from shell.main_window import MainWindow
         self.grant(["core"])
         return MainWindow()
 
@@ -748,7 +748,7 @@ class UpdateBanner(GateTest):
 
     def test_the_download_button_opens_the_fixed_address(self):
         import app_meta
-        import main_window
+        from shell import main_window
         win = self._advised(latest_version="99.0.0")
         with mock.patch.object(main_window.QDesktopServices,
                                "openUrl") as opened:

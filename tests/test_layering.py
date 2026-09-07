@@ -42,7 +42,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_MODULES = ("dashboard_data.py", "inquiry_config.py")
 
 # What those may not touch, at any scope.
-UI_PACKAGES = ("dialogs", "widgets")
+UI_PACKAGES = ("shell",)
 
 
 def _parse(path: str) -> ast.Module:
@@ -93,7 +93,7 @@ class AWidgetMayOpenADialogButNotDependOnOne(unittest.TestCase):
         module-level one is "this widget cannot be loaded without that
         dialog", which is a load-order dependency and a barrier to moving
         either file."""
-        folder = os.path.join(ROOT, "widgets")
+        folder = os.path.join(ROOT, "shell", "widgets")
         offenders = []
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".py"):
@@ -103,8 +103,8 @@ class AWidgetMayOpenADialogButNotDependOnOne(unittest.TestCase):
             for node in tree.body:
                 if not isinstance(node, (ast.Import, ast.ImportFrom)):
                     continue
-                if _module_of(node).split(".")[0] == "dialogs":
-                    offenders.append("widgets/%s:%d imports %s"
+                if _module_of(node).startswith("shell.dialogs"):
+                    offenders.append("shell/widgets/%s:%d imports %s"
                                      % (name, node.lineno, _module_of(node)))
         self.assertEqual(
             offenders, [],

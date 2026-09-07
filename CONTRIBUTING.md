@@ -13,8 +13,8 @@ own sake. Everything below exists to protect that one property.
 
 Here is what it was like before, and it is worth knowing because the rules
 only make sense against it. Over ninety days **every one of us edited the
-same four files**: `main_window.py`, `workers.py`, `sidebar.py`,
-`simple_panels.py`. Every feature had to be wired through them. So every
+same four files**: `main_window.py`, `workers.py`, `sidebar.py` and
+`simple_panels.py` (all of them now under `shell/`, or split up). Every feature had to be wired through them. So every
 branch collided there, merging became something you put off, branches sat
 unmerged for weeks — and the fixes on them never reached `main`.
 
@@ -42,7 +42,11 @@ addons/<key>/          ONE ADD-ON. Yours. Nobody else edits it.
 addons/registry.py     every add-on, one static import each.
                        THE ONLY SHARED FILE AN ADD-ON TOUCHES.
 
-widgets/  dialogs/     the shell and the shared kit. Not yours alone.
+shell/                 THE APP ITSELF. Shared — not yours alone.
+    main_window.py         the window: navigation, gates, the pipeline
+    workers.py             every background thread
+    widgets/  dialogs/     the panels and windows it is built from
+
 core_bridge.py         the ONLY door to the engine
 prism_terminal/        the engine (separate repo, separate migration)
 
@@ -86,7 +90,7 @@ Never `from core import …` anywhere else. Use `CB.get_gerber()`,
 first place, so a direct import also depends on something else having
 imported the bridge — it works until the import order changes.
 
-### 3. Every background thread subclasses `workers._Worker`
+### 3. Every background thread subclasses `shell.workers._Worker`
 
 Never `QThread` directly. A `QThread` collected while running aborts the
 process — no traceback, no log line, nothing catchable. **Connecting a signal
@@ -195,7 +199,7 @@ Learned the hard way, each one during the migration:
   runs them against freed memory and kills the run *hundreds of tests later*.
   See `BUGS.md` #11.
 - **Do not assert wiring by reading source text.** A test that greps
-  `main_window.py` for a line passes when the line is connected to nothing,
+  `shell/main_window.py` for a line passes when the line is connected to nothing,
   and fails on a refactor that changes no behaviour. Build the window and
   assert the signal arrives.
 - **Do not run a formatter across files somebody is rebasing over.** It

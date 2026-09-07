@@ -22,7 +22,7 @@ _app = QApplication.instance() or QApplication([])
 class Classifying(unittest.TestCase):
 
     def test_kinds_are_recognised_case_insensitively(self):
-        from dialogs.preview_dialog import _classify
+        from shell.dialogs.preview_dialog import _classify
         self.assertEqual(_classify("a.PNG"), "image")
         self.assertEqual(_classify("a.mp4"), "video")
         self.assertEqual(_classify("a.MP3"), "audio")
@@ -30,7 +30,7 @@ class Classifying(unittest.TestCase):
         self.assertEqual(_classify("a.py"), "text")
 
     def test_office_and_archive_formats_are_not_renderable(self):
-        from dialogs.preview_dialog import _classify
+        from shell.dialogs.preview_dialog import _classify
         for ext in (".docx", ".pptx", ".xlsx", ".zip", ".doc"):
             self.assertEqual(_classify(f"a{ext}"), "other")
 
@@ -73,45 +73,45 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
         return path
 
     def test_image(self):
-        from dialogs.preview_dialog import PreviewDialog
+        from shell.dialogs.preview_dialog import PreviewDialog
         path = self._file("a.png", b"not a real png")
         dlg = PreviewDialog(path, "image")
         dlg.reject()
 
     def test_text(self):
-        from dialogs.preview_dialog import PreviewDialog
+        from shell.dialogs.preview_dialog import PreviewDialog
         path = self._file("a.py", b"print('hi')")
         dlg = PreviewDialog(path, "text")
         dlg.reject()
 
     def test_pdf(self):
-        from dialogs.preview_dialog import PreviewDialog
+        from shell.dialogs.preview_dialog import PreviewDialog
         path = self._file("a.pdf", b"%PDF-1.4 not a real pdf")
         dlg = PreviewDialog(path, "pdf")
         dlg.reject()
 
     @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
     def test_video(self):
-        from dialogs.preview_dialog import PreviewDialog
+        from shell.dialogs.preview_dialog import PreviewDialog
         path = self._file("a.mp4", b"not a real mp4")
         dlg = PreviewDialog(path, "video")
         dlg.reject()
 
     @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
     def test_audio(self):
-        from dialogs.preview_dialog import PreviewDialog
+        from shell.dialogs.preview_dialog import PreviewDialog
         path = self._file("a.mp3", b"not a real mp3")
         dlg = PreviewDialog(path, "audio")
         dlg.reject()
 
     def test_unsupported_offers_the_default_app_instead_of_crashing(self):
-        from dialogs.preview_dialog import UnsupportedPreviewDialog
+        from shell.dialogs.preview_dialog import UnsupportedPreviewDialog
         path = self._file("a.docx", b"not a real docx")
         dlg = UnsupportedPreviewDialog(path)
         dlg.reject()
 
     def test_folder_lists_a_row_per_entry_including_nested_subfolders(self):
-        from dialogs.preview_dialog import FolderPreviewDialog
+        from shell.dialogs.preview_dialog import FolderPreviewDialog
         os.makedirs(os.path.join(self._tmp.name, "sub"))
         self._file("keep.png", b"x")
         with open(os.path.join(self._tmp.name, "sub", "nested.txt"), "w") as f:
@@ -124,7 +124,7 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
         dlg.reject()
 
     def test_a_link_sidecar_does_not_get_its_own_row(self):
-        from dialogs.preview_dialog import FolderPreviewDialog
+        from shell.dialogs.preview_dialog import FolderPreviewDialog
         self._file("a.png", b"x")
         self._file("a.png.link.txt", b"https://chatgpt.com/c/abc")
         dlg = FolderPreviewDialog(self._tmp.name)
@@ -147,14 +147,14 @@ class OpenPreviewDispatch(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_a_folder_opens_the_folder_dialog(self):
-        from dialogs import preview_dialog as PD
+        from shell.dialogs import preview_dialog as PD
         with mock.patch.object(PD.FolderPreviewDialog, "exec",
                                return_value=0) as m:
             PD.open_preview(self._tmp.name)
             m.assert_called_once()
 
     def test_a_renderable_file_opens_the_preview_dialog(self):
-        from dialogs import preview_dialog as PD
+        from shell.dialogs import preview_dialog as PD
         path = os.path.join(self._tmp.name, "a.png")
         with open(path, "wb") as f:
             f.write(b"x")
@@ -163,7 +163,7 @@ class OpenPreviewDispatch(unittest.TestCase):
             m.assert_called_once()
 
     def test_an_unrenderable_file_offers_the_default_app_instead(self):
-        from dialogs import preview_dialog as PD
+        from shell.dialogs import preview_dialog as PD
         path = os.path.join(self._tmp.name, "a.docx")
         with open(path, "wb") as f:
             f.write(b"x")
@@ -179,7 +179,7 @@ class OpenPreviewDispatch(unittest.TestCase):
         customer's click. Simulated by making the dialog's own construction
         raise ImportError, the same exception a stripped build's import
         would actually throw."""
-        from dialogs import preview_dialog as PD
+        from shell.dialogs import preview_dialog as PD
         path = os.path.join(self._tmp.name, "a.pdf")
         with open(path, "wb") as f:
             f.write(b"x")
@@ -204,7 +204,7 @@ class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
     """
 
     def test_an_importerror_becomes_the_open_externally_dialog(self):
-        import dialogs.preview_dialog as PD
+        import shell.dialogs.preview_dialog as PD
         folder = tempfile.mkdtemp()
         path = os.path.join(folder, "a.mp4")
         with open(path, "wb") as f:
