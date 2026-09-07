@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import i18n
-import sent_log
+from addons.email import sent_log
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C

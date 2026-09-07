@@ -155,7 +155,7 @@ Same four fields plus port semantics: `465` → `SMTP_SSL`, otherwise STARTTLS.
 
 ### `cfg["inquiry"]` — the Email-automation configuration
 
-Written whole by `dialogs/inquiry_setup_dialog.py :: _save()`.
+Written whole by `addons/inquiry/setup.py :: _save()`.
 
 | Key | Type | Meaning |
 |---|---|---|

@@ -142,7 +142,7 @@ _rule(r"mail server didn't answer|blocking outbound mail",
            "SMTP (ports 587/465) is blocked.")))
 
 # Written as an already-actionable sentence at the call site
-# (dialogs/inquiry_dialog.py's quotation flow) — without this rule it fell
+# (addons/inquiry/dialog.py's quotation flow) — without this rule it fell
 # through every pattern above to _GENERIC and threw that specific, already-
 # correct message away in favour of "Something went wrong", the one outcome
 # this whole module exists to avoid (see the module docstring).

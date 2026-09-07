@@ -47,6 +47,7 @@ import favorites as FAV
 import i18n
 import identity
 import theme
+from addons import manifest, registry
 from widgets import icons
 from widgets import controls as C
 from widgets.controls import Avatar, ToggleSwitch, elevate, kicker, track
@@ -79,51 +80,37 @@ PRIMARY = [
      "kept here even after you close it"),
 ]
 
-# Sentinel for a shelf item that isn't built yet, as opposed to one the
-# customer simply hasn't bought.
+# The add-on shelf, DERIVED. The hand-written table that used to live here
+# is gone; addons/registry.py is the one place an add-on is declared.
+#
+# It was one of three lists of the same add-ons, and the three had already
+# drifted apart -- different memberships, and where they overlapped,
+# different icons and different copy. widgets/home_panel.py still carries the
+# comment saying it is the list that "must never drift from" this one.
+#
+# The tuple layout is unchanged on purpose -- key, label, icon, tip, feature,
+# tone -- because four test files index it positionally and because
+# devtools/extract_strings.py matches COPY_TABLES on the assignment target
+# name, so the labels and tips stay translatable exactly as before.
+#
+# ONE THING DID CHANGE: the 6th field is now a TONE TOKEN, not a colour.
+# Holding theme.ACCENT here froze it at import time, before theme.apply_role()
+# runs -- and since apply_role rebinds ACCENT but not OK or WARN, a stale
+# accent affected only some rows and was correspondingly hard to see. It is
+# resolved by theme.tone() at the point of use below, which happens when the
+# rail is built rather than when this module is imported.
+ADDONS = [
+    (a.key, a.label, a.icon, a.tip, a.feature, a.tone)
+    for a in registry.shelf(manifest.RAIL)
+]
+
+# Kept for the one caller that still asks. Nothing sets it any more: "not
+# built yet" is now manifest.SOON in an add-on's `status`, which is a fact
+# about the add-on rather than a sentinel smuggled through the licence
+# column. BOM outgrew it -- it ships, it is routed and gated, and only Home
+# had not been told.
 SOON = "__soon__"
 
-# The add-on shelf. The 5th field is the licence entitlement the item needs —
-# "" for anything always available. The 6th is the chip hue: these are what
-# make the shelf scannable, so each add-on keeps one colour everywhere it
-# appears (rail chip, Home summary row, its own screen's stat cards).
-ADDONS = [
-    # First on purpose: it is the only add-on used every day. BOQ is occasional
-    # and Email is a task; this one is the reason the app gets opened at all.
-    #
-    # "Email automation", because that is the phrase the customer says when
-    # they describe what they want ("majority of our work is done over
-    # email"). The licence feature underneath is still "inbox" and the rail
-    # key is still "inquiry" — the SKU and the wiring did not move, only the
-    # name on the shelf.
-    ("inquiry", "Email automation", "inbox",
-     "Read every mailbox, register the inquiries in one shared file, quote, "
-     "chase, and check the PO",
-     "inbox", theme.OK),
-    ("boq", "BOQ", "file",
-     "Bill of Quantities — from a CAD drawing, or from a written spec",
-     "boq", theme.ACCENT),
-    # Licence feature is "boq" for now, not a dedicated "gerber" key — this
-    # add-on has one prospective customer and nothing registered on the
-    # licence server yet. Swap it the day a real "gerber" feature exists
-    # there; until then this rides on the same entitlement BOQ already has,
-    # rather than gating behind a key that would deny everyone, including
-    # the one account actually testing it.
-    ("gerber", "Gerber", "file",
-     "PCB size, track width & spacing, drill size and count — measured "
-     "from the Gerber files, never seen by an AI",
-     "boq", theme.ACCENT),
-    ("email", "Email", "mail",
-     "Draft & send an email from attached files", "email", theme.WARN),
-    # Shown but NOT a button. The shelf should look like a product line, and a
-    # visible "next one" is worth more in a client demo than an empty gap — but
-    # a disabled control that cannot be clicked, focused or activated is not a
-    # control, it is a caption. Rendering it as one is honest and it hands its
-    # slot in the twelve-control budget back to History.
-    ("bom", "BOM", "list",
-     "Bill of Materials — the parts list to fabricate it, measured from a CAD "
-     "drawing or a written spec", "boq", theme.ACCENT),
-]
 
 # Everything that is neither WORK nor an add-on.
 #
@@ -289,6 +276,10 @@ class AddonRow(QPushButton):
     CHIP = 24
 
     def __init__(self, label: str, icon_name: str, hue: str, parent=None):
+        # No _amp() here, deliberately, even though this IS a QPushButton:
+        # the name is drawn by the _Elided QLabel below rather than by the
+        # button's own text, and QLabel does not read "&" as an accelerator.
+        # Escaping it would put a literal "&&" on the shelf.
         super().__init__(parent)
         self.setObjectName("navSub")
         self.setCursor(Qt.PointingHandCursor)
@@ -479,21 +470,33 @@ class Sidebar(QFrame):
         root.addSpacing(theme.SPACE_2)
         root.addWidget(self._section("ADD-ONS"))
         self._gated: dict[str, tuple[AddonRow, str, str, str]] = {}
-        for key, label, icon_name, tip, feature, hue in ADDONS:
-            if feature == SOON:
-                text = i18n.t("{addon}  (soon)").format(addon=i18n.t(label))
-                row = SoonRow(text, icon_name)
-                row.setToolTip(i18n.t(tip))
+        # Straight off the registry rather than off ADDONS above, because the
+        # manifest carries `status` -- which ADDONS' six positional fields
+        # cannot, and which used to be smuggled through the licence column as
+        # a SOON sentinel. This loop runs when the rail is BUILT, so
+        # theme.tone() below resolves after apply_role() rather than at import.
+        for addon in registry.shelf(manifest.RAIL):
+            if addon.status == manifest.SOON:
+                # A caption, not a control. A disabled thing that cannot be
+                # clicked, focused or activated is not a button, and drawing
+                # it as one is dishonest; rendering it as a caption also hands
+                # its slot in the twelve-control budget back to History.
+                text = i18n.t("{addon}  (soon)").format(
+                    addon=i18n.t(addon.label))
+                row = SoonRow(text, addon.icon)
+                row.setToolTip(i18n.t(addon.tip))
                 root.addWidget(row)
                 continue
-            row = AddonRow(i18n.t(label), icon_name, hue)
-            row.setToolTip(i18n.t(tip))
-            row.setAccessibleDescription(i18n.t(tip))
+            row = AddonRow(i18n.t(addon.label), addon.icon,
+                           theme.tone(addon.tone))
+            row.setToolTip(i18n.t(addon.tip))
+            row.setAccessibleDescription(i18n.t(addon.tip))
             row.clicked.connect(
-                lambda _=False, k=key: self.command_triggered.emit(k))
-            if feature:
-                self._gated[key] = (row, label, icon_name, feature)
-            self._register(key, row)
+                lambda _=False, k=addon.key: self.command_triggered.emit(k))
+            if addon.feature:
+                self._gated[addon.key] = (row, addon.label, addon.icon,
+                                          addon.feature)
+            self._register(addon.key, row)
             root.addWidget(row)
 
         # -- Settings ---------------------------------------------------------

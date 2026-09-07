@@ -168,6 +168,19 @@ COPY_TABLES = {
     "STATUS_COPY", "STATES", "STEP_COPY", "COPY", "LABELS", "TIPS",
     "PLACEHOLDERS", "SKIP", "SOON",
     "MORE", "ADDONS", "DIRECT", "SECTIONS", "CARDS", "TABS", "STEPS",
+    # addons/<key>/addon.py's `MANIFEST = Addon(...)`. The rail and Home
+    # tables are now comprehensions over the registry, so their labels and
+    # tips are no longer literals where this scan can see them -- they live
+    # in the manifests instead, and without this line every add-on's name and
+    # description would silently ship untranslatable.
+    #
+    # _is_copy() already sorts the wheat from the chaff in an Addon call:
+    # "Gerber" is copy; "gerber" and "accent" are rejected as lowercase;
+    # "addons.gerber.contract:open_with_files" is rejected for the dot; and
+    # "Gerber — " is rejected for the trailing space -- which is exactly what
+    # the run prefixes need, since a TRANSLATED prefix would match nothing and
+    # History would silently empty in Hindi.
+    "MANIFEST",
     "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
     "ROW_ACTIONS", "REGISTER_RANGES", "OPEN_LABEL",
 }
@@ -177,6 +190,18 @@ COPY_TABLES = {
 EXTRA = [
     "Yes", "No", "OK", "Cancel", "Save", "Close", "Open", "Apply", "Retry",
     "Ignore", "Discard", "Help", "Reset", "Abort",
+    # The BOQ dialog's own name for the document it produces. It is chosen by
+    # a conditional and kept on an attribute --
+    #
+    #     self._doc = "Bill of Materials" if self.mode == "bom" else "Bill of Quantities"
+    #
+    # -- and then translated (`i18n.t(self._doc)`) and used as the window
+    # title. This scan reads literals in call arguments and in the copy
+    # tables; a literal assigned to an attribute is invisible to it, so both
+    # halves have to be listed here or the window title silently stops
+    # translating. "Bill of Quantities" was in the catalogue by historical
+    # accident and fell out the first time it was regenerated.
+    "Bill of Quantities", "Bill of Materials",
 ]
 
 

@@ -17,7 +17,7 @@ between a feature that feels native and one that feels bolted on.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
@@ -30,12 +30,13 @@ from integrations import gdrive
 from widgets import controls as C
 from widgets import icons
 from widgets.controls import heading, kicker, meta
+from workers import _Worker
 
 _ITEM_ROLE = 1000
 MY_DRIVE = "root"
 
 
-class _Job(QThread):
+class _Job(_Worker):
     """One Drive call, off the GUI thread."""
     done = Signal(object)
     failed = Signal(str)

@@ -389,9 +389,15 @@ class TheAIFillsOnlyWhatIsBlank(unittest.TestCase):
 class TheDialogRemembersTheTemplate(unittest.TestCase):
 
     def test_the_gui_offers_and_uses_the_clients_format(self):
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = open(os.path.join(root, "dialogs", "gerber_dialog.py"),
-                   encoding="utf-8").read()
+        # Read through the MODULE rather than by hand-built path. The file
+        # moved from dialogs/gerber_dialog.py to addons/gerber/dialog.py and a
+        # hardcoded path is a dependency no import error can catch -- this
+        # test would simply have raised FileNotFoundError and read like a
+        # broken feature. inspect follows the module wherever it goes.
+        import inspect
+
+        import addons.gerber.dialog as mod
+        src = inspect.getsource(mod)
         self.assertIn('cfg.get("gerber_form_template")', src)
         self.assertIn("get_gerber_form", src)
         # The unit choice is offered, remembered, and actually used.

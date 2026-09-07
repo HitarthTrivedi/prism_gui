@@ -106,7 +106,9 @@ def _selftest(app) -> int:
     # and Prism can fetch it at runtime (core/ffmpeg.py).
     try:
         from PIL import Image, ImageDraw   # noqa: F401
-        from core import reel              # noqa: F401
+        CB.get_reel()   # via the bridge: core_bridge is the only
+                        # module that may import the engine directly,
+                        # and tests/test_engine_facade.py enforces it.
         reel_ok, reel_err = True, ""
     except Exception as e:
         reel_ok, reel_err = False, str(e)
@@ -218,6 +220,35 @@ def _selftest(app) -> int:
     checks.append(("main window", win.isVisible()))
     checks.append(("sidebar", win.sidebar.width() > 0))
 
+    # ── the add-on census ────────────────────────────────────────────────
+    # The single worst failure mode this restructure can produce: an add-on
+    # invisible to PyInstaller's analyser, so development is perfect, the
+    # build succeeds, and the customer opens a windowed executable with an
+    # empty shelf and no console to say why.
+    #
+    # Counting is not enough -- a manifest is just data and will import
+    # anywhere. So this also RESOLVES every dotted reference each manifest
+    # names, which is what actually proves the panels and dialogs reached
+    # the archive. packaging/smoke_test.py runs this against the real
+    # executable, which is the only place the answer can differ.
+    from addons import registry
+    unresolved = []
+    for addon in registry.REGISTRY:
+        for field in ("panel", "dialog", "probe"):
+            dotted = getattr(addon, field, "")
+            if not dotted:
+                continue
+            try:
+                if registry.resolve(dotted) is None:
+                    unresolved.append(f"{addon.key}.{field}={dotted}")
+            except Exception as exc:                    # noqa: BLE001
+                unresolved.append(f"{addon.key}.{field}={dotted} ({exc})")
+    checks.append((f"add-ons registered ({len(registry.REGISTRY)})",
+                   len(registry.REGISTRY) == registry.EXPECTED))
+    checks.append(("add-on entry points resolve"
+                   + (f" — {', '.join(unresolved)}" if unresolved else ""),
+                   not unresolved))
+
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")
@@ -236,8 +267,7 @@ def _selftest(app) -> int:
     # build actually shipped one — which is the single fact this line exists
     # to establish, and the one that was wrong on Windows.
     try:
-        from core import ffmpeg as _ffmpeg
-        ffmpeg_which = _ffmpeg.describe()
+        ffmpeg_which = CB.get_ffmpeg().describe()
     except Exception:
         ffmpeg_which = "unknown"
     print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"

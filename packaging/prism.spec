@@ -193,16 +193,51 @@ def _engine_modules() -> list[str]:
     silently imported from disk instead. Now that the sources do not ship,
     anything missing from this list is an ImportError in front of a customer,
     in a windowed build with no console to print it. So enumerate, never list.
+
+    RECURSIVE, not a listdir of core/*.py. That mattered: core/motion/ is a
+    SUBPACKAGE, so the old flat scan never listed core.motion.generate,
+    core.motion.render or core.motion.schema, and no frozen build has ever
+    contained them. Motion Graphics has been shipped-but-disabled behind
+    core/motion/render.py's _DISABLED_PENDING_ASSET_FIX kill-switch, so the
+    omission has cost nothing yet -- turn that switch off without this change
+    and the feature is an ImportError in a windowed build with no console.
     """
     core = os.path.join(ENGINE_DIR, "core")
-    found = ["core"] + [
-        "core." + name[:-3] for name in sorted(os.listdir(core))
-        if name.endswith(".py") and name != "__init__.py"]
+    found = ["core"]
+    for folder, dirs, files in os.walk(core):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        rel = os.path.relpath(folder, core)
+        package = "core" if rel == "." else "core." + rel.replace(os.sep, ".")
+        if package != "core":
+            found.append(package)          # the subpackage itself
+        for name in sorted(files):
+            if name.endswith(".py") and name != "__init__.py":
+                found.append(package + "." + name[:-3])
     print(f"[prism] engine modules bundled: {len(found) - 1}")
     return found
 
 
-hiddenimports = _engine_modules() + [
+def _addon_modules() -> list[str]:
+    """Every module under addons/, so the shelf is not empty in a frozen build.
+
+    Belt and braces. addons/registry.py imports each add-on's manifest
+    STATICALLY, and those static imports are what PyInstaller's analyser
+    actually follows; this walk is the backstop for a module that only the
+    manifests' dotted strings refer to -- a panel or dialog named as
+    "addons.gerber.panel:GerberPanel" and never imported anywhere.
+
+    The failure this prevents is the worst one available in this design:
+    development is perfect, the build succeeds, and the customer opens a
+    windowed app with an empty add-on shelf and no console to say why.
+    """
+    import addons.registry as _registry
+    found = list(_registry.addon_modules())
+    print(f"[prism] add-on modules bundled: {len(found)} "
+          f"({_registry.EXPECTED} add-ons registered)")
+    return found
+
+
+hiddenimports = _engine_modules() + _addon_modules() + [
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "pyaudio",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`

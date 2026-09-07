@@ -233,6 +233,11 @@ def nuitka_args() -> list[str]:
         f"=licensing/testdata",
         # Dynamically imported, so nothing static can find them.
         "--include-package=core",
+        # The add-on shelf. Nuitka follows registry.py's static imports, but
+        # the manifests also name panels and dialogs by DOTTED STRING, and a
+        # string is invisible to any analyser. Without this the Nuitka build
+        # can compile cleanly and open with an empty shelf.
+        "--include-package=addons",
         "--include-package=undetected_chromedriver",
         "--include-package=selenium",
         "--include-package=cryptography",

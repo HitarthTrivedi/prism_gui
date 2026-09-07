@@ -1,6 +1,6 @@
 """Motion — say what it's about, get a scene-graph video with a real camera.
 
-Same shape as Reel (dialogs/reel_dialog.py): one prompt and one button.
+Same shape as Reel (addons/reel/dialog.py): one prompt and one button.
 Attach a logo or business card and the brand colours are measured off it,
 the agent writes a storyboard and then each scene in turn, and the
 renderer draws every frame locally from a JSON scene graph — a real

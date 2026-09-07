@@ -51,46 +51,25 @@ from widgets import controls as C
 from widgets import icons
 from workers import InboxVerifyWorker
 
-DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Prism Inquiries")
+# Moved to inquiry_config.py at the repo root, and re-exported here so that
+# nothing which already imports them from this module has to change.
+#
+# They are pure functions over a dict -- no Qt, no engine -- and while they
+# lived in this file, anything that needed to ask "is the mailbox set up?"
+# had to import a 1,100-line Qt dialog to find out. dashboard_data.py (a root
+# DATA module that feeds Home) and addons/inquiry/panel.py did exactly that,
+# eight times between them, every one a deferred import inside a function
+# because a module-level one would have been an obvious cycle.
+#
+# It also blocked the add-on split: Email automation could not move without
+# taking Home with it.
+from inquiry_config import (            # noqa: F401
+    DEFAULT_FOLDER, accounts_of, is_complete, is_ready, settings_of,
+)
 
-
-def settings_of(cfg: dict) -> dict:
-    return dict(cfg.get("inquiry") or {})
-
-
-def accounts_of(cfg: dict) -> list[dict]:
-    """Every configured mailbox, in the order they were added.
-
-    Reads the list form first; a config from before mailboxes were a list is
-    wrapped on the way out — the legacy `account` becomes entry one and
-    brings the legacy `state` bookmark with it, so an existing customer's
-    first multi-mailbox check carries on from where their last single-mailbox
-    check stopped instead of re-importing a month of mail.
-
-    Copies, not references: callers edit these freely and save what they
-    mean to save.
-    """
-    s = settings_of(cfg)
-    accounts = [dict(a) for a in (s.get("accounts") or []) if a]
-    if not accounts and s.get("account"):
-        legacy = dict(s["account"])
-        legacy["state"] = dict(s.get("state") or {})
-        accounts = [legacy]
-    return accounts
-
-
-def _complete(account: dict) -> bool:
-    return bool(account.get("address") and account.get("password")
-                and account.get("host"))
-
-
-def is_ready(cfg: dict) -> bool:
-    """Enough set up to run a check. Deliberately only a mailbox and the
-    folder — a rate list matters at quoting time, not at reading time, and
-    demanding one up front would stop somebody trying the read-only half."""
-    s = settings_of(cfg)
-    return bool(any(_complete(a) for a in accounts_of(cfg))
-                and s.get("folder"))
+# The old private spelling, still imported under that name from
+# addons/inquiry/panel.py. See inquiry_config.is_complete.
+_complete = is_complete
 
 
 class _Picker(QWidget):

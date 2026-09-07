@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt                                   # noqa: E402
 from PySide6.QtGui import QKeyEvent                              # noqa: E402
 from PySide6.QtWidgets import QApplication                       # noqa: E402
 
-from widgets.register_table import (                             # noqa: E402
+from addons.inquiry.register_table import (                             # noqa: E402
     AMOUNT, CUSTOMER, RegisterModel, RegisterTable, ROW_HEIGHT, SORT_ROLE,
 )
 

@@ -49,6 +49,7 @@ import dashboard_data as DATA
 import i18n
 import identity
 import theme
+from addons import manifest, registry
 from widgets import controls as C
 from widgets import icons
 
@@ -76,25 +77,29 @@ RECENT_SHOWN = 5
 CHAIN_SHOWN = 6
 
 # The add-on shelf, in the rail's order. A module-level copy table so
-# devtools/extract_strings.py finds the labels — the name `ADDONS` is in its
-# COPY_TABLES set, and matches widgets/sidebar.ADDONS, which is the list this
-# one must never drift from.
+# The Home shelf, DERIVED from addons/registry.py -- the one place an add-on
+# is declared. The comment that used to sit here said this list "must never
+# drift from" widgets/sidebar.ADDONS. It had drifted, three ways at once:
 #
-# `hue=None` means "the accent", resolved at build time rather than here: this
-# module is imported before theme.apply_role() runs, so an accent frozen into
-# the table would stay Prism blue in a green profile while everything around
-# it rotated.
+#   membership  Home carried reel and motion; the rail did not.
+#   icons       Gerber was "grid" here and "file" on the rail.
+#   copy        BOM said "Coming soon" in grey, months after BOM shipped.
+#
+# The last one reached customers. BOM is routed, gated, has its own screen
+# and opens a real dialog in BOM mode; the rail draws it in the accent
+# colour. Anyone working from this screen was told it did not exist yet, and
+# `_addon_row` below would not let them click it either.
+#
+# The tuple layout is unchanged -- key, label, blurb, icon, tone -- so
+# devtools/extract_strings.py still finds the labels by the assignment
+# target name `ADDONS`. The 5th field is now a TONE TOKEN rather than a
+# colour or None; see theme.tone() for why that had to stop being frozen at
+# import time.
 ADDONS = [
-    ("inquiry", "Email automation", "Register, quote, chase", "inbox", theme.OK),
-    ("boq", "BOQ", "Quantities off a drawing", "file", None),
-    ("gerber", "Gerber", "Measured off the Gerber files", "grid", None),
-    ("email", "Email", "Draft & send, your account", "mail", theme.WARN),
-    ("reel", "Reel / Studio", "A short video from a task", "video", None),
-    ("motion", "Motion Graphics", "A scene-graph video with camera, charts & diagrams", "video", None),
-    # Shown but disabled, exactly as the rail shows it: the shelf should read
-    # as a product line, and a visible "next one" beats an empty gap.
-    ("bom", "BOM & Stock", "Coming soon", "list", theme.NEUTRAL[400]),
+    (a.key, a.label, a.blurb, a.icon, a.tone)
+    for a in registry.shelf(manifest.HOME)
 ]
+
 
 def _greeting() -> str:
     hour = datetime.now().hour
@@ -774,11 +779,20 @@ class HomePanel(QWidget):
         return card
 
     def _addon_row(self, key, label, desc, icon_name, hue, badge) -> QWidget:
-        # "motion" joins "bom" here 2026-08-30: the render pipeline has a
-        # known bug (see core.motion.render's kill-switch), so the tile stays
-        # visible — a visible "next one" beats an empty gap — but not
-        # clickable, same as "bom" already is, until the bug is fixed.
-        soon = key in ("bom", "motion")
+        # Was `soon = key in ("bom", "motion")` -- a hardcoded pair inside a
+        # render method, and an eighth place add-on identity was written down.
+        #
+        # Motion belongs there: core/motion/render.py sets
+        # _DISABLED_PENDING_ASSET_FIX and is_available() returns False
+        # unconditionally, so the tile stays visible (a visible "next one"
+        # beats an empty gap) and stays unclickable.
+        #
+        # BOM did not. It shipped, boq_available() is True, and it opens from
+        # the rail -- but it sat in that tuple next to Motion and so was dead
+        # on this screen. Driving this off the manifest's `status` is what
+        # makes the difference between the two expressible at all.
+        entry = registry.by_key(key)
+        soon = entry is not None and entry.status == manifest.SOON
         wrap = _Row(enabled=not soon)
         if not soon:
             wrap.clicked.connect(
@@ -787,7 +801,9 @@ class HomePanel(QWidget):
         row.setContentsMargins(theme.SPACE_2, theme.SPACE_2,
                                theme.SPACE_2, theme.SPACE_2)
         row.setSpacing(theme.SPACE_3)
-        row.addWidget(C.IconPad(icon_name, hue or theme.ACCENT, 32,
+        # theme.tone() at draw time, not a colour frozen when this module was
+        # imported -- which is before theme.apply_role() has run.
+        row.addWidget(C.IconPad(icon_name, theme.tone(hue), 32,
                                 theme.R_CONTROL, 16))
         stack = QVBoxLayout()
         stack.setSpacing(1)

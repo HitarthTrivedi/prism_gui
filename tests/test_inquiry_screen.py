@@ -46,7 +46,7 @@ import core_bridge as CB  # noqa: E402
 import dashboard_data as DATA  # noqa: E402
 import licensing  # noqa: E402
 from licensing.status import LicenseState  # noqa: E402
-from widgets.inquiry_panel import TABS, InquiryPanel  # noqa: E402
+from addons.inquiry.panel import TABS, InquiryPanel  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -265,7 +265,7 @@ class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
         self.assertEqual(DATA.inquiry_stats(self.cfg)["waiting"], 0)
 
     def test_the_working_dialog_is_still_reachable(self):
-        from widgets.inquiry_panel import OPEN_LABEL
+        from addons.inquiry.panel import OPEN_LABEL
         panel = InquiryPanel(self.cfg)
         fired = []
         # OPEN_LABEL ("Open Email automation") hands off with no check
@@ -484,7 +484,17 @@ class TheScreenStaysInStepWithTheStore(unittest.TestCase):
         """The dialog works the register while the screen is behind it, so the
         screen is stale the moment the dialog closes."""
         import main_window
-        win = main_window.MainWindow()
+        # Point the window at an empty folder of our own before building it.
+        # Unpatched, MainWindow() loads the REAL config, so `_rows` starts
+        # populated with the operator's actual customers and this assertion
+        # fails -- on precisely the machines that are running Prism for real,
+        # and nowhere else. This module's own docstring states the rule: "a
+        # tempdir, and the config is built by hand rather than loaded".
+        empty = os.path.join(self._tmp.name, "empty")
+        os.makedirs(empty, exist_ok=True)
+        with mock.patch.object(CB.config, "load",
+                               return_value={"inquiry": {"folder": empty}}):
+            win = main_window.MainWindow()
         self.assertFalse(win.inquiry_panel._rows)
 
         cfg = written(sample_rows(), self._tmp.name)
