@@ -967,7 +967,13 @@ class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
         """A hardcoded list is how the first two traps survived."""
         source = inspect.getsource(self.mint._ungated_features)
         self.assertIn("_authorized_then", source)
-        self.assertIn("shell/main_window.py", source)
+        # It must read the WINDOW, not carry its own copy of the answer. How
+        # it locates the window is not this test's business: it asserted the
+        # literal "main_window.py" until the shell moved, at which point a
+        # correct fix (resolving the module through inspect, so it follows
+        # the file) failed a test about hardcoding. Assert the dependency,
+        # not its spelling.
+        self.assertIn("main_window", source)
 
 
 # ── 10. the box-drawing characters Windows cannot print ──────────────────────

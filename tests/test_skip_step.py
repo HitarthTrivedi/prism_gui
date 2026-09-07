@@ -92,7 +92,7 @@ class TheWorkerSwitch(unittest.TestCase):
         self.assertTrue(w._skip.is_set())
 
     def test_the_event_travels_into_the_run_call(self):
-        src = _source("workers.py")
+        src = _source("shell/workers.py")
         self.assertIn("skip_signal=self._skip", src)
 
 
@@ -123,7 +123,7 @@ class TheButton(unittest.TestCase):
         self.assertTrue(v.skip_btn.isEnabled())
 
     def test_the_window_routes_it_to_the_live_worker(self):
-        src = _source("main_window.py")
+        src = _source("shell/main_window.py")
         self.assertIn("output_panel.skip_requested.connect(self._skip_step)",
                       src)
         self.assertIn("worker.skip()", src)

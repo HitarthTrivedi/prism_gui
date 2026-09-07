@@ -137,11 +137,27 @@ def _ungated_features() -> set:
     import plans
 
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Read through the MODULE, not a hand-built path. This opened
+    # "main_window.py" at the repo root until the shell moved into shell/,
+    # and then it silently stopped working: the OSError below returns an
+    # empty set, the caller warns about nothing, and a licence minted with a
+    # feature that gates nothing is issued without a word. inspect follows
+    # the module wherever it goes.
     try:
-        with open(os.path.join(here, "main_window.py"), encoding="utf-8") as f:
-            gated = set(re.findall(r'_authorized_then\(\s*"([a-z]+)"', f.read()))
-    except OSError:
-        return set()
+        import inspect
+
+        import shell.main_window as _mw
+        source = inspect.getsource(_mw)
+    except Exception:                                   # noqa: BLE001
+        # Falling back to a path keeps this usable in a bare interpreter with
+        # no Qt, which is how it is often run.
+        try:
+            with open(os.path.join(here, "shell", "main_window.py"),
+                      encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            return set()
+    gated = set(re.findall(r'_authorized_then\(\s*"([a-z]+)"', source))
     if not gated:                       # the regex stopped matching — say
         return set()                    # nothing rather than warn on everything
     return {f for f in plans.FEATURES if f not in gated} - {"core"}
