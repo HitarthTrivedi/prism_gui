@@ -163,6 +163,82 @@ def reveal_result(path: str) -> None:
         open_result(folder)
 
 
+# Variables a snap's launcher exports for ITS app, that are poison to any
+# ordinary program started underneath it. Each names libraries, modules or
+# schemas inside the snap, built against the snap's own glibc.
+_SNAP_ONLY = ("GTK_PATH", "GIO_MODULE_DIR", "GTK_EXE_PREFIX",
+              "GTK_IM_MODULE_FILE", "GSETTINGS_SCHEMA_DIR", "LOCPATH")
+_SNAP_PATH_LISTS = ("LD_LIBRARY_PATH", "XDG_DATA_DIRS")
+
+
+def scrub_environment() -> list:
+    """Make os.environ safe to hand to a child process. Returns what changed.
+
+    Everything Prism opens for the owner — the finished reel in their video
+    player, a folder in the file manager, a result in the browser — starts
+    as a child of Prism and inherits Prism's environment. Two things put
+    poison in it, and both surfaced as the child dying rather than as
+    anything about Prism:
+
+      · PyInstaller points LD_LIBRARY_PATH at its own bundle so the frozen
+        app finds the libraries it ships, and stashes the real value in
+        LD_LIBRARY_PATH_ORIG. A video player started from a frozen Prism
+        loads Prism's bundled libstdc++/glib instead of the system's.
+        core.browser already undoes this for Chromium alone.
+      · A snap (VS Code's, on 2026-09-07) exports GTK_PATH & co. into its
+        terminals, and an app started from such a terminal — Prism, from a
+        dev checkout — passes them on. The deb VLC then loaded the snap's
+        GTK modules, built against the snap's glibc, and died on
+        `libpthread.so.0: undefined symbol: __libc_pthread_init`. Pressing
+        Play on a finished reel produced that, and nothing said why.
+
+    Safe to do to Prism's OWN environment, at startup: the dynamic loader
+    read LD_LIBRARY_PATH once when the process began and does not consult
+    os.environ again, so a library Prism loads later still resolves as it
+    did — only children see the change. Qt's openUrl(), xdg-open and every
+    Popen inherit os.environ, so one scrub covers them all.
+
+    Left alone when Prism itself IS the snap: those variables are then
+    correct, and removing them would break Prism.
+    """
+    changed = []
+    if not sys.platform.startswith("linux"):
+        return changed
+    env = os.environ
+
+    original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if original is not None:
+        env["LD_LIBRARY_PATH"] = original
+        changed.append("LD_LIBRARY_PATH")
+    elif is_frozen() and "LD_LIBRARY_PATH" in env:
+        del env["LD_LIBRARY_PATH"]
+        changed.append("LD_LIBRARY_PATH")
+
+    if env.get("SNAP_NAME") and not sys.executable.startswith("/snap/"):
+        for var in _SNAP_ONLY:
+            if "/snap/" in env.get(var, ""):
+                del env[var]
+                changed.append(var)
+        # The VS Code snap keeps the pre-snap value beside its own; anything
+        # else gets the snap entries filtered out of the list.
+        kept_orig = env.pop("XDG_DATA_DIRS_VSCODE_SNAP_ORIG", None)
+        if kept_orig and "/snap/" in env.get("XDG_DATA_DIRS", ""):
+            env["XDG_DATA_DIRS"] = kept_orig
+            changed.append("XDG_DATA_DIRS")
+        for var in _SNAP_PATH_LISTS:
+            value = env.get(var, "")
+            if "/snap/" not in value:
+                continue
+            kept = [p for p in value.split(os.pathsep) if p and "/snap/" not in p]
+            if kept:
+                env[var] = os.pathsep.join(kept)
+            else:
+                del env[var]
+            if var not in changed:
+                changed.append(var)
+    return changed
+
+
 def app_root() -> str:
     """The directory holding the executable (frozen) or the sources (dev).
     Used for logs and for telling the user where the app actually is."""

@@ -52,6 +52,7 @@ from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
+                     StudioFollowupWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
                      FFmpegWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
@@ -1426,8 +1427,43 @@ class MainWindow(QMainWindow):
         ] + [f"  {cat}: {name}" for cat, name in agents.items()]
         QMessageBox.information(self, "Status", "\n".join(lines))
 
+    def _history_dialog(self) -> "HistoryDialog":
+        """History, wired to the two things a past run can still ask for:
+        the reel editor, and a follow-up. (The menu entry used to open it
+        unwired, so Edit the layout did nothing from there.)"""
+        dialog = HistoryDialog(self)
+        dialog.edit_reel.connect(self._edit_reel_layout)
+        dialog.follow_up.connect(self._follow_up_from_history)
+        return dialog
+
     def _show_runs(self):
-        HistoryDialog(self).exec()
+        self._history_dialog().exec()
+
+    def _follow_up_from_history(self, record: dict):
+        """A follow-up on a past run, from its saved record.
+
+        The record holds what a follow-up session is made of — the query,
+        every stage's output, the tab each answered in, the tool that did
+        each — so it goes through the same bridge an add-on dialog's run
+        does. A Studio reel's saved design URL and mp4 make the reel branch
+        work from here too. Older records saved no `agents`; the configured
+        tool for each stage stands in.
+        """
+        responses = {k: v for k, v in (record.get("responses") or {}).items() if v}
+        if not responses:
+            return
+        agents = {k: v for k, v in (record.get("agents") or {}).items() if v}
+        if not agents:
+            try:
+                configured = CB.config.active_agents(self.cfg)
+            except Exception:                           # noqa: BLE001
+                configured = {}
+            agents = {s: configured.get(s, "") for s in responses}
+        # The record is the truth here, not whatever ran last.
+        self._followup_session = None
+        self._offer_followup_for_dialog(record.get("query", ""), responses,
+                                        agents, record.get("links") or {},
+                                        artifacts_dir=record.get("artifacts") or "")
 
     def _open_run_record(self, path: str):
         """Open History on one particular run.
@@ -1436,8 +1472,7 @@ class MainWindow(QMainWindow):
         stored record into readable output, so clicking a row hands that path
         over rather than duplicating the renderer.
         """
-        dialog = HistoryDialog(self)
-        dialog.edit_reel.connect(self._edit_reel_layout)
+        dialog = self._history_dialog()
         runs = getattr(dialog, "runs", None)
         if runs is not None:
             for i in range(runs.count()):
@@ -1900,6 +1935,51 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Run", "Every step is switched off — "
                                                  "turn at least one back on.")
             return
+        # Everything the owner left out, told to the engine by name: some
+        # stages are the engine's own insertions (Studio's image maker) and
+        # only learn they were switched off this way.
+        dropped: set = set(self.agents_panel.left_out_stages())
+
+        # A ticked step with no prompt behind it is the run that uploads the
+        # files, asks nothing, and sits out the whole 300s cap — twice over on
+        # the 2026-09-07 reel run before the owner pressed Stop. The router
+        # writes prompts only for the steps it planned; a step ticked on by
+        # hand has none until one is written.
+        #
+        # Offered as a drop, not a refusal — the same shape as the locked
+        # add-on case below. The first version refused outright, and the
+        # very next plan showed why that was wrong: "Make the images" ticked
+        # on by hand for a Studio reel, which makes its own artwork anyway.
+        # A refusal there blocks a run that would have been fine.
+        unprompted = self.agents_panel.unprompted_steps()
+        if unprompted:
+            stages = set(self.agents_panel.unprompted_stages())
+            note = (i18n.t("{steps} have no prompt yet, so nothing would be "
+                           "sent for them.")
+                    if len(unprompted) > 1 else
+                    i18n.t("{steps} has no prompt yet, so nothing would be "
+                           "sent for it.")).format(steps=", ".join(unprompted))
+            if "visual" in stages and "Prism Studio" in run_agents.values():
+                note += i18n.t(" Prism Studio makes its own artwork, so the "
+                               "reel still gets its pictures.")
+            answer = QMessageBox.question(
+                self, "Run",
+                note + "\n\n" + i18n.t("Run the rest of the plan without "
+                                       "{it}? (Or open Prompt on the step "
+                                       "and write one.)").format(
+                    it=i18n.t("them") if len(unprompted) > 1 else i18n.t("it")),
+                QMessageBox.Yes | QMessageBox.Cancel)
+            if answer != QMessageBox.Yes:
+                return
+            run_agents = {stage: name for stage, name in run_agents.items()
+                          if stage not in stages}
+            run_steps = [s for s in run_steps if s[2]]
+            dropped |= stages
+            if not run_agents:
+                QMessageBox.information(
+                    self, "Run", i18n.t("Every remaining step needs a prompt "
+                                        "— open Prompt on one and write it."))
+                return
 
         # The router can put a paid add-on into a plan without the customer
         # ever opening it from the rail, so the entitlement has to be checked
@@ -1976,12 +2056,15 @@ class MainWindow(QMainWindow):
         self.agents_panel.set_run_enabled(False)
         self.statusBar().showMessage("Checking your licence…")
         auth_worker = AuthorizeWorker("core", "run")
+        skip_stages = sorted(dropped)
         auth_worker.done.connect(
-            lambda result: self._start_run(result, run_agents, run_steps))
+            lambda result: self._start_run(result, run_agents, run_steps,
+                                           skip_stages))
         self._workers.append(auth_worker)
         auth_worker.start()
 
-    def _start_run(self, auth, run_agents: dict, run_steps: list = None):
+    def _start_run(self, auth, run_agents: dict, run_steps: list = None,
+                   skip_stages: list = None):
         """Second half of _run_pipeline, once the server has said yes."""
         self.statusBar().clearMessage()
         if not auth.allowed:
@@ -2015,7 +2098,8 @@ class MainWindow(QMainWindow):
         self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments,
-                                  self._last_query, custom_stages=run_steps)
+                                  self._last_query, custom_stages=run_steps,
+                                  skip_stages=skip_stages)
         # Hold the machine awake for the duration. A run is tens of minutes
         # and the whole promise is that you walk away — a laptop that sleeps
         # halfway through takes the browser session with it.
@@ -2103,6 +2187,7 @@ class MainWindow(QMainWindow):
         if not ctx:
             return
         import time as _time
+        CB.config.begin_run("reel — layout fixed by hand")   # its own folder
         out = os.path.join(CB.config.RUNS_DIR,
                            f"reel_{int(_time.time())}.mp4")
         self.statusBar().showMessage(
@@ -2357,6 +2442,10 @@ class MainWindow(QMainWindow):
             # took, and why "this one is slow" has never been answerable.
             "durations": self.output_panel.stage_durations(),
         }
+        # Where this run's files went — one folder per run (config.begin_run)
+        # — so a follow-up from History attaches THIS run's output, not
+        # everything ever made under the same words.
+        record["artifacts"] = CB.config.current_run_dir()
         if error:
             record["error"] = error
         # Stamped with who ran it, so a run file is self-describing even if it
@@ -2457,7 +2546,8 @@ class MainWindow(QMainWindow):
 
     # ── post-completion follow-up ─────────────────────────────────────────
     def _offer_followup_for_dialog(self, query: str, responses: dict,
-                                   stage_agents: dict, links: dict):
+                                   stage_agents: dict, links: dict,
+                                   artifacts_dir: str = ""):
         """Bridge an add-on dialog's finished run into the post-completion
         follow-up.
 
@@ -2486,9 +2576,10 @@ class MainWindow(QMainWindow):
         # offering a further follow-up instead of advancing a phantom queue.
         self._stage_results = []
         self._task_runs = []
-        self._offer_followup(responses, links or {})
+        self._offer_followup(responses, links or {}, artifacts_dir=artifacts_dir)
 
-    def _offer_followup(self, responses: dict, links: dict = None):
+    def _offer_followup(self, responses: dict, links: dict = None,
+                        artifacts_dir: str = ""):
         """After a whole task finishes, offer a refinement. Prism reads the
         note, works out which step it is about, and sends it to THAT step's
         assigned agent (auto-routed) — resuming the SAME chat that step used,
@@ -2500,20 +2591,41 @@ class MainWindow(QMainWindow):
         """
         if not responses or not self.cfg.get("api_key"):
             return
-        self._followup_links = links or {}
+        # One session per task, merged across follow-ups. A follow-up runs a
+        # single stage, and its completion used to hand THAT stage's
+        # responses and links here alone — so the second follow-up knew
+        # nothing of the other stages, their tabs, or the reel, and there
+        # was no third. The session keeps every stage's latest output and
+        # every tab URL for as long as the task is the same one.
+        query = getattr(self, "_last_query", "")
+        sess = getattr(self, "_followup_session", None)
+        if not sess or sess.get("query") != query:
+            sess = {"query": query, "responses": {}, "links": {}, "agents": {}}
+        sess["responses"].update({k: v for k, v in responses.items() if v})
+        sess["links"].update({k: v for k, v in (links or {}).items() if v})
+        sess["agents"].update({k: v for k, v in self._stage_agents.items() if v})
+        self._followup_session = sess
+        responses, links = dict(sess["responses"]), dict(sess["links"])
+        for s, a in sess["agents"].items():
+            self._stage_agents.setdefault(s, a)
+        self._followup_links = links
         # Gather what THIS task PRODUCED, up front. The engine saves every
         # stage's output (the BOQ PDF, the ChatGPT document, generated images)
         # into the task's Artifacts folder, keyed by the task. These files are
         # the REAL deliverable — an agentic tool leaves only messy process notes
         # in the chat — so the dialog SHOWS them as "what came back", and the
         # follow-up CARRIES them into the next step.
+        # THIS run's folder — the one the engine opened for it — never the
+        # task's whole history. (Filed by the task's words, a follow-up on
+        # "make a reel…" once attached twelve files from four runs.)
         artifact_paths = []
         try:
-            import os
-            art_dir = CB.config.artifact_task_dir(self._last_query)
-            artifact_paths = [os.path.join(art_dir, n)
-                              for n in sorted(os.listdir(art_dir))
-                              if os.path.isfile(os.path.join(art_dir, n))]
+            art_dir = artifacts_dir or CB.config.current_run_dir()
+            if art_dir and os.path.isdir(art_dir):
+                artifact_paths = [
+                    os.path.join(art_dir, n) for n in sorted(os.listdir(art_dir))
+                    if os.path.isfile(os.path.join(art_dir, n))
+                    and n != CB.config.ABOUT_FILE]
         except Exception:                               # noqa: BLE001
             pass
         from dialogs.followup_dialog import FollowupDialog
@@ -2539,59 +2651,114 @@ class MainWindow(QMainWindow):
         # to "the last AI" when the Groq classify can't run. Only when no agent
         # is named do we ask the classifier what the note is about.
         low = self._followup_text.lower()
-        for s, agent in self._stage_agents.items():
-            if agent and s in responses and agent.lower() in low:
-                self.statusBar().showMessage(
-                    i18n.t("Sending your follow-up to {agent}.").format(
-                        agent=agent), 4000)
-                self._on_followup_routed(s)
-                return
-        # Auto-route: which finished step is this follow-up about?
+        named = next((s for s, agent in self._stage_agents.items()
+                      if agent and s in responses and agent.lower() in low),
+                     None)
+        if named:
+            self.statusBar().showMessage(
+                i18n.t("Sending your follow-up to {agent}.").format(
+                    agent=self._stage_agents[named]), 4000)
+            self._on_followup_routed({"steps": [named]})
+            return
+        # Auto-route: which finished steps does this follow-up need, in what
+        # order? A plan, not one step — "make a picture of the new truck and
+        # put it in scene 3" is the image tool, then the design chat, then
+        # the renderer. A task that filmed a reel offers the classifier two
+        # engine-owned steps for that: `artwork` and `reel`.
+        reel = self._studio_reel_in(links)
         info = [{"stage": s,
                  "agent": self._stage_agents.get(s, ""),
                  "summary": (texts[0][:160].replace("\n", " ") if texts else "")}
                 for s, texts in responses.items()]
         self.statusBar().showMessage(
-            i18n.t("Working out which step your follow-up is for…"), 0)
-        worker = FollowupRouteWorker(self._followup_text, info, self.cfg)
+            i18n.t("Working out which steps your follow-up needs…"), 0)
+        worker = FollowupRouteWorker(self._followup_text, info, self.cfg,
+                                     reel=bool(reel and links.get("design")))
         worker.done.connect(self._on_followup_routed)
-        worker.failed.connect(lambda _e: self._on_followup_routed(""))
+        worker.failed.connect(lambda _e: self._on_followup_routed({}))
         self._workers.append(worker)
         worker.start()
 
-    def _on_followup_routed(self, target_stage: str):
-        """The classifier picked the step; send the follow-up to its agent by
-        re-running just that one stage (custom_stages) with the prior output as
-        context plus any new attachments."""
+    def _on_followup_routed(self, plan: dict):
+        """Carry out the classifier's plan.
+
+        Ordinary steps re-run as one relay — each in the chat it answered
+        in, each handed the one before's new output — exactly as a first
+        run's stages are. When the plan reaches the reel, the Studio
+        follow-up runs last: new pictures made first if asked for, the
+        earlier steps' output handed to the design chat as what changed,
+        then a re-film. An empty plan on a task that filmed a reel means
+        the reel — a change to such a task almost always means the video —
+        and otherwise the last step that ran, as before.
+        """
         responses = getattr(self, "_followup_responses", {})
         if not responses:
             return
-        if target_stage not in responses:              # unsure → the last step
-            target_stage = list(responses.keys())[-1]
-        agent = self._stage_agents.get(target_stage, "")
-        prior = "\n\n".join(responses.get(target_stage) or [])
+        links = getattr(self, "_followup_links", {}) or {}
+        atts = getattr(self, "_followup_attachments", [])
+        plan = plan if isinstance(plan, dict) else {}
+        steps = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
+        reel = self._studio_reel_in(links)
+        can_reel = bool(reel and links.get("design"))
+        images = (plan.get("images") or "").strip() if "artwork" in steps else ""
+        ordinary = [s for s in steps
+                    if s in responses and s not in ("design", "media")]
+        wants_reel = can_reel and (
+            not steps or bool({"reel", "artwork", "design", "media"} & set(steps)))
+        if wants_reel:
+            agent = (self._stage_agents.get("design")
+                     or self._stage_agents.get("brains") or "ChatGPT")
+            if ordinary:
+                # The other steps first, in their own chats; what they
+                # produce is what the design chat is then told has changed.
+                maker = ((self.cfg.get("agents") or {}).get("visual")
+                         or self._stage_agents.get("visual") or "ChatGPT")
+                shown = {s: self._stage_agents.get(s, "") for s in ordinary}
+                if images:
+                    shown["artwork"] = maker
+                shown.update({"design": agent, "media": "Prism Studio"})
+                self._start_followup_run(
+                    ordinary, atts, plan_agents=shown,
+                    then=lambda r, l: self._continue_studio_followup(
+                        r, l, reel, links["design"], agent, atts, images))
+            else:
+                self._start_studio_followup(reel, links["design"], agent,
+                                            atts, images=images)
+            return
+        if not ordinary:
+            ordinary = [list(responses.keys())[-1]]     # unsure → the last step
+        self._set_stage("run")
+        self._start_followup_run(ordinary, atts)
+
+    def _followup_prompt(self, stage: str, responses: dict, first: bool) -> str:
+        prior = "\n\n".join(responses.get(stage) or [])
         att_note = (" New file(s) are attached to this chat — use them."
                     if getattr(self, "_followup_attachments", None) else "")
-        prompt = (
+        chain = ("" if first else
+                 " The step before you has been redone for this change — its "
+                 "new output is the context above; build on that, not on "
+                 "your earlier version alone.")
+        return (
             f"Earlier, for this task, you produced:\n\n{prior}\n\n"
             f"The person now wants this change: {self._followup_text}\n\n"
             f"Redo your part with that change and give the full updated "
-            f"result.{att_note}")
-        resume_url = (getattr(self, "_followup_links", {}) or {}).get(
-            target_stage, "")
-        self._set_stage("run")
-        self._start_followup_run(target_stage, agent, prompt,
-                                 getattr(self, "_followup_attachments", []),
-                                 resume_url)
+            f"result.{att_note}{chain}")
 
-    def _start_followup_run(self, stage: str, agent: str, prompt: str,
-                            attachments: list, resume_url: str = ""):
-        """Run exactly one stage — the follow-up — reusing the run surface, so
-        a follow-up shows and finishes like any other run (and can itself offer
-        another follow-up when it completes). `resume_url`, when known, reopens
-        the SAME conversation the stage answered in, so the follow-up continues
-        that chat with its full context instead of starting a fresh one."""
-        run_agents = {stage: agent}
+    def _start_followup_run(self, stages: list, attachments: list,
+                            plan_agents: dict = None, then=None):
+        """Run the follow-up's steps — one, or a relay of several — reusing
+        the run surface, so a follow-up shows and finishes like any other
+        run (and can itself offer another follow-up when it completes).
+        Each step reopens the SAME conversation it answered in, so it
+        continues that chat with its full context instead of starting a
+        fresh one. `then(responses, links)` continues a longer plan instead
+        of finishing; `plan_agents` is the whole plan, for the timeline."""
+        responses = getattr(self, "_followup_responses", {}) or {}
+        links = getattr(self, "_followup_links", {}) or {}
+        run_agents = {s: self._stage_agents.get(s, "") for s in stages}
+        custom = [(s, run_agents[s], [self._followup_prompt(s, responses, i == 0)])
+                  for i, s in enumerate(stages)]
+        resume = {s: links[s] for s in stages if links.get(s)}
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = {**self._stage_agents, **run_agents}
         # Bring the workbench's RUNNING view to the front. A follow-up often
@@ -2603,24 +2770,132 @@ class MainWindow(QMainWindow):
         self._show_screen("workbench")
         self._set_stage("run")
         self.output_panel.clear()
-        self.output_panel.set_plan(run_agents)
+        self.output_panel.set_plan(plan_agents or run_agents)
         self.output_panel.set_task(self._followup_text)
         self.input_panel.set_state("running")
         self._run_finished = False
         self.output_panel.set_finished(False)
         self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
+        # The refinement is its own small run: the completion window shows
+        # it alone, not stacked under the task it refines. (The follow-up
+        # session, not these accumulators, is what carries the task forward.)
+        self._stage_results = []
+        self._task_runs = []
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
-            custom_stages=[(stage, agent, [prompt])],
-            resume_urls=({stage: resume_url} if resume_url else None))
+            custom_stages=custom, resume_urls=resume or None, followup=True)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
-        worker.done.connect(self._on_run_done)
+        worker.done.connect(then if then is not None else self._on_run_done)
         worker.failed.connect(self._on_run_failed)
         self._workers.append(worker)
         worker.start()
+
+    def _continue_studio_followup(self, responses: dict, links: dict, reel,
+                                  design_url: str, agent: str, atts: list,
+                                  images: str):
+        """The second half of a plan that ends at the reel: the earlier
+        steps have re-run, and their new output is what the design chat is
+        told has changed. Their results are banked first — History keeps
+        the whole follow-up, not just the film."""
+        awake.release()
+        self._active_run = None
+        self._save_run(responses, links)
+        sess = getattr(self, "_followup_session", None)
+        if sess:
+            sess["responses"].update({k: v for k, v in responses.items() if v})
+            sess["links"].update({k: v for k, v in links.items() if v})
+        self._followup_links = {**(getattr(self, "_followup_links", {}) or {}),
+                                **{k: v for k, v in links.items() if v}}
+        context = "\n\n".join(
+            f"[{s.upper()}]\n" + "\n\n".join(t for t in texts if t)
+            for s, texts in responses.items() if texts)
+        self._start_studio_followup(reel, design_url, agent, atts,
+                                    images=images, context=context,
+                                    fresh_panel=False)
+
+    # ── a follow-up on a Studio reel ──────────────────────────────────────
+    def _studio_reel_in(self, links: dict):
+        """(mp4, spec path, spec) when this task filmed a Studio reel — the
+        saved design beside the video is what a follow-up changes."""
+        import json as _json
+        for url in (links or {}).values():
+            if not (isinstance(url, str) and url.lower().endswith(".mp4")
+                    and paths.is_local_result(url)):
+                continue
+            spec_path = url[:-4] + ".json"
+            if not os.path.exists(spec_path):
+                continue
+            try:
+                with open(spec_path, encoding="utf-8") as f:
+                    spec = _json.load(f)
+            except (OSError, ValueError):
+                continue
+            if CB.get_reel_edit().is_studio_spec(spec):
+                return url, spec_path, spec
+        return None
+
+    def _start_studio_followup(self, reel, design_url: str, agent: str,
+                               attachments: list, images: str = "",
+                               context: str = "", fresh_panel: bool = True):
+        """Ask for the change in the reel's own design conversation and
+        re-film it — after making any picture asked for. Runs on the
+        workbench like any other follow-up, and offers another when it
+        finishes — with the new cut as the reel the next one changes.
+        `fresh_panel` is False when this continues a longer plan whose
+        earlier steps are already on the timeline."""
+        _mp4, _spec_path, spec = reel
+        run_agents = {"design": agent, "media": "Prism Studio"}
+        if images:
+            maker = ((self.cfg.get("agents") or {}).get("visual")
+                     or self._stage_agents.get("visual") or "ChatGPT")
+            run_agents = {"artwork": maker, **run_agents}
+        self._show_screen("workbench")
+        self._set_stage("run")
+        if fresh_panel:
+            self.output_panel.clear()
+            self.output_panel.set_plan(run_agents)
+            self.output_panel.set_task(self._followup_text)
+            self._stage_results = []
+            self._task_runs = []
+        self.input_panel.set_state("running")
+        self._run_finished = False
+        self.output_panel.set_finished(False)
+        self.output_panel.set_running(True)
+        self.work_stack.setCurrentIndex(RUNNING)
+        self.statusBar().showMessage(
+            i18n.t("Making the picture first…") if images else
+            i18n.t("Reopening the reel's design conversation…"), 0)
+        worker = StudioFollowupWorker(self.cfg, spec, agent, design_url,
+                                      self._followup_text, attachments,
+                                      images=images, context=context,
+                                      task=getattr(self, "_last_query", ""))
+        awake.acquire()
+        self._active_run = worker
+        worker.stage_event.connect(self._on_stage_event)
+        worker.progress.connect(lambda d, t: self.statusBar().showMessage(
+            i18n.t("Filming the changed reel… {p}%").format(
+                p=int(d / max(1, t) * 100))))
+        worker.done.connect(self._on_studio_followup_done)
+        worker.failed.connect(self._on_run_failed)
+        self._workers.append(worker)
+        worker.start()
+
+    def _on_studio_followup_done(self, out: str, spec_path: str, note: str):
+        try:
+            CB.config.save_artifact(out, self._last_query, kind="reel",
+                                    task=self._last_query)
+        except Exception:                               # noqa: BLE001
+            pass
+        design_url = (getattr(self, "_followup_links", {}) or {}).get(
+            "design", "")
+        # Through the ordinary completion path — History, the completion
+        # window, and the offer of another follow-up. `media` now points at
+        # the new cut, so that is the reel the next follow-up changes.
+        self._on_run_done({"design": [note], "media": [note]},
+                          {"design": design_url, "media": out})
 
     def _result_summary(self, responses: dict) -> str:
         """Recap for the follow-up dialog: the FINAL result first, then the

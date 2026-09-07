@@ -85,6 +85,18 @@ def _thumbnail(path: str):
     return label
 
 
+import re as _re
+
+# A run folder's name: the stamp config.begin_run() gives it.
+_RUN_STAMP = _re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}-\d{2}( \(\d+\))?$")
+
+
+def _run_time(run_dir: str) -> str:
+    """"16:18" off a run folder named "2026-09-07 16-18"."""
+    m = _re.match(r"^\d{4}-\d{2}-\d{2} (\d{2})-(\d{2})", os.path.basename(run_dir))
+    return f"{m.group(1)}:{m.group(2)}" if m else os.path.basename(run_dir)
+
+
 def _folder_stats(path: str) -> tuple[int, str]:
     """File count and total size of everything under a task subfolder —
     config.artifact_task_dir()'s folders can themselves hold nested folders
@@ -93,7 +105,7 @@ def _folder_stats(path: str) -> tuple[int, str]:
     count, total = 0, 0.0
     for root, _dirs, names in os.walk(path):
         for name in names:
-            if name.endswith(".link.txt"):
+            if name.endswith(".link.txt") or name == CB.config.ABOUT_FILE:
                 continue
             count += 1
             try:
@@ -164,6 +176,7 @@ class ArtifactsPanel(_Page):
     def build(self):
         folder = CB.config.ARTIFACTS_DIR
         paths = []
+        self._labels: dict[str, str] = {}
         if os.path.isdir(folder):
             for name in os.listdir(folder):
                 # A ".link.txt" is the sidecar save_artifact() writes next to
@@ -173,14 +186,26 @@ class ArtifactsPanel(_Page):
                 if name.endswith(".link.txt"):
                     continue
                 path = os.path.join(folder, name)
-                # A directory is one New Task's (or one BOQ/Gerber/quote
-                # job's) own subfolder — config.artifact_task_dir() groups
-                # everything one run produced there instead of scattering it
-                # loose. It gets one row in this same newest-first list,
-                # same as a single file would; opening it hands browsing its
-                # contents to Finder/Explorer rather than Prism reimplementing
-                # a folder tree inline.
-                if os.path.isfile(path) or os.path.isdir(path):
+                if os.path.isfile(path):
+                    paths.append(path)
+                    continue
+                if not os.path.isdir(path):
+                    continue
+                # A task's folder holds one subfolder per RUN (see
+                # config.begin_run) — and each run is its own card here,
+                # named for the task and the time, so two runs of the same
+                # words never read as one. A task folder from before runs
+                # were separated (files loose in it) stays one card.
+                runs = [os.path.join(path, n) for n in os.listdir(path)
+                        if _RUN_STAMP.match(n)
+                        and os.path.isdir(os.path.join(path, n))]
+                loose = [n for n in os.listdir(path)
+                         if not os.path.isdir(os.path.join(path, n))
+                         and not n.endswith(".link.txt")]
+                for run in runs:
+                    self._labels[run] = f"{name}  ·  {_run_time(run)}"
+                    paths.append(run)
+                if loose or not runs:
                     paths.append(path)
         if not paths:
             self._col.addWidget(C.EmptyState(
@@ -243,7 +268,7 @@ class ArtifactsPanel(_Page):
         return row
 
     def _folder_row(self, path: str) -> C.FileItem:
-        name = os.path.basename(path)
+        name = getattr(self, "_labels", {}).get(path) or os.path.basename(path)
         count, size = _folder_stats(path)
         files_word = (i18n.t("1 file") if count == 1
                      else i18n.t("{n} files").format(n=count))

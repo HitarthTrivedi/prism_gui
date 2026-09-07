@@ -144,6 +144,12 @@ class HistoryDialog(PrismDialog):
     # closes itself first, since the editor and the re-render both surface
     # through the main window, which this modal dialog sits in front of.
     edit_reel = Signal(str)
+    # A past run wants a change. Carries the whole record — its query, every
+    # stage's output, the tab each answered in, the tool that did each — which
+    # is exactly what a follow-up session is made of. MainWindow owns the
+    # follow-up (see _follow_up_from_history); this dialog only asks, and
+    # closes first for the same reason edit_reel does.
+    follow_up = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(
@@ -209,6 +215,16 @@ class HistoryDialog(PrismDialog):
             "resize it, retype it or delete it, then render it again."))
         self.edit_reel_btn.setVisible(False)
         right_box.addWidget(self.edit_reel_btn)
+        self._current_record = None
+        self.follow_up_btn = C.button(
+            i18n.t("Follow up"), "secondary", icon_name="arrow-up",
+            small=True, on_click=self._follow_up_current)
+        self.follow_up_btn.setToolTip(i18n.t(
+            "Ask for a change to what this run produced. Prism sends your "
+            "note to the step it is about, in the same chat that step used "
+            "— a reel goes back to the conversation that designed it."))
+        self.follow_up_btn.setVisible(False)
+        right_box.addWidget(self.follow_up_btn)
         split.addWidget(right)
 
         split.setStretchFactor(0, 1)
@@ -231,7 +247,9 @@ class HistoryDialog(PrismDialog):
             identity.view_as(self.who.currentData())
         except PermissionError as e:
             self._current_reel = ""
+            self._current_record = None
             self.edit_reel_btn.setVisible(False)
+            self.follow_up_btn.setVisible(False)
             self.view.setHtml(self._page(f"<p>{e}</p>"))
             return
         self.runs.clear()
@@ -253,7 +271,9 @@ class HistoryDialog(PrismDialog):
         if not names:
             self.runs.setEnabled(False)
             self._current_reel = ""
+            self._current_record = None
             self.edit_reel_btn.setVisible(False)
+            self.follow_up_btn.setVisible(False)
             nobody = ("No runs saved yet. Once Prism finishes a task, it "
                       "turns up here.")
             if who["mid"] != self._me["mid"]:
@@ -291,13 +311,21 @@ class HistoryDialog(PrismDialog):
                 record = json.load(f)
         except Exception as e:
             self._current_reel = ""
+            self._current_record = None
             self.edit_reel_btn.setVisible(False)
+            self.follow_up_btn.setVisible(False)
             self.view.setHtml(self._page(
                 f"<p style='color:{theme.ERR_INK}'>Couldn't read "
                 f"{os.path.basename(path)}: "
                 f"{e}</p>"))
             return
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
+        # A follow-up needs something to follow up: a run that saved stage
+        # output. A record with none (a planning failure, an add-on dialog's
+        # own run) has nothing to send a note about.
+        has_output = any(v for v in (record.get("responses") or {}).values())
+        self._current_record = record if has_output else None
+        self.follow_up_btn.setVisible(has_output)
         # The reel button reads the URLs this run actually produced, not the
         # HTML _render() just wrote — one source of truth for "is there a
         # reel here", matched against by widgets.artifacts_panel and
@@ -313,6 +341,13 @@ class HistoryDialog(PrismDialog):
         url = self._current_reel
         self.accept()
         self.edit_reel.emit(url)
+
+    def _follow_up_current(self):
+        if not self._current_record:
+            return
+        record = self._current_record
+        self.accept()
+        self.follow_up.emit(record)
 
     # ── rendering ─────────────────────────────────────────────────────────
     @staticmethod

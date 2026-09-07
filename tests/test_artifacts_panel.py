@@ -50,6 +50,31 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
         names = self._names(panel)
         self.assertTrue(any(n and "the nova launch" in n for n in names))
 
+    def test_each_run_of_a_task_is_its_own_card(self):
+        """Two runs of the same words: two cards, each named for the task
+        and its time — the Artifacts screen showed them as one."""
+        self.CB.config.begin_run("the nova launch")
+        self.CB.config.save_artifact(self._src.name, "a poster", kind="visual",
+                                     task="the nova launch")
+        second = self.CB.config.begin_run("the nova launch")
+        self.CB.config.save_artifact(self._src.name, "a poster", kind="visual",
+                                     task="the nova launch")
+        panel = self.Panel()
+        panel.build()
+        cards = [n for n in self._names(panel) if n and "the nova launch" in n]
+        self.assertEqual(len(cards), 2, cards)
+        self.assertTrue(all("·" in n for n in cards), cards)
+        from widgets.artifacts_panel import _run_time
+        self.assertIn(_run_time(second), cards[0] + cards[1])
+
+    def test_the_about_file_is_not_counted(self):
+        from widgets.artifacts_panel import _folder_stats
+        folder = self.CB.config.begin_run("a described run")
+        self.CB.config.save_artifact(self._src.name, "one", kind="visual",
+                                     task="a described run")
+        count, _ = _folder_stats(folder)
+        self.assertEqual(count, 1)
+
     def test_a_loose_file_still_gets_its_own_row_too(self):
         self.CB.config.save_artifact(self._src.name, "a poster", kind="visual")
         panel = self.Panel()

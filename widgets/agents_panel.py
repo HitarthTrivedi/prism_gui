@@ -617,6 +617,11 @@ class PlanRow(QFrame):
     def is_checked(self) -> bool:
         return self._included
 
+    def title(self) -> str:
+        """The step's name as the plan shows it — "Find the people", not
+        "leads" — so a refusal can point at the row the owner is looking at."""
+        return self._title
+
     def wait_seconds(self) -> int:
         entry = CB.agents.resolve_agent(self.stage, self.chip.current()) or {}
         return int(entry.get("wait_time") or 0)
@@ -1133,6 +1138,34 @@ class AgentsPanel(QWidget):
             for stage, tool, questions in self._extras:
                 out.append((stage, tool, list(questions)))
         return out
+
+    def unprompted_steps(self) -> list:
+        """Titles of the steps that are ticked to run but carry no prompt.
+
+        The router writes prompts only for the steps it planned; a step the
+        owner ticks on by hand starts with none, and selected_steps() hands
+        it to the engine exactly like that — a stage that uploads the files,
+        asks nothing, and waits the whole cap. Asked before the run starts so
+        the refusal can name the step rather than the engine discovering it
+        five minutes in.
+        """
+        return [row.title() for row in self._rows
+                if row.is_checked() and row.selected_agent()
+                and not row.questions()]
+
+    def left_out_stages(self) -> list:
+        """Stage keys of the rows the owner unticked. Handed to the engine as
+        `skip_stages`: a few stages are inserted by the engine rather than
+        planned here (Studio's image maker), and unticking their row has to
+        reach them or the run puts them straight back."""
+        return [row.stage for row in self._rows if not row.is_checked()]
+
+    def unprompted_stages(self) -> list:
+        """The same rows by stage key — what selected_agents() is keyed by,
+        so a run can drop exactly these and nothing else."""
+        return [row.stage for row in self._rows
+                if row.is_checked() and row.selected_agent()
+                and not row.questions()]
 
     def selected_agents(self) -> dict:
         """{stage: agent_name} for every step still switched on.

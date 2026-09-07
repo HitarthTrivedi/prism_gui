@@ -96,13 +96,22 @@ class AutomationWorker(_Worker):
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
                  custom_stages=None, chatgpt_analysis: bool = True,
                  reel_design_stage: str = "", motion_design_stage: str = "",
-                 resume_urls: dict | None = None):
+                 resume_urls: dict | None = None,
+                 skip_stages: list | None = None, followup: bool = False):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
         # {stage: conversation_url} — a follow-up resumes the SAME chat the
         # stage answered in, instead of opening a fresh one. None = normal run.
         self.resume_urls = resume_urls
+        # Steps the plan screen left out. The engine inserts a few stages of
+        # its own (Studio's image maker, for one) and has to be told which
+        # of them the owner switched off, or it puts them back.
+        self.skip_stages = list(skip_stages or [])
+        # A follow-up redoes a whole deliverable and gets the engine's longer
+        # wait ceiling (automation.FOLLOWUP_MIN_WAIT); the everyday budget
+        # was cutting those answers off mid-way.
+        self.followup = bool(followup)
         # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
         # instead of going through the router's fixed categories; the engine
         # accepts them directly. None = ordinary routed run, unchanged.
@@ -156,6 +165,10 @@ class AutomationWorker(_Worker):
                 kwargs["motion_design_stage"] = self.motion_design_stage
             if self.resume_urls:
                 kwargs["resume_urls"] = self.resume_urls
+            if self.skip_stages:
+                kwargs["skip_stages"] = self.skip_stages
+            if self.followup:
+                kwargs["min_wait"] = automation.FOLLOWUP_MIN_WAIT
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
@@ -168,17 +181,26 @@ class AutomationWorker(_Worker):
 
 
 class FollowupRouteWorker(_Worker):
-    """Work out which finished step a post-completion follow-up is about, so the
-    note goes to that step's assigned agent — Prism's "assign it automatically"
-    rule, applied to refinements. A quick Groq classify (JSON mode)."""
-    done = Signal(str)      # target stage key ("" = unsure/none)
+    """Work out which finished steps a post-completion follow-up needs, in
+    order — Prism's "assign it automatically" rule, applied to refinements.
+    A quick Groq classify (JSON mode).
+
+    A plan, not one step: "make a picture of the new truck and put it in
+    scene 3" needs the image tool, then the design chat, then the renderer.
+    For a task that filmed a reel, two engine-owned steps join the list —
+    `artwork` (make new pictures) and `reel` (change the scenes and re-film)
+    — and the plan says what pictures, if any.
+    """
+    done = Signal(dict)     # {"steps": [keys in order], "images": "…"}
     failed = Signal(str)
 
-    def __init__(self, followup: str, stages_info: list, cfg: dict):
+    def __init__(self, followup: str, stages_info: list, cfg: dict,
+                 reel: bool = False):
         super().__init__()
         self.followup = followup
         self.stages_info = stages_info   # [{"stage","agent","summary"}]
         self.cfg = cfg
+        self.reel = reel
 
     def run(self):
         try:
@@ -186,22 +208,41 @@ class FollowupRouteWorker(_Worker):
             lines = "\n".join(
                 f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
                 for s in self.stages_info)
-            keys = ", ".join(f'"{s["stage"]}"' for s in self.stages_info)
+            keys = [s["stage"] for s in self.stages_info]
+            extra = ""
+            if self.reel:
+                keys += ["artwork", "reel"]
+                extra = (
+                    '\nThis task filmed a reel, so two more steps exist: key '
+                    '"artwork" — make NEW pictures in the image tool (say '
+                    'what, in "images"); key "reel" — change the reel\'s '
+                    "scenes or look in its design chat and film it again. Any "
+                    'change that should show in the video ends with "reel". '
+                    'A picture that is only made and never placed is useless, '
+                    'so "artwork" is always followed by "reel".')
             prompt = (
                 "A multi-step task just finished. The steps that ran, each with "
                 "its category key, the tool that did it, and a snippet of its "
-                f"output:\n\n{lines}\n\n"
+                f"output:\n\n{lines}\n{extra}\n\n"
                 f'The user now says: "{self.followup}"\n\n'
-                "Which ONE step should handle this follow-up? Choose the step "
-                "whose work the follow-up is about. Reply with ONLY a JSON "
-                'object: {"stage": "<one of the keys above>"}. Valid keys: '
-                f"{keys}. If genuinely unsure, use the last key."
+                "Which steps does this follow-up need, IN ORDER? Usually one; "
+                "several only when one step's new output feeds the next. Reply "
+                'with ONLY a JSON object: {"steps": ["<key>", …], "images": '
+                '"<what pictures to make, or empty>"}. Valid keys: '
+                + ", ".join(f'"{k}"' for k in keys)
+                + ". If genuinely unsure, use the last step that ran."
             )
             out = CB.router.groq_chat(
                 self.cfg.get("api_key", ""), self.cfg.get("model", ""),
                 prompt, json_mode=True, timeout=45)
             data = json.loads(out)
-            self.done.emit(str(data.get("stage", "")).strip())
+            steps = [str(s).strip() for s in (data.get("steps") or [])
+                     if str(s).strip() in keys]
+            if not steps and str(data.get("stage", "")).strip() in keys:
+                steps = [str(data["stage"]).strip()]     # the old one-key shape
+            plan = {"steps": list(dict.fromkeys(steps)),
+                    "images": str(data.get("images") or "").strip()}
+            self.done.emit(plan)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -439,6 +480,44 @@ class ReelWorker(_Worker):
             engine.render(self.spec, self.out_path,
                           on_progress=lambda d, t: self.progress.emit(d, t))
             self.done.emit(self.out_path)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class StudioFollowupWorker(_Worker):
+    """A change to a filmed Studio reel: asked in the conversation that
+    designed it, then re-filmed here. See core.automation.studio_followup."""
+    stage_event = Signal(str, dict)
+    progress = Signal(int, int)      # frames done, total
+    done = Signal(str, str, str)     # mp4, spec path, note
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, spec: dict, agent: str, design_url: str,
+                 change: str, attachments: list | None = None,
+                 images: str = "", context: str = "", task: str = ""):
+        super().__init__()
+        self.cfg, self.spec, self.agent = cfg, spec, agent
+        self.design_url, self.change = design_url, change
+        self.attachments = list(attachments or [])
+        self.images, self.context = images or "", context or ""
+        self.task = task or ""
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
+    def run(self):
+        try:
+            out, spec_path, note = CB.get_automation().studio_followup(
+                self.cfg, self.spec, self.agent, self.design_url, self.change,
+                attachments=self.attachments, images=self.images,
+                context=self.context, task=self.task,
+                on_event=lambda k, p: self.stage_event.emit(k, p),
+                on_progress=lambda d, t: self.progress.emit(d, t))
+            self.done.emit(out, spec_path, note)
         except Exception as e:
             self.failed.emit(str(e))
 

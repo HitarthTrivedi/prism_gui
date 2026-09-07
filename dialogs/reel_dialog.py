@@ -51,6 +51,9 @@ class ReelDialog(PrismDialog):
         self.setMinimumSize(620, 620)
         self.cfg = cfg
         self.reel = CB.get_reel()
+        # Set by _run; read by _on_rendered. A reel reopened from disk and
+        # re-rendered from the editor reaches _on_rendered without _run.
+        self.request = ""
 
         self.images: list[dict] = []
         self.brand: dict = {}
@@ -398,6 +401,7 @@ class ReelDialog(PrismDialog):
 
         secs = sum(float(sc.get("seconds", 4)) for sc in spec["scenes"])
         os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+        CB.config.begin_run(self.request or "reel")     # its own folder
         stamp = int(time.time())
         self.out_path = os.path.join(CB.config.RUNS_DIR, f"reel_{stamp}.mp4")
         # Saved beside the video and complete in itself — assets inlined —

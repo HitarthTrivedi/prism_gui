@@ -255,6 +255,11 @@ def main():
     # cp1252 Windows console. Cheap, side-effect-free, must come before the
     # core_bridge import below.
     _force_utf8_streams()
+    # Before Qt starts: what every child of this process inherits — the
+    # video player Play opens, xdg-open, Chrome — and what Qt's own platform
+    # theme reads. See paths.scrub_environment for the two ways it was
+    # poisoned (a snap's GTK_PATH; PyInstaller's LD_LIBRARY_PATH).
+    scrubbed = paths.scrub_environment()
 
     app = QApplication(sys.argv)
     app.setApplicationName(app_meta.NAME)
@@ -284,6 +289,12 @@ def main():
     # Before anything that can fail: from here on, a crash lands in
     # ~/.prism/logs instead of on a stdout a windowed build does not have.
     diagnostics.install()
+    if scrubbed:
+        diagnostics.write("INFO", "environment: dropped "
+                          + ", ".join(scrubbed) + " for child processes — "
+                          "a snap's or a bundle's library paths, which break "
+                          "the system apps Prism opens (see paths."
+                          "scrub_environment)")
 
     # Rollback check for the in-app updater (Phase 1) — as early as possible,
     # before anything else assumes the files on disk are the ones the last

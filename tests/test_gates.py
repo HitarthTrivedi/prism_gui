@@ -792,3 +792,113 @@ class UpdateBanner(GateTest):
         self.assertIn("99.0.0", win._banner_text.text())
         texts = [l.text() for l in panel.findChildren(QLabel)]
         self.assertTrue(any("99.0.0" in t for t in texts), texts)
+
+
+class UnpromptedStepGate(GateTest):
+    """A step ticked on by hand with no prompt behind it is caught before
+    the run starts, by the name the plan shows — not discovered five minutes
+    in by an engine waiting on a tab nobody typed into (the 2026-09-07 reel
+    run: two such steps, 322 seconds on the first).
+
+    Caught, not refused: the owner is offered the run without that step, the
+    same way a locked add-on is offered as a drop. The first version refused
+    outright and the very next plan showed why that was wrong — "Make the
+    images" ticked on for a Studio reel, which makes its own artwork."""
+
+    def _window_with_a_hand_ticked_step(self, agents=None, routing=None,
+                                        tick="leads"):
+        self.grant(["core"])
+        win = self._window()
+        win.routing = {"stages": {}}
+        win._last_query = "make a reel for instagram for this brand"
+        win.agents_panel.set_content(
+            routing or {"leads": {"needed": False, "questions": []},
+                        "content": {"needed": True,
+                                    "questions": ["Write the script."]}},
+            agents or {"leads": "ChatGPT", "content": "ChatGPT"})
+        row = next(r for r in win.agents_panel.rows() if r.stage == tick)
+        row.set_included(True)
+        return win, row
+
+    def _run(self, win, answer):
+        import main_window
+        from PySide6.QtWidgets import QMessageBox
+        with mock.patch.object(main_window.QMessageBox, "question",
+                               return_value=answer) as asked, \
+             mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize()), \
+             mock.patch.object(main_window, "AutomationWorker") as worker:
+            win._run_pipeline()
+        return asked, worker
+
+    def test_the_step_is_named_and_the_run_can_be_declined(self):
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step()
+        asked, worker = self._run(win, QMessageBox.Cancel)
+        worker.assert_not_called()
+        self.assertTrue(asked.called)
+        said = asked.call_args[0][2]
+        self.assertIn("Find the people", said)
+        self.assertIn("Prompt", said)
+
+    def test_accepting_runs_the_rest_without_it(self):
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step()
+        asked, worker = self._run(win, QMessageBox.Yes)
+        self.assertTrue(worker.called)
+        labels = [s[0] for s in worker.call_args.kwargs["custom_stages"]]
+        self.assertIn("content", labels)
+        self.assertNotIn("leads", labels)
+        self.assertNotIn("leads", worker.call_args[0][1]["agents"])
+
+    def test_a_studio_reel_is_told_it_still_gets_its_pictures(self):
+        """The plan that showed a refusal was wrong: "Make the images"
+        ticked on by hand, for a reel Prism Studio illustrates itself."""
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step(
+            agents={"visual": "ChatGPT", "content": "ChatGPT",
+                    "media": "Prism Studio"},
+            routing={"visual": {"needed": False, "questions": []},
+                     "content": {"needed": True, "questions": ["Write it."]},
+                     "media": {"needed": True, "questions": ["Film it."]}},
+            tick="visual")
+        asked, worker = self._run(win, QMessageBox.Cancel)
+        worker.assert_not_called()
+        self.assertIn("Make the images", asked.call_args[0][2])
+        self.assertIn("makes its own artwork", asked.call_args[0][2])
+
+    def test_a_plan_with_a_prompt_on_every_step_asks_nothing(self):
+        from PySide6.QtWidgets import QMessageBox
+        win, leads = self._window_with_a_hand_ticked_step()
+        leads.set_included(False)
+        asked, worker = self._run(win, QMessageBox.Cancel)
+        asked.assert_not_called()
+        self.assertTrue(worker.called)
+
+    def test_what_was_left_out_reaches_the_engine_by_name(self):
+        """Unticking "Make the images" has to reach the engine, which inserts
+        that stage itself — or the run puts it straight back (2026-09-07)."""
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step(
+            agents={"visual": "ChatGPT", "content": "ChatGPT",
+                    "media": "Prism Studio"},
+            routing={"visual": {"needed": True, "questions": ["Pictures."]},
+                     "content": {"needed": True, "questions": ["Write it."]},
+                     "media": {"needed": True, "questions": ["Film it."]}},
+            tick="content")
+        next(r for r in win.agents_panel.rows() if r.stage == "visual") \
+            .set_included(False)
+        import main_window
+        with mock.patch.object(main_window.CB, "studio_available",
+                               return_value=(True, "")):
+            asked, worker = self._run(win, QMessageBox.Yes)
+        self.assertTrue(worker.called)
+        self.assertEqual(worker.call_args.kwargs["skip_stages"], ["visual"])
+        self.assertNotIn("visual",
+                         [s[0] for s in worker.call_args.kwargs["custom_stages"]])
+
+    def test_a_step_dropped_for_having_no_prompt_is_left_out_too(self):
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step()      # leads, no prompt
+        asked, worker = self._run(win, QMessageBox.Yes)
+        self.assertIn("leads", worker.call_args.kwargs["skip_stages"])
