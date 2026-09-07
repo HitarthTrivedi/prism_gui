@@ -113,6 +113,27 @@ class TheSessionOutlivesOneFollowup(FollowupBase):
         self.assertEqual(list(win._followup_links), ["content"])
 
 
+class TheFollowupPrompt(FollowupBase):
+
+    def test_leads_with_the_new_instruction_not_the_old_result(self):
+        win = self._win()
+        win._followup_text = "Make the mushroom farming plan suitable for Gujarat."
+        prompt = win._followup_prompt("content", {"content": ["old plan"]}, True)
+        self.assertIn(win._followup_text, prompt)
+        self.assertLess(prompt.index(win._followup_text), prompt.index("old plan"))
+        self.assertIn("Do the change now", prompt)
+
+    def test_keeps_a_long_prior_result_small_enough_for_a_web_composer(self):
+        win = self._win()
+        win._followup_text = "Use a smaller greenhouse."
+        prior = "START " + ("x" * 12_000) + " END"
+        prompt = win._followup_prompt("content", {"content": [prior]}, True)
+        self.assertLessEqual(len(prompt), 8_500)
+        self.assertIn("START", prompt)
+        self.assertIn("END", prompt)
+        self.assertIn("Earlier result shortened", prompt)
+
+
 class AReelGoesBackToItsDesignChat(FollowupBase):
 
     def _links(self, mp4, design=True):
@@ -281,10 +302,17 @@ class FromHistory(FollowupBase):
 
     def test_the_run_record_remembers_its_folder(self):
         win = self._win()
-        folder = CB.config.begin_run("make a reel for instagram")
-        with mock.patch.object(CB.config, "save_run") as saved:
-            win._save_run({"content": ["x"]}, {})
-        self.assertEqual(saved.call_args[0][0]["artifacts"], folder)
+        # Production writes artifacts to Desktop; tests must not assume the
+        # runner has a writable Desktop (CI and sandboxes usually do not).
+        old_dir = CB.config.ARTIFACTS_DIR
+        CB.config.ARTIFACTS_DIR = self.art
+        try:
+            folder = CB.config.begin_run("make a reel for instagram")
+            with mock.patch.object(CB.config, "save_run") as saved:
+                win._save_run({"content": ["x"]}, {})
+            self.assertEqual(saved.call_args[0][0]["artifacts"], folder)
+        finally:
+            CB.config.ARTIFACTS_DIR = old_dir
 
     def test_history_is_wired_from_both_entrances(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(

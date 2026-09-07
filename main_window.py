@@ -2771,6 +2771,19 @@ class MainWindow(QMainWindow):
 
     def _followup_prompt(self, stage: str, responses: dict, first: bool) -> str:
         prior = "\n\n".join(responses.get(stage) or [])
+        # A finished answer can be an entire document, a long research dump or
+        # an exported table. Sending it back verbatim makes the browser
+        # composer fall back to slow character-by-character typing when fast
+        # insertion refuses the payload. The UI then appears stuck at
+        # "prompt 1/1" and the agent never receives the follow-up. Keep both
+        # ends: the opening establishes the work and the ending normally holds
+        # the final recommendation or deliverable.
+        max_prior = 8_000
+        if len(prior) > max_prior:
+            head = 6_000
+            prior = (prior[:head].rstrip()
+                     + "\n\n[Earlier result shortened here for the chat]\n\n"
+                     + prior[-(max_prior - head):].lstrip())
         att_note = (" New file(s) are attached to this chat — use them."
                     if getattr(self, "_followup_attachments", None) else "")
         chain = ("" if first else
@@ -2778,10 +2791,12 @@ class MainWindow(QMainWindow):
                  "new output is the context above; build on that, not on "
                  "your earlier version alone.")
         return (
-            f"Earlier, for this task, you produced:\n\n{prior}\n\n"
-            f"The person now wants this change: {self._followup_text}\n\n"
-            f"Redo your part with that change and give the full updated "
-            f"result.{att_note}{chain}")
+            "THIS IS A FOLLOW-UP TO THE TASK ALREADY IN THIS CHAT.\n\n"
+            f"The person now wants this change:\n{self._followup_text}\n\n"
+            "Do the change now. Give the full updated result, not an outline "
+            "or instructions for how to change it.\n\n"
+            f"Your earlier result is included only as reference:\n\n{prior}"
+            f"{att_note}{chain}")
 
     def _start_followup_run(self, stages: list, attachments: list,
                             plan_agents: dict = None, then=None):
