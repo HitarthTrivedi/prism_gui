@@ -46,6 +46,7 @@ from addons.boq.panel import BoqPanel
 from widgets.catalog_panel import CatalogPanel
 from addons.email.panel import EmailPanel
 from addons.gerber.panel import GerberPanel
+from addons.step.panel import StepPanel
 from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
@@ -66,6 +67,7 @@ from dialogs.ai_directory_dialog import AIDirectoryDialog
 from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
+from addons.step.dialog import StepDialog
 from addons.reel.dialog import ReelDialog
 from addons.motion.dialog import MotionDialog
 from dialogs.completion_dialog import CompletionDialog
@@ -99,6 +101,7 @@ SCREENS = (
     "artifacts",
     "inquiry_work",     # reached only by drilling in from the launcher panel
     "bom",
+    "step",             # appended last, like bom: nothing above renumbers
 )
 _INDEX = {name: i for i, name in enumerate(SCREENS)}
 
@@ -124,6 +127,7 @@ WIZARD = _INDEX["wizard"]
 ARTIFACTS = _INDEX["artifacts"]
 INQUIRY_WORK = _INDEX["inquiry_work"]
 BOM = _INDEX["bom"]
+STEP = _INDEX["step"]
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -384,7 +388,9 @@ class MainWindow(QMainWindow):
         self.inquiry_work_panel = InquiryDialog(self.cfg, self)
         self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
         self.bom_panel = BomPanel(self.cfg)
-        self.screens.addWidget(self.bom_panel)              # BOM (last: no renumber)
+        self.screens.addWidget(self.bom_panel)              # BOM
+        self.step_panel = StepPanel(self.cfg)
+        self.screens.addWidget(self.step_panel)             # STEP (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -416,6 +422,7 @@ class MainWindow(QMainWindow):
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
         self.bom_panel.opened.connect(self._open_bom_dialog)
+        self.step_panel.opened.connect(self._open_step_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
         self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
         self.email_panel.open_compose.connect(self._open_email_dialog)
@@ -428,7 +435,7 @@ class MainWindow(QMainWindow):
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
-                      self.email_panel):
+                      self.step_panel, self.email_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -1147,6 +1154,8 @@ class MainWindow(QMainWindow):
             self._open_bom()
         elif key == "gerber":
             self._open_gerber()
+        elif key == "step":
+            self._open_step()
         elif key == "inquiry":
             self._open_inquiry()
 
@@ -1388,6 +1397,27 @@ class MainWindow(QMainWindow):
                 f"The Gerber add-on could not load: {err}")
             return
         GerberDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_step(self):
+        # Gated on "boq" like Gerber and BOM -- nothing on the licence
+        # server sells STEP separately yet. See addons/step/addon.py.
+        self._authorized_then("boq", "addon", lambda: self._show_screen("step"))
+
+    def _open_step_dialog(self):
+        # Unlike Gerber this has a hard dependency -- cadquery, which
+        # carries OpenCascade -- so the message is a real customer-facing
+        # one: the add-on cannot measure anything without it.
+        ok, err = CB.step_available()
+        if not ok:
+            QMessageBox.information(
+                self, "STEP",
+                "The STEP add-on needs the cadquery library to read 3D "
+                "models:\n\n    pip install cadquery\n\n"
+                f"Detail: {err}")
+            return
+        StepDialog(self.cfg, self.attachments, self).exec()
+        # A run finished in the dialog must show on the screen behind it.
+        self.step_panel.refresh()
 
     def _open_email(self):
         self._authorized_then("email", "addon",

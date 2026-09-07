@@ -97,10 +97,20 @@ class AutomationWorker(_Worker):
                  custom_stages=None, chatgpt_analysis: bool = True,
                  reel_design_stage: str = "", motion_design_stage: str = "",
                  resume_urls: dict | None = None,
-                 skip_stages: list | None = None, followup: bool = False):
+                 skip_stages: list | None = None, followup: bool = False,
+                 files_out: list | None = None,
+                 image_stages=None, failover: bool = True):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        # Stage keys the caller promises will produce a picture — they get
+        # the engine's full image budget. See automation.run(image_stages=).
+        self.image_stages = set(image_stages or ())
+        # False = a stage that produced nothing is NOT handed to another
+        # tool in its category. The STEP dialog's Draft is ChatGPT's job and
+        # nobody else's: a "fallback" sheet from a different image model is
+        # a second, differently-wrong drawing, not a rescue.
+        self.failover = failover
         # {stage: conversation_url} — a follow-up resumes the SAME chat the
         # stage answered in, instead of opening a fresh one. None = normal run.
         self.resume_urls = resume_urls
@@ -112,6 +122,11 @@ class AutomationWorker(_Worker):
         # wait ceiling (automation.FOLLOWUP_MIN_WAIT); the everyday budget
         # was cutting those answers off mid-way.
         self.followup = bool(followup)
+        # A caller-owned list the engine appends every harvested file record
+        # to (its pipeline_files_out) — how the STEP dialog gets the drawing
+        # sheet an image tool returned, the same way the terminal's
+        # /step-auto does. None = the caller does not want them.
+        self.files_out = files_out
         # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
         # instead of going through the router's fixed categories; the engine
         # accepts them directly. None = ordinary routed run, unchanged.
@@ -169,6 +184,12 @@ class AutomationWorker(_Worker):
                 kwargs["skip_stages"] = self.skip_stages
             if self.followup:
                 kwargs["min_wait"] = automation.FOLLOWUP_MIN_WAIT
+            if self.files_out is not None:
+                kwargs["pipeline_files_out"] = self.files_out
+            if self.image_stages:
+                kwargs["image_stages"] = self.image_stages
+            if not self.failover:
+                kwargs["failover"] = False
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),

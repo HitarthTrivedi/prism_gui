@@ -116,6 +116,7 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         "gerber": "gerber_panel",
         "artifacts": "artifacts_panel",
         "bom": "bom_panel",
+        "step": "step_panel",
     }
 
     def test_the_page_at_each_index_is_the_panel_the_table_names(self):

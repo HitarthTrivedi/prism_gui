@@ -42,6 +42,9 @@ from test_gates import GateTest                         # noqa: E402
 # reel and motion are not on the rail (Reel's row was given to Artifacts) but
 # are reachable by command, which is exactly why they are tested here.
 #
+# step rides "boq" for the same reason gerber does -- no "step" key on the
+# licence server yet. See addons/step/addon.py.
+#
 # bom rides "boq" for a different reason: there IS a "bom" key in
 # plans.FEATURES, but the add-on ships as a mode inside the BOQ dialog, so the
 # route it is reached by is BOQ's. The day BOM becomes its own screen, this
@@ -53,6 +56,7 @@ ADDON_FEATURES = {
     "boq": "boq",
     "bom": "boq",
     "gerber": "boq",
+    "step": "boq",
     "email": "email",
     "reel": "reel",
     "motion": "reel",

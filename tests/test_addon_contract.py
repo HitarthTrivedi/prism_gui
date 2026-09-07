@@ -347,8 +347,11 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     # the point: for months sidebar.ADDONS and home_panel.ADDONS disagreed
     # about these two while home_panel.py carried a comment saying it "must
     # never drift from" the rail.
-    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "email", "bom"]
-    GOLDEN_HOME = ["inquiry", "boq", "gerber", "email", "reel", "motion", "bom"]
+    # step (order 35) sits between Gerber and Email so the three measuring
+    # add-ons are neighbours on both shelves -- see addons/step/addon.py.
+    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "step", "email", "bom"]
+    GOLDEN_HOME = ["inquiry", "boq", "gerber", "step", "email", "reel",
+                   "motion", "bom"]
 
     def test_the_rail_shelf_is_what_we_decided(self):
         self.assertEqual(

@@ -208,6 +208,23 @@ def get_gerber_form():
     return gerber_form
 
 
+def step_available() -> tuple[bool, str]:
+    """core.stepfile imports without cadquery (its CAD imports are guarded)
+    and answers available() itself — so this asks it, the same question the
+    terminal's /step asks, and the STEP dialog can say "needs cadquery"
+    rather than fail on the first model."""
+    try:
+        from core import stepfile
+        return stepfile.available()
+    except Exception as e:
+        return False, str(e)
+
+
+def get_stepfile():
+    from core import stepfile
+    return stepfile
+
+
 # ── Inquiry automation ───────────────────────────────────────────────────────
 # Imported on demand like the rest: the engine's mail modules pull in imaplib
 # and the CSV machinery, and a customer who never buys this add-on should not

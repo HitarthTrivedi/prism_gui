@@ -37,6 +37,13 @@ MEASURE_DRAWING = "measure.drawing"
 # one button, not an import.
 MEASURE_PCB = "measure.pcb"
 
+# Take a STEP model and return every part's size, thickness, holes and
+# weight -- measured on this machine, the model never shown to an AI.
+# Offered by: step. Wanted by: nobody yet -- Inquiry is the obvious
+# consumer, and the day it wants this it is one `wants=` entry and one
+# button, not an import.
+MEASURE_MODEL = "measure.model"
+
 # Take a parts list off a drawing or spec.
 # Offered by: bom (as a mode of the BOQ dialog, which is exactly the kind of
 # implementation detail an intent is supposed to hide).
@@ -53,6 +60,7 @@ SEND_MAIL = "send.mail"
 ALL = (
     MEASURE_DRAWING,
     MEASURE_PCB,
+    MEASURE_MODEL,
     LIST_PARTS,
     SEND_MAIL,
 )

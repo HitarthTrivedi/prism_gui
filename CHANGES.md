@@ -114,6 +114,213 @@ render". `tests/test_motion_assets.py::AttachedImageReachesTheFilm` films a
 spec with an attached red PNG and reads the pixel out of the MP4. The
 packaged self-test gained `Studio editor + Motion runtime files`, because
 both are data files a bundle can lose without any import failing.
+# Round 16 — STEP moves into `addons/step/`, on top of the add-ons migration
+
+`origin/chore/addons-migration` (het-vaghela-21, ~24 commits) restructures
+the app: every add-on is a folder under `addons/<key>/` declared by a
+stdlib-only manifest, `addons/registry.py` is the one shared file an
+add-on touches, `widgets/simple_panels.py` is gone, and eight rules are
+enforced by guard tests (`CONTRIBUTING.md`, `docs/architecture/`). It is
+NOT on `main` yet. Rounds 12–15 were built on the old layout, so this round
+rebuilds the STEP add-on the way the new rules say, on a local branch
+`step-addon` cut from the migration branch. Nothing is merged into `main`
+and nothing is pushed.
+
+**What STEP is now.** `addons/step/addon.py` (`MANIFEST`: key `step`,
+feature `boq` like Gerber and BOM, order 35 so the three measuring add-ons
+sit together, screen `step`, probe `core_bridge:step_available`, remedy
+`cadquery`, run prefixes `"STEP — "` and `"/step"`, engine `stepfile`,
+offers `names.MEASURE_MODEL`), `contract.py` (`open_with_files` — plain
+paths in, the dialog shapes them), `panel.py` (`StepPanel(AddonFrontDoor)`),
+`dialog.py` (the Round 13–14 dialog, unchanged apart from where its workers
+come from), and `workers.py` (the three STEP workers, each a
+`workers._Worker`). One import line in `addons/registry.py`; one intent in
+`addons/names.py`.
+
+**What the shell needed.** The rail, Home, History and the licence gate
+now read the manifest, so `widgets/sidebar.py` and `widgets/panel_base.py`
+were not touched. `main_window.py` still builds each screen by hand, so it
+gained the `"step"` entry in `SCREENS` (appended last), the panel, the
+`opened` wiring, the `_handle_command` branch and `_open_step` /
+`_open_step_dialog`. `core_bridge.py` gained `step_available()` and
+`get_stepfile()` (rule 2: only the bridge imports the engine).
+`workers.py` keeps only the `AutomationWorker` additions from Round 13
+(`files_out`, `image_stages`, `failover`).
+
+**The guard tests learned about STEP in the same commit**, as
+`CONTRIBUTING.md` asks: `GOLDEN_RAIL` / `GOLDEN_HOME` in
+`tests/test_addon_contract.py`, `PANELS` in `tests/test_screen_registry.py`,
+`ADDON_FEATURES` in `tests/test_addon_gates.py`. `tests/test_step_dialog.py`
+was re-pointed at `addons.step` and its shelf/routing checks rewritten
+against the registry and a real window — the old version grepped
+`main_window.py`, which the new rules forbid. `lang/_catalogue.json`
+regenerated (56 strings added, none removed).
+
+**The engine is unchanged by the migration** and its pin on the branch is
+the same commit `main` pins, so the Round 12–15 engine work (`stepfile.py`
+naming and drawing sheets, `automation.py` skip-during-retry and deferred
+local stages, `config.py`'s `step_out_dir`, `prism.py`'s `/step-folder`)
+carries over as-is. It sits on a local branch `wip/step-engine` in
+`prism_terminal/`.
+
+**Local branches, none pushed.** `wip/step-old-layout` (prism_gui) holds
+Rounds 12–15 exactly as they were on the old layout; `wip/step-engine`
+(prism_terminal) holds the engine work; `step-addon` (prism_gui) is this
+round. `main` in both repos is untouched.
+
+*Files:* `addons/step/*`, `addons/registry.py`, `addons/names.py`,
+`main_window.py`, `core_bridge.py`, `workers.py`, `tests/test_step_dialog.py`,
+`tests/test_addon_contract.py`, `tests/test_screen_registry.py`,
+`tests/test_addon_gates.py`, `lang/_catalogue.json`
+
+---
+
+# Round 15 — a reel run that failed three ways, from one screenshot
+
+A live reel run: "Make the images" failed on ChatGPT and was being retried
+with Canva; **Skip this step** did nothing; and "Make the video" already
+read FAILED underneath, before the images had a second chance. Three
+faults, one fix each.
+
+**Skip works during a retry.** `_retry_failed_stages` started its nested
+`run()` without the skip flag, so a press during a retry — the one place a
+customer is most likely to press it — was ignored. The flag now reaches
+the nested run's waits (as a stop, so it winds up and keeps what landed),
+a press abandons the remaining alternatives for that stage instead of
+trying the next tool anyway, and the screen gets a `stage_skipped` saying
+so. A promised image stage keeps its full budget through a retry too.
+
+**The video waits for its images.** A local renderer (Reel, Studio,
+Motion) ran in its turn regardless of what came before. Now, when a stage
+before it produced nothing and failover is about to retry that stage, the
+renderer is held back and run after the retry pass — with the pictures if
+they came, honestly without them if not, but never before the retry that
+could have supplied them. Its card stays queued meanwhile instead of
+turning red.
+
+**The script example is a placeholder.** Step 2's Claude reply began "A
+quick flag: the tail end of your prompt demands a JSON schema about Bombay
+Super Hybrid Seeds" — the OUTPUT FORMAT block's example was a realistic
+sample about a named seed company, and the model read it as a smuggled
+second brief and refused. No JSON, so the video stage had nothing to
+build from. The example is now `<Example Company Name>` with placeholder
+figures and says so.
+
+*Files:* `core/automation.py`, `core/reel_web.py`, `tests/test_skip_step.py`
+
+---
+
+# Round 14 — the drawing sheet is drawn by Prism, and the AI one waits properly
+
+`/step-auto` asked an image model for the dimension sheet and got back a
+blurred preview, because a generic `visual` stage waits 60 seconds for a
+picture and gives up after 12 if none has shown — while ChatGPT's image
+model takes one to three minutes and shows a progressive preview that
+counted as "an image, unchanged for 20s, done".
+
+**Two changes, the second the one that matters.**
+
+**1. The wait.** `automation.run(image_stages=…)` lets a caller promise
+that a stage's deliverable IS a picture; such a stage gets a seven-minute
+cap (the loop still returns the moment the picture settles). And
+`_wait_for_images` now watches each image's source and size, not just the
+count — a preview replaced in place by the finished picture is a change —
+and keeps waiting while the page itself says it is still creating the
+image. `/step-auto` and the STEP dialog's Draft both make the promise.
+
+**2. The sheet, without an AI.** `core.stepfile.sheet_svg()` draws the
+dimension sheet itself from the geometry: for every part, front, top and
+side views by OpenCascade hidden-line projection (hidden edges dashed), the
+overall sizes on real dimension lines in millimetres to two decimals, the
+isometric, a hole table, notes and a title block — the layout of the
+hand-made sheet this whole add-on replaces. It takes about a second and
+every figure on it is the measured one. `/step` writes it every time as
+`<model> - drawing sheet.svg` / `.html` / `.png`; `/step-auto` and Draft are
+now the optional styled extra, not the only way to get a dimensioned sheet.
+
+**3. ChatGPT only, and the file first.** The styled sheet is ChatGPT's job:
+not whichever visual tool Agents names, and no hand-off to another image
+model if ChatGPT stumbles (`failover=False`) — a second, differently-wrong
+sheet is not a rescue. And the STEP dialog now asks for the model before
+anything else: the question box and the Draft / Ask / Edit choice only
+appear once a `.step` is attached.
+
+*Files:* `core/stepfile.py`, `core/automation.py`, `workers.py`,
+`prism.py`, `dialogs/step_dialog.py`, `widgets/simple_panels.py`,
+`tests/test_stepfile.py`, `tests/test_step_dialog.py`
+
+---
+
+# Round 13 — the STEP add-on has a screen
+
+The terminal had `/step`, `/step-auto` and `/step-ask` for a fortnight; the
+GUI had nothing. Now it is an add-on like Gerber: a rail entry, a front-door
+screen and a dialog.
+
+**How it works.** Attach one or more `.step` / `.stp` models. The first
+time, Prism asks where the files for your models should live (choose a
+folder, or the Desktop) and keeps the answer; a folder named after each
+model is made inside it, every file carrying the model's name (Round 12).
+Pick the material (metal or plastic) and one of three actions:
+
+- **Draft** — measure, then the image tool draws a dimensioned drawing
+  sheet from the numbers; the sheet it returns is saved beside the rest.
+- **Ask** — measure, then Groq suggests improvements from the numbers and
+  your question, and the reasoning tool reviews them into an exact change
+  plan on a review page. Nothing is changed.
+- **Edit** — Ask, then — after you confirm against the review page — the
+  plan is applied to a COPY of the model, here, and the copy is re-measured
+  so the After column is real.
+
+**The rule.** The STEP file never leaves the machine. Every AI stage is
+given the measured numbers and Prism's own plain render of the parts, and
+`tests/test_step_dialog.py` intercepts the worker calls to prove it — the
+same tests Gerber has, for the same reason.
+
+**The rail.** This is the thirteenth control on a rail the header of
+`widgets/sidebar.py` holds at twelve. The scroll floor carries it; the day
+one measuring add-on is folded into another, this is the row to fold.
+
+*Files:* `dialogs/step_dialog.py`, `workers.py` (three STEP workers, and
+`files_out` on AutomationWorker), `core_bridge.py`, `widgets/sidebar.py`,
+`widgets/simple_panels.py`, `main_window.py`, `tests/test_step_dialog.py`
+
+---
+
+# Round 12 — STEP files are named after the model, and go where you say
+
+An estimator keeps ten jobs' sheets in one place, and `/step` wrote
+`dimensions.xlsx`, `drawing.png` and `modified.step` for every one of them
+— ten files nobody could tell apart — into a folder called
+`Assem1_1757000000` on the Desktop.
+
+**Now:** every file starts with the customer's own file name. For
+`Assem1.STEP`:
+
+    Assem1 - dimensions.xlsx
+    Assem1 - drawing sheet.html / .png
+    Assem1 - view top.svg, Assem1 - view side.svg …
+    Assem1 - AI drawing sheet 1.png          (/step-auto)
+    Assem1 - change review.html              (/step-ask)
+    Assem1 - modified.step
+    Assem1 - dimensions after change.xlsx
+    Assem1 - drawing sheet after change.png
+
+They live in a folder named after the model, `<root>/Assem1`, and a
+second run of the same model gets `Assem1 (2)` rather than overwriting the
+first. `root` is the person's choice: the new config key `step_out_dir`,
+set from the terminal with `/step-folder <path>` (the GUI will ask the
+same question in a dialog when its STEP screen is built) and defaulting to
+`~/Desktop/Prism Step` as before.
+
+All the names come from one place, `core.stepfile.names()`, so the
+terminal, the review page and a future GUI cannot disagree about what a
+file is called. Spaces in the names are URL-quoted in the HTML.
+
+*Files:* `core/stepfile.py`, `core/config.py`, `prism.py`,
+`tests/test_stepfile.py`
+
+---
 
 # Round 11 — the Apollo prompt lands in the box that reads prose
 
