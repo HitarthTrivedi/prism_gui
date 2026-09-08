@@ -132,6 +132,21 @@ a browser download gets). Run those two experiments
 (`update-plan.md` §9) before the first real customer hits this path on
 either platform — Linux is the only one that's been tested end to end.
 
+**1.4.0 clients read a different place — and there are a lot of them.**
+1.4.0's `updater._file_url(relpath)` fetched every per-file asset from the
+MAIN release via `releases/latest/download/<flat name>`; the per-platform
+`<tag>-assets-<platform>` releases only arrived on 2026-09-01, after 1.4.0
+shipped. So until every 1.4.0 install is gone, each release also needs the
+files that CHANGED since 1.4.0 uploaded onto the main `<tag>` release
+itself (flattened exactly as `update_manifest.flat_name()` does — 1.4.0's
+rule agrees with today's for every safe name; the hash fallback for
+unsafe names came later, and such a file would 404 for 1.4.0 either way).
+For 1.4.2 that was 85 files per platform for Linux and Windows, 180 assets
+on the main release in total — well under the cap. macOS 1.4.0 is
+deliberately left on the browser path (see the `macos-arm64-app` channel
+note in `updater.platform_tag()`). Found on 2026-09-09 when a real 1.4.0
+Desktop install kept opening the browser after everything else was fixed.
+
 **Two hard-won facts from shipping 1.4.1's assets (2026-09-08):**
 GitHub caps a release at **1000 assets** — `packaging/manifest.py` now
 refuses a build that would need more, and `prism.spec` trims licence texts
