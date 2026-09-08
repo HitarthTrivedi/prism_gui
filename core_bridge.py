@@ -189,6 +189,21 @@ def get_boq_price():
     return boq_price
 
 
+# ── Sales Automation (Leads & Outreach) ──────────────────────────────────────
+# The pipeline lives GUI-side in the `prospector` package, not in the engine's
+# core.* — deliberately, like the prototype it grew from — and it leans on the
+# same Groq router the rest of Prism already uses. So there is no heavy optional
+# dependency to be missing here; this probe only confirms the package imports,
+# for symmetry with every other add-on's front door.
+
+def leads_available() -> tuple[bool, str]:
+    try:
+        from prospector import engine, reach  # noqa: F401
+        return True, ""
+    except Exception as e:                     # noqa: BLE001
+        return False, str(e)
+
+
 def gerber_available() -> tuple[bool, str]:
     """core.gerber has no hard dependency of its own — shapely is optional,
     same as ezdxf is for BOQ, and the module degrades rather than fails

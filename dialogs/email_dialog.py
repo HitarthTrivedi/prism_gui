@@ -29,7 +29,8 @@ import sent_log
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
-from workers import AutomationWorker, SendWorker, VerifyWorker
+from workers import (AutomationWorker, ListVerifyWorker, SendWorker,
+                     VerifyWorker)
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -93,6 +94,26 @@ class EmailSetupDialog(PrismDialog):
         self.password_status.setWordWrap(True)
         root.addWidget(self.password_status)
         self._update_password_status()
+
+        # Save a copy of each send into the account's own Sent folder. A plain
+        # SMTP send never writes there, so without this Prism-sent mail is
+        # invisible in Outlook/webmail; with it, the mailer IMAP-APPENDs each
+        # message after sending. Default on.
+        sent_row = QHBoxLayout()
+        self.sent_toggle = C.ToggleSwitch()
+        self.sent_toggle.setChecked(bool(existing.get("save_to_sent", True)))
+        sent_label = QLabel(i18n.t("Save a copy of each sent email to my Sent folder"))
+        sent_label.setWordWrap(True)
+        sent_row.addWidget(self.sent_toggle, 0, Qt.AlignTop)
+        sent_row.addSpacing(theme.SPACE_2)
+        sent_row.addWidget(sent_label, 1)
+        root.addLayout(sent_row)
+        sent_hint = QLabel(i18n.t(
+            "Keeps your Outlook/webmail Sent in sync — same login, over IMAP. "
+            "Gmail already does this itself, so it's skipped there."))
+        sent_hint.setObjectName("dim")
+        sent_hint.setWordWrap(True)
+        root.addWidget(sent_hint)
 
         self.status = QLabel("")
         self.status.setObjectName("dim")
@@ -171,7 +192,8 @@ class EmailSetupDialog(PrismDialog):
         except ValueError:
             QMessageBox.warning(self, "Email setup", "Port must be a number.")
             return None
-        return {"address": address, "password": password, "host": host, "port": port}
+        return {"address": address, "password": password, "host": host, "port": port,
+                "save_to_sent": self.sent_toggle.isChecked()}
 
     def _test(self):
         account = self._account()
@@ -235,7 +257,7 @@ class EmailComposeDialog(PrismDialog):
             i18n.t("From {address}. Fill in To, Subject and Message, then "
                    "press Send. Nothing goes out until you press it."
                    ).format(address=address or i18n.t("your account")),
-            icon="mail", parent=parent, closable=False)
+            icon="mail", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(i18n.t("Send an email"))
         self.resize(820, 760)
         self.setMinimumSize(640, 620)
@@ -246,6 +268,7 @@ class EmailComposeDialog(PrismDialog):
         self.source_files: list[dict] = []   # attached to every email
         self._worker = None
         self._send_worker = None
+        self._verify_list_worker = None
         self._draft_stage = ""
         self._last_run: dict = {}
         self._sent_ok: list[str] = []
@@ -326,6 +349,19 @@ class EmailComposeDialog(PrismDialog):
         self.clear_list_btn = C.button(i18n.t("Clear the list"), "tertiary",
                                        small=True, on_click=self._clear_list)
         list_btns.addWidget(self.clear_list_btn)
+        self.verify_list_btn = C.button(i18n.t("Verify these (free)"), "secondary",
+                                        small=True, on_click=self._verify_list)
+        self.verify_list_btn.setToolTip(i18n.t(
+            "Check every address against its mail server (free) and drop the "
+            "dead ones before you send — avoids 550 bounces."))
+        list_btns.addWidget(self.verify_list_btn)
+        self.keep_valid_btn = C.button(i18n.t("Keep only verified"), "tertiary",
+                                       small=True, on_click=self._keep_only_valid)
+        self.keep_valid_btn.setToolTip(i18n.t(
+            "Trim the list to only the addresses the verifier CONFIRMED valid — "
+            "the ones safe to send. Catch-all and unverified are removed."))
+        self.keep_valid_btn.setVisible(False)
+        list_btns.addWidget(self.keep_valid_btn)
         list_btns.addStretch(1)
         list_col.addLayout(list_btns)
         self.list_box.setVisible(False)
@@ -511,6 +547,73 @@ class EmailComposeDialog(PrismDialog):
         self._list, self._list_name = [], ""
         self._fill_list_table()
         self._sync()
+
+    def _verify_list(self):
+        """Confirm every mailbox in the list (free waterfall) and drop the dead
+        ones BEFORE sending — so a blast never collects 550 bounces that burn the
+        sending domain. Needs a verifier key (Settings → Agents)."""
+        if not self._list:
+            self.status.setText(i18n.t("Add a list first."))
+            return
+        from prospector import verify
+        if not verify.collect_keys(self.cfg):
+            QMessageBox.information(self, i18n.t("Verify list"), i18n.t(
+                "Add a free email-verifier key first, in Settings → Agents — "
+                "Reoon gives 600 checks a month at no cost. Without one, Prism "
+                "can only guess addresses, and unverified guesses hard-bounce."))
+            return
+        self.verify_list_btn.setEnabled(False)
+        self.send_btn.setEnabled(False)
+        self.status.setText(i18n.t(
+            "Verifying the list — dead mailboxes will be dropped…"))
+        self._verify_list_worker = ListVerifyWorker(list(self._list), self.cfg)
+        self._verify_list_worker.progress.connect(
+            lambda i, n: self.status.setText(
+                i18n.t("Verifying {i} of {n}…").format(i=i, n=n)))
+        self._verify_list_worker.done.connect(self._on_list_verified)
+        self._verify_list_worker.failed.connect(self._on_verify_failed)
+        self._verify_list_worker.start()
+
+    def _on_list_verified(self, results):
+        from collections import Counter
+        counts = Counter()
+        kept, dropped = [], 0
+        for r, status in results:
+            counts[status or "unverified"] += 1
+            if status == "invalid":
+                dropped += 1
+            else:
+                r["email_check"] = status or ""
+                kept.append(r)
+        self._list = kept
+        self.verify_list_btn.setEnabled(True)
+        valid = counts.get("valid", 0)
+        catchall = counts.get("catch-all", 0)
+        unver = counts.get("unknown", 0) + counts.get("unverified", 0)
+        # Offer the trim only when there's a mix worth trimming.
+        self.keep_valid_btn.setVisible(valid > 0 and (catchall + unver) > 0)
+        self._fill_list_table()
+        self._sync()
+        self.status.setText(i18n.t(
+            "Verified — {v} CONFIRMED valid, {c} catch-all, {u} unverified, "
+            "{d} dropped invalid. Only the {v} confirmed are safe to send — press "
+            "'Keep only verified' to trim to those. (Unverified = the verifier ran "
+            "out of free credits; add another key or try again tomorrow.)"
+        ).format(v=valid, c=catchall, u=unver, d=dropped))
+
+    def _keep_only_valid(self):
+        self._list = [r for r in self._list if r.get("email_check") == "valid"]
+        self.keep_valid_btn.setVisible(False)
+        self._fill_list_table()
+        self._sync()
+        self.status.setText(i18n.t(
+            "Kept only the {n} confirmed-valid address(es) — safe to send."
+        ).format(n=len(self._list)))
+
+    def _on_verify_failed(self, msg):
+        self.verify_list_btn.setEnabled(True)
+        self._sync()
+        self.status.setText(i18n.t("Couldn't verify the list: {m}").format(m=msg))
 
     def _discover_recipient(self):
         """No address to hand: ask the research/leads tool to find the
@@ -768,7 +871,8 @@ class EmailComposeDialog(PrismDialog):
         sent is locked while it runs, and Send becomes the way to stop."""
         for w in (self.to_edit, self.subject_edit, self.body_edit,
                   self.brief_edit, self.list_btn, self.attach_btn,
-                  self.remove_btn, self.clear_list_btn, self.write_btn):
+                  self.remove_btn, self.clear_list_btn, self.verify_list_btn,
+                  self.keep_valid_btn, self.write_btn):
             w.setEnabled(not sending)
         self.send_btn.setEnabled(True)
         if sending:

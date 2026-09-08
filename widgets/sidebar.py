@@ -115,6 +115,10 @@ ADDONS = [
      "boq", theme.ACCENT),
     ("email", "Email", "mail",
      "Draft & send an email from attached files", "email", theme.WARN),
+    ("leads", "Leads & Outreach", "user",
+     "Qualify a sheet of leads against what you sell, then write and send a "
+     "personalised email to each — grounded in each company's own why-now",
+     "leads", theme.INFO),
     # Shown but NOT a button. The shelf should look like a product line, and a
     # visible "next one" is worth more in a client demo than an empty gap — but
     # a disabled control that cannot be clicked, focused or activated is not a

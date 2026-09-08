@@ -42,7 +42,7 @@ from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from widgets.simple_panels import (
     BomPanel, BoqPanel, CatalogPanel, EmailPanel, GerberPanel, GuidePanel,
-    HistoryPanel,
+    HistoryPanel, LeadsPanel,
 )
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
@@ -60,6 +60,7 @@ from wakeword import WakeWordListener
 from dialogs.ai_directory_dialog import AIDirectoryDialog
 from dialogs.email_dialog import EmailComposeDialog, EmailSetupDialog
 from dialogs.boq_dialog import BoqDialog
+from dialogs.leads_dialog import LeadsDialog
 from dialogs.gerber_dialog import GerberDialog
 from dialogs.reel_dialog import ReelDialog
 from dialogs.motion_dialog import MotionDialog
@@ -86,6 +87,9 @@ INQUIRY_WORK = 13
 # its own screen. Appended LAST so nothing above renumbers; it IS a rail entry
 # and DOES have an entry in _show_screen()'s table below.
 BOM = 14
+# Appended after BOM, same reasoning again: a rail entry that DOES have a
+# _show_screen() table entry, added last so nothing above renumbers.
+LEADS = 15
 
 # Wake-word threads that were asked to stop but had not finished in time.
 # Module level, not an attribute: on window close there is nothing else left
@@ -338,7 +342,9 @@ class MainWindow(QMainWindow):
         self.inquiry_work_panel = InquiryDialog(self.cfg, self)
         self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
         self.bom_panel = BomPanel(self.cfg)
-        self.screens.addWidget(self.bom_panel)              # BOM (last: no renumber)
+        self.screens.addWidget(self.bom_panel)              # BOM
+        self.leads_panel = LeadsPanel(self.cfg)
+        self.screens.addWidget(self.leads_panel)            # LEADS (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -371,6 +377,7 @@ class MainWindow(QMainWindow):
         self.boq_panel.opened.connect(self._open_boq_dialog)
         self.bom_panel.opened.connect(self._open_bom_dialog)
         self.gerber_panel.opened.connect(self._open_gerber_dialog)
+        self.leads_panel.opened.connect(self._open_leads_dialog)
         self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
         self.email_panel.open_compose.connect(self._open_email_dialog)
         self.email_panel.change_account.connect(self._open_email_setup)
@@ -382,7 +389,7 @@ class MainWindow(QMainWindow):
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
-                      self.email_panel):
+                      self.email_panel, self.leads_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -418,7 +425,8 @@ class MainWindow(QMainWindow):
                  "inquiry": INQUIRY, "config": SETTINGS, "guide": GUIDE,
                  "catalog": CATALOG, "runs": HISTORY, "boq": BOQ,
                  "email": EMAIL, "support": SUPPORT, "gerber": GERBER,
-                 "artifacts": ARTIFACTS, "bom": BOM}.get(name, HOME)
+                 "artifacts": ARTIFACTS, "bom": BOM,
+                 "leads": LEADS}.get(name, HOME)
         self.screens.setCurrentIndex(index)
         # Re-read on arrival. Both screens are reports over stores that other
         # parts of the app (and the inquiry dialog) write to, so what was true
@@ -1111,6 +1119,8 @@ class MainWindow(QMainWindow):
             self._open_gerber()
         elif key == "inquiry":
             self._open_inquiry()
+        elif key == "leads":
+            self._open_leads()
 
     def _authorized_then(self, feature: str, action: str, then):
         """Ask the licence server, then run `then()` if it said yes.
@@ -1352,6 +1362,26 @@ class MainWindow(QMainWindow):
                 f"The Gerber add-on could not load: {err}")
             return
         GerberDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_leads(self):
+        # Front-door pattern like BOQ/Gerber: the rail switches to the screen,
+        # and the screen's own button opens the working dialog. Gated on the
+        # "leads" entitlement (plans.py: "Leads & Outreach"), which the Studio
+        # plan already includes.
+        self._authorized_then("leads", "addon",
+                              lambda: self._show_screen("leads"))
+
+    def _open_leads_dialog(self):
+        # Dependency probe AFTER the licence check, same order as BOQ: a
+        # customer who hasn't bought this should be told that, not sent to fix
+        # an import for a feature they still can't open.
+        ok, err = CB.leads_available()
+        if not ok:
+            QMessageBox.information(
+                self, "Leads & Outreach",
+                f"The Leads & Outreach add-on could not load:\n\n{err}")
+            return
+        LeadsDialog(self.cfg, self).exec()
 
     def _open_email(self):
         self._authorized_then("email", "addon",
