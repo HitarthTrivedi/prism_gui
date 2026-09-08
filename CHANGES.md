@@ -4,7 +4,7 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **1841 passing** (64 skipped — see
+Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main — see
 `.claude/agents/prism-test-doctor.md`), plus 148 scenario checks
 (`devtools/scenarios.py`).
 
@@ -115,6 +115,15 @@ spec with an attached red PNG and reads the pixel out of the MP4. The
 packaged self-test gained `Studio editor + Motion runtime files`, because
 both are data files a bundle can lose without any import failing.
 # Round 16 — STEP moves into `addons/step/`, on top of the add-ons migration
+
+**Landed 8 Sep 2026.** Rebased onto `origin/main` after PR #8 (the
+migration) and the 1.4.1 / Reel Studio round had merged; the engine commit
+was rebased onto the engine's `origin/main` (Studio V2) — one conflict in
+`core/automation.py`, resolved by keeping the upstream no-prompt guard and
+folding the Studio hand-off into `_run_local_stage`. `workers.py` keeps
+both sides' new `AutomationWorker` parameters. Engine pushed first, then
+the app, per `CONTRIBUTING.md`. A `CLAUDE.md` at the root now points every
+Claude session at the architecture and landing rules.
 
 `origin/chore/addons-migration` (het-vaghela-21, ~24 commits) restructures
 the app: every add-on is a folder under `addons/<key>/` declared by a
