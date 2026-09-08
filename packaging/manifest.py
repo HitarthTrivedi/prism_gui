@@ -48,6 +48,19 @@ def main(argv: list[str] | None = None) -> int:
         p.error(f"{args.root_dir!r} is not a directory")
 
     manifest = update_manifest.build(args.root_dir, args.version)
+    # GitHub caps a release at 1000 assets, and every non-empty regular
+    # file in this list becomes one (symlinks and empty files are recreated
+    # by the client). 1.4.1's Linux build had 1022 and could not be
+    # published in full; packaging/prism.spec now trims licence texts and
+    # .pyi stubs to stay under. Fail the build here, where the count is
+    # known, rather than an hour later in devtools/release_all.py.
+    uploadable = sum(1 for e in manifest["files"]
+                     if "symlink" not in e and e.get("size", 0) > 0)
+    if uploadable > 1000:
+        p.error(f"{uploadable} files would need uploading as release assets; "
+                "GitHub allows 1000 per release. Trim the bundle in "
+                "packaging/prism.spec (see the dist-info/.pyi filter).")
+    print(f"{uploadable} uploadable files (GitHub cap 1000)")
     if args.archive:
         if not os.path.isfile(args.archive):
             p.error(f"{args.archive!r} is not a file")

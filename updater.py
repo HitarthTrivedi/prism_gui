@@ -271,6 +271,25 @@ def note_rollback(from_version: str) -> None:
         pass
 
 
+_session: Any = None
+
+
+def _http():
+    """One keep-alive session for the whole update, not a fresh connection
+    per file. A release is ~1000 files fetched one after another; opening a
+    new TLS connection to github.com and then following its redirect to the
+    asset CDN for every one of them is what turned an 80 MB, 111-file
+    update into a 25-minute crawl (measured 2026-09-08: 3 s per tiny file
+    from a long-running process, 0.3 s from a fresh one — GitHub throttles a
+    client that keeps reconnecting). Lazy, so `import updater` stays as
+    cheap as licensing/client.py's local-import style keeps it."""
+    global _session
+    if _session is None:
+        import requests  # local import: see module docstring / client.py parity
+        _session = requests.Session()
+    return _session
+
+
 def _get(url: str, *, timeout: int, fetch: Callable[..., Any] | None = None,
         max_bytes: int | None = None) -> bytes:
     """The one place Phase 1 touches the network for a GET. `fetch` is an
@@ -289,8 +308,7 @@ def _get(url: str, *, timeout: int, fetch: Callable[..., Any] | None = None,
     come back, so there's nothing for a cap to protect against there."""
     if fetch is not None:
         return fetch(url, timeout=timeout)
-    import requests  # local import: see module docstring / client.py parity
-    response = requests.get(url, timeout=timeout, stream=True)
+    response = _http().get(url, timeout=timeout, stream=True)
     response.raise_for_status()
     if max_bytes is None:
         return response.content

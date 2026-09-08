@@ -113,8 +113,25 @@ class ConfirmAndRollback(unittest.TestCase):
         AU.confirm_startup_success(self.install_dir, self.backup_dir)
         self.assertFalse(os.path.isdir(self.backup_dir))
 
-    def test_pending_marker_at_next_launch_triggers_rollback(self):
+    def test_the_first_launch_after_a_swap_is_not_rolled_back(self):
+        """The bug that undid every in-app update through 1.4.1: the new
+        build's own first launch found the marker and rolled itself back.
+        The first launch must proceed; only a SECOND launch that finds the
+        marker still there (the first never confirmed) rolls back."""
         AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        self.assertFalse(AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir))
+        with open(os.path.join(self.install_dir, "marker.txt")) as f:
+            self.assertEqual(f.read(), "new-version")       # still the new build
+        self.assertTrue(AU.is_pending_confirm(self.install_dir))
+        # …and that launch got to the window: the normal happy path.
+        AU.confirm_startup_success(self.install_dir, self.backup_dir)
+        self.assertFalse(AU.is_pending_confirm(self.install_dir))
+        self.assertFalse(os.path.isdir(self.backup_dir))
+
+    def test_a_second_unconfirmed_launch_triggers_rollback(self):
+        AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        self.assertFalse(AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir))
+        # The first launch crashed before confirming. Next launch:
         rolled_back = AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)
         self.assertTrue(rolled_back)
         with open(os.path.join(self.install_dir, "marker.txt")) as f:
@@ -131,6 +148,7 @@ class ConfirmAndRollback(unittest.TestCase):
         import shutil
         shutil.rmtree(self.backup_dir)
         AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)  # first launch
         rolled_back = AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)
         self.assertFalse(rolled_back)
         self.assertTrue(os.path.isdir(self.install_dir))
@@ -254,7 +272,8 @@ class MacBundle(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.app, "Contents", "Info.plist")))
         self.assertTrue(os.path.isfile(os.path.join(backup, "Contents", "MacOS", "Prism")))
         AU.mark_pending_confirm(self.app, "1.4.0")
-        # Next launch never confirmed → the old bundle comes back whole.
+        self.assertFalse(AU.check_and_rollback_if_pending(self.app, backup))  # first launch
+        # …which never confirmed → the next launch brings the old bundle back whole.
         self.assertTrue(AU.check_and_rollback_if_pending(self.app, backup))
         self.assertTrue(os.path.isfile(self.exe))
         self.assertFalse(os.path.exists(os.path.join(self.app, "Contents", "Info.plist")))

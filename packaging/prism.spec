@@ -504,6 +504,28 @@ if IS_MAC:
         print(f"[prism] {_pw_moved} playwright browser binaries moved to "
               f"datas so PyInstaller's ad-hoc signer skips them")
 
+# ── keep the file count under GitHub's 1000-assets-per-release cap ────────
+# Every non-empty regular file in the bundle becomes one release asset for
+# the in-app updater (packaging/manifest.py refuses a build over 1000).
+# 1.4.1's Linux build had 1022 — 30 of them licence texts inside
+# *.dist-info/ and 8 of them .pyi type stubs, none of which anything reads
+# at runtime. Metadata that IS read at runtime (keyring's entry_points.txt,
+# every RECORD/METADATA importlib.metadata resolves) is left alone.
+_TRIM_SUFFIXES = (".pyi",)
+_kept_datas, _trimmed = [], 0
+for t in a.datas:
+    dest = t[0].replace("\\", "/")
+    name = dest.rsplit("/", 1)[-1]
+    licence_text = (".dist-info/" in dest
+                    and ("/licenses/" in dest or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "AUTHORS"))))
+    if licence_text or dest.endswith(_TRIM_SUFFIXES):
+        _trimmed += 1
+        continue
+    _kept_datas.append(t)
+a.datas = _kept_datas
+print(f"[prism] trimmed {_trimmed} licence texts / .pyi stubs from datas "
+      "(release-asset cap; see packaging/manifest.py)")
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(

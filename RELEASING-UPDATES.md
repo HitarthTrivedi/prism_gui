@@ -132,6 +132,17 @@ a browser download gets). Run those two experiments
 (`update-plan.md` §9) before the first real customer hits this path on
 either platform — Linux is the only one that's been tested end to end.
 
+**Two hard-won facts from shipping 1.4.1's assets (2026-09-08):**
+GitHub caps a release at **1000 assets** — `packaging/manifest.py` now
+refuses a build that would need more, and `prism.spec` trims licence texts
+and `.pyi` stubs to stay under. And a `gh release upload` that dies midway
+leaves an asset in state `starter` that every later upload of that name
+answers with `HTTP 422`; delete it via the API
+(`gh api -X DELETE repos/<repo>/releases/assets/<id>`) before retrying —
+`release_all.py` will not do that for you. Note also that
+`devtools/verify_upload.py` takes the *assets* tag
+(`v1.4.1-assets-linux-x64`), never the main tag.
+
 **macOS, 1.4.1:** two things that made the Mac path *certain* to fail are
 fixed, so the experiment above is now worth running. Before 1.4.1
 `updater.install_dir()` returned `Prism.app/Contents/MacOS` and the swap

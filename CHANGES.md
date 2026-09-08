@@ -10,6 +10,43 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.4.2 — the in-app update finally sticks
+
+Found by actually running one: a real frozen 1.4.0 Linux build, the signed
+1.4.1 manifest, real assets, the real swap — and then the new build rolled
+itself back on its first launch. Every in-app update through 1.4.1 did.
+
+**Was:** `apply_update.mark_pending_confirm()` wrote a marker after the
+swap and `check_and_rollback_if_pending()` treated ANY marker at startup as
+"the previous launch never confirmed". The very first launch of the
+swapped-in build is the one that finds the marker — so it restored the
+backup, noted a rollback, and relaunched the old version before a single
+window opened. Nothing in the tests exercised swap-then-first-launch;
+`test_pending_marker_at_next_launch_triggers_rollback` codified the bug.
+
+**Now:** the marker is two-phase. The first launch appends `launched` and
+carries on; `confirm_startup_success()` removes the marker once the window
+is up; only a SECOND launch that still finds it rolls back. Because the
+decision runs in the NEW binary, 1.4.0 and 1.4.1 clients updating to 1.4.2
+get the fix — their own code only stages and swaps.
+`tests/test_apply_update.py::ConfirmAndRollback`.
+
+**Also from that run:**
+
+* `updater._get()` opened a fresh connection to github.com, followed its
+  redirect to the asset CDN, and closed it — for every one of ~1000 files.
+  GitHub throttles that pattern: 3 s per tiny file from the long-running
+  process, 0.3 s from a fresh one; an 80 MB update took 25 minutes and
+  looked hung. One keep-alive `requests.Session` (`updater._http()`): the
+  same update now stages and verifies in 52 s.
+* GitHub allows 1000 assets per release and the 1.4.1 Linux build had
+  1022, so its assets release could never be complete (only the files that
+  differ from 1.4.0 were published, which is all a 1.4.0 client asks for).
+  `packaging/prism.spec` now trims licence texts inside `*.dist-info/` and
+  `.pyi` stubs — nothing reads them at runtime — and
+  `packaging/manifest.py` fails the build over 1000 rather than letting
+  `release_all.py` discover it an hour later.
+
 # 1.4.1 — a Mac can install, update and re-seat itself; Studio V2 is whole
 
 Three threads, one release. The first two came out of reading the macOS
