@@ -229,13 +229,20 @@ jobs:
       #
       # The certificate goes into a throwaway keychain that dies with the
       # runner; it is never written under the checkout.
+      # `secrets` cannot be read in a step's `if` (actionlint: "context
+      # secrets is not allowed here"), so the step always runs on macOS and
+      # returns early itself when the certificate is absent.
       - name: Import the macOS signing certificate (if configured)
-        if: runner.os == 'macOS' && secrets.MACOS_CERT_P12_BASE64 != ''
+        if: runner.os == 'macOS'
         env:
           P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           set -e
+          if [ -z "$P12" ]; then
+            echo "No MACOS_CERT_P12_BASE64 secret - building unsigned (see BUILD.md)."
+            exit 0
+          fi
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD="$(uuidgen)"
           echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
