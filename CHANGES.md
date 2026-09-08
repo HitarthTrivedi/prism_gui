@@ -10,6 +10,30 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.4.3 — the Windows update helper never swapped
+
+Found by a real customer update on Windows: the 1.4.2 tree downloaded and
+verified into `%USERPROFILE%\.prism\updates\1.4.2`, Prism quit for the
+restart, and never came back; reopening the exe gave the old version.
+
+**Was:** `apply_update.pid_alive()`'s Windows branch did `import ctypes`
+and then used `ctypes.wintypes.DWORD()`. `ctypes.wintypes` is a submodule
+that only exists as an attribute once something imports it by name. The
+`--prism-apply-update` helper is a bare process — no Qt, no licensing,
+no keyring — so nothing had, `wait_for_exit()` raised `AttributeError`,
+`perform_apply_and_relaunch()`'s catch-all returned 3, and the swap and
+relaunch never happened. Under pytest some other import had already
+loaded the submodule, which is why the Windows test lane was green.
+
+**Now:** `import ctypes.wintypes`, and a test that runs `pid_alive()` in
+a fresh `python -I` interpreter with only `apply_update` imported — the
+way the helper actually runs.
+
+**Consequence, stated plainly:** the helper runs in the OLD binary, so a
+Windows 1.4.1 or 1.4.2 install cannot finish any in-app update. Windows
+customers make one browser download to 1.4.3; from then on they
+self-update. Linux and macOS clients on 1.4.1+ update to 1.4.3 in-app.
+
 # 1.4.2 — the in-app update finally sticks
 
 Found by actually running one: a real frozen 1.4.0 Linux build, the signed
