@@ -322,8 +322,8 @@ class InquiryPanel(QWidget):
         return card
 
     def _mailboxes(self) -> QWidget | None:
-        from inquiry_config import accounts_of
-        accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
+        from inquiry_config import active_accounts_of
+        accounts = active_accounts_of(self.cfg)
         if not accounts:
             return None
         grid = C.CardGrid(min_col_width=300)
@@ -371,8 +371,8 @@ class InquiryPanel(QWidget):
         complete, the folder the CSV will be written to, and the register's
         own status vocabulary. A customer waiting for their first check should
         be able to see where it is going to land and what it will say."""
-        from inquiry_config import accounts_of, settings_of
-        accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
+        from inquiry_config import active_accounts_of, settings_of
+        accounts = active_accounts_of(self.cfg)
         if not accounts:
             return []                   # nothing configured, nothing to state
 
@@ -481,9 +481,9 @@ class InquiryPanel(QWidget):
         """"Watching sales@… and 2 more — one register." — or "" for one
         mailbox, where the standing blurb says everything already."""
         try:
-            from inquiry_config import accounts_of
-            addresses = [a.get("address", "") for a in accounts_of(self.cfg)
-                         if a.get("address")]
+            from inquiry_config import active_accounts_of
+            addresses = [a.get("address", "")
+                         for a in active_accounts_of(self.cfg)]
         except Exception:                   # noqa: BLE001
             return ""
         if len(addresses) < 2:

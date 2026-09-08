@@ -64,7 +64,8 @@ from workers import InboxVerifyWorker
 # It also blocked the add-on split: Email automation could not move without
 # taking Home with it.
 from inquiry_config import (            # noqa: F401
-    DEFAULT_FOLDER, accounts_of, is_complete, is_ready, settings_of,
+    DEFAULT_FOLDER, accounts_of, active_accounts_of, is_active, is_complete,
+    is_ready, settings_of,
 )
 
 # The old private spelling, still imported under that name from
@@ -338,6 +339,26 @@ class InquirySetupDialog(PrismDialog):
         layout.addWidget(self.password_status)
         self._update_password_status()
 
+        # Park a mailbox without losing it. Somebody who stops watching an
+        # address for a month should not have to delete the account and find
+        # the app password again -- and deleting it would throw away the read
+        # bookmark too, so switching it back on would re-import everything
+        # since. Offered only with more than one mailbox: switching off your
+        # only one stops the feature, and a checkbox is too quiet for that.
+        self.read_box = QCheckBox(i18n.t("Read this mailbox"))
+        # Seeded from the first account the way every other field on this tab
+        # is, because _load_form() only runs when somebody SWITCHES mailbox.
+        # Left to QCheckBox's own default it would start unticked, and
+        # _commit_form() would then write active=False over a mailbox nobody
+        # had touched -- switching off, on the first Save, the one mailbox a
+        # single-mailbox customer has.
+        self.read_box.setChecked(is_active(self._accounts[0]))
+        self.read_box.setToolTip(i18n.t(
+            "Unticked, Prism leaves this mailbox alone but keeps its "
+            "password and remembers where it had read up to."))
+        self.read_box.toggled.connect(self._read_toggled)
+        layout.addWidget(self.read_box)
+
         layout.addSpacing(4)
         row = QHBoxLayout()
         row.setSpacing(10)
@@ -441,6 +462,8 @@ class InquirySetupDialog(PrismDialog):
             label = (f"{address}   ·   {host}" if address and host
                      else address or i18n.t("(new mailbox — type the address "
                                             "below)"))
+            if not is_active(account):
+                label = i18n.t("{who} — not being read").replace("{who}", label)
             self.mailboxes.addItem(QListWidgetItem(label))
         self.mailboxes.setCurrentRow(self._current)
         # A list of one, above a form asking for that same one, reads as two
@@ -448,6 +471,7 @@ class InquirySetupDialog(PrismDialog):
         several = len(self._accounts) > 1
         self.mailboxes.setVisible(several)
         self.remove_mailbox_btn.setVisible(several)
+        self.read_box.setVisible(several)
         self._loading = False
 
     def _commit_form(self):
@@ -467,6 +491,7 @@ class InquirySetupDialog(PrismDialog):
             account["password"] = password
         account["host"] = self.host.text().strip() or account.get("host", "")
         account["folder"] = self.folder_name.text().strip() or "INBOX"
+        account["active"] = self.read_box.isChecked()
         account.setdefault("port", 993)
 
     def _load_form(self, index: int):
@@ -482,6 +507,7 @@ class InquirySetupDialog(PrismDialog):
             else i18n.t("your mail password"))
         self.host.setText(account.get("host", ""))
         self.folder_name.setText(account.get("folder", "") or "INBOX")
+        self.read_box.setChecked(is_active(account))
         self._tested_ok = False
         self._set_test_state("")
         # Explicit, not relied on via password.clear()'s textChanged: Qt does
@@ -493,6 +519,12 @@ class InquirySetupDialog(PrismDialog):
         if account.get("host"):
             self.advanced_btn.setChecked(True)
         self._loading = False
+
+    def _read_toggled(self, _on: bool):
+        if self._loading:
+            return
+        self._accounts[self._current]["active"] = self.read_box.isChecked()
+        self._refresh_mailboxes()
 
     def _mailbox_picked(self, row: int):
         if self._loading or row < 0 or row == self._current:
@@ -1010,6 +1042,13 @@ class InquirySetupDialog(PrismDialog):
                 i18n.t("Prism needs the email address and password of every "
                        "mailbox to read. Nothing else can start without "
                        "them.") + (f"\n\n{who}" if who else ""))
+            self.tabs.setCurrentIndex(0)
+            return
+        if not any(is_active(a) for a in accounts):
+            QMessageBox.information(
+                self, i18n.t("Email automation"),
+                i18n.t("At least one mailbox has to be read, or there is "
+                       "nothing for Prism to check."))
             self.tabs.setCurrentIndex(0)
             return
         if not folder:

@@ -60,7 +60,14 @@ OUT = os.path.join(ROOT, "lang", "_catalogue.json")
 # this app's business. The few engine strings that surface in the GUI arrive
 # through the status sink and are listed by hand in EXTRA below.
 SKIP_DIRS = {".git", ".venv", "build", "dist", "__pycache__", "prism_terminal",
-             "tests", "packaging", "devtools", "assets", "docs", "lang"}
+             "tests", "packaging", "devtools", "assets", "docs", "lang",
+             # Claude Code keeps temporary git worktrees here. A worktree is a
+             # second checkout of this same repo, so walking it lists every
+             # string twice -- once against the real path and once against a
+             # path that does not exist for anybody else -- and adds the
+             # strings of whatever branch happens to be checked out in it.
+             # tests/test_worker_mandate.py skips it for the same reason.
+             ".claude"}
 
 # A few helpers take a string that is NOT copy — a stylesheet object name, an
 # icon name, a callback. Listing the argument positions that ARE copy keeps

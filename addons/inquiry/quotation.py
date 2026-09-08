@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 import core_bridge as CB
+import email_config
 import i18n
 import theme
 from dialogs.base import PrismDialog
@@ -394,6 +395,19 @@ class QuotationDialog(PrismDialog):
         layout.addWidget(self.preview, stretch=1)
 
         layout.addWidget(QLabel(i18n.t("The email that carries it:")))
+        # Which address the quotation leaves from. A firm that quotes from
+        # sales@ and invoices from accounts@ decides that here, on the screen
+        # that sends it, rather than in a setting somewhere else. Offered
+        # only when there is more than one -- with a single sending account
+        # this screen is exactly the screen it was.
+        self._senders = email_config.active_senders(self.cfg)
+        self.from_box = QComboBox()
+        for account in self._senders:
+            self.from_box.addItem(
+                i18n.t("From: {who}").replace(
+                    "{who}", account.get("address", "")))
+        if len(self._senders) > 1:
+            layout.addWidget(self.from_box)
         self.subject = QLineEdit()
         layout.addWidget(self.subject)
         # `mail_body`, not `body`: PrismDialog owns `self.body` (the content
@@ -662,17 +676,21 @@ class QuotationDialog(PrismDialog):
             # so markup in it would render as markup — in the dialog that
             # confirms who is being sent a quotation, and for how much. The
             # confirmation has to say what is actually about to happen.
+            sender = self._sender()
             confirm = QMessageBox(
                 QMessageBox.Question, i18n.t("Send the quotation"),
                 i18n.t("Send this quotation to {who} for "
-                       "₹{total}?").replace("{who}", address).replace(
-                    "{total}", quoting.indian_currency(self.quote.total)),
+                       "₹{total}, from {from}?").replace(
+                    "{who}", address).replace(
+                    "{total}", quoting.indian_currency(self.quote.total)
+                ).replace("{from}", sender.get("address", "")
+                          or i18n.t("your account")),
                 QMessageBox.Yes | QMessageBox.No, self)
             confirm.setTextFormat(Qt.PlainText)
             confirm.setDefaultButton(QMessageBox.No)
             if confirm.exec() != QMessageBox.Yes:
                 return
-            if not CB.mailer.is_configured(self.cfg):
+            if not email_config.can_send(self.cfg):
                 QMessageBox.information(
                     self, i18n.t("Quotation"),
                     i18n.t("Sending needs your outgoing account set up — "
@@ -681,8 +699,9 @@ class QuotationDialog(PrismDialog):
                 return
             self.send_btn.setEnabled(False)
             self._send_worker = SendWorker(
-                self.cfg, [{"email": address,
-                            "name": self.row.get("Contact person", "")}],
+                email_config.cfg_for_sender(self.cfg, sender),
+                [{"email": address,
+                  "name": self.row.get("Contact person", "")}],
                 self.subject.text(), self.mail_body.toPlainText(),
                 [{"path": written, "name": os.path.basename(written),
                   "mime": "text/csv"}])
@@ -694,6 +713,15 @@ class QuotationDialog(PrismDialog):
 
         self._record(register, paths, sent=False)
         self.accept()
+
+    def _sender(self) -> dict:
+        """The account this quotation goes out from -- whichever the chooser
+        is on, else the default. {} means "change nothing", which is what
+        `cfg_for_sender()` does with it."""
+        index = self.from_box.currentIndex()
+        if 0 <= index < len(self._senders):
+            return self._senders[index]
+        return email_config.default_sender(self.cfg)
 
     def _sent(self, sent: list, failed: list):
         self.send_btn.setEnabled(True)

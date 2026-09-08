@@ -2406,6 +2406,12 @@ class ChasingByItself(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.mkdtemp()
         self.cfg = ready_cfg(self.folder)
+        # A real sending account rather than a stubbed gate: the chase
+        # now resolves which address it goes out from, so the config
+        # has to say which one.
+        self.cfg["email"] = {"address": "sales@acme.co.in",
+                             "password": "p",
+                             "host": "smtp.acme.co.in", "port": 587}
         self.cfg["inquiry"]["auto_followup"] = True
         self.cfg["inquiry"]["followup_days"] = 2
         self.cfg["inquiry"]["max_reminders"] = 3
@@ -2420,11 +2426,15 @@ class ChasingByItself(unittest.TestCase):
         self.sent = []
         d._send_worker = None
 
+        self.sent_from = []
+
         class _Fake:
             def __init__(_, cfg, recipients, subject, body, files):
                 _.done = _Signal()
                 _.failed = _Signal()
                 self.sent.append((recipients[0]["email"], subject, body))
+                self.sent_from.append(
+                    (cfg.get("email") or {}).get("address", ""))
 
             def isRunning(_):
                 return False
@@ -2437,8 +2447,7 @@ class ChasingByItself(unittest.TestCase):
 
     def test_it_sends_when_switched_on(self):
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(len(self.sent), 1)
 
@@ -2447,8 +2456,7 @@ class ChasingByItself(unittest.TestCase):
         writes to nobody."""
         self.cfg["inquiry"]["auto_followup"] = False
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(self.sent, [])
 
@@ -2464,8 +2472,7 @@ class ChasingByItself(unittest.TestCase):
             rows.append(r)
         register.save(rows, mailflow.Paths(self.folder).register_csv)
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(len(self.sent), 1)
 
@@ -2473,8 +2480,7 @@ class ChasingByItself(unittest.TestCase):
         self.row["Reminders sent"] = "3"
         register.save([self.row], mailflow.Paths(self.folder).register_csv)
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(self.sent, [])
 
@@ -2486,17 +2492,41 @@ class ChasingByItself(unittest.TestCase):
             date.today() - timedelta(days=1)).strftime("%d-%m-%Y")
         register.save([self.row], mailflow.Paths(self.folder).register_csv)
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: True):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(self.sent, [])
 
     def test_nothing_is_sent_without_an_outgoing_account(self):
+        self.cfg.pop("email")
         d = self.dialog()
-        with _Patched(UI, "SendWorker", self._fake), \
-             _Patched(CB.mailer, "is_configured", lambda cfg: False):
+        with _Patched(UI, "SendWorker", self._fake):
             d._chase_automatically()
         self.assertEqual(self.sent, [])
+
+    def test_nothing_is_sent_when_every_address_is_parked(self):
+        """An address switched off is not an address to send from.
+        The unattended chase has no screen to ask on, so it has to
+        read the same answer the Send button would have."""
+        self.cfg["email"]["accounts"] = [
+            dict(self.cfg["email"], active=False)]
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake):
+            d._chase_automatically()
+        self.assertEqual(self.sent, [])
+
+    def test_it_goes_out_from_the_default_address(self):
+        """No draft screen on this path, so the default sends --
+        which is what having a default is for."""
+        self.cfg["email"]["accounts"] = [
+            {"address": "accounts@acme.co.in", "password": "p",
+             "host": "smtp.acme.co.in", "port": 587},
+            {"address": "sales@acme.co.in", "password": "p",
+             "host": "smtp.acme.co.in", "port": 587},
+        ]
+        d = self.dialog()
+        with _Patched(UI, "SendWorker", self._fake):
+            d._chase_automatically()
+        self.assertEqual(self.sent_from, ["accounts@acme.co.in"])
 
     def test_each_reminder_is_worded_differently(self):
         """Three identical nudges in six days is a mail merge."""

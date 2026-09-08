@@ -97,12 +97,33 @@ def is_complete(account: dict) -> bool:
                 and account.get("host"))
 
 
+def is_active(account: dict) -> bool:
+    """Whether Prism reads this mailbox.
+
+    Absent means active, so a config written before there was a switch reads
+    as "keep checking it". The other reading -- a missing key meaning off --
+    would silently stop an existing customer's mail being read, and they
+    would find out by a customer asking why nobody replied.
+    """
+    return bool((account or {}).get("active", True))
+
+
+def active_accounts_of(cfg: dict) -> list[dict]:
+    """The mailboxes the check should actually walk: named, and switched on.
+
+    A parked mailbox keeps its password and its read bookmark, so switching
+    it back on carries on from where it stopped rather than re-importing
+    everything since.
+    """
+    return [a for a in accounts_of(cfg) if a.get("address") and is_active(a)]
+
+
 def is_ready(cfg: dict) -> bool:
     """Enough set up to run a check. Deliberately only a mailbox and the
     folder — a rate list matters at quoting time, not at reading time, and
     demanding one up front would stop somebody trying the read-only half."""
     s = settings_of(cfg)
-    return bool(any(is_complete(a) for a in accounts_of(cfg))
+    return bool(any(is_complete(a) for a in active_accounts_of(cfg))
                 and s.get("folder"))
 
 

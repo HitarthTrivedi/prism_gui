@@ -14,6 +14,37 @@ comment in the code should point here; this file should point back at the code.
 
 ---
 
+## Replying from the address the inquiry arrived at is deferred
+
+**Where:** `addons/inquiry/dialog.py::_stamp_mailboxes` (writes the
+`Mailbox` column); `email_config.py`; `docs/EMAIL_SEND.md`.
+
+**Done so far:** sending takes a list of accounts. The default account sends
+unless somebody picks another on the quotation, the reminder or the compose
+window, and the unattended chase uses the default.
+
+**Not done:** choosing the sender automatically from the mailbox the inquiry
+came in at. The register has carried a `Mailbox` column since the
+multi-mailbox round and **nothing reads it** — the data for this is already
+on disk, and it is one function (`sender_for(cfg, row["Mailbox"])`) plus a
+fallback.
+
+It was deliberately not built. Routing a reply automatically is the kind of
+rule that is right in the demo and wrong on the day a customer writes to
+`info@` about a quotation that went out from `sales@` and gets an answer
+from a third address nobody watches. A default the owner set, and can see
+on the screen that sends, is the version we can explain.
+
+**What it would be:** resolve the account whose address equals the row's
+`Mailbox`, fall back to the default when it is blank or names an address
+that is no longer a sending account. Hours, not days. The chooser would
+open on it rather than on the default.
+
+**Trigger:** a customer running more than two sending addresses who says
+they pick the same one every time for a given mailbox — asked for, not
+assumed, since the two firms this feature came from both described the
+mailbox list and neither described the reply routing.
+
 ## One register, one writer — several machines is deferred
 
 **Where:** `addons/inquiry/dialog.py`, `check_now()` and the module
