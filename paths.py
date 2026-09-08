@@ -229,9 +229,13 @@ def scrub_environment() -> list:
             value = env.get(var, "")
             if "/snap/" not in value:
                 continue
-            kept = [p for p in value.split(os.pathsep) if p and "/snap/" not in p]
+            # ":" not os.pathsep: these are Linux variables (a snap exists
+            # nowhere else), and on the Windows CI runner os.pathsep is ";"
+            # — which left the whole list as one "/snap/" entry and deleted
+            # it, the one red test on the Windows lane for two releases.
+            kept = [p for p in value.split(":") if p and "/snap/" not in p]
             if kept:
-                env[var] = os.pathsep.join(kept)
+                env[var] = ":".join(kept)
             else:
                 del env[var]
             if var not in changed:
