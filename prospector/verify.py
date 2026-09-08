@@ -220,37 +220,50 @@ def verify_email(email: str, keys: dict | None = None) -> str:
 
 
 def find_and_verify(lead, keys: dict | None = None) -> None:
-    """FIND then VERIFY for ONE lead, with a clean split of duties:
-      1) FINDERS (Tomba, Hunter) — fetch the person's REAL address, replacing a
-         wrong pattern guess. Hunter is FIND-ONLY, so its ~50 credits go
-         entirely to finding; a finder sets only the address, never the verdict.
-      2) VERIFIERS (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox) —
-         confirm the found-or-guessed address, most-free-first, STOP at 'valid'.
+    """VERIFY-first, FIND-on-failure for ONE lead — the credit-thrifty order:
+      1) VERIFIERS (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox) —
+         confirm the address we ALREADY have (a pattern guess), most-free-first.
+         A guess that comes back 'valid' is deliverable and costs nothing.
+      2) FINDERS (Tomba, Hunter) — ONLY when there's no address, or the free
+         check couldn't confirm it (invalid/unknown) — fetch the person's REAL
+         address, then verify that too. A confirmed or catch-all guess never
+         triggers a finder, so a paid credit is spent only where it can help.
+    Hunter is FIND-ONLY throughout, so its ~50 credits go purely to recovery.
     BYO-key; a missing key is skipped, errors are ignored."""
     keys = keys or {}
-    # 1) FIND the real address (finders set the address ONLY — confirmation is
-    #    left to the free verifiers below, so Hunter never spends on a verify).
-    if (lead.name or "") and _domain_of(lead):
-        for cfg_key, _name, fn in _FINDERS:
-            k = keys.get(cfg_key)
-            if not k:
-                continue
-            email, _status = fn(lead, k)
-            if email:
-                lead.email = email
-                break
-    # 2) VERIFY the address (found or pattern-guessed), most-free-first.
-    email = (lead.email or "").strip()
-    if email:
+
+    def _verify(addr: str) -> str:
+        """Run the free verifier waterfall over one address; record and return
+        the resulting status ('valid' short-circuits)."""
         for cfg_key, _name, fn in _VERIFIERS:
             k = keys.get(cfg_key)
             if not k:
                 continue
-            status = fn(email, k)
+            status = fn(addr, k)
             if status:
                 lead.extra["email_check"] = status
                 if status == "valid":
-                    return              # confirmed free — stop the waterfall
+                    return "valid"
+        return (lead.extra or {}).get("email_check", "")
+
+    # 1) VERIFY the address we already have — FREE. A confirmed guess is done.
+    email = (lead.email or "").strip()
+    if email and _verify(email) == "valid":
+        return
+    # 2) Not confirmed (no address, or invalid/unknown) — FIND the real one (a
+    #    finder credit), then verify what came back. 'catch-all' can't be
+    #    confirmed either way, so we don't spend a credit chasing it.
+    check = (lead.extra or {}).get("email_check", "")
+    if (lead.name or "") and _domain_of(lead) and check not in ("valid", "catch-all"):
+        for cfg_key, _name, fn in _FINDERS:
+            k = keys.get(cfg_key)
+            if not k:
+                continue
+            found, _status = fn(lead, k)
+            if found and found.strip().lower() != email.lower():
+                lead.email = found
+                _verify(found)          # confirm the freshly found address, free
+                break
 
 
 def verify_reachable(dossiers, keys: dict | None = None, limit: int = 25,
