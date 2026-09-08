@@ -146,5 +146,34 @@ class TheAppendItself(unittest.TestCase):
         saver.save(self._message())                    # swallowed — send survives
 
 
+class DerivingTheImapHostFromSmtp(unittest.TestCase):
+    """The IMAP host is derived from the SMTP host we already have — no DNS —
+    so a copy is saved even when dnspython isn't installed and MX-based
+    discovery returns nothing (the real GoDaddy failure this fixes)."""
+
+    def test_godaddy_workspace_is_mapped(self):
+        self.assertEqual(mailer._imap_from_smtp("smtpout.secureserver.net"),
+                         "imap.secureserver.net")
+
+    def test_microsoft_and_gmail_are_mapped(self):
+        self.assertEqual(mailer._imap_from_smtp("smtp-mail.outlook.com"),
+                         "outlook.office365.com")
+        self.assertEqual(mailer._imap_from_smtp("smtp.gmail.com"),
+                         "imap.gmail.com")
+
+    def test_an_unknown_smtp_prefix_is_rewritten_to_imap(self):
+        # cPanel/hosted: smtp.<domain> -> imap.<domain>.
+        self.assertEqual(mailer._imap_from_smtp("smtp.mycompany.co.in"),
+                         "imap.mycompany.co.in")
+
+    def test_a_mail_host_is_kept_as_is(self):
+        self.assertEqual(mailer._imap_from_smtp("mail.mycompany.co.in"),
+                         "mail.mycompany.co.in")
+
+    def test_blank_is_blank(self):
+        self.assertEqual(mailer._imap_from_smtp(""), "")
+        self.assertEqual(mailer._imap_from_smtp(None), "")
+
+
 if __name__ == "__main__":
     unittest.main()
