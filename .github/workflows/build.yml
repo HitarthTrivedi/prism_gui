@@ -6,7 +6,11 @@ name: Build desktop apps
 on:
   push:
     branches: [main, master]
-    tags: ["v*"]
+    # Not the `v*-assets-<platform>` tags devtools/release_all.py creates
+    # for the per-file update assets: a build on those published the
+    # archives INTO the assets releases (7 of the 1000 asset slots each,
+    # found while shipping 1.4.1) and burned three runners per platform.
+    tags: ["v*", "!v*-assets-*"]
   pull_request:
   workflow_dispatch:
 
