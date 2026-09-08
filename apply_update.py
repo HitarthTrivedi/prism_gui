@@ -91,7 +91,19 @@ def pid_alive(pid: int) -> bool:
     the one exercised by this module's own tests.
     """
     if sys.platform == "win32":
+        # `import ctypes` alone does NOT make ctypes.wintypes available — it
+        # is a submodule that must be imported by name. In the bare
+        # --prism-apply-update helper nothing else has imported it, so the
+        # DWORD() below raised AttributeError, perform_apply_and_relaunch()'s
+        # catch-all swallowed it, and on Windows every in-app update through
+        # 1.4.2 staged perfectly, then never swapped and never relaunched:
+        # the customer reopened the same exe and was still on the old
+        # version. Under pytest the attribute happened to exist (some other
+        # import had loaded the submodule), which is why the Windows test
+        # lane never saw it. tests/test_apply_update.py now runs this in a
+        # bare interpreter.
         import ctypes
+        import ctypes.wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259

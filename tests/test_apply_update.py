@@ -155,6 +155,21 @@ class ConfirmAndRollback(unittest.TestCase):
 
 
 class PidLifecycle(unittest.TestCase):
+    def test_pid_alive_works_in_a_bare_interpreter(self):
+        """The apply helper is a bare process: no Qt, no licensing, no
+        pytest — nothing that happens to have imported ctypes.wintypes
+        first. On Windows through 1.4.2 that made pid_alive() raise
+        AttributeError and the helper silently skip the swap. Run it the
+        way the helper runs it: fresh interpreter, only this module."""
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run(
+            [sys.executable, "-I", "-c",
+             f"import sys; sys.path.insert(0, {here!r}); import os, apply_update; "
+             "print(apply_update.pid_alive(os.getpid()), apply_update.pid_alive(2**22 - 1))"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split(), ["True", "False"])
+
     def test_pid_alive_true_for_self(self):
         self.assertTrue(AU.pid_alive(os.getpid()))
 
