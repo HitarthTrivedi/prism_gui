@@ -58,6 +58,14 @@ class StableElementIdentity(unittest.TestCase):
             self.assertIn(token, page)
         self.assertNotIn("__ed-bar", page)      # V1's toolbar is gone for good
 
+    def test_design_brief_requires_visual_reference_review_and_flags(self):
+        brief = web.design_instructions(
+            request="a product launch",
+            assets="  asset:logo — 800x200, transparent PNG")
+        self.assertIn("VISUAL REFERENCE REVIEW", brief)
+        self.assertIn("asset_flags", brief)
+        self.assertIn("Never invent a replacement filename", brief)
+
     def test_refine_endpoint_carries_sanitised_selection_context(self):
         import time
         import urllib.request
