@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 import app_meta
 import awake
 import core_bridge as CB
+import email_config
 import diagnostics
 import i18n
 import identity
@@ -1424,7 +1425,7 @@ class MainWindow(QMainWindow):
                               lambda: self._show_screen("email"))
 
     def _open_email_dialog(self, mode: str = "one"):
-        if not CB.mailer.is_configured(self.cfg):
+        if not email_config.can_send(self.cfg):
             dlg = EmailSetupDialog(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
                 return

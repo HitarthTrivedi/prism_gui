@@ -50,11 +50,12 @@ from PySide6.QtWidgets import (
 )
 
 import core_bridge as CB
+import email_config
 import i18n
 import theme
 from dialogs.base import PrismDialog
 from addons.inquiry.setup import (
-    InquirySetupDialog, accounts_of, is_ready, settings_of,
+    InquirySetupDialog, accounts_of, active_accounts_of, is_ready, settings_of,
 )
 from widgets import controls as C
 from workers import DraftWorker, InboxCheckWorker, POReadWorker, SendWorker
@@ -1899,7 +1900,7 @@ class InquiryDialog(QWidget):
             # user gets going after fixing a password.
             self._auth_failures = {}
 
-        accounts = [a for a in accounts_of(self.cfg) if a.get("address")]
+        accounts = active_accounts_of(self.cfg)
         if quiet:
             # A mailbox whose password keeps being refused is skipped by the
             # timer rather than hammered — the provider will throttle and then
@@ -2115,7 +2116,7 @@ class InquiryDialog(QWidget):
         every = all(
             self._auth_failures.get(a.get("address", ""), 0)
             >= self.AUTH_FAILURES_BEFORE_STOP
-            for a in accounts_of(self.cfg) if a.get("address"))
+            for a in active_accounts_of(self.cfg))
         if every:
             self._auto.stop()
             # Loud, unlike every other quiet-run failure: automatic checking
@@ -2161,7 +2162,7 @@ class InquiryDialog(QWidget):
             return
         if not CB.get_inbox().is_auth_failure(message):
             return                          # transport, not credentials
-        accounts = accounts_of(self.cfg)
+        accounts = active_accounts_of(self.cfg)
         address = accounts[0].get("address", "") if accounts else ""
         self._auth_failures[address] = self._auth_failures.get(address, 0) + 1
         self._maybe_stop_timer()
@@ -2230,7 +2231,7 @@ class InquiryDialog(QWidget):
     def _remember(self, result):
         """Persist the bookmark and anything the sorter learned — the direct
         single-result path; the walk banks each account itself."""
-        accounts = accounts_of(self.cfg)
+        accounts = active_accounts_of(self.cfg)
         address = accounts[0].get("address", "") if accounts else ""
         self._remember_account(address, result)
 
@@ -2941,7 +2942,7 @@ class InquiryDialog(QWidget):
                 self, i18n.t("Reminder"),
                 i18n.t("This inquiry has no email address to write to."))
             return
-        if not CB.mailer.is_configured(self.cfg):
+        if not email_config.can_send(self.cfg):
             QMessageBox.information(
                 self, i18n.t("Reminder"),
                 i18n.t("Sending needs your outgoing account set up — open the "
@@ -2961,15 +2962,15 @@ class InquiryDialog(QWidget):
             .replace("{signature}", settings.get("signature", "")
                      or settings.get("company", "")))
 
-        draft = _ReminderDialog(subject, body, address, self)
+        draft = _ReminderDialog(subject, body, address, self, cfg=self.cfg)
         if draft.exec() != QDialog.Accepted:
             return
 
         self.remind_btn.setEnabled(False)
         self.status.setText(i18n.t("Sending the reminder…"))
         self._send_worker = SendWorker(
-            self.cfg, [{"email": address,
-                        "name": row.get("Contact person", "")}],
+            email_config.cfg_for_sender(self.cfg, draft.sender()),
+            [{"email": address, "name": row.get("Contact person", "")}],
             draft.subject(), draft.message(), [])
         self._send_worker.done.connect(
             lambda sent, failed, s=draft.subject(), b=draft.message():
@@ -3061,7 +3062,7 @@ class InquiryDialog(QWidget):
             return
         if self._send_worker is not None and self._send_worker.isRunning():
             return
-        if not CB.mailer.is_configured(self.cfg):
+        if not email_config.can_send(self.cfg):
             return
         due = [r for r in getattr(self, "_followup_rows", []) if r.get("Email")]
         if not due:
@@ -3072,9 +3073,13 @@ class InquiryDialog(QWidget):
         self.status.setText(
             i18n.t("Sending a reminder to {who}…").replace(
                 "{who}", row.get("Email", "")))
+        # No draft screen to choose on, so the default account sends --
+        # which is the whole point of there being a default.
         self._send_worker = SendWorker(
-            self.cfg, [{"email": row.get("Email", ""),
-                        "name": row.get("Contact person", "")}],
+            email_config.cfg_for_sender(
+                self.cfg, email_config.default_sender(self.cfg)),
+            [{"email": row.get("Email", ""),
+              "name": row.get("Contact person", "")}],
             subject, body, [])
         self._send_worker.done.connect(
             lambda sent, failed, s=subject:
@@ -3306,18 +3311,20 @@ class InquiryDialog(QWidget):
                                  self, note=i18n.t(
                                      "Written by {agent}. Read it before it "
                                      "goes — it is your name on it.")
-                                 .replace("{agent}", result.agent))
+                                 .replace("{agent}", result.agent),
+                                 cfg=self.cfg)
         if dialog.exec() != QDialog.Accepted:
             return
-        if not CB.mailer.is_configured(self.cfg):
+        if not email_config.can_send(self.cfg):
             QMessageBox.information(
                 self, i18n.t("Win this back"),
                 i18n.t("Sending needs your outgoing account set up — open the "
                        "Email add-on once and enter it."))
             return
         self._send_worker = SendWorker(
-            self.cfg, [{"email": row.get("Email", ""),
-                        "name": row.get("Contact person", "")}],
+            email_config.cfg_for_sender(self.cfg, dialog.sender()),
+            [{"email": row.get("Email", ""),
+              "name": row.get("Contact person", "")}],
             dialog.subject(), dialog.message(), [])
         self._send_worker.done.connect(
             lambda sent, failed, s=dialog.subject(), b=dialog.message():
@@ -3505,7 +3512,7 @@ class _ReminderDialog(PrismDialog):
     for a customer of fifteen years are not the right words for a new one."""
 
     def __init__(self, subject: str, body: str, address: str, parent=None,
-                 note: str = ""):
+                 note: str = "", cfg: dict | None = None):
         super().__init__(
             i18n.t("Send a reminder"),
             i18n.t("Prism wrote this. Edit anything before it goes."),
@@ -3516,6 +3523,18 @@ class _ReminderDialog(PrismDialog):
         layout.setSpacing(theme.ROW_GAP)
         layout.addWidget(QLabel(
             i18n.t("To: {who}").replace("{who}", address)))
+        # Which address it goes out from. A chaser for money and a chaser
+        # for a quotation are often not the same mailbox, and this is the
+        # last moment anybody can say so. Offered only when there is a
+        # choice; with one sending account the screen is unchanged.
+        self._senders = email_config.active_senders(cfg or {})
+        self._from_box = QComboBox()
+        for account in self._senders:
+            self._from_box.addItem(
+                i18n.t("From: {who}").replace(
+                    "{who}", account.get("address", "")))
+        if len(self._senders) > 1:
+            layout.addWidget(self._from_box)
         if note:
             caption = QLabel(note)
             caption.setWordWrap(True)
@@ -3530,6 +3549,15 @@ class _ReminderDialog(PrismDialog):
         self.footer.set_primary(
             self.button(i18n.t("Send it"), "primary", icon_name="mail",
                         on_click=self.accept))
+
+    def sender(self) -> dict:
+        """The account picked, or {} -- which `cfg_for_sender()` reads as
+        "change nothing", so the no-choice case sends exactly what it did
+        before this screen grew a chooser."""
+        index = self._from_box.currentIndex()
+        if 0 <= index < len(self._senders):
+            return self._senders[index]
+        return {}
 
     def subject(self) -> str:
         return self._subject.text().strip()

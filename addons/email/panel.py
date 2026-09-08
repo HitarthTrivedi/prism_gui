@@ -97,7 +97,11 @@ class EmailPanel(QWidget):
         self.refresh()          # a send in the window must show here at once
 
     def _address(self) -> str:
-        return ((self.cfg.get("email") or {}).get("address") or "").strip()
+        """The address this screen leads with: the one that sends unless
+        somebody picks another on the way out."""
+        import email_config
+        return (email_config.default_sender(self.cfg).get("address")
+                or "").strip()
 
     def _not_set_up(self) -> QWidget:
         door = C.EmptyState(
@@ -207,7 +211,9 @@ class EmailPanel(QWidget):
         col = card.body()
         col.setSpacing(theme.SPACE_2)
         col.addWidget(C.label(i18n.t("Sending account"), level="CARD_TITLE"))
-        account = self.cfg.get("email") or {}
+        import email_config
+        senders = email_config.active_senders(self.cfg)
+        account = email_config.default_sender(self.cfg)
         line = QHBoxLayout()
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(theme.SPACE_4)
@@ -221,6 +227,12 @@ class EmailPanel(QWidget):
                                 icon_name="key", small=True,
                                 on_click=self.change_account.emit))
         col.addLayout(line)
+        if len(senders) > 1:
+            others = ", ".join(a.get("address", "") for a in senders[1:])
+            col.addWidget(C.label(
+                i18n.t("Also set up: {who}. You choose which one a message "
+                       "goes out from when you send it.").replace(
+                    "{who}", others), level="SUPPORT", wrap=True))
         col.addWidget(C.label(i18n.t(
             "Every email goes out from this address, through your own mail "
             "provider. Prism has no mail server of its own, and your password "
