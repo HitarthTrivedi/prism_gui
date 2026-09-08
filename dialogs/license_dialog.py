@@ -104,15 +104,27 @@ class _ActivateWorker(_Worker):
 
     ok = Signal(object)
     failed = Signal(str)
+    # Every seat is taken — carries the server's list of the machines holding
+    # them, so the dialog can offer to free one rather than just say no.
+    seats_full = Signal(str, object)
 
-    def __init__(self, key: str, parent=None):
+    def __init__(self, key: str, parent=None, release_device_id: int | None = None):
         super().__init__(parent)
         self._key = key
+        # "Free that machine's seat first, then activate here" — one worker,
+        # so the customer sees one spinner and one answer for one click.
+        self._release = release_device_id
 
     def run(self):
         try:
+            if self._release is not None:
+                licensing.release_device(self._key, self._release)
             self.ok.emit(licensing.activate(self._key))
         except licensing.ServerError as e:
+            devices = e.detail.get("devices") if isinstance(e.detail, dict) else None
+            if e.code == "SEAT_LIMIT_REACHED" and devices:
+                self.seats_full.emit(e.message, devices)
+                return
             # The server writes this as customer-facing copy, so show it as-is.
             self.failed.emit(e.message)
         except licensing.Unreachable:
@@ -160,6 +172,7 @@ class LicenseDialog(PrismDialog):
         self.body.addWidget(self._explainer())
         self.body.addLayout(self._key_row())
         self.body.addWidget(self._message_label())
+        self.body.addWidget(self._seats_panel())
         self.body.addWidget(self._support())
         unlocked = self._unlocked()
         if unlocked is not None:
@@ -267,6 +280,80 @@ class LicenseDialog(PrismDialog):
         self.message.setVisible(False)
         return self.message
 
+    def _seats_panel(self) -> QWidget:
+        """Where SEAT_LIMIT_REACHED stops being a dead end.
+
+        Every seat on the key is held by some other machine — usually this
+        same customer's old laptop, reimaged or replaced (a new Mac gets a
+        new fingerprint), which is the single most common licence ticket
+        device.py predicts. The server sends the list; this shows it, and
+        one click frees the chosen seat and activates here in one go. Hidden
+        until that answer arrives.
+        """
+        self.seats_box = QFrame()
+        self.seats_box.setObjectName("licSeats")
+        self.seats_box.setAttribute(Qt.WA_StyledBackground, True)
+        self.seats_box.setStyleSheet(
+            f"#licSeats {{ background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
+        self._seats_col = QVBoxLayout(self.seats_box)
+        self._seats_col.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                                           theme.SPACE_3, theme.SPACE_2)
+        self._seats_col.setSpacing(theme.SPACE_2)
+        self.seats_box.setVisible(False)
+        return self.seats_box
+
+    def _show_seats(self, devices: list[dict]):
+        from dashboard_data import _ago
+        col = self._seats_col
+        while col.count():
+            item = col.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        col.addWidget(kicker(i18n.t("Computers using this key"), muted=True))
+        explain = QLabel(i18n.t(
+            "Pick the one you no longer use. Its seat moves to this computer "
+            "— that machine will ask for the key again if it's ever opened."))
+        explain.setObjectName("body")
+        explain.setWordWrap(True)
+        col.addWidget(explain)
+        for d in devices:
+            row = QHBoxLayout()
+            row.setSpacing(theme.SPACE_2)
+            label = str(d.get("label") or d.get("platform") or "Unnamed computer")
+            seen = d.get("last_seen")
+            when = f"last used {_ago(float(seen))}" if seen else ""
+            name = QLabel(label)
+            name.setObjectName("body")
+            row.addWidget(name)
+            if when:
+                row.addWidget(meta(when))
+            row.addStretch(1)
+            btn = C.button(i18n.t("Use its seat here"), "tertiary", small=True)
+            device_id = d.get("id")
+            if device_id is None:
+                # A server too old to send ids can only be released by us.
+                btn.setEnabled(False)
+                btn.setToolTip(i18n.t("Write to us to free this seat."))
+            else:
+                btn.clicked.connect(
+                    lambda _=False, i=int(device_id): self._release_and_activate(i))
+            row.addWidget(btn)
+            col.addLayout(row)
+        self.seats_box.setVisible(True)
+
+    def _release_and_activate(self, device_id: int):
+        self._busy(True)
+        self.message.setVisible(False)
+        self.seats_box.setEnabled(False)
+        self._worker = _ActivateWorker(self.key_edit.text(), self,
+                                       release_device_id=device_id)
+        self._worker.ok.connect(self._on_activated)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.seats_full.connect(self._on_seats_full)
+        self._worker.start()
+
     def _support(self) -> QWidget:
         """The way out, always on screen.
 
@@ -353,6 +440,10 @@ class LicenseDialog(PrismDialog):
         # round trip and a rate-limit slot on it.
         self.activate_btn.setEnabled(licensing.keyformat.is_well_formed(formatted))
         self.message.setVisible(False)
+        # A different key means a different licence — the seat list was
+        # for the old one.
+        if getattr(self, "seats_box", None) is not None:
+            self.seats_box.setVisible(False)
 
     def _say(self, text: str, ok: bool = False):
         """The server's own answer, in the semantic tone that matches it.
@@ -384,10 +475,18 @@ class LicenseDialog(PrismDialog):
             return
         self._busy(True)
         self.message.setVisible(False)
+        self.seats_box.setVisible(False)
         self._worker = _ActivateWorker(self.key_edit.text(), self)
         self._worker.ok.connect(self._on_activated)
         self._worker.failed.connect(self._on_failed)
+        self._worker.seats_full.connect(self._on_seats_full)
         self._worker.start()
+
+    def _on_seats_full(self, message: str, devices):
+        self._busy(False)
+        self.seats_box.setEnabled(True)
+        self._say(message)
+        self._show_seats(list(devices or []))
 
     def _on_activated(self, state):
         self._busy(False)
@@ -398,6 +497,7 @@ class LicenseDialog(PrismDialog):
 
     def _on_failed(self, message: str):
         self._busy(False)
+        self.seats_box.setEnabled(True)
         self._say(message)
 
     def _email_us(self):

@@ -133,6 +133,9 @@ def _selftest(app) -> int:
     # would have passed on the broken build. This starts it, paints a frame
     # and closes it, which is the same round trip a render takes.
     studio_ok, studio_err = CB.studio_render_selftest()
+    # The editor's own JS/CSS and Motion's runtime are data files, not
+    # modules — a bundle can lose them without a single import failing.
+    assets_ok, assets_err = CB.studio_assets_selftest()
 
     # The dependencies nothing else here would notice. Every one of them is
     # imported lazily, inside the function that needs it, so a build that
@@ -214,6 +217,8 @@ def _selftest(app) -> int:
     if paths.is_frozen():
         checks.append((f"Prism Studio browser (Chromium)"
                        f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
+    checks.append((f"Studio editor + Motion runtime files"
+                   f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
     from main_window import MainWindow
     win = MainWindow()
     win.show()

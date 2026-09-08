@@ -158,10 +158,11 @@ class TheCutLibrary(unittest.TestCase):
                                           "cut": 'x" onload="alert(1)',
                                           "html": "<p>x</p>"}]}, 30)
         tag = self._section(html)
-        # The only attributes are the three we write. Counting quotes would
-        # pass or fail on how many attributes the tag happens to have today.
+        # The only attributes are the four we write (data-prism-scene is
+        # Studio's durable scene id, since V2). Counting quotes would pass
+        # or fail on how many attributes the tag happens to have today.
         self.assertEqual(sorted(re.findall(r'(\w[\w-]*)=', tag)),
-                         ["class", "data-type", "id"], tag)
+                         ["class", "data-prism-scene", "data-type", "id"], tag)
         self.assertNotIn("onload", tag.split("class=")[1].split('"')[2])
 
     def test_the_prompt_offers_them_as_a_choice(self):

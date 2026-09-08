@@ -211,6 +211,45 @@ jobs:
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           sudo chmod +x /usr/local/bin/appimagetool
 
+      # Developer ID signing + notarisation, the moment the secrets exist.
+      # Every one of these is OPTIONAL: an unset secret is an empty string,
+      # packaging/codesign.py sees no MACOS_SIGN_IDENTITY and prints "not
+      # signing" — the build still ships, unsigned, exactly as before. So
+      # there is nothing to flip here when the Apple Developer account
+      # arrives: add the five secrets and the next tag signs.
+      #
+      #   MACOS_CERT_P12_BASE64   `base64 -i DeveloperID.p12` of the exported
+      #                           "Developer ID Application" certificate
+      #   MACOS_CERT_PASSWORD     the password that export was given
+      #   MACOS_SIGN_IDENTITY     "Developer ID Application: <Name> (<TEAMID>)"
+      #   MACOS_NOTARY_APPLE_ID   the Apple ID that owns the team
+      #   MACOS_NOTARY_PASSWORD   an app-specific password for it
+      #                           (appleid.apple.com → Sign-In and Security)
+      #   MACOS_NOTARY_TEAM_ID    the 10-character team id
+      #
+      # The certificate goes into a throwaway keychain that dies with the
+      # runner; it is never written under the checkout.
+      - name: Import the macOS signing certificate (if configured)
+        if: runner.os == 'macOS' && secrets.MACOS_CERT_P12_BASE64 != ''
+        env:
+          P12: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -e
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Build
         env:
           # Which licence server this build talks to. A frozen app ignores
@@ -223,6 +262,11 @@ jobs:
           # not a secret — it is a public URL, and secrets are masked in logs
           # which makes a wrong one impossible to diagnose.
           PRISM_SERVER_URL: ${{ vars.PRISM_SERVER_URL }}
+          # Read by packaging/codesign.py; all empty until the secrets exist.
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
         run: python packaging/build.py --clean
 
       # Proves the bundle actually starts: imports resolve, Qt loads, the
@@ -256,10 +300,19 @@ jobs:
           # right here, silently (no traceback — this failed in CI on every
           # push tonight before this fix, always at this exact line).
           ARCHIVE=$(ls dist/*.tar.gz dist/*.zip dist/*.dmg 2>/dev/null | head -1 || true)
-          python packaging/manifest.py dist/Prism "$VERSION" \
+          # The tree that gets INSTALLED, which is what updater.install_dir()
+          # swaps and what the manifest's `path`s must be relative to. On
+          # macOS that is the bundle (Prism.app/Contents/MacOS/Prism …), not
+          # the PyInstaller COLLECT folder it was assembled from — hashing
+          # dist/Prism there produced a manifest no installed Mac could ever
+          # match a single file of (ISSUES_AND_FIXES.md 5.2).
+          UPDATE_ROOT=dist/Prism
+          if [ -d dist/Prism.app ]; then UPDATE_ROOT=dist/Prism.app; fi
+          python packaging/manifest.py "$UPDATE_ROOT" "$VERSION" \
             -o "dist/manifest.${PLATFORM_TAG}.unsigned.json" \
             --archive "$ARCHIVE"
           echo "PLATFORM_TAG=${PLATFORM_TAG}" >> "$GITHUB_ENV"
+          echo "UPDATE_ROOT=${UPDATE_ROOT}" >> "$GITHUB_ENV"
 
       # Flattened per-file copies, named exactly how updater.py's
       # _file_url() expects to fetch them (<platform>__<path with / as __>)
@@ -270,7 +323,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          python packaging/flatten_update_assets.py dist/Prism dist/update-assets "$PLATFORM_TAG"
+          python packaging/flatten_update_assets.py "$UPDATE_ROOT" dist/update-assets "$PLATFORM_TAG"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -324,8 +377,10 @@ jobs:
             has the full walkthrough — which file to pick, first launch, first run.
 
             Quick version: builds are unsigned, so the OS warns on first launch.
-            **macOS**: right-click Prism.app → Open → Open. Or, if macOS says
-            the app "is damaged", clear the quarantine flag:
+            **macOS** (Apple Silicon only): right-click Prism.app → Open → Open.
+            On macOS 15+ that dialog has no Open button — close it, then
+            System Settings → Privacy & Security → **Open Anyway**. If macOS
+            says the app "is damaged", clear the quarantine flag:
             `xattr -dr com.apple.quarantine /Applications/Prism.app`
             **Windows**: SmartScreen → More info → Run anyway.
             **Linux**: `chmod +x` the AppImage, or extract the tarball and run

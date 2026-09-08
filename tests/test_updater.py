@@ -335,3 +335,33 @@ class Advice(Harness):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlatformChannel(unittest.TestCase):
+    """The channel name is a contract with every binary already shipped.
+
+    macOS moved to `macos-arm64-app` in 1.4.1 because a 1.4.0 Mac that found a
+    manifest on the old name would gut its own bundle (updater.platform_tag()
+    says why). Pinning the names here means changing one is a deliberate act
+    with a failing test to explain, not a side effect of a refactor.
+    """
+
+    def _tag(self, sys_platform: str, machine: str) -> str:
+        import updater
+        with mock.patch.object(updater.sys, "platform", sys_platform), \
+                mock.patch.object(updater.platform, "machine", return_value=machine):
+            return updater.platform_tag()
+
+    def test_macos_uses_the_bundle_channel(self):
+        self.assertEqual(self._tag("darwin", "arm64"), "macos-arm64-app")
+
+    def test_linux_and_windows_channels_are_unchanged(self):
+        self.assertEqual(self._tag("linux", "x86_64"), "linux-x64")
+        self.assertEqual(self._tag("win32", "AMD64"), "windows-x64")
+
+    def test_release_all_publishes_to_the_same_names(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "devtools"))
+        import release_all
+        self.assertEqual([p for p, _ in release_all.PLATFORMS],
+                         ["linux-x64", "windows-x64", "macos-arm64-app"])

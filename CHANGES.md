@@ -4,11 +4,116 @@ Written for the person who has to pick this up later — each entry says what it
 was, what it is now, and why the change was made, because the "why" is the
 part that gets lost.
 
-Tests: **1075 passing** (16 skipped, 1 deselected — see
+Tests: **1841 passing** (64 skipped — see
 `.claude/agents/prism-test-doctor.md`), plus 148 scenario checks
 (`devtools/scenarios.py`).
 
 ---
+
+# 1.4.1 — a Mac can install, update and re-seat itself; Studio V2 is whole
+
+Three threads, one release. The first two came out of reading the macOS
+install and licensing path end to end for the first time
+(`prism+gui/artifacts/macos-install-and-licensing-2026-09-08.html`); the
+third finishes the Studio V2 / Motion work that had been sitting
+uncommitted.
+
+## The macOS updater swapped the wrong folder
+
+**Was:** `updater.install_dir()` returned the executable's parent —
+correct for a PyInstaller onedir on Linux and Windows, but on a Mac that is
+`Prism.app/Contents/MacOS`. `apply_update.perform_swap()` renamed *that*
+aside and dropped a whole staged tree in its place, so the first in-app
+update left a bundle with no `Info.plist`, no `Frameworks/` and a broken
+signature seal. Finder then refused to open it. CI compounded it by
+hashing `dist/Prism` (the COLLECT folder) for the macOS manifest, a tree no
+installed Mac has.
+
+**Now:** `updater.bundle_root()` walks up to the `.app` and the whole
+bundle is the swap unit; the pending-confirm marker is written *beside* it
+(a stray file inside a bundle also breaks the seal); CI hashes
+`dist/Prism.app`. And because every 1.4.0 Mac still carries the old swap
+code, macOS moved to a new update channel name, `macos-arm64-app`: a 1.4.0
+Mac fetches `manifest.macos-arm64.signed`, gets a 404, and takes the
+browser-download fallback — the only safe path for it. Never publish under
+the old name again. `tests/test_apply_update.py::MacBundle`,
+`tests/test_updater.py::PlatformChannel`.
+
+## Signing is wired, waiting on an Apple account
+
+`packaging/codesign.py` already did Developer ID + hardened runtime +
+notarytool + stapler; nothing ever set `MACOS_SIGN_IDENTITY`. The workflow
+now imports a `.p12` into a throwaway keychain and passes the six secrets
+through — all optional, so an unset secret still builds unsigned exactly as
+before. The `.dmg` itself is now signed, notarised and stapled too
+(`codesign.sign_macos_archive`); before, only the bundle inside it was.
+BUILD.md and the release notes gained the macOS 15 "Open Anyway" path,
+which replaced right-click → Open.
+
+## SEAT_LIMIT_REACHED is a choice, not a ticket
+
+**Was:** the server answered "every seat is in use" *with the list of
+machines*, and the client showed only the sentence. A customer whose old Mac
+was reimaged, repaired or migrated (a new IOPlatformUUID) sat at the one
+machine that could not activate, and the only way out was an admin release.
+`device.py` had predicted this as the most common support ticket.
+
+**Now:** the licence dialog lists the machines with when they were last
+used, and one click frees the chosen seat and activates here, through a
+new `POST /v1/release` that takes the licence key as proof — the same proof
+activation takes to grab a seat, so it grants nothing the key did not.
+`tests/test_license_seats.py`; server `tests/test_api.py` (+2).
+
+## Smaller licensing changes
+
+* `keyring` is on. Every build before this wrote the reusable licence key
+  in the clear to `~/.prism/license.json` because the line was commented
+  out "for later". On macOS an updated (re-signed) Prism gets one keychain
+  prompt; Deny is survivable — the customer retypes the key once.
+* Server `offline_hours` default 1 → 24, matching what `issue-key.sh`,
+  `trial.sh` and `grant.py` always passed. Only a licence minted through
+  the raw API differed, and it stopped authorising an hour into a train
+  journey.
+
+## Studio V2, finished
+
+The uncommitted rewrite had the right bones — durable `data-prism-id`
+layers instead of child-index paths, browser modules as real files under
+`core/studio_assets/`, a `/refine` endpoint back into the design
+conversation — and three things that made it unusable as it stood:
+
+* **The canvas did not fit its column.** `editor.css` fixed `#stage`'s
+  edges but never overrode the harness's 1080×1920, so the reel drew near
+  full size under the right panel and below the fold; the workspace test
+  timed out on a click the transport intercepted. The stage now sits in its
+  own viewport and is scaled *as one unit*, the way V1 did it.
+* **`fit()` wrote an inline `transform` on every scene**, which is exactly
+  the property the cut library drives — so no push, squeeze or zoom ever
+  showed in the preview. Scaling the stage instead leaves scene transforms
+  alone; scrub across a cut and it plays.
+* **The editor had lost V1's tools** while the Python still accepted every
+  record: add text / picture / shape, colour, background, font, size,
+  weight, align, front/back, delete/reset, scene length and background,
+  palette and typeface swap. All back, inside the V2 inspector, one undo
+  step per control.
+
+Also: a reel the AI router filmed never got `_studio` (the design
+conversation), so Refine was dead for every reel opened from Artifacts —
+`automation._studio_conversation()` finds the nearest earlier stage with a
+chat URL and `_run_studio` stores it. `build_html()` stamps ids on every
+page it builds, so an edit made in the editor finds its layer on the render
+page for a spec that predates stamping. The V1 `#__ed-bar`/`#__ed-side`
+stubs are gone; the two browser tests that waited on them now drive the V2
+ids. `tests/test_studio_v2.py` (+2), the browser lane in
+`tests/test_reel_edit.py` and `tests/test_reel_editor_tools.py`.
+
+## Motion is back, with the check its kill-switch asked for
+
+The switch-off comment said: re-enable only after "a real attached-image
+render". `tests/test_motion_assets.py::AttachedImageReachesTheFilm` films a
+spec with an attached red PNG and reads the pixel out of the MP4. The
+packaged self-test gained `Studio editor + Motion runtime files`, because
+both are data files a bundle can lose without any import failing.
 
 # Round 11 — the Apollo prompt lands in the box that reads prose
 

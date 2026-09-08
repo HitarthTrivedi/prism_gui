@@ -29,7 +29,7 @@ import theme
 import wakeword
 from dialogs.base import PrismDialog
 from widgets import controls as C
-from workers import AutomationWorker, RecordWorker, ReelWorker
+from workers import AutomationWorker, RecordWorker, ReelWorker, StudioFollowupWorker
 from widgets.ask_panel import AskPanel
 
 
@@ -39,6 +39,7 @@ class ReelDialog(PrismDialog):
     # Save & render.
     edits_saved = Signal(list)
     edits_rendered = Signal(list)
+    refine_requested = Signal(str, dict)
 
     def __init__(self, cfg: dict, attachments: list, parent=None):
         super().__init__(
@@ -72,6 +73,7 @@ class ReelDialog(PrismDialog):
         self._studio_last = False
         self.edits_saved.connect(self._on_edits_saved)
         self.edits_rendered.connect(self._on_edits_rendered)
+        self.refine_requested.connect(self._on_editor_refine)
 
         # The base class owns the header and footer; `root` is its body column.
         root = self.body
@@ -317,6 +319,7 @@ class ReelDialog(PrismDialog):
         # The art director is the strongest tool available: this pass is the
         # harder of the two by a distance.
         director = agents.get("brains") or agents.get("content") or agents[writer]
+        self._studio_director = director
         self._busy(True, f"{agents[writer]} is writing the words…")
         self._worker = AutomationWorker(
             {}, self.cfg, self.images, f"design a reel — {request}",
@@ -384,6 +387,11 @@ class ReelDialog(PrismDialog):
                     [i["path"] for i in self.images])
             except Exception:
                 pass
+        # The editor can now reopen this exact conversation for an in-place
+        # prompt follow-up. It is deliberately stored with the otherwise
+        # portable spec; old specs simply keep manual editing available.
+        spec["_studio"] = {"design_url": links.get("design", ""),
+                           "agent": getattr(self, "_studio_director", "")}
         self.spec = spec
         self._start_render(spec, studio=True)
 
@@ -489,6 +497,7 @@ class ReelDialog(PrismDialog):
         self._stop_editor()
         for worker in (getattr(self, "_worker", None),
                        getattr(self, "_render_worker", None),
+                       getattr(self, "_followup_worker", None),
                        getattr(self, "_rec", None)):
             if worker is None or not worker.isRunning():
                 continue
@@ -557,7 +566,8 @@ class ReelDialog(PrismDialog):
             url, self._edit_stop = edit.serve(
                 self.spec,
                 on_save=self.edits_saved.emit,
-                on_render=self.edits_rendered.emit)
+                on_render=self.edits_rendered.emit,
+                on_refine=self.refine_requested.emit)
         except Exception as e:                          # noqa: BLE001
             QMessageBox.warning(self, "Reel", i18n.t(
                 "Could not open the editor: {error}").format(error=e))
@@ -589,6 +599,41 @@ class ReelDialog(PrismDialog):
         self._keep_edits(edits)
         self._stop_editor()
         self._start_render(self.spec, studio=True)
+
+    def _on_editor_refine(self, change: str, selection: dict):
+        """Continue the actual Studio design tab, scoped to browser selection."""
+        meta = (self.spec or {}).get("_studio") or {}
+        design_url, agent = meta.get("design_url", ""), meta.get("agent", "")
+        if not design_url or not agent:
+            self.status.setText(
+                "This older reel has no saved design conversation. Manual edits still work; "
+                "make a new Studio reel to use prompt follow-up.")
+            return
+        target = f"Scene {int(selection.get('scene_index', 0)) + 1}"
+        if selection.get("element_id"):
+            target += f", selected layer {selection.get('label') or selection['element_id']}"
+        contextual_change = f"{change}\n\nSTUDIO SELECTION: {target}."
+        self._stop_editor()
+        self._busy(True, "Reopening the design conversation for the selected layer…")
+        self._followup_worker = StudioFollowupWorker(
+            self.cfg, self.spec, agent, design_url, contextual_change,
+            task=self.request or change, title="Studio refinement")
+        self._followup_worker.progress.connect(self._on_frames)
+        self._followup_worker.done.connect(self._on_editor_refined)
+        self._followup_worker.failed.connect(self._on_failed)
+        self._followup_worker.start()
+
+    def _on_editor_refined(self, out_path: str, spec_path: str, _note: str):
+        try:
+            with open(spec_path, encoding="utf-8") as f:
+                self.spec = json.load(f)
+        except (OSError, ValueError):
+            pass
+        self.out_path = out_path
+        self.artifact_path = ""
+        self.play_btn.setEnabled(True)
+        self.folder_btn.setEnabled(True)
+        self._busy(False, "Refined reel rendered — open Studio again to keep editing.")
 
     def _stop_editor(self):
         if self._edit_stop is not None:

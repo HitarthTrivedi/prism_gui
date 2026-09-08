@@ -424,6 +424,11 @@ def main():
         made = archive_windows(app_dir)
     elif IS_MAC:
         made = archive_macos(target)
+        # The image is a separate signable object from the bundle inside it;
+        # see codesign.sign_macos_archive for why both need doing.
+        if not args.no_sign:
+            for path in made:
+                codesign.sign_macos_archive(path)
     else:
         made = archive_linux(app_dir)
     print("\n✓ artifacts:")

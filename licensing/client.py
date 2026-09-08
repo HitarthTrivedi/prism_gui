@@ -210,6 +210,22 @@ def deactivate(license_id: str, device_fp: str, *, app_version: str,
     }, app_version=app_version)
 
 
+def release_device(key: str, device_id: int, *, app_version: str) -> dict[str, Any]:
+    """Free ANOTHER machine's seat, using the key as proof.
+
+    The counterpart to deactivate(): that one releases the seat of the
+    machine you are on, this one releases a seat listed in a
+    SEAT_LIMIT_REACHED answer — the old, reimaged or traded-in machine —
+    from the new one that cannot activate. Same timeout as activate, and
+    no retries for the same reason: the request is not idempotent from the
+    customer's point of view if it lands twice on different ids.
+    """
+    return _post("/v1/release", {
+        "key": key,
+        "device_id": int(device_id),
+    }, app_version=app_version, timeout=ACTIVATE_TIMEOUT, retries=0)
+
+
 def authorize(license_id: str, device_fp: str, *, app_version: str,
               action: str = "run", feature: str = "core",
               scopes: list[str] | None = None) -> dict[str, Any]:

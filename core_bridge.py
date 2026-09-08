@@ -348,6 +348,41 @@ def studio_render_selftest() -> tuple[bool, str]:
     return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
+def studio_assets_selftest() -> tuple[bool, str]:
+    """Are the browser-side files Studio and Motion load at runtime actually
+    on disk where the frozen imports resolve them?
+
+    core/reel_edit.py reads core/studio_assets/*.js next to its own
+    __file__ and core/motion/render.py reads core/motion/runtime/ the same
+    way. In a source checkout those files are simply there. In a bundle
+    they are data files PyInstaller has to be TOLD about (packaging/
+    prism.spec's `core/studio_assets` and `core/motion/runtime` entries),
+    and a build that lost them starts perfectly and raises FileNotFoundError
+    the first time a customer clicks Edit layout or renders Motion. This
+    reads each file the way the app does, so the packaging gate sees the
+    same failure the customer would.
+    """
+    problems = []
+    try:
+        from core import reel_edit
+        for name in ("apply.js", "editor.js", "editor.css"):
+            if not reel_edit._studio_asset(name).strip():
+                problems.append(f"studio_assets/{name} is empty")
+    except Exception as e:                      # noqa: BLE001
+        problems.append(f"studio_assets: {e}")
+    try:
+        import importlib
+        import os
+        render = importlib.import_module("core.motion.render")
+        runtime = os.path.join(os.path.dirname(render.__file__), "runtime")
+        for name in ("index.html", "runtime.js", "render_runner.js", "gsap.min.js"):
+            if not os.path.isfile(os.path.join(runtime, name)):
+                problems.append(f"motion/runtime/{name} missing")
+    except Exception as e:                      # noqa: BLE001
+        problems.append(f"motion runtime: {e}")
+    return (not problems), "; ".join(problems)
+
+
 def get_studio():
     from core import reel_web
     return reel_web

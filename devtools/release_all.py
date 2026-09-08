@@ -102,7 +102,10 @@ BATCH_SIZE = 40
 PLATFORMS = [
     ("linux-x64", "ubuntu-22.04"),
     ("windows-x64", "windows-latest"),
-    ("macos-arm64", "macos-14"),
+    # `-app`: the bundle-layout channel (updater.platform_tag()). The plain
+    # `macos-arm64` name is retired — see the comment there for why a 1.4.0
+    # Mac must never find a manifest under it.
+    ("macos-arm64-app", "macos-14"),
 ]
 
 

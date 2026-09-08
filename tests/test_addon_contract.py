@@ -334,9 +334,11 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     #
     #   · the rail is at 12 of 12 controls and Reel already gave its row to
     #     Artifacts, so a rail row costs something else its place;
-    #   · Motion cannot run at all -- core/motion/render.py sets
-    #     _DISABLED_PENDING_ASSET_FIX -- so a rail row would advertise a
-    #     feature that opens nothing.
+    #   · Motion was switched off then (core/motion/render.py's
+    #     _DISABLED_PENDING_ASSET_FIX), so a rail row would have advertised
+    #     a feature that opened nothing. It runs again since 2026-09-08 —
+    #     attached artwork reaches the film (tests/test_motion_assets.py) —
+    #     but the first reason alone keeps it on Home, beside Reel.
     #
     # Both remain reachable by command, which is exactly why their licence
     # gate matters and why tests/test_addon_gates.py covers them.

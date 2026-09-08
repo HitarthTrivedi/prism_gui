@@ -41,7 +41,12 @@ does the swap, then relaunches the real app fresh. See main.py's
 ║                                                                            ║
 ║   macOS: does a .app bundle written to disk by another running app       ║
 ║   (rather than downloaded via a browser) pick up the same Gatekeeper/    ║
-║   quarantine treatment a browser download gets? Untested.                ║
+║   quarantine treatment a browser download gets? Untested. (Expected not  ║
+║   to: only apps that opt in via LSFileQuarantineEnabled tag what they    ║
+║   write, and shutil.copy2 does not carry xattrs on macOS.) What IS fixed ║
+║   is the unit being swapped — updater.install_dir() now returns the      ║
+║   whole `Prism.app`, never `Contents/MacOS` (that rename gutted the      ║
+║   bundle), and the pending marker sits beside the bundle, not inside it. ║
 ║                                                                            ║
 ║ Do not remove this banner or treat either path as proven until both      ║
 ║ have actually been run on the hardware in question.                      ║
@@ -177,6 +182,17 @@ def perform_swap(install_dir: str, staged_dir: str, backup_dir: str, *,
 
 # ── startup-success confirmation & rollback ────────────────────────────────
 def confirm_marker_path(install_dir: str) -> str:
+    """Where the "swapped in, not yet confirmed" marker lives.
+
+    Inside the install folder for a plain onedir tree. BESIDE it for a macOS
+    `.app`: the bundle's code-signature seal covers everything under
+    `Contents/`, and Gatekeeper treats a bundle with unexpected files as
+    "damaged" — a marker written into the bundle by the previous launch is
+    exactly the kind of thing that turns a good update into "Prism.app is
+    damaged and can't be opened" on the very next start.
+    """
+    if install_dir.rstrip(os.sep).endswith(".app"):
+        return install_dir.rstrip(os.sep) + PENDING_MARKER
     return os.path.join(install_dir, PENDING_MARKER)
 
 

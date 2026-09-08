@@ -150,6 +150,14 @@ for root, dirs, files in os.walk(ENGINE_DIR):
         rel = os.path.relpath(root, GUI_DIR)
         datas.append((src, rel))
 
+# Modules in the archive use paths relative to ``core`` at runtime, whereas
+# the generic engine-data loop above preserves the source checkout prefix.
+# Keep these browser modules in the location their frozen imports resolve.
+for _asset_dir in ("studio_assets", os.path.join("motion", "runtime")):
+    _source = os.path.join(ENGINE_DIR, "core", _asset_dir)
+    if os.path.isdir(_source):
+        datas.append((_source, os.path.join("core", _asset_dir)))
+
 # When frozen, core.router is imported from the archive, so its __file__ points
 # at <bundle>/core/router.py and its notes lookup walks up to the bundle root —
 # not to prism_terminal/. Put a copy there too, or the tool notes silently stop

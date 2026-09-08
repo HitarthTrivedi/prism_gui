@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
     # these onto the UI thread): the browser pressed Save / Save & render.
     reel_edits_saved = Signal(list)
     reel_edits_rendered = Signal(list)
+    reel_refine_requested = Signal(str, dict)
 
     def __init__(self):
         super().__init__()
@@ -1051,6 +1052,7 @@ class MainWindow(QMainWindow):
         self.artifacts_panel.edit_reel.connect(self._edit_reel_layout)
         self.reel_edits_saved.connect(self._on_reel_edits_saved)
         self.reel_edits_rendered.connect(self._on_reel_edits_rendered)
+        self.reel_refine_requested.connect(self._on_reel_refine_requested)
         self._reel_edit_stop = None
         self._reel_edit_ctx = None          # {"spec":…, "spec_path":…}
         self._reel_edit_worker = None
@@ -2186,12 +2188,14 @@ class MainWindow(QMainWindow):
             url, self._reel_edit_stop = edit.serve(
                 spec,
                 on_save=self.reel_edits_saved.emit,
-                on_render=self.reel_edits_rendered.emit)
+                on_render=self.reel_edits_rendered.emit,
+                on_refine=self.reel_refine_requested.emit)
         except Exception as e:                          # noqa: BLE001
             QMessageBox.warning(self, "Reel", i18n.t(
                 "Could not open the editor: {error}").format(error=e))
             return
-        self._reel_edit_ctx = {"spec": spec, "spec_path": spec_path}
+        self._reel_edit_ctx = {"spec": spec, "spec_path": spec_path,
+                               "mp4_path": mp4_path}
         QDesktopServices.openUrl(QUrl(url))
         self.statusBar().showMessage(i18n.t(
             "The reel is open in your browser — drag things into place, "
@@ -2237,6 +2241,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Reel", e)))
         self._reel_edit_worker = worker
         worker.start()
+
+    def _on_reel_refine_requested(self, change: str, selection: dict):
+        """Turn Studio's browser prompt into the existing design-tab follow-up."""
+        ctx = self._reel_edit_ctx or {}
+        spec = ctx.get("spec") or {}
+        meta = spec.get("_studio") or {}
+        design_url, agent = meta.get("design_url", ""), meta.get("agent", "")
+        if not design_url or not agent:
+            self.statusBar().showMessage(
+                "This older reel has no saved Studio conversation; manual editing is available.",
+                9000)
+            return
+        scene = int(selection.get("scene_index", 0) or 0) + 1
+        layer = selection.get("label") or selection.get("element_id") or "scene"
+        self._followup_text = f"{change}\n\nSTUDIO SELECTION: Scene {scene}, {layer}."
+        self._followup_links = {"design": design_url}
+        # Studio can be opened from the Artifacts panel with no run in this
+        # session, so `_last_query` is empty or belongs to something else;
+        # the follow-up worker files its run and artifact under it. The
+        # change the owner typed IS this run's task.
+        self._last_query = change
+        self._stop_reel_editor()
+        reel = (ctx.get("mp4_path", ""), ctx.get("spec_path", ""), spec)
+        self._start_studio_followup(reel, design_url, agent, [], fresh_panel=True)
 
     def _on_reel_edit_rendered_done(self, path: str):
         try:

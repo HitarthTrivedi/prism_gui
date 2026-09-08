@@ -203,5 +203,62 @@ class EndToEndApplyHelper(unittest.TestCase):
                         "spawn_detached's relaunch never ran")
 
 
+class MacBundle(unittest.TestCase):
+    """The macOS-specific path logic is pure path logic, so it IS testable
+    here: a fake `Prism.app/Contents/MacOS/Prism` on Linux exercises exactly
+    the branch a real Mac takes. What is still not covered is Gatekeeper —
+    see the banner in apply_update.py."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="prism-mac-")
+        self.app = os.path.join(self.tmp, "Applications", "Prism.app")
+        self.exe = os.path.join(self.app, "Contents", "MacOS", "Prism")
+        os.makedirs(os.path.dirname(self.exe))
+        open(self.exe, "w").close()
+
+    def test_install_dir_is_the_whole_bundle_not_contents_macos(self):
+        import updater
+        self.assertEqual(updater.bundle_root(self.exe), self.app)
+
+    def test_onedir_layout_is_unchanged(self):
+        import updater
+        exe = os.path.join(self.tmp, "opt", "Prism", "Prism")
+        os.makedirs(os.path.dirname(exe))
+        open(exe, "w").close()
+        self.assertEqual(updater.bundle_root(exe), os.path.dirname(exe))
+
+    def test_a_dot_app_in_the_path_only_counts_if_it_is_a_bundle(self):
+        import updater
+        exe = os.path.join(self.tmp, "my.app", "Prism", "Prism")   # no Contents/
+        os.makedirs(os.path.dirname(exe))
+        open(exe, "w").close()
+        self.assertEqual(updater.bundle_root(exe), os.path.dirname(exe))
+
+    def test_pending_marker_lives_beside_the_bundle_not_inside_it(self):
+        marker = AU.confirm_marker_path(self.app)
+        self.assertEqual(os.path.dirname(marker), os.path.dirname(self.app))
+        self.assertFalse(marker.startswith(self.app + os.sep))
+        AU.mark_pending_confirm(self.app, "1.4.0")
+        self.assertTrue(AU.is_pending_confirm(self.app))
+        self.assertEqual(os.listdir(self.app), ["Contents"])   # bundle untouched
+        AU.confirm_startup_success(self.app, self.app + ".old")
+        self.assertFalse(AU.is_pending_confirm(self.app))
+
+    def test_swap_and_rollback_move_the_bundle_as_one_unit(self):
+        staged = os.path.join(self.tmp, "staged")
+        os.makedirs(os.path.join(staged, "Contents", "MacOS"))
+        with open(os.path.join(staged, "Contents", "Info.plist"), "w") as f:
+            f.write("new")
+        backup = self.app + ".old"
+        AU.perform_swap(self.app, staged, backup)
+        self.assertTrue(os.path.isfile(os.path.join(self.app, "Contents", "Info.plist")))
+        self.assertTrue(os.path.isfile(os.path.join(backup, "Contents", "MacOS", "Prism")))
+        AU.mark_pending_confirm(self.app, "1.4.0")
+        # Next launch never confirmed → the old bundle comes back whole.
+        self.assertTrue(AU.check_and_rollback_if_pending(self.app, backup))
+        self.assertTrue(os.path.isfile(self.exe))
+        self.assertFalse(os.path.exists(os.path.join(self.app, "Contents", "Info.plist")))
+
+
 if __name__ == "__main__":
     unittest.main()
