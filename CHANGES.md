@@ -71,6 +71,39 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 21 — a tool that builds the thing is briefed to build it, and every stage is briefed like a colleague
+
+The owner's second Canva run, from the prompt Canva received: *"Produce the
+final deck in plain-text slide format ready for import into Gamma.app …
+Do NOT generate actual PPT files."* Canva did as it was told and typed the
+outline back. The stage prompt had been written for a chat tool, and it
+named the wrong tool.
+
+**Makers.** The registry now says what each tool builds (`makes`: Canva an
+editable design, Gamma and Tome a presentation, Midjourney images, Runway
+a video, ElevenLabs audio, v0 an app…). The router is told, per tool, and
+when a maker is in the plan it gets a rule to brief it the way a senior
+person briefs a designer: build this, with this content verbatim, this
+look, this count — never "plain text", never "do not generate files", and
+never a different tool's name. At run time the engine opens a maker's
+stage with a plain brief — *"You are Canva, and what I need from you is an
+editable Canva design … build it here … if anything below asks for plain
+text or says not to create files, that was written for a chat tool and
+does not apply to you"* — reads the context to it the human way, and never
+asks it for a handoff section.
+
+**Every other stage, in the same voice.** The numbered "STRICT PIPELINE
+RULES" block that closed each chat prompt now reads as a colleague's
+note — what the answer is for, who reads it next, the one section that
+has to be there (`HANDOFF FOR <NEXT>`, unchanged, because the relay parses
+it) — and the final stage is told it is the last step and the answer goes
+to the person. Machine-read stages (JSON specs, image batches, Apollo's
+filter block) keep their strict wording on purpose.
+
+Engine only. Tests in `tests/test_makers.py`.
+
+---
+
 # Round 20 — an empty ChatGPT answer is caught in seconds, and Canva builds the deck
 
 From the owner's run log of 10 Sep, two faults.
