@@ -1056,6 +1056,7 @@ class MainWindow(QMainWindow):
         self.output_panel.back_requested.connect(self._back_to_plan)
         self.output_panel.stop_requested.connect(self._stop_run)
         self.output_panel.skip_requested.connect(self._skip_step)
+        self.output_panel.fallback_requested.connect(self._use_fallback)
         self.output_panel.edit_reel.connect(self._edit_reel_layout)
         self.artifacts_panel.edit_reel.connect(self._edit_reel_layout)
         self.reel_edits_saved.connect(self._on_reel_edits_saved)
@@ -2335,6 +2336,21 @@ class MainWindow(QMainWindow):
         worker.skip()
         self.statusBar().showMessage(
             i18n.t("Skipping this step — moving to the next one…"), 6000)
+
+    def _use_fallback(self):
+        """Hand the stage that is running to its fallback tool now.
+
+        Same switch shape as _skip_step: the engine polls the flag inside
+        the stage's waits, runs the failover pass for that one stage
+        immediately, and clears the flag itself.
+        """
+        worker = getattr(self, "_active_run", None)
+        if (worker is None or not worker.isRunning()
+                or not hasattr(worker, "use_fallback")):
+            return
+        worker.use_fallback()
+        self.statusBar().showMessage(
+            i18n.t("Handing this step to its fallback tool…"), 6000)
 
     def _stop_run(self):
         """Ask the running pipeline to wind up.

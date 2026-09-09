@@ -144,11 +144,18 @@ class AutomationWorker(_Worker):
         self._stop = threading.Event()
         # One press skips one step: the engine clears it when it acts.
         self._skip = threading.Event()
+        # "Use fallback": hand the running stage to the next tool in its
+        # category now, instead of waiting out the cap. Cleared by the
+        # engine per press, like _skip.
+        self._fallback = threading.Event()
 
     def skip(self):
         """Skip the stage that is running right now and move on — for a tool
         stuck generating. The rest of the run continues."""
         self._skip.set()
+
+    def use_fallback(self):
+        self._fallback.set()
 
     def stop(self):
         """Ask the run to wind up at the next safe point.
@@ -194,7 +201,8 @@ class AutomationWorker(_Worker):
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
                 query=self.query, should_stop=self._stop.is_set,
-                skip_signal=self._skip, **kwargs,
+                skip_signal=self._skip, fallback_signal=self._fallback,
+                **kwargs,
             )
             self.done.emit(responses, links)
         except Exception as e:

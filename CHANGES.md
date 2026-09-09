@@ -71,6 +71,33 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 19 — Use fallback: hand a stuck step to its fallback tool now
+
+The owner's ask: Prism waits a fixed time for a tool and only then hands
+the step to the next tool in its category — but the person watching can
+often see the tool has errored, and does not want to sit out 600 seconds
+for Prism to notice.
+
+**Use fallback**, beside Skip this step on the run screen. Pressing it
+stops the wait on the running step and runs the failover pass for that
+one step immediately — the next tool in the same category, the same
+`_retry_failed_stages` the end-of-run pass uses — so the stages after it
+get its answer instead of running on thinner context. What the stuck tool
+had on the page is not kept; the person pressed the button because they
+could see it was not going to answer. Pressed again during the retry, it
+abandons that tool too and moves to the next one. Not latched; the engine
+clears the flag per press, like Skip.
+
+Wiring, in the same shape as Skip: `OutputPanel.fallback_requested` →
+`MainWindow._use_fallback` → `AutomationWorker.use_fallback()` →
+`run(fallback_signal=)`. The engine's per-stage waits (text and image)
+poll it through `stage_halt()`; a nested retry run never fails over again.
+
+*Files:* `prism_terminal/core/automation.py`, `workers.py`,
+`widgets/output_panel.py`, `main_window.py`, `tests/test_use_fallback.py`
+
+---
+
 # Round 18 — the Canva hand-off, verified live, and the two reasons Prism skipped it
 
 The owner's report: ask Prism for an Instagram post *"and make it editable /
