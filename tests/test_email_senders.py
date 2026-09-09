@@ -114,7 +114,7 @@ class _FakeSendWorker(QObject):
     failed = Signal(str)
     stopped = False
 
-    def __init__(self, cfg, recipients, subject, body, files):
+    def __init__(self, cfg, recipients, subject, body, files, **_pace):
         super().__init__()
         self.cfg, self.recipients = cfg, recipients
         _FakeSendWorker.last = self

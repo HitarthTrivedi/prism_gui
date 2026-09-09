@@ -313,14 +313,22 @@ class SendWorker(_Worker):
     list, which is exactly as long as the window would be frozen if this ran
     where it used to (straight off the Send button)."""
     progress = Signal(int, int, str, bool, str)   # i, total, email, ok, error
+    waiting = Signal(int)                         # seconds until a scheduled start
     done = Signal(list, list)                     # sent, failed
     failed = Signal(str)                          # couldn't even connect
 
     def __init__(self, cfg: dict, recipients: list, subject: str, body: str,
-                 files: list):
+                 files: list, *, delay: float | None = None,
+                 jitter: float = 0.0, limit: int = 0, start_at: float = 0.0):
         super().__init__()
         self.cfg, self.recipients = cfg, recipients
         self.subject, self.body, self.files = subject, body, files
+        # The pace and the limits, as the window resolved them from
+        # email_config.send_policy -- passed through, never re-read here, so
+        # what the customer confirmed is what goes out. delay None = the
+        # engine's own default.
+        self.delay, self.jitter = delay, jitter
+        self.limit, self.start_at = limit, start_at
         self._stop = threading.Event()
 
     def stop(self):
@@ -332,11 +340,16 @@ class SendWorker(_Worker):
 
     def run(self):
         try:
+            kwargs = {}
+            if self.delay is not None:
+                kwargs["delay"] = self.delay
             sent, failed = CB.mailer.send_bulk(
                 self.cfg, self.recipients, self.subject, self.body, self.files,
                 on_progress=lambda i, n, email, ok, err:
                     self.progress.emit(i, n, email, ok, err),
                 should_stop=self._stop.is_set,
+                jitter=self.jitter, limit=self.limit, start_at=self.start_at,
+                on_wait=self.waiting.emit, **kwargs,
             )
             self.done.emit(sent, failed)
         except Exception as e:

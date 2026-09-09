@@ -16,12 +16,14 @@ stage as before through an ordinary AutomationWorker.
 from __future__ import annotations
 import os
 import re
-from PySide6.QtCore import Qt, QTimer
+import time
+from PySide6.QtCore import QDateTime, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QSizePolicy, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDialog,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QPushButton, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -34,6 +36,9 @@ from widgets import controls as C
 from workers import AutomationWorker, SendWorker, VerifyWorker
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# A clock format, not copy: kept out of every i18n.t() call so the string
+# extractor does not offer "%d %b %H:%M" to a translator.
+_WHEN_FMT = "%d %b %H:%M"
 
 
 class EmailSetupDialog(PrismDialog):
@@ -484,6 +489,7 @@ class EmailComposeDialog(PrismDialog):
         self._sent_bad: list[tuple] = []
         self._sending_as: dict = {}
         self._subject = self._body = ""
+        self._held_back: list[dict] = []     # kept in the list for next time
 
         self.header.add_action(C.button(
             i18n.t("Change account"), "secondary", icon_name="key",
@@ -610,6 +616,106 @@ class EmailComposeDialog(PrismDialog):
         form.addLayout(files_row, 6, 1)
         root.addLayout(form, stretch=1)
 
+        # ── pace and limits ───────────────────────────────────────────────
+        # A list is not a blast. How many go, how far apart, and when it
+        # starts are decisions the person pressing Send should be making --
+        # and were being made for them, silently, as "all of them, two
+        # seconds apart, right now". The numbers persist (email_config's
+        # send policy) so they are set once, and the daily cap is counted
+        # off the sent log, so it holds across windows and across days.
+        self._policy = email_config.send_policy(cfg)
+        pace = C.Card()
+        pace_col = pace.body(margins=(theme.SPACE_4, theme.SPACE_3,
+                                      theme.SPACE_4, theme.SPACE_3),
+                             spacing=theme.SPACE_2)
+        pace_col.addWidget(C.label(i18n.t("Pace and limits"), level="CARD_TITLE"))
+        pace_grid = QGridLayout()
+        pace_grid.setContentsMargins(0, 0, 0, 0)
+        pace_grid.setHorizontalSpacing(theme.SPACE_3)
+        pace_grid.setVerticalSpacing(theme.SPACE_2)
+
+        gap_row = QHBoxLayout()
+        gap_row.setContentsMargins(0, 0, 0, 0)
+        gap_row.setSpacing(theme.SPACE_2)
+        self.gap_spin = QDoubleSpinBox()
+        self.gap_spin.setRange(0.5, 3600.0)
+        self.gap_spin.setDecimals(1)
+        self.gap_spin.setSingleStep(0.5)
+        self.gap_spin.setSuffix(" " + i18n.t("s"))
+        self.gap_spin.setValue(self._policy["gap_seconds"])
+        self.gap_spin.setToolTip(i18n.t(
+            "How long Prism waits after one email before sending the next."))
+        gap_row.addWidget(self.gap_spin)
+        gap_row.addWidget(QLabel(i18n.t("plus up to")))
+        self.jitter_spin = QDoubleSpinBox()
+        self.jitter_spin.setRange(0.0, 3600.0)
+        self.jitter_spin.setDecimals(1)
+        self.jitter_spin.setSingleStep(0.5)
+        self.jitter_spin.setSuffix(" " + i18n.t("s"))
+        self.jitter_spin.setValue(self._policy["jitter_seconds"])
+        self.jitter_spin.setToolTip(i18n.t(
+            "A random extra wait added to every gap, so the emails do not "
+            "leave like clockwork. 0 = the same gap every time."))
+        gap_row.addWidget(self.jitter_spin)
+        gap_row.addWidget(QLabel(i18n.t("at random")))
+        gap_row.addStretch(1)
+        pace_grid.addWidget(self._field_label(i18n.t("Gap between emails")), 0, 0)
+        pace_grid.addLayout(gap_row, 0, 1)
+
+        cap_row = QHBoxLayout()
+        cap_row.setContentsMargins(0, 0, 0, 0)
+        cap_row.setSpacing(theme.SPACE_2)
+        self.per_run_spin = QSpinBox()
+        self.per_run_spin.setRange(0, 100000)
+        self.per_run_spin.setSpecialValueText(i18n.t("all of them"))
+        self.per_run_spin.setValue(self._policy["max_per_run"])
+        self.per_run_spin.setToolTip(i18n.t(
+            "Send to at most this many people each time you press Send. "
+            "The rest stay in the list for the next press."))
+        cap_row.addWidget(self.per_run_spin)
+        cap_row.addWidget(QLabel(i18n.t("per send, and")))
+        self.per_day_spin = QSpinBox()
+        self.per_day_spin.setRange(0, 100000)
+        self.per_day_spin.setSpecialValueText(i18n.t("no limit"))
+        self.per_day_spin.setValue(self._policy["max_per_day"])
+        self.per_day_spin.setToolTip(i18n.t(
+            "Send at most this many from one address per day, counted "
+            "across every send from this computer."))
+        cap_row.addWidget(self.per_day_spin)
+        cap_row.addWidget(QLabel(i18n.t("per day")))
+        cap_row.addStretch(1)
+        pace_grid.addWidget(self._field_label(i18n.t("At most")), 1, 0)
+        pace_grid.addLayout(cap_row, 1, 1)
+
+        when_row = QHBoxLayout()
+        when_row.setContentsMargins(0, 0, 0, 0)
+        when_row.setSpacing(theme.SPACE_2)
+        self.later_check = QCheckBox(i18n.t("Send later, at"))
+        self.later_check.toggled.connect(self._sync)
+        when_row.addWidget(self.later_check)
+        self.later_edit = QDateTimeEdit()
+        self.later_edit.setDisplayFormat("dd MMM yyyy  HH:mm")
+        self.later_edit.setCalendarPopup(True)
+        soon = QDateTime.currentDateTime().addSecs(3600)
+        soon = soon.addSecs(-soon.time().second())
+        self.later_edit.setDateTime(soon)
+        self.later_edit.setMinimumDateTime(QDateTime.currentDateTime())
+        self.later_edit.setEnabled(False)
+        self.later_check.toggled.connect(self.later_edit.setEnabled)
+        self.later_edit.dateTimeChanged.connect(self._sync)
+        when_row.addWidget(self.later_edit)
+        when_row.addStretch(1)
+        pace_grid.addWidget(self._field_label(i18n.t("When")), 2, 0)
+        pace_grid.addLayout(when_row, 2, 1)
+        pace_col.addLayout(pace_grid)
+
+        self.pace_note = C.label("", level="SUPPORT", wrap=True)
+        pace_col.addWidget(self.pace_note)
+        for w in (self.gap_spin, self.jitter_spin, self.per_run_spin,
+                  self.per_day_spin):
+            w.valueChanged.connect(self._sync)
+        root.addWidget(pace)
+
         # ── optional: let Prism write it ──────────────────────────────────
         card = C.Card()
         card_col = card.body(margins=(theme.SPACE_4, theme.SPACE_3,
@@ -662,6 +768,84 @@ class EmailComposeDialog(PrismDialog):
             QTimer.singleShot(0, self._add_list)
         else:
             self.to_edit.setFocus()
+
+    # ── pace and limits ─────────────────────────────────────────────────
+    def policy(self) -> dict:
+        """The four numbers as the controls show them right now."""
+        return {
+            "gap_seconds": float(self.gap_spin.value()),
+            "jitter_seconds": float(self.jitter_spin.value()),
+            "max_per_run": int(self.per_run_spin.value()),
+            "max_per_day": int(self.per_day_spin.value()),
+        }
+
+    def start_at(self) -> float:
+        """When the send begins, as time.time(); 0 = the moment Send is
+        pressed. A time already past is "now" -- the box was filled in and
+        then the person read the letter over for ten minutes."""
+        if not self.later_check.isChecked():
+            return 0.0
+        when = self.later_edit.dateTime().toSecsSinceEpoch()
+        return float(when) if when > time.time() else 0.0
+
+    def _sent_today(self) -> int:
+        try:
+            return sent_log.sent_today(
+                self.cfg, self._sender().get("address", ""))
+        except Exception:                                   # noqa: BLE001
+            return 0
+
+    def plan(self) -> tuple[int, list[str]]:
+        """How many of the recipients go on this press, and why not all."""
+        return email_config.plan_send(
+            self.policy(), len(self.recipients), self._sent_today())
+
+    def _pace_words(self) -> str:
+        p = self.policy()
+        if p["jitter_seconds"] > 0:
+            gap = i18n.t("{a:g} to {b:g} seconds apart").format(
+                a=p["gap_seconds"], b=p["gap_seconds"] + p["jitter_seconds"])
+        else:
+            gap = i18n.t("{a:g} seconds apart").format(a=p["gap_seconds"])
+        words = [gap]
+        allowed, reasons = self.plan()
+        n = len(self.recipients)
+        today = self._sent_today()
+        if p["max_per_day"]:
+            words.append(i18n.t("{n} of {cap} sent today from this address").format(
+                n=today, cap=p["max_per_day"]))
+        if n and allowed < n:
+            words.append(i18n.t("{k} of {n} will go on this press ({why}); "
+                                "the rest stay in the list").format(
+                k=allowed, n=n, why="; ".join(reasons)))
+        start = self.start_at()
+        if start:
+            words.append(i18n.t("starts {when} — keep Prism open until then").format(
+                when=time.strftime(_WHEN_FMT, time.localtime(start))))
+        return ". ".join(words) + "."
+
+    def _remember_policy(self):
+        """The numbers persist: set once, kept for the next window."""
+        new = self.policy()
+        if new == email_config.send_policy(self.cfg):
+            return
+        self.cfg = email_config.with_send_policy(self.cfg, new)
+        try:
+            CB.config.save(self.cfg)
+        except Exception:                                   # noqa: BLE001
+            pass                    # a pace that did not persist still sends
+
+    def _drop_sent(self, sent: list[str]):
+        """Take the ones that went out of the To line and the list, so what
+        remains on screen is exactly who has not been written to yet."""
+        gone = {e.lower() for e in sent}
+        self._list = [r for r in self._list if r["email"].lower() not in gone]
+        if not self._list:
+            self._list_name = ""
+        kept = [r["email"] for r in self._typed() if r["email"] not in gone]
+        self.to_edit.setText(", ".join(kept))
+        self._fill_list_table()
+        self._sync()
 
     # ── small builders ──────────────────────────────────────────────────
     @staticmethod
@@ -865,6 +1049,8 @@ class EmailComposeDialog(PrismDialog):
             missing.append(i18n.t("a subject"))
         if not self.body_edit.toPlainText().strip():
             missing.append(i18n.t("the message"))
+        if hasattr(self, "pace_note"):
+            self.pace_note.setText(self._pace_words())
         sending = bool(self._send_worker and self._send_worker.isRunning())
         if sending:
             return
@@ -876,11 +1062,28 @@ class EmailComposeDialog(PrismDialog):
         else:
             self.send_btn.setEnabled(True)
             self.send_btn.setToolTip("")
-            if n == 1:
-                self.send_btn.setText(i18n.t("Send to {who}").format(
-                    who=recipients[0]["email"]))
+            allowed, _why = self.plan()
+            later = bool(self.start_at())
+            if allowed == 0:
+                self.send_btn.setEnabled(False)
+                self.send_btn.setToolTip(i18n.t(
+                    "Today's limit for this address is used up. Raise it in "
+                    "Pace and limits, or send tomorrow."))
+                self.send_btn.setText(i18n.t("Daily limit reached"))
+            elif n == 1:
+                self.send_btn.setText(
+                    (i18n.t("Send to {who} later") if later
+                     else i18n.t("Send to {who}")).format(
+                        who=recipients[0]["email"]))
+            elif allowed < n:
+                self.send_btn.setText(
+                    (i18n.t("Send to {k} of {n} people later") if later
+                     else i18n.t("Send to {k} of {n} people")).format(
+                        k=allowed, n=n))
             else:
-                self.send_btn.setText(i18n.t("Send to {n} people").format(n=n))
+                self.send_btn.setText(
+                    (i18n.t("Send to {n} people later") if later
+                     else i18n.t("Send to {n} people")).format(n=n))
 
     # ── draft ───────────────────────────────────────────────────────────
     def _write_for_me(self):
@@ -1018,6 +1221,20 @@ class EmailComposeDialog(PrismDialog):
         if not recipients or not subject or not body:
             self._sync()
             return
+        policy = self.policy()
+        allowed, reasons = self.plan()
+        if allowed <= 0:
+            QMessageBox.information(
+                self, i18n.t("Daily limit"),
+                i18n.t("{n} emails have already left {address} today, and "
+                       "the limit is {cap}. Raise the limit under Pace and "
+                       "limits, or send tomorrow.").format(
+                    n=self._sent_today(), address=sender.get("address", ""),
+                    cap=policy["max_per_day"]))
+            return
+        self._held_back = recipients[allowed:]
+        recipients = recipients[:allowed]
+        start = self.start_at()
         files = ", ".join(f["name"] for f in self.source_files) or i18n.t("none")
         if len(recipients) == 1:
             question = i18n.t(
@@ -1034,12 +1251,18 @@ class EmailComposeDialog(PrismDialog):
                 "copy. This cannot be undone.").format(
                 n=len(recipients), to=f"{shown}{more}", subject=subject,
                 files=files, sender=sender.get("address", ""))
+        question += "\n\n" + i18n.t("Pace: {pace}").format(pace=self._pace_words())
+        if self._held_back:
+            question += "\n" + i18n.t(
+                "{k} more stay in the list for next time.").format(
+                k=len(self._held_back))
         confirm = QMessageBox.question(
             self, i18n.t("Send"), question,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No)   # nobody should send a blast by pressing Enter
         if confirm != QMessageBox.Yes:
             return
+        self._remember_policy()
 
         self._sent_ok, self._sent_bad = [], []
         self._subject, self._body = subject, body
@@ -1050,19 +1273,39 @@ class EmailComposeDialog(PrismDialog):
             host=sender.get("host", "")))
         self._send_worker = SendWorker(
             email_config.cfg_for_sender(self.cfg, sender),
-            list(recipients), subject, body, self.source_files)
+            list(recipients), subject, body, self.source_files,
+            delay=policy["gap_seconds"], jitter=policy["jitter_seconds"],
+            start_at=start)
         self._send_worker.progress.connect(self._on_send_progress)
         self._send_worker.done.connect(self._on_send_done)
         self._send_worker.failed.connect(self._on_send_failed)
+        if hasattr(self._send_worker, "waiting"):
+            self._send_worker.waiting.connect(self._on_send_waiting)
+        if start:
+            self.status.setText(i18n.t(
+                "Scheduled for {when}. Keep this window open; Stop sending "
+                "cancels it.").format(
+                when=time.strftime(_WHEN_FMT, time.localtime(start))))
         self._send_worker.start()
+
+    def _on_send_waiting(self, seconds_left: int):
+        m, s = divmod(max(0, int(seconds_left)), 60)
+        h, m = divmod(m, 60)
+        left = (f"{h}h {m:02d}m" if h else f"{m}m {s:02d}s")
+        self.status.setText(i18n.t(
+            "Scheduled — sending begins in {left}. Keep this window open; "
+            "Stop sending cancels it.").format(left=left))
 
     def _set_sending(self, sending: bool):
         """A list takes minutes. Everything that would change what is being
         sent is locked while it runs, and Send becomes the way to stop."""
         for w in (self.to_edit, self.subject_edit, self.body_edit,
                   self.brief_edit, self.list_btn, self.attach_btn,
-                  self.remove_btn, self.clear_list_btn, self.write_btn):
+                  self.remove_btn, self.clear_list_btn, self.write_btn,
+                  self.gap_spin, self.jitter_spin, self.per_run_spin,
+                  self.per_day_spin, self.later_check):
             w.setEnabled(not sending)
+        self.later_edit.setEnabled(not sending and self.later_check.isChecked())
         self.send_btn.setEnabled(True)
         if sending:
             self.send_btn.setText(i18n.t("Stop sending"))
@@ -1089,7 +1332,8 @@ class EmailComposeDialog(PrismDialog):
                 self.cfg, to=recipients, subject=self._subject, body=self._body,
                 sent=sent, failed=failed,
                 attachments=[f["name"] for f in self.source_files],
-                list_name=self._list_name, stopped=stopped)
+                list_name=self._list_name, stopped=stopped,
+                sender=self._sending_as.get("address", ""))
         except Exception as e:                                # noqa: BLE001
             self.status.setText(i18n.t(
                 "Sent, but could not write it down in {path}: {error}").format(
@@ -1109,8 +1353,21 @@ class EmailComposeDialog(PrismDialog):
                 failed[0][1], self._sending_as.get("address", ""))
             if hint != failed[0][1]:
                 msg += f"\n\n{hint}"
+        held = list(self._held_back)
+        if held and not stopped:
+            msg += "\n\n" + i18n.t(
+                "{k} people are still in the list — they were held back by "
+                "the limit. Press Send again when you want them to go.").format(
+                k=len(held))
         self.status.setText(msg.split("\n")[0])
         QMessageBox.information(self, i18n.t("Email"), msg)
+        if held and not stopped:
+            # What went is gone from the screen; what stayed is the list.
+            self._held_back = []
+            self._drop_sent(sent)
+            self.status.setText(i18n.t(
+                "{k} still to send — held back by the limit.").format(k=len(held)))
+            return
         if sent and not failed and not stopped:
             self.accept()
 

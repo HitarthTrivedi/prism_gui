@@ -161,9 +161,10 @@ class _FakeSendWorker(QObject):
     failed = Signal(str)
     stopped = False
 
-    def __init__(self, cfg, recipients, subject, body, files):
+    def __init__(self, cfg, recipients, subject, body, files, **pace):
         super().__init__()
         self.recipients = recipients
+        self.pace = pace                  # delay / jitter / start_at, as given
         _FakeSendWorker.last = self
 
     def start(self):

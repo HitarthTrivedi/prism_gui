@@ -126,3 +126,47 @@ is byte-for-byte the dict the engine already receives, and show no chooser.
 The rest pins the mirror following the default past a parked account, a
 parked account keeping its password, the readers handing back copies, and
 the worker being signed in as the address the confirmation named.
+
+## Pace, limits and sending later (2026-09-09)
+
+The owner's ask: *limit and schedule the mails, and set the difference of
+time between the emails*. Until now a list went out to everyone, two
+seconds apart, the moment Send was pressed — a metronome a provider can
+hear, with no cap and no way to say "not now".
+
+A **Pace and limits** card sits under the letter:
+
+| Control | What it does |
+|---|---|
+| **Gap between emails** `2.0 s` *plus up to* `0.0 s` *at random* | The fixed pause after each email, plus a random slice on top so the pauses are not identical. Never below half a second. |
+| **At most** `all of them` *per send, and* `no limit` *per day* | A per-press cap (the rest stay in the list for the next press) and a per-address daily cap, counted off the sent log across every window and every send from this computer. |
+| **When** ☐ *Send later, at* `dd MMM yyyy HH:mm` | Waits until that time, then signs in and sends. The window must stay open; **Stop sending** cancels the wait. A time already past means "now". |
+
+The line under the card says it in words — *"3 to 5 seconds apart. 12 of
+100 sent today from this address. 88 of 120 will go on this press (daily
+limit 100, 12 already sent today); the rest stay in the list. Starts 09
+Sep 14:30 — keep Prism open until then."* — and the Send button counts the
+same way: **Send to 88 of 120 people**, **Send to 3 people later**, or
+**Daily limit reached** (disabled) when the day is used up.
+
+After a capped send the window stays open with exactly the people who did
+not go still in the list, so the next press continues where this one
+stopped. The confirmation names the pace and how many are held back.
+
+Where the numbers live: `cfg["email"]["send"]` — `gap_seconds`,
+`jitter_seconds`, `max_per_run`, `max_per_day` — read by
+`email_config.send_policy()`, written by `with_send_policy()` when Send is
+pressed with changed values, and carried across an account save the way
+`folder` is. The terminal's `/email` reads the same gap, jitter and
+per-send cap; the daily cap is counted off the GUI's sent log and does not
+apply there.
+
+The engine side is `core/mailer.py:send_bulk(delay, jitter=, limit=,
+start_at=, on_wait=)`: the wait for a scheduled start happens **before**
+the SMTP login, so a send set for the morning does not hold a session
+open all night, and a stop during the wait sends nothing. Every entry in
+`sent.json` now carries `from`, the address it left — what the daily
+count is taken against. An entry written before that field existed counts
+against every address, on purpose.
+
+Tests: `tests/test_email_pacing.py`.

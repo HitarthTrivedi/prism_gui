@@ -122,6 +122,9 @@ def account_block(cfg: dict, accounts: list[dict]) -> dict:
     block = {k: v for k, v in default.items() if k not in _LOCAL_KEYS}
     if existing.get("folder") and "folder" not in block:
         block["folder"] = existing["folder"]
+    # Install-wide like `folder`: how fast and how many, not whose account.
+    if existing.get("send") and "send" not in block:
+        block["send"] = dict(existing["send"])
     block["accounts"] = accounts
     return block
 
@@ -145,5 +148,85 @@ def cfg_for_sender(cfg: dict, account: dict) -> dict:
     folder = settings_of(cfg).get("folder")
     if folder and "folder" not in block:
         block["folder"] = folder
+    send = settings_of(cfg).get("send")
+    if send and "send" not in block:
+        block["send"] = dict(send)
     out["email"] = block
     return out
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pace and limits -- how a list goes out
+# ────────────────────────────────────────────────────────────────────────────
+# `cfg["email"]["send"]` holds four numbers. They are install-wide (a pace is
+# a habit, not an account), carried across a save the way `folder` is, and
+# read by the Email add-on's window and by the terminal's /email alike, so
+# the two cannot pace a list two different ways.
+#
+#   gap_seconds      the fixed pause between two messages
+#   jitter_seconds   a random 0..this added to every pause, so the pauses
+#                    are not a metronome
+#   max_per_run      send to at most this many per press of Send; 0 = all
+#   max_per_day      send at most this many from one address per calendar
+#                    day, counted off the sent log; 0 = no limit
+#
+# The defaults reproduce what the engine did before there were knobs (a
+# flat two seconds, no cap), so a config without the block sends exactly
+# as it always has.
+
+DEFAULT_GAP_SECONDS = 2.0
+SEND_KEYS = ("gap_seconds", "jitter_seconds", "max_per_run", "max_per_day")
+
+
+def send_policy(cfg: dict) -> dict:
+    """The four numbers, always all four, always sane: negatives and
+    junk read as the default, and the gap is never below half a second --
+    a zero gap is exactly the burst the pause exists to prevent."""
+    raw = settings_of(cfg).get("send") or {}
+
+    def _num(key, default, cast):
+        try:
+            v = cast(raw.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return v if v >= 0 else default
+
+    return {
+        "gap_seconds": max(0.5, _num("gap_seconds", DEFAULT_GAP_SECONDS, float)),
+        "jitter_seconds": _num("jitter_seconds", 0.0, float),
+        "max_per_run": _num("max_per_run", 0, int),
+        "max_per_day": _num("max_per_day", 0, int),
+    }
+
+
+def with_send_policy(cfg: dict, policy: dict) -> dict:
+    """A copy of cfg with the four numbers written into the email block.
+    Only the four: a stray key from a screen never reaches the engine."""
+    out = dict(cfg or {})
+    block = settings_of(cfg)
+    block["send"] = {k: policy[k] for k in SEND_KEYS if k in policy}
+    out["email"] = block
+    return out
+
+
+def plan_send(policy: dict, wanted: int, sent_today: int = 0) -> tuple[int, list[str]]:
+    """How many of `wanted` may go now, and why not all of them, in words.
+
+    Pure arithmetic over the policy so the window, the terminal and the
+    tests agree on the number. The daily cap is what is left of it after
+    what the sent log already shows for today; the per-run cap is flat.
+    """
+    allowed = max(0, int(wanted))
+    reasons = []
+    per_day = int(policy.get("max_per_day") or 0)
+    if per_day > 0:
+        left = max(0, per_day - max(0, int(sent_today)))
+        if left < allowed:
+            allowed = left
+            reasons.append(
+                "daily limit %d, %d already sent today" % (per_day, sent_today))
+    per_run = int(policy.get("max_per_run") or 0)
+    if per_run > 0 and per_run < allowed:
+        allowed = per_run
+        reasons.append("at most %d per send" % per_run)
+    return allowed, reasons

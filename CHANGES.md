@@ -71,6 +71,43 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 17 — a list is not a blast: pace, limits and sending later
+
+The owner's ask, in two lines: *limit and schedule the mails*, and *the
+difference of time between the emails*. A list used to go out to everyone,
+two seconds apart, the moment Send was pressed.
+
+**Pace and limits**, a card under the letter in the Email window: the gap
+between emails plus a random extra on top (so the pauses are not a
+metronome), a per-press cap and a per-address daily cap (counted off the
+sent log, across windows and days), and *Send later, at* a chosen time.
+The note under the card and the Send button both say what will happen in
+words — *Send to 88 of 120 people*, *Daily limit reached*. After a capped
+send the window stays open with exactly the people who did not go, so the
+next press continues. The numbers persist in `cfg["email"]["send"]`.
+
+**Engine:** `core/mailer.py:send_bulk()` grew `jitter`, `limit`, `start_at`
+and `on_wait`; the scheduled wait happens before the SMTP login and a stop
+during it sends nothing. `pause_after_send()` is the one place the gap is
+computed. The terminal's `/email` reads the same gap, jitter and per-send
+cap out of the config.
+
+**Kept inside the Email add-on and its own data module**, per the
+architecture: `addons/email/dialog.py`, `addons/email/sent_log.py` (each
+entry now records `from`, and `sent_today()` counts it), root-level
+stdlib-only `email_config.py` (`send_policy`, `with_send_policy`,
+`plan_send`; the policy survives `account_block` and `cfg_for_sender`),
+`workers.py:SendWorker` (the parameters pass through; a `waiting` signal
+counts down). No other add-on touched; Email automation's own sends are
+single messages and are unchanged.
+
+*Files:* `prism_terminal/core/mailer.py`, `prism_terminal/prism.py`,
+`email_config.py`, `addons/email/dialog.py`, `addons/email/sent_log.py`,
+`workers.py`, `docs/EMAIL_SEND.md`, `tests/test_email_pacing.py`,
+`lang/_catalogue.json`
+
+---
+
 # 1.4.1 — a Mac can install, update and re-seat itself; Studio V2 is whole
 
 Three threads, one release. The first two came out of reading the macOS

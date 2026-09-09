@@ -49,13 +49,18 @@ def load(cfg: dict) -> list[dict]:
 
 def record(cfg: dict, *, to: list[dict], subject: str, body: str,
            sent: list[str], failed: list, attachments: list[str],
-           list_name: str = "", stopped: bool = False) -> dict:
+           list_name: str = "", stopped: bool = False,
+           sender: str = "") -> dict:
     """Append one entry and return it. Never raises into a send that has
-    already gone out — a log that cannot be written is reported, not fatal."""
+    already gone out — a log that cannot be written is reported, not fatal.
+
+    `sender` is the address it left from -- what the daily limit is counted
+    against now that there can be several."""
     now = _dt.datetime.now()
     entry = {
         "date": now.strftime("%Y-%m-%d"),
         "time": now.strftime("%H:%M"),
+        "from": (sender or "").strip().lower(),
         "to": [{"email": r.get("email", ""), "name": r.get("name", "")}
                for r in to],
         "subject": subject,
@@ -77,6 +82,27 @@ def record(cfg: dict, *, to: list[dict], subject: str, body: str,
         os.fsync(f.fileno())
     os.replace(tmp, path(cfg))
     return entry
+
+
+def sent_today(cfg: dict, sender: str = "", today: str = "") -> int:
+    """How many messages have left `sender` today, off this log.
+
+    An entry written before the log knew who sent it has no "from"; it
+    counts against every address, because the cautious reading of an
+    unknown sender is "it might have been this one" -- a daily limit that
+    can be dodged by the log having been older is not a limit.
+    """
+    today = today or _dt.date.today().strftime("%Y-%m-%d")
+    sender = (sender or "").strip().lower()
+    n = 0
+    for entry in load(cfg):
+        if entry.get("date") != today:
+            continue
+        who = (entry.get("from") or "").strip().lower()
+        if sender and who and who != sender:
+            continue
+        n += len(entry.get("sent") or [])
+    return n
 
 
 # ── words for the table ───────────────────────────────────────────────────────
