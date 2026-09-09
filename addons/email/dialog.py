@@ -707,6 +707,14 @@ class EmailComposeDialog(PrismDialog):
         when_row.addStretch(1)
         pace_grid.addWidget(self._field_label(i18n.t("When")), 2, 0)
         pace_grid.addLayout(when_row, 2, 1)
+        # Said once, always visible, not only after the box is ticked: the
+        # sending happens from this computer, so a scheduled send needs
+        # Prism -- and this window -- open until it has gone out.
+        self.keep_open_note = C.label(i18n.t(
+            "Prism does the sending from this computer, so it has to stay "
+            "open — and this window with it — until the emails have gone. "
+            "Closing it cancels a scheduled send."), level="SUPPORT", wrap=True)
+        pace_grid.addWidget(self.keep_open_note, 3, 1)
         pace_col.addLayout(pace_grid)
 
         self.pace_note = C.label("", level="SUPPORT", wrap=True)
