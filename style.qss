@@ -1214,7 +1214,7 @@ QRadioButton::indicator:checked {
 
 QRadioButton:disabled { color: #b7b7ba; }
 
-QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit {
+QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit, QDateTimeEdit {
     background: #ffffff;
     border: 2px solid #e7e7ea;
     border-radius: 8px;
@@ -1224,15 +1224,15 @@ QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit {
     selection-color: #ffffff;
 }
 
-QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QDateEdit:hover {
+QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QDateEdit:hover, QDateTimeEdit:hover {
     border-color: #d4d4d7;
 }
 
-QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QDateEdit:focus {
+QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QDateEdit:focus, QDateTimeEdit:focus {
     border-color: #4480bb;
 }
 
-QSpinBox:disabled, QDoubleSpinBox:disabled, QTimeEdit:disabled,
+QSpinBox:disabled, QDoubleSpinBox:disabled, QTimeEdit:disabled, QDateTimeEdit:disabled,
 QDateEdit:disabled {
     background: #f7f8f9;
     border-color: #ececee;
@@ -1245,7 +1245,7 @@ QDateEdit:disabled {
    purpose: these are pressed by somebody setting a GST rate, not a developer
    nudging a value. */
 QSpinBox::up-button, QDoubleSpinBox::up-button,
-QTimeEdit::up-button, QDateEdit::up-button {
+QTimeEdit::up-button, QDateEdit::up-button, QDateTimeEdit::up-button {
     subcontrol-origin: border;
     subcontrol-position: top right;
     width: 24px;
@@ -1257,7 +1257,7 @@ QTimeEdit::up-button, QDateEdit::up-button {
 }
 
 QSpinBox::down-button, QDoubleSpinBox::down-button,
-QTimeEdit::down-button, QDateEdit::down-button {
+QTimeEdit::down-button, QDateEdit::down-button, QDateTimeEdit::down-button {
     subcontrol-origin: border;
     subcontrol-position: bottom right;
     width: 24px;

@@ -472,9 +472,9 @@ class EmailComposeDialog(PrismDialog):
             i18n.t("From {address}. Fill in To, Subject and Message, then "
                    "press Send. Nothing goes out until you press it."
                    ).format(address=address or i18n.t("your account")),
-            icon="mail", parent=parent, closable=False)
+            icon="mail", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(i18n.t("Send an email"))
-        self.resize(820, 760)
+        self.resize(860, 880)
         self.setMinimumSize(640, 620)
         self.cfg = cfg
         self.mode = mode
@@ -623,79 +623,99 @@ class EmailComposeDialog(PrismDialog):
         # seconds apart, right now". The numbers persist (email_config's
         # send policy) so they are set once, and the daily cap is counted
         # off the sent log, so it holds across windows and across days.
+        #
+        # Folded by default. Most sends are one letter to one person and
+        # need none of this; the card then costs one line -- the title, the
+        # current setting in words, and Change -- and the letter keeps its
+        # room. It opens on its own when a saved setting is not the default,
+        # because a cap somebody set last week should not be invisible.
         self._policy = email_config.send_policy(cfg)
         pace = C.Card()
         pace_col = pace.body(margins=(theme.SPACE_4, theme.SPACE_3,
                                       theme.SPACE_4, theme.SPACE_3),
                              spacing=theme.SPACE_2)
-        pace_col.addWidget(C.label(i18n.t("Pace and limits"), level="CARD_TITLE"))
-        pace_grid = QGridLayout()
-        pace_grid.setContentsMargins(0, 0, 0, 0)
-        pace_grid.setHorizontalSpacing(theme.SPACE_3)
-        pace_grid.setVerticalSpacing(theme.SPACE_2)
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(theme.SPACE_3)
+        head.addWidget(C.label(i18n.t("Pace and limits"), level="CARD_TITLE"))
+        self.pace_summary = C.label("", level="SUPPORT", wrap=True)
+        head.addWidget(self.pace_summary, stretch=1)
+        self.pace_toggle = C.button(i18n.t("Change"), "tertiary", small=True,
+                                    on_click=self._toggle_pace)
+        head.addWidget(self.pace_toggle, alignment=Qt.AlignTop)
+        pace_col.addLayout(head)
 
-        gap_row = QHBoxLayout()
-        gap_row.setContentsMargins(0, 0, 0, 0)
-        gap_row.setSpacing(theme.SPACE_2)
+        self.pace_details = QWidget()
+        details = QFormLayout(self.pace_details)
+        details.setContentsMargins(0, theme.SPACE_2, 0, 0)
+        details.setHorizontalSpacing(theme.SPACE_3)
+        details.setVerticalSpacing(theme.SPACE_2)
+        details.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        details.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
+        def _row(*widgets):
+            lay = QHBoxLayout()
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(theme.SPACE_2)
+            for w in widgets:
+                lay.addWidget(w)
+            lay.addStretch(1)
+            return lay
+
         self.gap_spin = QDoubleSpinBox()
         self.gap_spin.setRange(0.5, 3600.0)
         self.gap_spin.setDecimals(1)
         self.gap_spin.setSingleStep(0.5)
         self.gap_spin.setSuffix(" " + i18n.t("s"))
+        self.gap_spin.setMinimumWidth(96)
         self.gap_spin.setValue(self._policy["gap_seconds"])
         self.gap_spin.setToolTip(i18n.t(
             "How long Prism waits after one email before sending the next."))
-        gap_row.addWidget(self.gap_spin)
-        gap_row.addWidget(QLabel(i18n.t("plus up to")))
         self.jitter_spin = QDoubleSpinBox()
         self.jitter_spin.setRange(0.0, 3600.0)
         self.jitter_spin.setDecimals(1)
         self.jitter_spin.setSingleStep(0.5)
         self.jitter_spin.setSuffix(" " + i18n.t("s"))
+        self.jitter_spin.setMinimumWidth(96)
         self.jitter_spin.setValue(self._policy["jitter_seconds"])
         self.jitter_spin.setToolTip(i18n.t(
             "A random extra wait added to every gap, so the emails do not "
             "leave like clockwork. 0 = the same gap every time."))
-        gap_row.addWidget(self.jitter_spin)
-        gap_row.addWidget(QLabel(i18n.t("at random")))
-        gap_row.addStretch(1)
-        pace_grid.addWidget(self._field_label(i18n.t("Gap between emails")), 0, 0)
-        pace_grid.addLayout(gap_row, 0, 1)
+        details.addRow(self._field_label(i18n.t("Gap between emails")),
+                       _row(self.gap_spin, QLabel(i18n.t("plus up to")),
+                            self.jitter_spin, QLabel(i18n.t("at random"))))
 
-        cap_row = QHBoxLayout()
-        cap_row.setContentsMargins(0, 0, 0, 0)
-        cap_row.setSpacing(theme.SPACE_2)
         self.per_run_spin = QSpinBox()
         self.per_run_spin.setRange(0, 100000)
-        self.per_run_spin.setSpecialValueText(i18n.t("all of them"))
+        self.per_run_spin.setSpecialValueText(i18n.t("everyone"))
+        self.per_run_spin.setMinimumWidth(118)
         self.per_run_spin.setValue(self._policy["max_per_run"])
         self.per_run_spin.setToolTip(i18n.t(
             "Send to at most this many people each time you press Send. "
             "The rest stay in the list for the next press."))
-        cap_row.addWidget(self.per_run_spin)
-        cap_row.addWidget(QLabel(i18n.t("per send, and")))
+        details.addRow(self._field_label(i18n.t("Each press sends")),
+                       _row(self.per_run_spin,
+                            QLabel(i18n.t("people — the rest stay in the list"))))
+
         self.per_day_spin = QSpinBox()
         self.per_day_spin.setRange(0, 100000)
         self.per_day_spin.setSpecialValueText(i18n.t("no limit"))
+        self.per_day_spin.setMinimumWidth(118)
         self.per_day_spin.setValue(self._policy["max_per_day"])
         self.per_day_spin.setToolTip(i18n.t(
             "Send at most this many from one address per day, counted "
             "across every send from this computer."))
-        cap_row.addWidget(self.per_day_spin)
-        cap_row.addWidget(QLabel(i18n.t("per day")))
-        cap_row.addStretch(1)
-        pace_grid.addWidget(self._field_label(i18n.t("At most")), 1, 0)
-        pace_grid.addLayout(cap_row, 1, 1)
+        self.today_label = QLabel("")
+        details.addRow(self._field_label(i18n.t("Per day")),
+                       _row(self.per_day_spin,
+                            QLabel(i18n.t("from this address")), self.today_label))
 
-        when_row = QHBoxLayout()
-        when_row.setContentsMargins(0, 0, 0, 0)
-        when_row.setSpacing(theme.SPACE_2)
         self.later_check = QCheckBox(i18n.t("Send later, at"))
         self.later_check.toggled.connect(self._sync)
-        when_row.addWidget(self.later_check)
         self.later_edit = QDateTimeEdit()
         self.later_edit.setDisplayFormat("dd MMM yyyy  HH:mm")
         self.later_edit.setCalendarPopup(True)
+        self.later_edit.setMinimumWidth(190)
         soon = QDateTime.currentDateTime().addSecs(3600)
         soon = soon.addSecs(-soon.time().second())
         self.later_edit.setDateTime(soon)
@@ -703,10 +723,8 @@ class EmailComposeDialog(PrismDialog):
         self.later_edit.setEnabled(False)
         self.later_check.toggled.connect(self.later_edit.setEnabled)
         self.later_edit.dateTimeChanged.connect(self._sync)
-        when_row.addWidget(self.later_edit)
-        when_row.addStretch(1)
-        pace_grid.addWidget(self._field_label(i18n.t("When")), 2, 0)
-        pace_grid.addLayout(when_row, 2, 1)
+        details.addRow(self._field_label(i18n.t("When")),
+                       _row(self.later_check, self.later_edit))
         # Said once, always visible, not only after the box is ticked: the
         # sending happens from this computer, so a scheduled send needs
         # Prism -- and this window -- open until it has gone out.
@@ -714,14 +732,15 @@ class EmailComposeDialog(PrismDialog):
             "Prism does the sending from this computer, so it has to stay "
             "open — and this window with it — until the emails have gone. "
             "Closing it cancels a scheduled send."), level="SUPPORT", wrap=True)
-        pace_grid.addWidget(self.keep_open_note, 3, 1)
-        pace_col.addLayout(pace_grid)
+        details.addRow("", self.keep_open_note)
 
         self.pace_note = C.label("", level="SUPPORT", wrap=True)
-        pace_col.addWidget(self.pace_note)
+        details.addRow("", self.pace_note)
+        pace_col.addWidget(self.pace_details)
         for w in (self.gap_spin, self.jitter_spin, self.per_run_spin,
                   self.per_day_spin):
             w.valueChanged.connect(self._sync)
+        self._show_pace(self._policy != email_config.send_policy({}))
         root.addWidget(pace)
 
         # ── optional: let Prism write it ──────────────────────────────────
@@ -778,6 +797,30 @@ class EmailComposeDialog(PrismDialog):
             self.to_edit.setFocus()
 
     # ── pace and limits ─────────────────────────────────────────────────
+    def _show_pace(self, open_: bool):
+        self.pace_details.setVisible(open_)
+        self.pace_toggle.setText(i18n.t("Done") if open_ else i18n.t("Change"))
+
+    def _toggle_pace(self):
+        self._show_pace(not self.pace_details.isVisible())
+
+    def _pace_summary(self) -> str:
+        """The setting in a few words, for the folded card."""
+        p = self.policy()
+        gap = (i18n.t("{a:g}–{b:g} s apart").format(
+                   a=p["gap_seconds"], b=p["gap_seconds"] + p["jitter_seconds"])
+               if p["jitter_seconds"] > 0
+               else i18n.t("{a:g} s apart").format(a=p["gap_seconds"]))
+        per_run = (i18n.t("{n} per press").format(n=p["max_per_run"])
+                   if p["max_per_run"] else i18n.t("everyone at once"))
+        per_day = (i18n.t("{n} a day").format(n=p["max_per_day"])
+                   if p["max_per_day"] else i18n.t("no daily limit"))
+        start = self.start_at()
+        when = (i18n.t("sends {when}").format(
+                    when=time.strftime(_WHEN_FMT, time.localtime(start)))
+                if start else i18n.t("sends now"))
+        return " · ".join([gap, per_run, per_day, when])
+
     def policy(self) -> dict:
         """The four numbers as the controls show them right now."""
         return {
@@ -1059,6 +1102,9 @@ class EmailComposeDialog(PrismDialog):
             missing.append(i18n.t("the message"))
         if hasattr(self, "pace_note"):
             self.pace_note.setText(self._pace_words())
+            self.pace_summary.setText(self._pace_summary())
+            self.today_label.setText(
+                i18n.t("({n} sent today)").format(n=self._sent_today()))
         sending = bool(self._send_worker and self._send_worker.isRunning())
         if sending:
             return
