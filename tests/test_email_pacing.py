@@ -305,7 +305,7 @@ class TheWindow(unittest.TestCase):
         ask = self._send()
         start = _FakeSendWorker.last.pace["start_at"]
         self.assertAlmostEqual(start, later.toSecsSinceEpoch(), delta=2)
-        self.assertIn("starts", ask.call_args[0][2])
+        self.assertIn("Starts", ask.call_args[0][2])
 
     def test_a_time_already_past_means_now(self):
         self.d.later_check.setChecked(True)
