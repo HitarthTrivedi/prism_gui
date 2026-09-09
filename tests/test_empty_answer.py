@@ -168,6 +168,7 @@ class TheCanvaEntryMatchesTheLivePage(unittest.TestCase):
         self.assertIn("_click_control(driver, [\"generate design\"]", src)
         self.assertIn('"generate design"', src)          # the second move
         self.assertIn('"view outline"', src)
+        self.assertIn('"skip"', src)                   # the brand/style picker
         self.assertIn("submit_selector", src)
 
     def test_the_runner_polls_the_halt_between_its_waits(self):
