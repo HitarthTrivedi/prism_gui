@@ -71,6 +71,40 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 20 — an empty ChatGPT answer is caught in seconds, and Canva builds the deck
+
+From the owner's run log of 10 Sep, two faults.
+
+**ChatGPT finished with nothing, and Prism waited 300 s for it.** The tab
+showed a new assistant turn with no text and no Stop button — the toolbar
+under a blank bubble — and `_smart_wait`, which watches text grow, ran out
+the whole cap. Now a tool can say which element means "still generating"
+(`busy_selector`) and which means "a reply" (`turn_selector`); when a new
+turn has sat idle and empty for a short while the wait ends, the tool's
+own regenerate control is pressed once (`_regenerate_once`, hover-only but
+in the DOM), and if it is empty again the stage fails at once and the
+fallback tool takes it. ChatGPT's selectors were read off the live page.
+The user can also press **Use fallback** (Round 19) the moment they see it.
+
+**Canva never received the prompt, then never pressed Generate.** The
+registry pointed at `/magic-design/`, a marketing page with no composer.
+Probed live with Playwright: Canva AI lives at `canva.com/ai`, opens under
+a promo dialog whose video swallows clicks (Escape closes it), takes the
+prompt in the one labelled textarea, sends with `button[aria-label='Submit']`
+— and answers with an *outline* first, needing "View outline" → "Generate
+design" before a deck exists. `_run_canva` makes those moves; the thread
+URL is the saved link (the deck opens from its card there and lands in
+Projects). Verified end to end: a 3-slide deck built through both paths.
+
+**The prompt header is shorter.** The block that carries the customer's
+own words to every tool now says its rule in one sentence — summaries lose
+things, the words above win, specific facts must survive — instead of a
+paragraph. The stall was not the prompt's length, but every tool reads it.
+
+Engine only. Tests in `tests/test_empty_answer.py`.
+
+---
+
 # Round 19 — Use fallback: hand a stuck step to its fallback tool now
 
 The owner's ask: Prism waits a fixed time for a tool and only then hands
