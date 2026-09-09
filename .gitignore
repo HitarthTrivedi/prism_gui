@@ -42,3 +42,4 @@ integrations/token.json
 
 # devtools/apollo_probe.py writes screenshots and a profile copy here
 devtools/apollo_probe_out/
+devtools/canva_probe_out/

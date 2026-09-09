@@ -340,6 +340,20 @@ class TheSecondPrompt(unittest.TestCase):
         configured = set(AGENT_REGISTRY["ChatGPT"]["stage_suffix"])
         self.assertEqual(set(self.AU._EDITABLE_STAGES), configured)
 
+    def test_a_picture_with_no_words_is_still_handed_over(self):
+        """The 2026-09-09 Playwright run. ChatGPT answers an image request
+        with the picture and no prose at all -- the assistant turn is an
+        <img> and an "Edit" button -- so the text capture is empty while
+        the artwork is right there. The step used to read that as "nothing
+        was made" and skip Canva; the customer who asked for something
+        editable got a flat PNG. A rendered image is something made."""
+        out, url = self.AU._make_editable(None, CHATGPT, "visual",
+                                          "make it in canva", [],
+                                          made_image=True)
+        self.assertEqual(len(self.asked), 1)
+        self.assertEqual(out, self.reply)
+        self.assertEqual(url, "https://canva.com/design/abc")
+
     def test_it_does_not_ask_when_nothing_was_made(self):
         """With no image in the thread, Canva would invent a design from the
         words alone — which is exactly the template-instead-of-artwork

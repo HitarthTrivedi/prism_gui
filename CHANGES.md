@@ -71,6 +71,38 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 18 — the Canva hand-off, verified live, and the two reasons Prism skipped it
+
+The owner's report: ask Prism for an Instagram post *"and make it editable /
+in Canva"* and ChatGPT should draw the picture and then hand it to its
+Canva app — and it no longer did.
+
+**Verified with Playwright first** (`devtools/canva_probe.py`, on a copy of
+Prism's own Chrome profile). The hand-off itself works: ChatGPT drew the
+post, the follow-up `@canva …` was answered by the Canva app with a card and
+`CANVA LINK: https://www.canva.com/d/…`, and that link opens a real editable
+1254×1254 design in the owner's Canva. ChatGPT still routes a plain
+`@canva` in the message text to the app; the response selector still finds
+the text turn. So the engine's plan was right and the run was failing
+around it.
+
+**Reason one — a picture has no words.** ChatGPT answers an image request
+with the image and no prose: the assistant turn is an `<img>` and an
+"Edit" button. `_capture()` therefore came back empty, and
+`_make_editable()` read an empty capture as "nothing was made" and skipped
+Canva — while the picture sat on screen. `run()` now tells the step whether
+a picture rendered (`made_image=bool(got)` off `_wait_for_images`), and a
+rendered image counts as something to convert.
+
+**Reason two — a short answer was thrown away.** `_capture()` drops
+anything under fifty characters, to lose buttons and chips. `CANVA LINK:
+none` is sixteen; a real link can be under fifty. So the one reply the
+step most needs to read was the one discarded, and "not connected" read
+as "did not answer". `_capture(keep=)` keeps a reply carrying the marker a
+caller is waiting for, and `_reask()` passes its `expect` through.
+
+Engine only (`core/automation.py`); no add-on, no shell, no registry
+touched. Tests in `tests/test_canva.py`.
 # Round 17 — a list is not a blast: pace, limits and sending later
 
 The owner's ask, in two lines: *limit and schedule the mails*, and *the
