@@ -118,6 +118,14 @@ words — *Send to 88 of 120 people*, *Daily limit reached*. After a capped
 send the window stays open with exactly the people who did not go, so the
 next press continues. The numbers persist in `cfg["email"]["send"]`.
 
+**Folded by default (10 Sep).** On the owner's screen the open card pushed
+the Message box down to one line, the date picker drew unstyled and the
+note was clipped. The card is now a title, the setting in words (*2 s
+apart · everyone at once · no daily limit · sends now*) and **Change**; it
+opens to a proper form and opens on its own when a saved setting is not
+the default. The window scrolls; `QDateTimeEdit` joined the stepper rules
+in `style.qss`.
+
 **Engine:** `core/mailer.py:send_bulk()` grew `jitter`, `limit`, `start_at`
 and `on_wait`; the scheduled wait happens before the SMTP login and a stop
 during it sends nothing. `pause_after_send()` is the one place the gap is
