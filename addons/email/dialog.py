@@ -828,7 +828,7 @@ class EmailComposeDialog(PrismDialog):
                 k=allowed, n=n, why="; ".join(reasons)))
         start = self.start_at()
         if start:
-            words.append(i18n.t("starts {when} — keep Prism open until then").format(
+            words.append(i18n.t("Starts {when} — keep Prism open until then").format(
                 when=time.strftime(_WHEN_FMT, time.localtime(start))))
         return ". ".join(words) + "."
 

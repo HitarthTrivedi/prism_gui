@@ -3900,7 +3900,7 @@
   "Started this week": [
    "widgets/home_panel.py"
   ],
-  "starts {when} — keep Prism open until then": [
+  "Starts {when} — keep Prism open until then": [
    "addons/email/dialog.py"
   ],
   "Status": [
