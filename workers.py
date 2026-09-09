@@ -88,6 +88,29 @@ class RouteWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class PlanBriefWorker(_Worker):
+    """Write the prompts for the plan as the owner confirmed it.
+
+    The router wrote its prompts before anyone looked at the plan. Once a
+    step has been dropped, added, moved or given another tool, those
+    prompts are wrong -- one Groq call rewrites them for the confirmed
+    steps, off the GUI thread, before the licence check and the run.
+    """
+    done = Signal(list)              # [(stage, tool, questions)], in order
+    failed = Signal(str)
+
+    def __init__(self, query: str, cfg: dict, steps: list, routing: dict):
+        super().__init__()
+        self.query, self.cfg, self.steps, self.routing = query, cfg, steps, routing
+
+    def run(self):
+        try:
+            self.done.emit(CB.router.brief_confirmed_plan(
+                self.query, self.cfg, self.steps, self.routing))
+        except Exception as e:                      # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class AutomationWorker(_Worker):
     stage_event = Signal(str, dict)
     done = Signal(dict, dict)

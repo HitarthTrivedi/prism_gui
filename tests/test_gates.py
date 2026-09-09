@@ -142,6 +142,37 @@ class GateTest(unittest.TestCase):
                         "agents": {"content": "ChatGPT"}})
         return win
 
+    def _instant_brief(self):
+        """Replace PlanBriefWorker with something synchronous that hands the
+        steps back unchanged -- the prompt rewrite is Groq on a thread, and
+        these tests are about what happens after the person presses Start,
+        not about the prompts' wording (tests/test_confirmed_plan.py)."""
+        class _Instant:
+            def __init__(self, query, cfg, steps, routing):
+                self.steps = steps
+                self._done = self._failed = None
+
+            @property
+            def done(self):
+                outer = self
+
+                class _Sig:
+                    def connect(self, fn):
+                        outer._done = fn
+                return _Sig()
+
+            @property
+            def failed(self):
+                class _Sig:
+                    def connect(self, fn):
+                        pass
+                return _Sig()
+
+            def start(self):
+                if self._done:
+                    self._done(list(self.steps))
+        return _Instant
+
     def _instant_authorize(self, allowed=True, message=""):
         """Replace AuthorizeWorker with something synchronous.
 
@@ -827,6 +858,8 @@ class UnpromptedStepGate(GateTest):
                                return_value=answer) as asked, \
              mock.patch.object(main_window, "AuthorizeWorker",
                                self._instant_authorize()), \
+             mock.patch.object(main_window, "PlanBriefWorker",
+                               self._instant_brief()), \
              mock.patch.object(main_window, "AutomationWorker") as worker:
             win._run_pipeline()
         return asked, worker

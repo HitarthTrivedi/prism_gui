@@ -58,6 +58,7 @@ from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
+                     PlanBriefWorker,
                      StudioFollowupWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
                      FFmpegWorker, UpdateWorker, FollowupRouteWorker,
@@ -2118,6 +2119,52 @@ class MainWindow(QMainWindow):
                               else agent, questions)
                              for label, agent, questions in run_steps]
 
+        skip_stages = sorted(dropped)
+
+        # The prompts were written when the plan was made -- before anyone
+        # looked at it. If a step was dropped, added, moved or given another
+        # tool here, those prompts are wrong: on the 2026-09-10 deck run the
+        # presentation step was switched from Gamma to Canva and Canva was
+        # handed Gamma's brief ("plain-text slide format ready for import
+        # into Gamma.app"), so it typed an outline back. So the prompts are
+        # written again, now, for the plan as it is about to run -- one Groq
+        # call, off the thread, before the licence check. An unchanged plan
+        # keeps the prompts it has.
+        planned = CB.router.planned_steps(
+            self.routing, CB.config.active_agents(self.cfg))
+        if CB.router.plan_changed(planned, run_steps):
+            self.agents_panel.set_run_enabled(False)
+            self.statusBar().showMessage(
+                i18n.t("Writing the prompts for the steps you confirmed…"))
+            worker = PlanBriefWorker(self._last_query, self.cfg, run_steps,
+                                     self.routing)
+            worker.done.connect(
+                lambda steps: self._prompts_written(steps, run_agents,
+                                                    skip_stages))
+            worker.failed.connect(
+                lambda err: self._prompts_written(run_steps, run_agents,
+                                                  skip_stages, error=err))
+            self._workers.append(worker)
+            worker.start()
+            return
+        self._authorize_and_start(run_agents, run_steps, skip_stages)
+
+    def _prompts_written(self, steps: list, run_agents: dict,
+                         skip_stages: list, error: str = ""):
+        """The rewritten prompts are back (or could not be written): show
+        them on the plan, then carry on to the licence check."""
+        if error:
+            self.statusBar().showMessage(i18n.t(
+                "Couldn't rewrite the prompts ({error}) — running with the "
+                "plan's own.").format(error=error), 8000)
+        else:
+            self.agents_panel.apply_prompts(steps)
+            self.statusBar().showMessage(
+                i18n.t("Prompts written for the plan as you confirmed it."), 5000)
+        self._authorize_and_start(run_agents, steps, skip_stages)
+
+    def _authorize_and_start(self, run_agents: dict, run_steps: list,
+                             skip_stages: list):
         # Ask the licence server, live, before committing to the run. This is
         # the ONLY place a run is authorised — never again once it is moving,
         # because a pipeline is tens of minutes of browser automation and
@@ -2125,7 +2172,6 @@ class MainWindow(QMainWindow):
         self.agents_panel.set_run_enabled(False)
         self.statusBar().showMessage("Checking your licence…")
         auth_worker = AuthorizeWorker("core", "run")
-        skip_stages = sorted(dropped)
         auth_worker.done.connect(
             lambda result: self._start_run(result, run_agents, run_steps,
                                            skip_stages))

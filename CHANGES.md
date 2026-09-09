@@ -71,6 +71,31 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 22 — the prompts are written for the plan you confirmed
+
+The flaw behind the Canva run, named by the owner: the router wrote every
+step's prompt when it made the plan — before anyone looked at it. Drop a
+step, add one, move one, or switch its tool on the Plan screen and the
+prompts did not follow: the presentation step was switched from Gamma to
+Canva and Canva was handed Gamma's brief.
+
+**Now Start the work checks whether the plan changed** (`router.plan_changed`
+against `router.planned_steps`: membership, order, tools, and any step with
+no prompt) and, if it did, **writes the prompts again for exactly the steps
+you confirmed, in that order, on those tools** — one Groq call off the
+thread (`PlanBriefWorker` → `router.brief_confirmed_plan`) before the
+licence check. The drafts keep their substance; the tool and the order are
+the truth; makers get the maker rule; the last step is told it is last.
+The rewritten prompts are put back on the rows (`AgentsPanel.apply_prompts`)
+so Prompt shows what will actually be sent. An unchanged plan keeps its
+prompts and starts as before. If Groq cannot be reached the drafts stand,
+and a step with no prompt gets a real floor (`passthrough_prompt`).
+
+*Files:* `prism_terminal/core/router.py`, `workers.py`, `main_window.py`,
+`widgets/agents_panel.py`, `tests/test_confirmed_plan.py`
+
+---
+
 # Round 21 — a tool that builds the thing is briefed to build it, and every stage is briefed like a colleague
 
 The owner's second Canva run, from the prompt Canva received: *"Produce the

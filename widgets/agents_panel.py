@@ -1139,6 +1139,18 @@ class AgentsPanel(QWidget):
                 out.append((stage, tool, list(questions)))
         return out
 
+    def apply_prompts(self, steps: list):
+        """Put rewritten prompts back on the rows, in the order
+        selected_steps() handed them out -- the ticked rows first, then the
+        extras (the summary pass) that are not rows."""
+        rows = [r for r in self._rows if r.is_checked() and r.selected_agent()]
+        for row, step in zip(rows, steps):
+            row.set_questions(list(step[2]) if len(step) > 2 else [])
+        rest = steps[len(rows):]
+        self._extras = [(stage, tool, list(step[2]) if len(step) > 2 else list(qs))
+                        for (stage, tool, qs), step in zip(self._extras, rest)] \
+            + list(self._extras[len(rest):])
+
     def unprompted_steps(self) -> list:
         """Titles of the steps that are ticked to run but carry no prompt.
 
