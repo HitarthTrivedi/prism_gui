@@ -123,3 +123,60 @@ class TheTwoModesAreOneDialog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheDrawingNeverReachesAnAI(unittest.TestCase):
+    """The owner's rule for every measuring add-on, made to hold for BOQ too
+    (10 Sep 2026): the drawing is measured here; an AI only ever sees the
+    numbers. Until now the writing stage attached the CAD file itself."""
+
+    class _Capture:
+        seen = {}
+
+        def __init__(self, *a, **kw):
+            TheDrawingNeverReachesAnAI._Capture.seen = {"args": a, "kwargs": kw}
+            self.done = self.failed = self
+
+        def connect(self, *_):
+            pass
+
+        def start(self):
+            pass
+
+    def test_the_writer_is_handed_templates_and_notes_but_never_the_drawing(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = _dialog()
+        d.q = {"layers": ["WALLS"], "lengths_by_layer": {"WALLS": 12.0},
+               "areas_by_layer": {}, "block_counts": {}, "unit": "m",
+               "scope_total_layers": 1}
+        d.cad_path = "/secret/site.dxf"
+        d.summary = "WALLS 12.00 m"
+        d.request = "BOQ for the site"
+        d.templates = [{"path": "/x/template.xlsx", "name": "template.xlsx"}]
+        d.notes = [{"path": "/x/notes.txt", "name": "notes.txt"}]
+        d.writer_agent = "ChatGPT"
+        with mock.patch.object(BD, "AutomationWorker", self._Capture):
+            d._write()
+        files = self._Capture.seen["args"][2]
+        names = [f["name"] for f in files]
+        self.assertEqual(names, ["template.xlsx", "notes.txt"])
+        for f in files:
+            self.assertFalse(f["path"].lower().endswith((".dxf", ".dwg")))
+        prompt = self._Capture.seen["kwargs"]["custom_stages"][0][2][0]
+        self.assertIn("NOT attached", prompt)
+        self.assertNotIn("attached to this message", prompt)
+        self.assertNotIn("/secret/site.dxf", prompt)
+
+    def test_the_terminal_command_keeps_the_same_rule(self):
+        import inspect
+        import core_bridge as CB
+        src = inspect.getsource(CB.get_boq().__class__) if False else ""
+        import importlib, sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "prism_terminal"))
+        text = open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "prism_terminal", "prism.py"),
+            encoding="utf-8").read()
+        self.assertIn("write_files = templates + note_files", text)
+        self.assertNotIn("write_files = ([cad_file] if cad_file else [])", text)

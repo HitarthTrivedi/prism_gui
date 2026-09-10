@@ -530,12 +530,13 @@ class BoqDialog(PrismDialog):
             allow_derived=self.derive_cb.isChecked() or not self.q,
             has_cad=bool(self.q))
 
+        # Templates and notes only. The drawing itself is never attached to
+        # any AI stage -- the same rule Gerber and STEP keep. The writer is
+        # handed the MEASURED figures (in the prompt) and nothing else about
+        # the drawing; until 2026-09-10 the CAD file rode along here "so the
+        # tool could check", which put the customer's drawing on a third
+        # party's server for a formatting job that never needed it.
         files = list(self.templates) + list(self.notes)
-        if self.q and self.cad_path:
-            try:
-                files.insert(0, CB.files.attach(self.cad_path))
-            except Exception:
-                pass
 
         self._worker = AutomationWorker(
             {}, self.cfg, files, f"{self._run_prefix}{self.request}",

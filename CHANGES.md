@@ -71,6 +71,27 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 23 — the BOQ drawing never reaches an AI either
+
+The owner walked the BOQ flow and found the one gap in the rule every
+measuring add-on keeps: the drawing was measured here, the Standards and
+Interpret stages never saw it — but the Format stage attached the CAD
+file to the writing tool "so it could analyse the drawing itself".
+
+Now no stage receives the drawing, in the window and in the terminal's
+`/boq` alike; the writer is handed the measured summary (every layer,
+every block and count, the lengths and areas) and told plainly that the
+file is not attached, to build every line from those figures, and to
+flag anything only the layout could decide rather than invent it. BOM
+mode, which shares the writer, says the same. Templates and notes still
+travel.
+
+*Files:* `addons/boq/dialog.py`, `prism_terminal/prism.py`,
+`prism_terminal/core/boq.py`, `prism_terminal/core/bom.py`,
+`tests/test_boq_dialog.py`
+
+---
+
 # Round 22 — the prompts are written for the plan you confirmed
 
 The flaw behind the Canva run, named by the owner: the router wrote every

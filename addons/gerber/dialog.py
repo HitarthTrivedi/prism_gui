@@ -2,9 +2,9 @@
 
 Same shape as BOQ: one prompt, one drop target, the measuring happens the
 instant a file lands and before anything is typed. Where this has to be
-STRICTER than BOQ is the one place BOQ attaches the customer's drawing to
-the writing stage (`files.insert(0, CB.files.attach(self.cad_path))` in
-boq_dialog.py) — that is fine for a building drawing, and it is never fine
+STRICTER than BOQ WAS is the one place BOQ used to attach the customer's
+drawing to the writing stage (`files.insert(0, CB.files.attach(self.cad_path))`
+in boq_dialog.py, removed 2026-09-10 -- every measuring add-on keeps this rule now) — that is fine for a building drawing, and it is never fine
 for a Gerber set, because the Gerber files ARE the customer's product. This
 dialog never attaches them to anything; the write-up stage receives
 `core.gerber.agent_brief()` — five numbers and nothing else — and passes
