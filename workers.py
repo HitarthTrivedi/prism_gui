@@ -122,7 +122,8 @@ class AutomationWorker(_Worker):
                  resume_urls: dict | None = None,
                  skip_stages: list | None = None, followup: bool = False,
                  files_out: list | None = None,
-                 image_stages=None, failover: bool = True):
+                 image_stages=None, failover: bool = True,
+                 motion_skeleton: str = ""):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
@@ -164,6 +165,7 @@ class AutomationWorker(_Worker):
         # scene-at-a-time conversation the same way. Motion has no routed-run
         # auto-detection, so every caller names this stage explicitly.
         self.motion_design_stage = motion_design_stage
+        self.motion_skeleton = motion_skeleton
         self._stop = threading.Event()
         # One press skips one step: the engine clears it when it acts.
         self._skip = threading.Event()
@@ -208,6 +210,8 @@ class AutomationWorker(_Worker):
                 kwargs["reel_design_stage"] = self.reel_design_stage
             if self.motion_design_stage:
                 kwargs["motion_design_stage"] = self.motion_design_stage
+            if self.motion_skeleton:
+                kwargs["motion_skeleton"] = self.motion_skeleton
             if self.resume_urls:
                 kwargs["resume_urls"] = self.resume_urls
             if self.skip_stages:

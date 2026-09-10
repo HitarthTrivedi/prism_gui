@@ -242,12 +242,12 @@ class OneTurnPerScene(unittest.TestCase):
         self.assertIn("rises from the fold", ask.asked[0])
         self.assertIn("counts up", ask.asked[1])
 
-    def test_the_prompt_says_how_much_of_the_reply_to_spend(self):
-        """The one line that fixes the 278-character scene. `be more detailed`
-        is not actionable; a count is."""
+    def test_scene_has_a_full_turn_without_decorative_element_quotas(self):
         prompt = RW.scene_instructions(0, 3, {}, {"headline": "x"})
         self.assertIn("THIS WHOLE REPLY IS ONE SCENE", prompt)
-        self.assertRegex(prompt, r"\b12 to 30 elements\b")
+        self.assertIn("no minimum element count or animation count", prompt)
+        self.assertIn("readable hold", prompt)
+        self.assertNotIn("12 to 30 elements", prompt)
 
     def test_the_prompt_frees_the_scene_from_worrying_about_names(self):
         """Scoping is only half a win if the model still hedges. Telling it
@@ -361,11 +361,14 @@ class EachSceneIsLaidOutWhileItIsStillTheSubject(unittest.TestCase):
 
     def test_a_checker_that_explodes_does_not_take_the_reel_with_it(self):
         ask = Recorder([scene_reply() for _ in range(3)])
+        logs = []
 
         def check(spec):
             raise RuntimeError("no browser here")
-        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, check=check)
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, check=check, log=logs.append)
         self.assertEqual(len(spec["scenes"]), 3)
+        self.assertTrue(any("preflight unavailable" in line for line in logs))
+        self.assertFalse(any("preflight passed" in line for line in logs))
 
     def test_the_scene_is_checked_against_the_artwork_it_was_offered(self):
         """Without this the checker sees a spec with no assets, calls every
@@ -502,10 +505,11 @@ class WhatMadeOneReelWorkAndAnotherNot(unittest.TestCase):
         for trade in ("fabricator", "seed company", "workshop"):
             self.assertIn(trade, prompt, trade)
 
-    def test_it_asks_for_depth_rather_than_a_centred_block(self):
+    def test_layers_serve_legibility_without_forcing_decoration(self):
         prompt = RW.scene_instructions(0, 5, {}, {})
-        self.assertIn("LAYERS", prompt)
-        self.assertIn("Three depths", prompt)
+        self.assertIn("LAYER ORDER", prompt)
+        self.assertIn("add depth only when it clarifies the subject", prompt)
+        self.assertIn("Required copy must be the top readable layer", prompt)
 
     def test_a_count_may_be_drawn_rather_than_printed(self):
         """238 dots read as 238 holes. The number alone reads as a number."""

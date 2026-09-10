@@ -115,5 +115,23 @@ class ThePlanCall(unittest.TestCase):
         self.assertIn("Make a plan again", str(caught.exception))
 
 
+class StudioImageryGuardrail(unittest.TestCase):
+    def test_studio_reel_gets_visual_stage_when_planner_omits_it(self):
+        routing = {"media": {"needed": True, "questions": ["Film it."]}}
+        forced = R.apply_studio_imagery_guardrail(
+            "make a brand reel", routing,
+            {"media": "Prism Studio", "visual": "ChatGPT"})
+        self.assertTrue(forced)
+        self.assertTrue(routing["visual"]["needed"])
+
+    def test_explicit_type_only_request_stays_type_only(self):
+        routing = {"media": {"needed": True, "questions": ["Film it."]}}
+        forced = R.apply_studio_imagery_guardrail(
+            "make a typography-only reel without images", routing,
+            {"media": "Prism Studio", "visual": "ChatGPT"})
+        self.assertFalse(forced)
+        self.assertNotIn("visual", routing)
+
+
 if __name__ == "__main__":
     unittest.main()

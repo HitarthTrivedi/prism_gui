@@ -13,6 +13,8 @@ import subprocess
 import sys
 import time
 
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox, QProgressBar, QLabel, QPlainTextEdit
 
 import core_bridge as CB
@@ -25,6 +27,12 @@ from widgets.ask_panel import AskPanel
 
 
 class MotionDialog(PrismDialog):
+    # From the Motion Studio server's thread (core.motion.studio.serve) —
+    # a signal, never a widget, is what may cross that boundary.
+    edits_saved = Signal(list)
+    edits_rendered = Signal(list)
+    refine_requested = Signal(str, dict)
+
     def __init__(self, cfg: dict, attachments: list, parent=None):
         super().__init__(
             i18n.t("Make a Motion Graphic"),
@@ -48,7 +56,13 @@ class MotionDialog(PrismDialog):
         self.artifact_path = ""
         self._worker = None
         self._render_worker = None
+        self._followup_worker = None
         self._rec = None
+        self._edit_stop = None
+        self.request = ""
+        self.edits_saved.connect(self._on_edits_saved)
+        self.edits_rendered.connect(self._on_edits_rendered)
+        self.refine_requested.connect(self._on_editor_refine)
 
         root = self.body
         root.setSpacing(theme.ROW_GAP)
@@ -93,6 +107,14 @@ class MotionDialog(PrismDialog):
         self.script_view.setMinimumHeight(150)
         root.addWidget(self.script_view, stretch=1)
 
+        self.edit_btn = self.button(i18n.t("Edit in Studio"), "secondary",
+                                    small=True, on_click=self._edit_layout)
+        self.edit_btn.setEnabled(False)
+        self.edit_btn.setToolTip(i18n.t(
+            "Open the motion graphic in your browser: scenes, continuity "
+            "threads, camera shots, glass and handoffs, with start, "
+            "midpoint, settled and exit previews of every shot."))
+        self.footer.add_utility(self.edit_btn)
         self.play_btn = self.button(i18n.t("Play"), "secondary",
                                     icon_name="play", small=True,
                                     on_click=self._play)
@@ -111,6 +133,40 @@ class MotionDialog(PrismDialog):
 
         if attachments:
             self._absorb([a["path"] for a in attachments])
+
+        # The newest saved motion graphic is back on the bench, so closing
+        # the window after a render does not orphan it — same reason
+        # ReelDialog restores the last Studio reel.
+        last = self._last_motion_project()
+        if last:
+            self.spec, self.out_path = last
+            self.request = str((self.spec.get("_studio") or {}).get("request", ""))
+            if os.path.exists(self.out_path):
+                self.play_btn.setEnabled(True)
+                self.folder_btn.setEnabled(True)
+            self._refresh_edit_btn()
+
+    @staticmethod
+    def _last_motion_project():
+        """(spec, mp4 path) of the newest saved motion graphic, or None.
+        Only the newest twenty records are tried; this runs at every open."""
+        folder = CB.config.RUNS_DIR
+        if not os.path.isdir(folder):
+            return None
+        names = sorted((n for n in os.listdir(folder)
+                        if n.startswith("motion_") and n.endswith(".json")),
+                       reverse=True)
+        for name in names[:20]:
+            path = os.path.join(folder, name)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    spec = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(spec, dict) and isinstance(spec.get("scenes"), list) \
+                    and spec["scenes"]:
+                return spec, path[:-5] + ".mp4"
+        return None
 
     # ── inputs ──────────────────────────────────────────────────────────
 
@@ -195,12 +251,14 @@ class MotionDialog(PrismDialog):
         self.request = request
 
         self._busy(True, f"{writer} is planning the storyboard…")
-        prompt = self.motion_generate.storyboard_instructions(request, self.brand)
+        prompt = self.motion_generate.storyboard_instructions(
+            request, self.brand, skeleton="cinematic_glass")
         self._worker = AutomationWorker(
             {}, self.cfg, self.images, f"motion graphic — {request}",
             custom_stages=[("storyboard", writer, [prompt])],
             chatgpt_analysis=False,
-            motion_design_stage="storyboard")
+            motion_design_stage="storyboard",
+            motion_skeleton="cinematic_glass")
         self._worker.stage_event.connect(self._on_motion_event)
         self._worker.done.connect(self._on_storyboard)
         self._worker.failed.connect(self._on_failed)
@@ -236,6 +294,7 @@ class MotionDialog(PrismDialog):
                    if links.get("storyboard") else ""))
             return
         self.spec = spec
+        spec.setdefault("_studio", {})["request"] = self.request
         self._start_render(spec)
 
     def _start_render(self, spec: dict):
@@ -267,9 +326,116 @@ class MotionDialog(PrismDialog):
     def _on_frames(self, done: int, total: int):
         self.progress.setValue(int(done / max(1, total) * 100))
 
+    # ── the Studio editing surface ──────────────────────────────────────
+
+    def _refresh_edit_btn(self):
+        self.edit_btn.setEnabled(bool(self.spec))
+
+    def _edit_layout(self):
+        """Open the motion graphic in the browser with the edit layer on.
+
+        The page plays the SAME runtime the renderer films, fed by the
+        same edit records the renderer applies — fix a pose or a handoff
+        by eye there, press Render MP4, and the film cannot differ.
+        """
+        if not self.spec:
+            return
+        self._stop_editor()
+        studio = CB.get_motion_studio()
+        try:
+            url, self._edit_stop = studio.serve(
+                self.spec,
+                on_save=self.edits_saved.emit,
+                on_render=self.edits_rendered.emit,
+                on_refine=self.refine_requested.emit)
+        except Exception as e:                          # noqa: BLE001
+            QMessageBox.warning(self, "Motion Graphics", i18n.t(
+                "Could not open the editor: {error}").format(error=e))
+            return
+        QDesktopServices.openUrl(QUrl(url))
+        self.status.setText(i18n.t(
+            "The motion graphic is open in your browser. Select a layer or "
+            "a thread, adjust it, then press Render MP4 there — the new "
+            "video renders here."))
+
+    def _keep_edits(self, edits: list):
+        """The edits onto the spec and the spec back onto disk, so the saved
+        copy re-renders with them even next year."""
+        if not self.spec:
+            return
+        if edits:
+            self.spec["_motion_edits"] = edits
+        else:
+            self.spec.pop("_motion_edits", None)
+        if self.out_path.endswith(".mp4"):
+            try:
+                with open(self.out_path[:-4] + ".json", "w", encoding="utf-8") as f:
+                    json.dump(self.spec, f, indent=2)
+            except OSError:
+                pass    # the render still carries the edits in memory
+
+    def _on_edits_saved(self, edits: list):
+        self._keep_edits(edits)
+        self.status.setText(i18n.t(
+            "Layout saved — {n} change(s). Press Render MP4 in the browser "
+            "when you are happy with it.").format(n=len(edits)))
+
+    def _on_edits_rendered(self, edits: list):
+        self._keep_edits(edits)
+        self._stop_editor()
+        self._start_render(self.spec)
+
+    def _on_editor_refine(self, change: str, selection: dict):
+        """A prompt from the Studio, scoped to the selected scene, layer
+        and continuity thread — one scene is rewritten, not the piece."""
+        if not self.spec:
+            return
+        active = CB.config.active_agents(self.cfg)
+        writer = (self.cfg.get("motion_agent") or active.get("brains")
+                  or active.get("content"))
+        if not writer:
+            self.status.setText(i18n.t(
+                "No writing agent set up yet — open Agents first."))
+            return
+        studio = CB.get_motion_studio()
+        prompt = studio.followup_prompt(change, selection, self.spec)
+        self._refine_scene = int(selection.get("scene_index", 0) or 0)
+        self._stop_editor()
+        self._busy(True, i18n.t("{agent} is rewriting scene {n}…").format(
+            agent=writer, n=self._refine_scene + 1))
+        self._followup_worker = AutomationWorker(
+            {}, self.cfg, self.images, f"motion refinement — {change}",
+            custom_stages=[("refine", writer, [prompt])],
+            chatgpt_analysis=False)
+        self._followup_worker.done.connect(self._on_refined)
+        self._followup_worker.failed.connect(self._on_failed)
+        self._followup_worker.start()
+
+    def _on_refined(self, responses: dict, links: dict):
+        texts = [t for t in (responses.get("refine") or []) if t.strip()]
+        studio = CB.get_motion_studio()
+        new_spec, note = studio.apply_followup(
+            self.spec, getattr(self, "_refine_scene", 0), texts[-1] if texts else "")
+        if new_spec is None:
+            self._busy(False, "")
+            QMessageBox.warning(self, "Motion Graphics", note)
+            return
+        self.spec = new_spec
+        self.status.setText(note)
+        self._start_render(self.spec)
+
+    def _stop_editor(self):
+        if self._edit_stop is not None:
+            try:
+                self._edit_stop()
+            except Exception:                           # noqa: BLE001
+                pass
+            self._edit_stop = None
+
     def _on_rendered(self, path: str):
         self.play_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
+        self._refresh_edit_btn()
         try:
             self.artifact_path = CB.config.save_artifact(
                 path, self.request, kind="motion", task=self.request)
@@ -293,8 +459,10 @@ class MotionDialog(PrismDialog):
         A QThread destroyed while still running aborts the whole process —
         see ReelDialog.closeEvent() for the same fix, applied there first.
         """
+        self._stop_editor()
         for worker in (getattr(self, "_worker", None),
                        getattr(self, "_render_worker", None),
+                       getattr(self, "_followup_worker", None),
                        getattr(self, "_rec", None)):
             if worker is None or not worker.isRunning():
                 continue

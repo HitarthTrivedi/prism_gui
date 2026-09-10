@@ -30,6 +30,33 @@ def spec():
 
 
 class StableElementIdentity(unittest.TestCase):
+    def test_duplicate_identity_migration_preserves_edits_on_later_scenes(self):
+        project = {"scenes": [{"html": '<p data-prism-id="same">First</p>'},
+                               {"html": '<p data-prism-id="same">Second</p>'}],
+                   "edits": [{"scene": 0, "element_id": "same", "dx": 10},
+                             {"scene": 1, "element_id": "same", "dx": 20}]}
+        edit.ensure_stable_ids(project)
+        self.assertEqual(project["edits"][0]["element_id"], "same")
+        replacement = project["edits"][1]["element_id"]
+        self.assertNotEqual(replacement, "same")
+        self.assertIn(f'data-prism-id="{replacement}"', project["scenes"][1]["html"])
+
+    def test_insertions_preserve_later_ids_and_duplicate_ids_are_unique(self):
+        import copy
+        import re
+        project = {"scenes": [
+            {"html": '<b>new</b><p data-prism-id="el-1-1">existing</p>'},
+            {"studio_id": "scene-1", "html": '<p data-prism-id="el-1-1">copy</p>'},
+            {"studio_id": "scene-1", "html": '<p>third</p>'}]}
+        edit.ensure_stable_ids(project)
+        self.assertIn('data-prism-id="el-1-1">existing', project["scenes"][0]["html"])
+        ids = re.findall(r'data-prism-id="([^"]+)"', "".join(sc["html"] for sc in project["scenes"]))
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len({sc["studio_id"] for sc in project["scenes"]}), 3)
+        self.assertEqual(project["scenes"][1]["studio_id"], "scene-1")
+        saved = copy.deepcopy(project)
+        edit.ensure_stable_ids(project)
+        self.assertEqual(project, saved)
     def test_migration_persists_ids_and_new_edits_target_them(self):
         project = spec()
         edit.ensure_stable_ids(project)
@@ -113,6 +140,51 @@ class StudioWorkspaceBrowser(unittest.TestCase):
 
 @unittest.skipUnless(_render_tests_enabled(), "render lane not enabled")
 class GoldenFrameParity(unittest.TestCase):
+    def test_svg_stroke_is_painted_at_the_sought_time_not_previous_frame(self):
+        from PIL import Image, ImageChops, ImageStat
+        project = {"fps": 10, "design": {"cut_ms": 0, "css": ".scene{background:white}"},
+            "scenes": [{"seconds": 1.5,
+                "html": "<svg width='808' height='280' style='position:absolute;left:136px;top:1010px' viewBox='0 0 808 280'><path d='M240 140 H568'/></svg>",
+                "css": "path{fill:none;stroke:#ce4939;stroke-width:5;stroke-dasharray:1100;stroke-dashoffset:0;animation:trace 1s both}@keyframes trace{from{stroke-dashoffset:1100}to{stroke-dashoffset:0}}"}]}
+        with tempfile.TemporaryDirectory() as folder:
+            preview, movie, exported = [os.path.join(folder, name) for name in ("preview.png", "movie.mp4", "exported.png")]
+            web.still(project, 12, preview)
+            # Assert the actual endpoint, not only an easy-to-pass whole-frame
+            # average dominated by the blank background.
+            a = Image.open(preview).convert("RGB")
+            red, green, blue = a.getpixel((690, 1150))
+            self.assertGreater(red - green, 70, (red, green, blue))
+            web.render(project, movie)
+            subprocess.run([web.ffmpeg_path(), "-y", "-loglevel", "error", "-i", movie,
+                            "-vf", "select=eq(n\\,12)", "-frames:v", "1", exported], check=True)
+            roi = (370, 1144, 710, 1156)
+            b = Image.open(exported).convert("RGB")
+            mae = sum(ImageStat.Stat(ImageChops.difference(a.crop(roi), b.crop(roi))).mean) / 3
+            self.assertLess(mae, 12.0)
+
+    def test_edited_multiscene_preview_matches_export_including_the_cut(self):
+        from PIL import Image, ImageChops, ImageStat
+        project = spec()
+        project["design"] = {"cut_ms": 200, "css": ".scene{position:relative}"}
+        project["scenes"][0]["html"] = "<p class='safe' data-prism-id='headline'>First frame</p>"
+        project["scenes"].append({"seconds": 1.5, "css": ".scene{position:relative;background:#403052}.safe{position:absolute;left:180px;top:600px;color:white;font:70px Arial}",
+                                   "html": "<p class='safe'>Second frame</p>"})
+        project["edits"] = [{"scene": 0, "element_id": "headline", "dx": 70, "dy": 60, "scale": 1}]
+        with tempfile.TemporaryDirectory() as folder:
+            movie = os.path.join(folder, "movie.mp4")
+            web.render(project, movie)
+            for frame in (5, 14, 20):
+                with self.subTest(frame=frame):
+                    preview = os.path.join(folder, f"preview-{frame}.png")
+                    exported = os.path.join(folder, f"exported-{frame}.png")
+                    web.still(project, frame, preview)
+                    subprocess.run([web.ffmpeg_path(), "-y", "-loglevel", "error",
+                                    "-i", movie, "-vf", f"select=eq(n\\,{frame})",
+                                    "-frames:v", "1", exported], check=True)
+                    a, b = Image.open(preview).convert("RGB"), Image.open(exported).convert("RGB")
+                    mae = sum(ImageStat.Stat(ImageChops.difference(a, b)).mean) / 3
+                    self.assertLess(mae, 9.0)
+
     def test_preview_and_exported_mp4_are_pixel_close_at_the_same_frame(self):
         from PIL import Image, ImageChops, ImageStat
         project = spec()

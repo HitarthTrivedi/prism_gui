@@ -75,6 +75,11 @@ class TheQuestionPutToTheDesignChat(unittest.TestCase):
 
 class ReadingTheReply(unittest.TestCase):
 
+    def test_a_storyboard_with_shared_css_is_not_an_executable_change(self):
+        raw = json.dumps({"design": {"css": ".scene{color:red}"},
+                          "storyboard": [{"scene": 1, "concept": "warmer"}]})
+        self.assertIsNone(RW.parse_followup(raw, 3))
+
     def test_numbered_scenes_come_back_zero_based(self):
         got = RW.parse_followup(reply([{"scene": 2, "seconds": 5, "cut": "zoom",
                                         "css": ".b{}", "html": "<p>new</p>"}]), 3)
@@ -141,6 +146,19 @@ class ApplyingTheChange(unittest.TestCase):
 
 
 class TheWholeTurn(unittest.TestCase):
+
+    def test_storyboard_reply_is_retried_for_renderable_scenes(self):
+        prompts = []
+        replies = iter([json.dumps({"design": {"css": "body{}"},
+                                   "storyboard": [{"scene": 1}]}),
+                        reply([{"scene": 1, "html": "<p>Revised</p>"}])])
+        def ask(prompt, expect=""):
+            prompts.append(prompt)
+            return next(replies)
+        new, _ = RW.refine_spec(SPEC, "fix the render", ask)
+        self.assertEqual(new["scenes"][0]["html"], "<p>Revised</p>")
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("cannot be rendered", prompts[1])
 
     def test_one_turn_changes_the_scene_and_says_so(self):
         prompts = []

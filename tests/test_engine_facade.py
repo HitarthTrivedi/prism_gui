@@ -15,7 +15,7 @@ Why the exceptions are what they are:
   · core_bridge.py itself is the bridge.
   · tests/ may import the engine directly; a test that had to go through the
     bridge could not test the bridge.
-  · devtools/ are developer scripts that are never packaged
+  · devtools/ and examples/ are developer scripts that are never packaged
     (packaging/prism.spec excludes the whole directory) and deliberately
     re-implement the sys.path dance so they can run standalone.
 """
@@ -27,7 +27,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "release", "prism_terminal",
-             ".venv", "node_modules", "tests", "devtools", "videos"}
+             ".venv", "node_modules", "tests", "devtools", "examples", "videos"}
 
 # Relative paths allowed to import the engine directly.
 ALLOWED = {"core_bridge.py"}

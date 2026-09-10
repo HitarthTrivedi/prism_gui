@@ -3029,6 +3029,31 @@ class MainWindow(QMainWindow):
                 continue
             if CB.get_reel_edit().is_studio_spec(spec):
                 return url, spec_path, spec
+        # An export failure has no media link, but its project was saved
+        # before encoding. Recover only the exact design conversation; using
+        # the newest reel globally could send a change to another client's job.
+        design_url = str((links or {}).get("design") or "").strip().rstrip("/")
+        if not design_url:
+            return None
+        import pathlib
+        try:
+            candidates = sorted(pathlib.Path(CB.config.RUNS_DIR).glob("reel_*.json"),
+                                key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return None
+        for candidate in candidates:
+            try:
+                with candidate.open(encoding="utf-8") as f:
+                    spec = _json.load(f)
+                if not isinstance(spec, dict):
+                    continue
+                saved_url = str((spec.get("_studio") or {}).get("design_url") or "")
+                if saved_url.strip().rstrip("/") != design_url:
+                    continue
+                if CB.get_reel_edit().is_studio_spec(spec):
+                    return str(candidate.with_suffix(".mp4")), str(candidate), spec
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
         return None
 
     def _start_studio_followup(self, reel, design_url: str, agent: str,

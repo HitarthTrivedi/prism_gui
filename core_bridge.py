@@ -392,7 +392,8 @@ def studio_assets_selftest() -> tuple[bool, str]:
         import os
         render = importlib.import_module("core.motion.render")
         runtime = os.path.join(os.path.dirname(render.__file__), "runtime")
-        for name in ("index.html", "runtime.js", "render_runner.js", "gsap.min.js"):
+        for name in ("index.html", "runtime.js", "render_runner.js", "gsap.min.js",
+                     "studio.js", "studio.css"):
             if not os.path.isfile(os.path.join(runtime, name)):
                 problems.append(f"motion/runtime/{name} missing")
     except Exception as e:                      # noqa: BLE001
@@ -435,6 +436,14 @@ def motion_available() -> tuple[bool, str]:
 def get_motion():
     from core import motion
     return motion
+
+
+def get_motion_studio():
+    """The browser editing surface for Motion graphics — scenes, continuity
+    threads, camera shots, glass material, handoffs and review points; the
+    Motion counterpart of get_reel_edit()."""
+    from core.motion import studio
+    return studio
 
 
 def get_motion_generate():

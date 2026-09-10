@@ -37,6 +37,25 @@ def spec(html, css=""):
 @unittest.skipUnless(READY, f"needs the web renderer: {WHY}")
 class TwoTextsPrintedOverEachOther(unittest.TestCase):
 
+    def test_scene_root_position_cannot_stack_later_scenes_below_frame(self):
+        project = spec("<p class='t' style='left:150px;top:500px'>First</p>")
+        project["design"]["css"] += ".scene{position:relative}"
+        project["scenes"].append({"seconds": 3, "css": ".scene{position:relative}",
+                                  "html": "<p class='t' style='left:150px;top:500px'>Second</p>"})
+        self.assertEqual(RW.inspect(project), [])
+
+    def test_multiple_filled_animations_are_valid(self):
+        project = spec("<p class='t a' style='left:150px;top:500px'>Moving</p>",
+                       ".a{animation:fade 300ms both,rise 400ms both}"
+                       "@keyframes fade{from{opacity:0}to{opacity:1}}"
+                       "@keyframes rise{from{transform:translateY(10px)}to{transform:translateY(0)}}")
+        self.assertEqual(RW.inspect(project), [])
+
+    def test_inspection_checks_the_saved_edit_not_just_original_markup(self):
+        project = spec("<p class='t' data-prism-id='headline' style='left:150px;top:500px'>Edited</p>")
+        project["edits"] = [{"scene": 0, "element_id": "headline", "dx": 1200, "dy": 0, "scale": 1}]
+        self.assertTrue(any("outside" in f for f in RW.inspect(project)))
+
     def test_are_reported_with_both_names(self):
         faults = RW.inspect(spec(
             "<p class='t' style='left:100px;top:300px'>BRAND GUIDELINES</p>"

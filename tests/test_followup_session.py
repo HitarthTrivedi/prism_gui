@@ -136,6 +136,35 @@ class TheFollowupPrompt(FollowupBase):
 
 class AReelGoesBackToItsDesignChat(FollowupBase):
 
+    def test_failed_export_recovers_project_and_uses_studio_worker(self):
+        win = self._win()
+        win._stage_agents = {"design": "ChatGPT", "media": "Prism Studio"}
+        project = {"design": {"css": ""},
+                   "_studio": {"design_url": "https://chatgpt.com/c/2"},
+                   "scenes": [{"html": "<p>Recover me</p>", "seconds": 4}]}
+        with open(os.path.join(self.tmp, "reel_failed.json"), "w") as f:
+            json.dump(project, f)
+        # Neither a broken record nor a newer, unrelated project may win.
+        with open(os.path.join(self.tmp, "reel_broken.json"), "w") as f:
+            f.write("{")
+        project["_studio"]["design_url"] = "https://chatgpt.com/c/other"
+        with open(os.path.join(self.tmp, "reel_unrelated.json"), "w") as f:
+            json.dump(project, f)
+        with mock.patch.object(CB.config, "RUNS_DIR", self.tmp):
+            studio, _, auto = self._offer(
+                win, {"design": ["storyboard"]},
+                {"design": "https://chatgpt.com/c/2/"}, text="fix and render")
+        self.assertTrue(studio.called)
+        auto.assert_not_called()
+        self.assertEqual(studio.call_args[0][1]["scenes"][0]["html"], "<p>Recover me</p>")
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "reel_failed.mp4")))
+
+    def test_missing_matching_project_does_not_recover_some_other_task(self):
+        win = self._win()
+        self._filmed()
+        with mock.patch.object(CB.config, "RUNS_DIR", self.tmp):
+            self.assertIsNone(win._studio_reel_in({"design": "https://chatgpt.com/c/unknown"}))
+
     def _links(self, mp4, design=True):
         links = {"content": "https://chatgpt.com/c/1", "media": mp4}
         if design:
