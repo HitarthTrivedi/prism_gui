@@ -61,8 +61,8 @@ _app = QApplication.instance() or QApplication([])
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "release", "videos",
-             "prism_terminal", ".venv", "node_modules", "tests", "devtools",
-             ".claude"}
+             "prism_terminal", ".venv", "venv", "node_modules", "tests",
+             "devtools", ".claude"}
 
 # The one place a bare QThread subclass is correct: the anchor itself.
 ANCHOR_FILE = "workers.py"

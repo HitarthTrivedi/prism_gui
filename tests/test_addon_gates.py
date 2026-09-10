@@ -58,6 +58,7 @@ ADDON_FEATURES = {
     "gerber": "boq",
     "step": "boq",
     "email": "email",
+    "leads": "leads",
     "reel": "reel",
     "motion": "reel",
 }

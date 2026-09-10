@@ -48,6 +48,8 @@ from widgets.catalog_panel import CatalogPanel
 from addons.email.panel import EmailPanel
 from addons.gerber.panel import GerberPanel
 from addons.step.panel import StepPanel
+from addons.leads.panel import LeadsPanel
+from addons.leads.dialog import LeadsDialog
 from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
@@ -103,7 +105,8 @@ SCREENS = (
     "artifacts",
     "inquiry_work",     # reached only by drilling in from the launcher panel
     "bom",
-    "step",             # appended last, like bom: nothing above renumbers
+    "step",
+    "leads",            # appended last: nothing above renumbers
 )
 _INDEX = {name: i for i, name in enumerate(SCREENS)}
 
@@ -392,7 +395,9 @@ class MainWindow(QMainWindow):
         self.bom_panel = BomPanel(self.cfg)
         self.screens.addWidget(self.bom_panel)              # BOM
         self.step_panel = StepPanel(self.cfg)
-        self.screens.addWidget(self.step_panel)             # STEP (last: no renumber)
+        self.screens.addWidget(self.step_panel)             # STEP
+        self.leads_panel = LeadsPanel(self.cfg)
+        self.screens.addWidget(self.leads_panel)            # LEADS (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -429,6 +434,7 @@ class MainWindow(QMainWindow):
         self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
         self.email_panel.open_compose.connect(self._open_email_dialog)
         self.email_panel.change_account.connect(self._open_email_setup)
+        self.leads_panel.opened.connect(self._open_leads_dialog)
         # The screens that now offer a way onward. Same pattern as
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
@@ -437,7 +443,7 @@ class MainWindow(QMainWindow):
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
-                      self.step_panel, self.email_panel):
+                      self.step_panel, self.email_panel, self.leads_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -1159,6 +1165,8 @@ class MainWindow(QMainWindow):
             self._open_gerber()
         elif key == "step":
             self._open_step()
+        elif key == "leads":
+            self._open_leads()
         elif key == "inquiry":
             self._open_inquiry()
 
@@ -1421,6 +1429,17 @@ class MainWindow(QMainWindow):
         StepDialog(self.cfg, self.attachments, self).exec()
         # A run finished in the dialog must show on the screen behind it.
         self.step_panel.refresh()
+
+    def _open_leads(self):
+        # Front door first, like BOQ/Email: the rail switches screens, and the
+        # screen's button opens the workbench. Gated on the "leads" feature.
+        self._authorized_then("leads", "addon",
+                              lambda: self._show_screen("leads"))
+
+    def _open_leads_dialog(self):
+        LeadsDialog(self.cfg, self).exec()
+        # A run finished in the dialog must show on the screen behind it.
+        self.leads_panel.refresh()
 
     def _open_email(self):
         self._authorized_then("email", "addon",

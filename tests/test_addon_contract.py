@@ -349,8 +349,8 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     # never drift from" the rail.
     # step (order 35) sits between Gerber and Email so the three measuring
     # add-ons are neighbours on both shelves -- see addons/step/addon.py.
-    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "step", "email", "bom"]
-    GOLDEN_HOME = ["inquiry", "boq", "gerber", "step", "email", "reel",
+    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "step", "email", "leads", "bom"]
+    GOLDEN_HOME = ["inquiry", "boq", "gerber", "step", "email", "leads", "reel",
                    "motion", "bom"]
 
     def test_the_rail_shelf_is_what_we_decided(self):
