@@ -94,6 +94,7 @@ class _FakeUC(types.ModuleType):
         super().__init__("undetected_chromedriver")
         self.failures = list(failures)
         self.calls = []
+        self.driver_paths = []
         fake = self
 
         class ChromeOptions:
@@ -101,8 +102,10 @@ class _FakeUC(types.ModuleType):
                 pass
 
         class Chrome:
-            def __init__(self, options=None, user_data_dir=None, version_main=None):
+            def __init__(self, options=None, user_data_dir=None, version_main=None,
+                         driver_executable_path=None):
                 fake.calls.append(version_main)
+                fake.driver_paths.append(driver_executable_path)
                 if fake.failures:
                     raise fake.failures.pop(0)
                 self.current_url = "about:blank"
@@ -122,11 +125,12 @@ class TheCleanupAndTheRetry(unittest.TestCase):
         with open(self.driver, "wb") as f:
             f.write(data)
 
-    def _run(self, fake, system="Darwin", machine="arm64"):
+    def _run(self, fake, system="Darwin", machine="arm64", own_driver=""):
         quiet = ("seed_profile", "_clear_profile_locks", "_release_profile",
                  "_prune_preferences", "_ensure_session_restore", "_reset_to_blank_tab")
         patches = [mock.patch.object(AU, name) for name in quiet]
         patches += [
+            mock.patch.object(AU, "_apple_silicon_driver", return_value=own_driver),
             mock.patch.object(AU, "profile_is_seeded", return_value=True),
             mock.patch.object(AU, "detect_chrome_version", return_value=None),
             mock.patch.object(AU, "_uc_cache_dir", return_value=self.cache),
@@ -176,6 +180,98 @@ class TheCleanupAndTheRetry(unittest.TestCase):
         self.assertIn("Rosetta", msg)
         self.assertIn("undetected_chromedriver", msg)
         self.assertNotIn("Traceback", msg)
+
+
+    def test_prisms_own_arm64_driver_is_handed_to_uc_on_apple_silicon(self):
+        own = os.path.join(self.cache, "own-chromedriver")
+        with open(own, "wb") as f:
+            f.write(_thin(AU._MACHO_ARM64))
+        fake = _FakeUC([])
+        self._run(fake, own_driver=own)
+        self.assertEqual(fake.driver_paths, [own])
+
+    def test_without_an_own_driver_uc_chooses_as_before(self):
+        fake = _FakeUC([])
+        self._run(fake, own_driver="")
+        self.assertEqual(fake.driver_paths, [None])
+
+    def test_an_undeletable_driver_folder_is_moved_aside(self):
+        self._put(_thin(AU._MACHO_X86_64))
+        parent = os.path.dirname(self.cache)
+        with mock.patch.object(AU, "_uc_cache_dir", return_value=self.cache), \
+                mock.patch.object(AU.os, "remove", side_effect=PermissionError("nope")):
+            AU._purge_uc_cache("test")
+        self.assertFalse(os.path.exists(self.cache), "the folder was renamed away")
+        aside = [d for d in os.listdir(parent)
+                 if d.startswith(os.path.basename(self.cache) + ".intel-")]
+        self.assertEqual(len(aside), 1, aside)
+
+
+class FetchingTheArm64Driver(unittest.TestCase):
+    """_apple_silicon_driver talks to Chrome-for-Testing through _http_get;
+    here that is a fake that serves a version string and a zip holding a
+    fake arm64 Mach-O, so nothing leaves the machine."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="prism-own-driver-")
+        self.fetched = []
+
+    def _serve(self, arch=AU._MACHO_ARM64):
+        import io
+        import zipfile
+
+        def get(url, timeout=60.0):
+            self.fetched.append(url)
+            if "LATEST_RELEASE" in url:
+                return b"152.0.7977.82\n"
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("chromedriver-mac-arm64/LICENSE", "x")
+                z.writestr("chromedriver-mac-arm64/chromedriver", _thin(arch))
+            return buf.getvalue()
+        return get
+
+    def _patched(self, get, system="Darwin", machine="arm64"):
+        ps = [mock.patch.object(AU, "_http_get", side_effect=get),
+              mock.patch.object(AU, "_PRISM_DRIVER_DIR", self.dir),
+              mock.patch.object(AU.platform, "system", return_value=system),
+              mock.patch.object(AU.platform, "machine", return_value=machine)]
+        for p in ps:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_downloads_once_per_chrome_major_and_reuses_it(self):
+        self._patched(self._serve())
+        path = AU._apple_silicon_driver(152)
+        self.assertTrue(path.endswith(os.path.join("152", "chromedriver")))
+        self.assertTrue(os.access(path, os.X_OK))
+        self.assertEqual(AU._macho_arches(path), {"arm64"})
+        self.assertIn("LATEST_RELEASE_152", self.fetched[0])
+        self.assertIn("/mac-arm64/chromedriver-mac-arm64.zip", self.fetched[1])
+        again = AU._apple_silicon_driver(152)
+        self.assertEqual(again, path)
+        self.assertEqual(len(self.fetched), 2, "the second call did not download")
+
+    def test_an_unknown_chrome_version_uses_the_stable_feed(self):
+        self._patched(self._serve())
+        AU._apple_silicon_driver(None)
+        self.assertIn("LATEST_RELEASE_STABLE", self.fetched[0])
+
+    def test_a_download_that_is_not_arm64_is_refused(self):
+        self._patched(self._serve(arch=AU._MACHO_X86_64))
+        self.assertEqual(AU._apple_silicon_driver(152), "")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "152", "chromedriver")))
+
+    def test_a_failed_download_falls_back_to_uc(self):
+        def boom(url, timeout=60.0):
+            raise OSError("offline")
+        self._patched(boom)
+        self.assertEqual(AU._apple_silicon_driver(152), "")
+
+    def test_nothing_happens_off_apple_silicon(self):
+        self._patched(self._serve(), system="Linux", machine="x86_64")
+        self.assertEqual(AU._apple_silicon_driver(152), "")
+        self.assertEqual(self.fetched, [])
 
 
 if __name__ == "__main__":

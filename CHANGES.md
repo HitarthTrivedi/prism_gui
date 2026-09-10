@@ -10,6 +10,26 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.2 — Prism brings its own Apple silicon driver
+
+The client's M2 updated to 1.5.1 and still stopped with errno 86 on the
+retry. The reason is inside undetected-chromedriver: it unlinks and
+re-downloads the driver on every launch, and when the unlink is refused
+(the migrated folder was not writable) it silently reuses the file that
+is there — the Intel one. So Prism's cleanup and purge could both fail
+and the same driver ran again.
+
+**Now:** on Apple silicon Prism fetches the `mac-arm64` chromedriver
+itself from Chrome for Testing into `~/.prism/chromedriver/<major>/`,
+checks the Mach-O header says arm64, and hands that path to
+undetected-chromedriver, which only patches it. Its own cache no longer
+decides anything. A driver folder that cannot be emptied is moved aside.
+The message now says: press Start again; if it comes back, the one
+`rm -rf` line; then Export diagnostics. Intel Macs, Windows and Linux are
+untouched, and a failed download falls back to the old behaviour.
+
+---
+
 # 1.5.1 — an Intel driver on an M2 is found, removed and explained
 
 Found by the first client install of the Apple silicon DMG (10 Sep 2026):
