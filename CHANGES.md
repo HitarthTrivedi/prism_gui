@@ -71,6 +71,24 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 24 — a sample BOQ tells the writer what it is making
+
+The owner's idea, after comparing a numbers-only BOQ with one written
+from the drawing: do not give the AI the drawing, give it one of the
+firm's own BOQs. The plumbing already existed — a `.docx`/`.xlsx`/`.pdf`
+attached to the BOQ window was classed as a template and handed to the
+Interpret and Format stages — but the screen never said so, and the
+writer was told to treat it as a "style guide, take inspiration". Now the
+BOQ front door offers it as a step, and the writer is told the sample
+defines the document: its sections, columns, numbering, level of detail,
+wording, units and boilerplate, and its design decisions for comparable
+items, filled with this drawing's measured numbers, never its rows.
+
+*Files:* `prism_terminal/core/boq.py`, `addons/boq/panel.py`,
+`tests/test_boq_dialog.py`
+
+---
+
 # Round 23 — the BOQ drawing never reaches an AI either
 
 The owner walked the BOQ flow and found the one gap in the rule every

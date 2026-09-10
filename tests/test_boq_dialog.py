@@ -180,3 +180,36 @@ class TheDrawingNeverReachesAnAI(unittest.TestCase):
             encoding="utf-8").read()
         self.assertIn("write_files = templates + note_files", text)
         self.assertNotIn("write_files = ([cad_file] if cad_file else [])", text)
+
+
+class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
+    """Attach one of the firm's own BOQs and the writer is told to make THAT
+    document, filled with this drawing's numbers -- the drawing itself
+    still never goes (10 Sep 2026)."""
+
+    def test_a_docx_xlsx_or_pdf_is_a_template_and_goes_to_the_writer(self):
+        import core_bridge as CB
+        boq = CB.get_boq()
+        cad, templates, images, notes = boq.classify_inputs([
+            {"path": "/x/site.dwg", "name": "site.dwg"},
+            {"path": "/x/last_year_boq.xlsx", "name": "last_year_boq.xlsx"},
+            {"path": "/x/sample.pdf", "name": "sample.pdf"},
+            {"path": "/x/legend.png", "name": "legend.png"}])
+        self.assertEqual([t["name"] for t in templates],
+                         ["last_year_boq.xlsx", "sample.pdf"])
+        self.assertEqual([c["name"] for c in cad], ["site.dwg"])
+
+    def test_the_writer_is_told_the_sample_defines_the_document(self):
+        import core_bridge as CB
+        boq = CB.get_boq()
+        with_sample = boq.formatting_prompt("WALLS 12.00 m", has_template=True)
+        self.assertIn("A SAMPLE BOQ IS ATTACHED", with_sample)
+        self.assertIn("defines what you are making", with_sample)
+        self.assertIn("do not copy the sample's rows or quantities", with_sample)
+        without = boq.formatting_prompt("WALLS 12.00 m", has_template=False)
+        self.assertNotIn("SAMPLE BOQ", without)
+
+    def test_the_front_door_says_so(self):
+        from addons.boq.panel import BoqPanel
+        titles = [step[1] for step in BoqPanel.STEPS]
+        self.assertIn("Attach a sample BOQ too", titles)
