@@ -106,16 +106,33 @@ class MeasuredTable(QWidget):
     # ── data ─────────────────────────────────────────────────────────────
     def set_quantities(self, q: dict):
         unit = q.get("unit") or "unspecified"
+        site = q.get("site") or {}
+        inferred = site.get("unit_inferred") if not q.get("unit_confirmed", True) else ""
+        shown_unit = (i18n.t("{unit} (inferred from the coordinates)").format(unit=inferred)
+                      if inferred else unit)
         self.header.setText(i18n.t(
             "Drawing units: {unit} · {entities:,} entities · {layers} layers").format(
-            unit=unit, entities=int(q.get("entity_count") or 0),
+            unit=shown_unit, entities=int(q.get("entity_count") or 0),
             layers=len(q.get("layers") or [])))
         warnings = []
-        if not q.get("unit_confirmed", q.get("unit_code", 0) != 0):
+        if inferred:
+            warnings.append(i18n.t(
+                "Unit not recorded in the file, but the coordinates say {unit}: "
+                "{why}.").format(unit=inferred, why="; ".join(site.get("unit_evidence") or [])))
+        elif not q.get("unit_confirmed", q.get("unit_code", 0) != 0):
             warnings.append(i18n.t(
                 "Unit not confirmed — the drawing's unit was not recorded. "
                 "Every value is in the drawing's raw unit (mm, m or ft); "
                 "confirm it against the source before this goes near a rate."))
+        for lk in site.get("lookalikes") or []:
+            warnings.append(i18n.t("Look-alike layers {a} and {b}: {verdict}.").format(
+                a=lk["layers"][0], b=lk["layers"][1], verdict=lk["verdict"]))
+        for rb in site.get("remote_blocks") or []:
+            warnings.append(i18n.t(
+                "{count} of {of} {name} blocks are {km} km away — another site, "
+                "not on this one's network.").format(
+                count=rb["count"], of=rb["of"], name=rb["name"],
+                km=", ".join(f"{d/1000:.1f}" for d in rb["distances_m"][:6])))
         if "scope_keywords" in q:
             warnings.append(i18n.t(
                 "Scope filter on ({words}) — {shown} of the drawing's {total} "

@@ -71,6 +71,26 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 27 — the measurement says what the coordinates say
+
+Reading the same site survey by hand settled three things no BOQ written
+from its totals had: the unit (a projected survey grid in metres, and a
+7 m gate block placed at scale ~0.001), the two boundary-wall layers (one
+wall on two layers — together they close the footprint), and six of seven
+pump houses sitting 1 – 4 km away on a pipeline. `core.boq.measure()` now
+walks the same coordinates once more and reports `site`: the inferred
+unit with its evidence, look-alike layers with a verdict (one run on two
+layers / drawn twice / check), the main cluster's extent, and any block
+farther than a kilometre from the rest with its distances. The summary
+the AI reads carries them; the measured table on screen shows the unit as
+inferred and the look-alikes and remote blocks in its warning band. All
+local; nothing leaves the machine.
+
+*Files:* `prism_terminal/core/boq.py`, `addons/boq/measured.py`,
+`tests/test_site_facts.py`
+
+---
+
 # Round 26 — the measurement is a table
 
 The owner's screenshot: "Measured from your drawing" showed the prompt
