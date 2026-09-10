@@ -222,3 +222,61 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
                        "size storage, power and switching",
                        "use them as mounting or routing points"):
             self.assertIn(phrase, prompt)
+
+
+class TheMeasurementIsATable(unittest.TestCase):
+    """The owner's screenshot of 10 Sep: the measured figures shown as the
+    prompt text in a 120 px box. Now a table, one row per measured item,
+    the way the CSV has it. The prompt text is still what the AI gets."""
+
+    Q = {"unit": "unspecified", "unit_code": 0, "unit_confirmed": False,
+         "notes": ["Full conversion couldn't be read, so a minimal fallback was used"],
+         "lengths_by_layer": {"BOUNDARY WALL": 1091.18, "Concrete Road": 579.23},
+         "areas_by_layer": {"Building": 2227.57},
+         "block_counts": {"EP": 22, "MAIN-GATE-7M": 2},
+         "block_layers": {"EP": ["Electric Pole"], "MAIN-GATE-7M": ["gates"]},
+         "layers": ["0", "BOUNDARY WALL", "Building", "Concrete Road",
+                    "Electric Pole", "gates"],
+         "entity_count": 29661}
+
+    def test_one_row_per_measured_item_in_csv_order(self):
+        from addons.boq.measured import MeasuredTable, rows_for
+        rows = rows_for(self.Q)
+        self.assertEqual([r[0] for r in rows],
+                         ["BOUNDARY WALL", "Concrete Road", "Building", "EP",
+                          "MAIN-GATE-7M"])
+        self.assertEqual([r[1] for r in rows],
+                         ["Length", "Length", "Area", "Count", "Count"])
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        shown = t.rows()
+        self.assertEqual(len(shown), 5)
+        self.assertEqual(shown[0], ("BOUNDARY WALL", "Length", "BOUNDARY WALL",
+                                    "1,091.18", "unspecified"))
+        self.assertEqual(shown[2], ("Building", "Area", "Building", "2,227.57",
+                                    "sq unspecified"))
+        self.assertEqual(shown[3], ("EP", "Count", "Electric Pole", "22", "nos"))
+
+    def test_the_header_and_warnings_say_what_the_text_said(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        self.assertIn("29,661 entities", t.header.text())
+        self.assertIn("6 layers", t.header.text())
+        self.assertTrue(t.warn.isVisibleTo(t))
+        self.assertIn("Unit not confirmed", t.warn.text())
+        self.assertIn("minimal fallback", t.warn.text())
+        self.assertIn("All 6 layers", t.layers.text())
+
+    def test_the_window_fills_the_table_and_keeps_the_prompt_text(self):
+        import tempfile
+        from unittest import mock
+        import core_bridge as CB
+        d = _dialog()
+        d.cad_path = "/x/site.dwg"
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._on_measured(self.Q, ["a note"])
+        self.assertEqual(len(d.meas_table.rows()), 5)
+        self.assertIn("LENGTHS BY LAYER", d.summary)     # the AI's text, intact
+        self.assertTrue(d.meas_box.isVisibleTo(d))

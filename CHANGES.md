@@ -71,6 +71,24 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 26 — the measurement is a table
+
+The owner's screenshot: "Measured from your drawing" showed the prompt
+text — "LENGTHS BY LAYER:" and a wall of "layer: 498.44 unspecified"
+lines in a 120 px box. That text is written for the AI, not for a person.
+The box is now a table (`addons/boq/measured.py`): one row per measured
+item in the CSV's own order — Item, Measured as (Length / Area / Count),
+Layer, Value right-aligned with thousands separators, Unit — sortable by
+any column, ten rows on screen and the rest scrolling, a header line with
+units, entity and layer counts, the warnings (unit unconfirmed, scope
+filter, conversion notes) in a warning band, and the full layer list one
+click away. The prompt text is untouched; it is still what the AI gets.
+
+*Files:* `addons/boq/measured.py`, `addons/boq/dialog.py`,
+`tests/test_boq_dialog.py`
+
+---
+
 # Round 25 — the writer keeps the estimator's habits
 
 Comparing two BOQs of the same site — one written locally from the

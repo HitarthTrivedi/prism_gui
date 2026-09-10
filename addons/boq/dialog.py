@@ -29,6 +29,7 @@ from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
 from widgets.ask_panel import AskPanel, MoreOptions
+from addons.boq.measured import MeasuredTable
 from widgets.output_panel import short_duration
 
 
@@ -166,10 +167,12 @@ class BoqDialog(PrismDialog):
         # Only appears once a drawing has actually been measured.
         self.meas_box = QGroupBox("Measured from your drawing")
         meas_l = QVBoxLayout(self.meas_box)
-        self.meas_view = QPlainTextEdit()
-        self.meas_view.setReadOnly(True)
-        self.meas_view.setFixedHeight(120)
-        meas_l.addWidget(self.meas_view)
+        # A table, not the prompt text: one row per measured item, the way
+        # the CSV has it (addons/boq/measured.py). The prompt text is still
+        # built -- it is what the AI stages receive -- it is just not what
+        # the person is shown.
+        self.meas_table = MeasuredTable()
+        meas_l.addWidget(self.meas_table)
         # Not the dashed #emptyState box it used to be: this line says "your
         # numbers are saved, here is where", which is a result and not the
         # absence of one. A dashed placeholder box around a success message
@@ -317,7 +320,7 @@ class BoqDialog(PrismDialog):
     def _on_measured(self, q, notes: list):
         self.q = q
         self.summary = self.boq.summary_text(q)
-        self.meas_view.setPlainText(self.summary)
+        self.meas_table.set_quantities(q)
         self.meas_box.setVisible(True)
 
         os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
