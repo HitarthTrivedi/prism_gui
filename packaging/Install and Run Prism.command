@@ -50,10 +50,10 @@ good_python() {      # $1 = a python; true when it is 3.11+ and has venv
 PY=""
 for candidate in \
         "$DIR/runtime/python/bin/python3" \
-        python3.13 python3.12 python3.11 \
-        /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+        python3.12 python3.11 python3.13 \
         /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
         /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
+        /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
         /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
     path="$(command -v "$candidate" 2>/dev/null || true)"
     [ -n "$path" ] && good_python "$path" && { PY="$path"; break; }
@@ -109,6 +109,10 @@ if [ "$WANT" != "$HAVE" ]; then
     "$VPY" -c "import PySide6, requests, selenium, ezdxf, openpyxl, playwright" 2>>"$LOG" \
         || fail "The requirements didn't install. Look at the end of $LOG."
     say "   ✅  core requirements"
+    # Python 3.13 dropped the audioop module the voice input reads with;
+    # the drop-in replacement is best-effort like pyaudio itself.
+    "$VPY" -c "import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)" 2>/dev/null \
+        && "$VPY" -m pip install --quiet audioop-lts >>"$LOG" 2>&1 || true
     if "$VPY" -m pip install --quiet pyaudio >>"$LOG" 2>&1; then
         say "   ✅  voice input (pyaudio)"
     else

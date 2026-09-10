@@ -29,6 +29,15 @@ import sys
 import urllib.request
 import zipfile
 
+# A Windows console is cp1252 and cannot encode the ✓ below -- see
+# packaging/build.py for the CI failure that found this. Degrade, don't die.
+if __name__ == "__main__":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:                               # noqa: BLE001
+            pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)

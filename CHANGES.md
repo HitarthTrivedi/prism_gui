@@ -10,6 +10,39 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.0 — the rules and fallbacks of 9–10 Sep, in a build
+
+1.4.3 was built on 8 Sep, before any of Rounds 17–28 existed, so every
+installed copy still sends a list two seconds apart with no cap, still
+has no "Use fallback" button, still hands Canva a page of prompt, and
+still attaches the customer's drawing to the BOQ writer. This build is
+those rounds, plus what the team landed on `main` since:
+
+* **Email** — Pace and limits (gap, jitter, per-press and per-day caps,
+  send later), the Sent-folder copy with its switch, het's multi-account
+  sending (Round 17, Round 28; `docs/EMAIL_SEND.md`).
+* **Running a task** — "Use fallback" beside "Skip step"; an empty
+  ChatGPT answer caught in seconds and regenerated once; Canva builds the
+  deck through its own AI page; short, human-sized prompts; makers are
+  briefed to build; the prompts are written only for the plan you
+  confirmed (Rounds 18–22).
+* **BOQ** — the drawing never reaches an AI; a sample BOQ defines the
+  document; the measurement is a table with the unit inferred from the
+  coordinates, look-alike layers and remote blocks flagged; and now
+  pricing from your own rate list to an Excel with live formulas (Rounds
+  23–28).
+* **Landed by the team** — Leads & Outreach add-on and the BOQ pricing
+  engine (Harsh); Motion Studio, the continuity compiler, materials,
+  review and the cinematic lab (Beastburner); the add-on architecture and
+  its guard tests (`CONTRIBUTING.md`).
+* **Hand-off without a certificate** — `devtools/make_bundle.py` and the
+  double-click installer for a Mac with nothing on it.
+
+Nine add-ons register. The update manifests for this version are signed
+with the production key `u1` as before; a 1.4.1+ install updates in-app.
+
+---
+
 # 1.4.3 — the Windows update helper never swapped
 
 Found by a real customer update on Windows: the 1.4.2 tree downloaded and
