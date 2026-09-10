@@ -10,6 +10,53 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.5 — the macOS in-app update produced an app that would not open
+
+Found by the first real macOS in-app update (1.5.2 → 1.5.4, 10 Sep 2026):
+the update downloaded, verified, swapped in and relaunched — and Prism.app
+never opened again. No window, no log line, no rollback. The backup was
+beside it as `Prism.app.old`; restoring it by hand brought 1.5.2 back.
+
+**Was:** `update_manifest.build()` listed the tree with `os.walk()`, whose
+`filenames` never include a symlink that points at a *directory* — those
+are reported in `dirnames` and, with `followlinks=False`, never descended
+into either. So they were never recorded. A PyInstaller macOS bundle is
+built on exactly those links: every framework's `Versions/Current → A`,
+and `Python.framework/Versions/Current → 3.12`. The *file* links that go
+through them (`Python.framework/Python → Versions/Current/Python`, the
+seventeen Qt framework binaries) WERE recorded and recreated, so the
+staged bundle had every file, every file link, and nothing for the links
+to point at. dyld could not load Python.framework, so the process died
+before a line of Prism ran — which is also why the two-phase rollback
+marker never got its second launch: it needs Python to reach `main.py`.
+Linux and Windows bundles have no directory symlinks, which is why the
+real frozen-Linux update test in 1.4.2 passed and this waited for a Mac.
+
+**Now:** `build()` records directory symlinks from `dirnames` as the same
+`{"path", "symlink"}` entries file symlinks already use; the client's
+`stage_update()` has created those since 1.4.1, so a 1.5.2 or 1.5.4 Mac
+updating to 1.5.5 gets a complete bundle. And a gate:
+`update_manifest.dangling_symlinks()` resolves every link in the manifest
+through every other link in it, and `packaging/manifest.py` fails the CI
+build if any link points at nothing the manifest carries — run against
+the shipped 1.5.4 macOS manifest it reports every broken link that build
+had. `tests/test_update_manifest.py` builds a framework-shaped tree and
+checks both halves.
+
+**Stated plainly for anyone on a Mac:** a 1.5.2 or 1.5.4 Mac that takes
+the in-app update to 1.5.5 is fine — the fix is in the manifest CI builds,
+not in the client. A Mac that already took 1.5.4 in-app and will not open:
+in Terminal, `mv /Applications/Prism.app /Applications/Prism-broken.app &&
+mv /Applications/Prism.app.old /Applications/Prism.app && rm -f
+/Applications/Prism.app.prism_update_pending`, then open Prism; it is 1.5.2
+again and will offer 1.5.5. The 1.5.4 DMG itself was always fine.
+
+Still open: the rollback can only act once Python runs. A launch that dies
+in dyld needs a supervisor (the apply helper waiting on the relaunched PID
+for a few seconds) to notice; the next hardening step.
+
+---
+
 # 1.5.4 — a file the tool made is a result, on every step, and it lands in Artifacts
 
 Reported 10 Sep 2026: "the agent gives the document but Prism couldn't

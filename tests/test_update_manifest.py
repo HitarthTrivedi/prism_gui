@@ -297,3 +297,115 @@ def token_payload_b64(manifest: dict) -> str:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirectorySymlinksAreCarried(unittest.TestCase):
+    """The first real macOS in-app update (1.5.2 -> 1.5.4) installed and
+    then never opened: os.walk reports a symlink to a DIRECTORY in
+    `dirnames`, not `filenames`, so `Versions/Current -> A` was never in
+    the manifest and every framework link through it dangled in the staged
+    bundle. Built here as the smallest framework-shaped tree that has the
+    bug, and checked both ways: the link is recorded, and a manifest
+    without it is refused."""
+
+    def setUp(self):
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
+        self.tmp = tempfile.mkdtemp(prefix="prism-framework-")
+        fw = os.path.join(self.tmp, "Contents", "Frameworks", "Python.framework")
+        os.makedirs(os.path.join(fw, "Versions", "3.12"))
+        with open(os.path.join(fw, "Versions", "3.12", "Python"), "wb") as f:
+            f.write(b"\xcf\xfa\xed\xfe not really a dylib")
+        os.symlink("3.12", os.path.join(fw, "Versions", "Current"))          # DIR link
+        os.symlink("Versions/Current/Python", os.path.join(fw, "Python"))    # file link
+        self.fw = fw
+
+    def test_a_symlink_to_a_directory_is_recorded(self):
+        manifest = UM.build(self.tmp, "1.5.5")
+        by_path = {f["path"]: f for f in manifest["files"]}
+        current = by_path.get("Contents/Frameworks/Python.framework/Versions/Current")
+        self.assertIsNotNone(current, "the directory link must be in the manifest")
+        self.assertEqual(current["symlink"], "3.12")
+        self.assertNotIn("sha256", current)
+        # Not descended into: the real file appears once, under 3.12 only.
+        self.assertIn("Contents/Frameworks/Python.framework/Versions/3.12/Python", by_path)
+        self.assertNotIn("Contents/Frameworks/Python.framework/Versions/Current/Python",
+                         by_path)
+
+    def test_a_complete_manifest_has_no_dangling_links(self):
+        self.assertEqual(UM.dangling_symlinks(UM.build(self.tmp, "1.5.5")), [])
+
+    def test_the_1_5_4_shape_is_refused(self):
+        manifest = UM.build(self.tmp, "1.5.4")
+        manifest["files"] = [f for f in manifest["files"]
+                             if not f["path"].endswith("Versions/Current")]
+        bad = UM.dangling_symlinks(manifest)
+        self.assertEqual(len(bad), 1, bad)
+        self.assertIn("Python.framework/Python -> Versions/Current/Python", bad[0])
+
+    def test_a_link_that_leaves_the_tree_is_refused(self):
+        os.symlink("../../../../etc/hosts", os.path.join(self.tmp, "Contents", "escape"))
+        os.symlink("/usr/lib/libSystem.B.dylib", os.path.join(self.tmp, "Contents", "abs"))
+        bad = UM.dangling_symlinks(UM.build(self.tmp, "1.5.5"))
+        self.assertEqual({b.split(" -> ")[0] for b in bad},
+                         {"Contents/escape", "Contents/abs"})
+
+    def test_a_link_cycle_does_not_hang_the_gate(self):
+        os.symlink("b", os.path.join(self.tmp, "a"))
+        os.symlink("a", os.path.join(self.tmp, "b"))
+        bad = UM.dangling_symlinks(UM.build(self.tmp, "1.5.5"))
+        self.assertEqual({b.split(" -> ")[0] for b in bad}, {"a", "b"})
+
+
+class PyInstallersDotDirectoriesAreCarried(unittest.TestCase):
+    """The other 58 of the 76 dangling links in the 1.5.4 macOS manifest:
+    PyInstaller renames a dot-directory inside a bundle to `__dot__…` and
+    leaves a directory symlink at the old name (`PIL/.dylibs ->
+    __dot__dylibs`); the rpath links dyld follows (`Contents/Frameworks/
+    libXau.6.dylib -> PIL/.dylibs/libXau.6.dylib`) go through it. Same
+    class of bug, same fix; pinned separately because the shape differs."""
+
+    def setUp(self):
+        why = sample_jobs.symlinks_unavailable()
+        if why:
+            self.skipTest(why)
+        self.tmp = tempfile.mkdtemp(prefix="prism-dotdir-")
+        fw = os.path.join(self.tmp, "Contents", "Frameworks")
+        os.makedirs(os.path.join(fw, "PIL", "__dot__dylibs"))
+        with open(os.path.join(fw, "PIL", "__dot__dylibs", "libXau.6.dylib"), "wb") as f:
+            f.write(b"dylib")
+        os.symlink("__dot__dylibs", os.path.join(fw, "PIL", ".dylibs"))
+        os.symlink("PIL/.dylibs/libXau.6.dylib", os.path.join(fw, "libXau.6.dylib"))
+        os.makedirs(os.path.join(fw, "empty_dir"))
+        os.symlink("empty_dir", os.path.join(fw, "empty_link"))
+        self.fw = fw
+
+    def test_the_dot_directory_link_is_recorded_and_everything_resolves(self):
+        manifest = UM.build(self.tmp, "1.5.5")
+        by_path = {f["path"]: f for f in manifest["files"]}
+        self.assertEqual(by_path["Contents/Frameworks/PIL/.dylibs"]["symlink"], "__dot__dylibs")
+        self.assertIn("Contents/Frameworks/PIL/__dot__dylibs/libXau.6.dylib", by_path)
+        # Strict: the link to the empty directory is the one thing reported.
+        strict = UM.dangling_symlinks(manifest)
+        self.assertEqual(strict, ["Contents/Frameworks/empty_link -> empty_dir"])
+        # With the tree at hand, an empty directory is excused.
+        self.assertEqual(UM.dangling_symlinks(manifest, self.tmp), [])
+
+    def test_the_gate_refuses_the_tree_the_1_5_4_build_produced(self):
+        """packaging/manifest.py exits non-zero on a manifest with a
+        dangling link, before CI can publish it."""
+        import subprocess
+        manifest = UM.build(self.tmp, "1.5.4")
+        # Take the directory link away, as the old build() did.
+        manifest["files"] = [f for f in manifest["files"]
+                             if f["path"] != "Contents/Frameworks/PIL/.dylibs"]
+        bad = UM.dangling_symlinks(manifest, self.tmp)
+        self.assertEqual(bad, ["Contents/Frameworks/libXau.6.dylib -> PIL/.dylibs/libXau.6.dylib"])
+        out = os.path.join(self.tmp, "m.json")
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run([sys.executable, os.path.join(root, "packaging", "manifest.py"),
+                            self.tmp, "1.5.5", "-o", out],
+                           capture_output=True, text=True, cwd=root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("every symlink resolves", r.stdout)

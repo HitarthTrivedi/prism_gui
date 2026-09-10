@@ -149,7 +149,26 @@ def build(root_dir: str, version: str) -> dict[str, Any]:
     here — so this half is testable with an ordinary throwaway directory and
     needs no real PyInstaller build to exercise."""
     files: list[dict[str, Any]] = []
-    for dirpath, _dirnames, filenames in os.walk(root_dir):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        # A symlink that points at a DIRECTORY is reported by os.walk in
+        # `dirnames`, never in `filenames`, and (followlinks=False) is never
+        # descended into -- so this loop never saw it and the manifest never
+        # carried it. A PyInstaller macOS bundle is full of exactly those:
+        # every framework's `Versions/Current -> A`, and Python.framework's
+        # `Versions/Current -> 3.12`. The file symlinks that go THROUGH them
+        # (`Python.framework/Python -> Versions/Current/Python`, the 17 Qt
+        # framework binaries) were recorded and recreated, so the staged
+        # 1.5.4 bundle had every file and dangling links to all of them:
+        # dyld could not load Python.framework and the app died before a
+        # line of Prism ran -- no window, no log, no rollback. Found on the
+        # first real macOS in-app update (1.5.2 -> 1.5.4, 10 Sep 2026).
+        for name in sorted(dirnames):
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                files.append({
+                    "path": os.path.relpath(full, root_dir).replace(os.sep, "/"),
+                    "symlink": os.readlink(full),
+                })
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root_dir).replace(os.sep, "/")
@@ -167,6 +186,76 @@ def build(root_dir: str, version: str) -> dict[str, Any]:
             })
     files.sort(key=lambda f: f["path"])
     return {"version": version, "files": files}
+
+
+def dangling_symlinks(manifest: dict[str, Any], root_dir: str | None = None) -> list[str]:
+    """Symlink entries whose target, resolved inside the tree the manifest
+    describes, is not itself in the manifest -- the shape of the 1.5.4
+    macOS break, checked from the manifest alone so the build gate can
+    refuse it before anything is published. A target outside the tree
+    (an absolute path, or `..` past the root) is reported too: nothing the
+    updater recreates could satisfy it.
+
+    Resolution follows symlinks along the way (`X/Versions/Current/Python`
+    is fine when `X/Versions/Current` is a recorded link to `A` and
+    `X/Versions/A/Python` is recorded), bounded so a link cycle cannot hang
+    the gate.
+
+    `root_dir`, when given (the build gate has the tree it just walked),
+    excuses one case: a link whose target is an EMPTY directory on disk.
+    The manifest has no entry for an empty directory (nothing to hash), so
+    the staged tree will not have it and the link will dangle there -- but
+    nothing loads from an empty directory, and failing a release over one
+    would be the gate crying wolf."""
+    import posixpath
+    entries = {f["path"]: f for f in manifest.get("files", [])}
+    dirs: set[str] = set()
+    for p in entries:
+        parts = p.split("/")
+        for i in range(1, len(parts)):
+            dirs.add("/".join(parts[:i]))
+
+    def resolve(path: str, depth: int = 0) -> str | None:
+        """The canonical path `path` names once every link in it is
+        followed, or None when it leaves the tree or loops."""
+        if depth > 40:
+            return None
+        parts = [p for p in path.split("/") if p]
+        walked: list[str] = []
+        for i, part in enumerate(parts):
+            if part == ".":
+                continue
+            if part == "..":
+                if not walked:
+                    return None
+                walked.pop()
+                continue
+            walked.append(part)
+            here = "/".join(walked)
+            entry = entries.get(here)
+            if entry is not None and "symlink" in entry:
+                target = entry["symlink"]
+                if target.startswith("/"):
+                    return None
+                base = "/".join(walked[:-1])
+                rest = "/".join(parts[i + 1:])
+                joined = posixpath.join(base, target) if base else target
+                return resolve(posixpath.join(joined, rest) if rest else joined,
+                               depth + 1)
+        return "/".join(walked)
+
+    bad = []
+    for path, entry in sorted(entries.items()):
+        if "symlink" not in entry:
+            continue
+        final = resolve(path)
+        if final is None or (final not in entries and final not in dirs):
+            if (root_dir and final is not None
+                    and os.path.isdir(os.path.join(root_dir, *final.split("/")))
+                    and not os.path.islink(os.path.join(root_dir, *final.split("/")))):
+                continue                      # an empty directory: harmless
+            bad.append(f"{path} -> {entry['symlink']}")
+    return bad
 
 
 def add_archive(manifest: dict[str, Any], archive_path: str) -> dict[str, Any]:

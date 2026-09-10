@@ -61,6 +61,21 @@ def main(argv: list[str] | None = None) -> int:
                 "GitHub allows 1000 per release. Trim the bundle in "
                 "packaging/prism.spec (see the dist-info/.pyi filter).")
     print(f"{uploadable} uploadable files (GitHub cap 1000)")
+    # Every symlink the manifest carries must resolve to something else the
+    # manifest carries. The 1.5.4 macOS manifest did not record the
+    # framework `Versions/Current` directory links, so the staged bundle
+    # had dangling `Python.framework/Python` and Qt links and never
+    # launched -- the update installed cleanly and the app died in dyld.
+    # A manifest-only check, so it runs here at build time, before CI
+    # publishes anything a customer's updater could fetch.
+    dangling = update_manifest.dangling_symlinks(manifest, args.root_dir)
+    if dangling:
+        shown = "\n  ".join(dangling[:12])
+        p.error(f"{len(dangling)} symlink(s) in the manifest point at nothing "
+                f"the manifest carries -- an updated install built from it "
+                f"would not launch:\n  {shown}"
+                + ("\n  …" if len(dangling) > 12 else ""))
+    print("every symlink resolves inside the manifest")
     if args.archive:
         if not os.path.isfile(args.archive):
             p.error(f"{args.archive!r} is not a file")
