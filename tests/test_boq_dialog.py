@@ -213,3 +213,12 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
         from addons.boq.panel import BoqPanel
         titles = [step[1] for step in BoqPanel.STEPS]
         self.assertIn("Attach a sample BOQ too", titles)
+
+    def test_the_writer_keeps_the_good_habits_of_the_best_boq(self):
+        import core_bridge as CB
+        prompt = CB.get_boq().formatting_prompt("WALLS 12.00 m", has_template=True)
+        for phrase in ("reference table of the measured figures",
+                       "decide — count it once or keep both",
+                       "size storage, power and switching",
+                       "use them as mounting or routing points"):
+            self.assertIn(phrase, prompt)

@@ -71,6 +71,22 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 25 — the writer keeps the estimator's habits
+
+Comparing two BOQs of the same site — one written locally from the
+numbers with the firm's sample attached, one written by Claude with the
+whole DWG — showed the template did its job (the local one is the
+document the firm would send) and the drawing added no measurement (the
+tool said so itself). What the drawing-fed one did better was habit, not
+data: a reference table of the measured figures, a stated decision on a
+duplicate wall layer, storage and power sized from the counts with the
+arithmetic shown, existing poles reused as mounts. Those habits are now
+asked of the local writer on every drawing-based BOQ.
+
+*Files:* `prism_terminal/core/boq.py`, `tests/test_boq_dialog.py`
+
+---
+
 # Round 24 — a sample BOQ tells the writer what it is making
 
 The owner's idea, after comparing a numbers-only BOQ with one written
