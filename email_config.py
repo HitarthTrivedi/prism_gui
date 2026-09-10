@@ -125,6 +125,8 @@ def account_block(cfg: dict, accounts: list[dict]) -> dict:
     # Install-wide like `folder`: how fast and how many, not whose account.
     if existing.get("send") and "send" not in block:
         block["send"] = dict(existing["send"])
+    if "save_to_sent" in existing and "save_to_sent" not in block:
+        block["save_to_sent"] = bool(existing["save_to_sent"])
     block["accounts"] = accounts
     return block
 
@@ -151,6 +153,8 @@ def cfg_for_sender(cfg: dict, account: dict) -> dict:
     send = settings_of(cfg).get("send")
     if send and "send" not in block:
         block["send"] = dict(send)
+    if "save_to_sent" in settings_of(cfg) and "save_to_sent" not in block:
+        block["save_to_sent"] = bool(settings_of(cfg)["save_to_sent"])
     out["email"] = block
     return out
 
@@ -230,3 +234,27 @@ def plan_send(policy: dict, wanted: int, sent_today: int = 0) -> tuple[int, list
         allowed = per_run
         reasons.append("at most %d per send" % per_run)
     return allowed, reasons
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# A copy in Sent
+# ────────────────────────────────────────────────────────────────────────────
+# `cfg["email"]["save_to_sent"]` is the engine's own switch (core/mailer, 10
+# Sep 2026): after each SMTP send it files a copy into the account's Sent
+# folder over IMAP, so a Prism-sent mail shows in Outlook and webmail. The
+# engine defaults it ON and treats a failed copy as a note, never an error.
+# Install-wide like `folder` and `send`, and carried across a save the same
+# way, so the window and the terminal's /email agree.
+
+def save_to_sent(cfg: dict) -> bool:
+    """Whether a copy of each send is filed in Sent. Missing = on."""
+    return bool(settings_of(cfg).get("save_to_sent", True))
+
+
+def with_save_to_sent(cfg: dict, on: bool) -> dict:
+    """A copy of cfg with the switch written into the email block."""
+    out = dict(cfg or {})
+    block = settings_of(cfg)
+    block["save_to_sent"] = bool(on)
+    out["email"] = block
+    return out

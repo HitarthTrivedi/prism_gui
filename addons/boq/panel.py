@@ -39,6 +39,10 @@ class BoqPanel(AddonFrontDoor):
         ("pencil", "Then it is written up",
          "The measured numbers and your sample go to your writing tool. "
          "The drawing itself never leaves this machine."),
+        ("grid", "Price it, if you like",
+         "Attach your own rate list and the measured lines are priced by "
+         "arithmetic — rates, amounts, GST, a grand total — and saved as an "
+         "Excel sheet with live formulas. No AI touches a number."),
     ]
 
     PLACEHOLDERS = [

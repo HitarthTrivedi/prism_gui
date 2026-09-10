@@ -163,6 +163,7 @@ class _FakeSendWorker(QObject):
 
     def __init__(self, cfg, recipients, subject, body, files, **pace):
         super().__init__()
+        self.cfg = cfg                    # what the engine would be handed
         self.recipients = recipients
         self.pace = pace                  # delay / jitter / start_at, as given
         _FakeSendWorker.last = self

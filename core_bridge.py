@@ -180,6 +180,14 @@ def get_boq():
     return boq
 
 
+def get_boq_price():
+    """core.boq_price: the measured take-off priced into a tender-ready BOQ
+    (rates from the user's own list, arithmetic totals, Excel with live
+    formulas). Pure arithmetic over core.quoting -- no ezdxf, no AI."""
+    from core import boq_price
+    return boq_price
+
+
 def gerber_available() -> tuple[bool, str]:
     """core.gerber has no hard dependency of its own — shapely is optional,
     same as ezdxf is for BOQ, and the module degrades rather than fails

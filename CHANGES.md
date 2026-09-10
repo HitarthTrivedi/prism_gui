@@ -71,6 +71,54 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 28 — Harsh's BOQ pricing and Sent-copy get their windows
+
+Harsh's 10 Sep landing (engine `de4ed63`) brought two things the GUI could
+not show: `core/boq_price.py`, which prices a measured take-off into a
+tender-ready BOQ, and a Sent-folder copy of every email the mailer sends.
+Both were live in the engine and invisible in the app — the pricing had no
+caller at all, and the copy was on with nothing to say so or switch it off.
+
+**BOQ — "Price it (optional)"** (`addons/boq/pricing.py`, shown under the
+measured table once a drawing is measured, BOQ mode only — a BOM is a parts
+list):
+
+* one grid row per measured line, in the measurement's order; Qty is the
+  measurement and Amount is arithmetic, so neither takes typing; Section,
+  Description, Unit and Rate do;
+* **Attach your rate list…** (CSV / XLSX, read by the same `core.quoting`
+  loader Inquiry's quotations use; the price list already given to Inquiry
+  is picked up automatically), or **Use starter rates**, marked indicative;
+* a library rate is applied only when the match is confident AND the units
+  agree — a per-cum rate never prices a wall measured in metres; the row
+  stays unpriced and says why;
+* contingency %, GST % and inter-state (IGST vs CGST+SGST); the totals
+  line with the grand total in Indian words; unpriced lines counted and
+  kept out of the total;
+* **Save as Excel…** (live `=Qty*Rate` / `=SUM` formulas, Abstract of Cost
+  sheet), **CSV**, **PDF** (needs the bundled Chromium).
+
+No AI touches a number here, and the write-up prompt is unchanged: pricing
+sits beside the writing stage, never inside it. `core_bridge.get_boq_price()`
+is the one door. Tests: `tests/test_boq_pricing.py`.
+
+**Email — "Keep a copy of each email in the account's Sent folder"** in
+the Pace and limits card, on by default as the engine has it, named in the
+folded summary ("copy kept in Sent" / "no copy in Sent"), handed to the
+worker as ticked, remembered with the pace, and carried across an account
+save like `folder` (`email_config.save_to_sent` / `with_save_to_sent`).
+The terminal's `/email` reads the same key. Tests: `ACopyInSent` in
+`tests/test_email_pacing.py`.
+
+**Shipping to a Mac with nothing on it** (`devtools/make_bundle.py`,
+`packaging/Install and Run Prism.command`): a zip of the tracked source of
+both repos plus one double-click launcher that finds or fetches a
+standalone Python (no admin password, no Homebrew), makes the venv,
+installs the requirements, fetches Chromium, checks for Google Chrome and
+starts Prism — and on the next double-click just starts it. Interim until
+the Developer ID certificate lets the DMG be signed. See
+`packaging/README-INSTALL.txt`.
+
 # Round 27 — the measurement says what the coordinates say
 
 Reading the same site survey by hand settled three things no BOQ written

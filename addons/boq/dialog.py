@@ -30,6 +30,7 @@ from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq.measured import MeasuredTable
+from addons.boq.pricing import PricingTable
 from widgets.output_panel import short_duration
 
 
@@ -188,6 +189,17 @@ class BoqDialog(PrismDialog):
         self.meas_box.setVisible(False)
         root.addWidget(self.meas_box)
 
+        # Optional, and only for a BOQ: price the measured lines. The engine
+        # half (core.boq_price) prices by arithmetic from a rate list the
+        # customer brings; this card is its window. Appears with the
+        # measurement, because there is nothing to price before it.
+        self.price_box = QGroupBox(i18n.t("Price it (optional)"))
+        price_l = QVBoxLayout(self.price_box)
+        self.price_table = PricingTable(self.cfg)
+        price_l.addWidget(self.price_table)
+        self.price_box.setVisible(False)
+        root.addWidget(self.price_box)
+
         # Which AIs run the BOQ. Defaults to the agents configured in Settings,
         # but re-pickable per BOQ: the write-up tool (Claude vs ChatGPT vs …)
         # and the standards-research tool (Perplexity vs Consensus vs …) each
@@ -322,6 +334,10 @@ class BoqDialog(PrismDialog):
         self.summary = self.boq.summary_text(q)
         self.meas_table.set_quantities(q)
         self.meas_box.setVisible(True)
+        if self.mode == "boq":
+            self.price_table.set_quantities(
+                q, title=f"Bill of Quantities — {getattr(self, 'request', '') or 'measured drawing'}")
+            self.price_box.setVisible(True)
 
         os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
         self.csv_path = os.path.join(

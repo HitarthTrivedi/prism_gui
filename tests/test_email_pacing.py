@@ -342,3 +342,59 @@ class TheWindow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ACopyInSent(unittest.TestCase):
+    """The engine files a copy of every send into the account's Sent folder
+    (core/mailer, 10 Sep 2026) and defaults it on. The window shows the
+    switch beside the pace, hands it to the worker as ticked, and keeps it
+    with the pace; the config carries it across a save like `folder`."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(prefix="prism-email-")
+        self.d = _dialog(self.folder)
+        self.d.subject_edit.setText("Hello")
+        self.d.body_edit.setPlainText("Dear {name}")
+        self.d._load_list(_csv([("A", "a@x.in")]))
+
+    def _send(self):
+        with mock.patch.object(ED, "SendWorker", _FakeSendWorker), \
+                mock.patch.object(QMessageBox, "question",
+                                  return_value=QMessageBox.Yes), \
+                mock.patch.object(QMessageBox, "information"), \
+                mock.patch.object(ED.CB.config, "save_run"), \
+                mock.patch.object(ED.CB.config, "save"):
+            self.d._send()
+
+    def test_on_by_default_and_said_in_the_summary(self):
+        self.assertTrue(self.d.sent_copy_check.isChecked())
+        self.assertIn("copy kept in Sent", self.d._pace_summary())
+
+    def test_the_switch_reaches_the_worker_either_way(self):
+        self._send()
+        self.assertTrue(_FakeSendWorker.last.cfg["email"]["save_to_sent"])
+        self.d.sent_copy_check.setChecked(False)
+        self.assertIn("no copy in Sent", self.d._pace_summary())
+        self._send()
+        self.assertFalse(_FakeSendWorker.last.cfg["email"]["save_to_sent"])
+
+    def test_switching_it_off_is_remembered_and_reopens_the_card(self):
+        self.d.sent_copy_check.setChecked(False)
+        with mock.patch.object(ED.CB.config, "save") as save:
+            self.d._remember_policy()
+        self.assertTrue(save.called)
+        self.assertFalse(email_config.save_to_sent(self.d.cfg))
+        again = ED.EmailComposeDialog(self.d.cfg, [], None)
+        self.assertFalse(again.sent_copy_check.isChecked())
+        self.assertTrue(again.pace_details.isVisibleTo(again))
+
+    def test_the_config_carries_it_like_folder(self):
+        cfg = _cfg(self.folder)
+        cfg["email"]["save_to_sent"] = False
+        acct = {"address": "sales@shakti.one", "password": "x",
+                "host": "smtp.gmail.com", "port": 465, "label": "Sales"}
+        self.assertFalse(email_config.cfg_for_sender(cfg, acct)["email"]["save_to_sent"])
+        self.assertFalse(email_config.account_block(cfg, [acct])["save_to_sent"])
+        self.assertTrue(email_config.save_to_sent({}))          # missing = on
+        self.assertTrue(email_config.cfg_for_sender(_cfg(self.folder), acct)
+                        ["email"].get("save_to_sent", True))

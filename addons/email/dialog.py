@@ -734,13 +734,27 @@ class EmailComposeDialog(PrismDialog):
             "Closing it cancels a scheduled send."), level="SUPPORT", wrap=True)
         details.addRow("", self.keep_open_note)
 
+        # The engine files a copy of every send into the account's Sent
+        # folder (core/mailer, 10 Sep 2026) so the mail shows in Outlook and
+        # webmail. It was on with no way to see it or turn it off; this is
+        # both. Install-wide, remembered with the pace.
+        self.sent_copy_check = QCheckBox(i18n.t(
+            "Keep a copy of each email in the account's Sent folder"))
+        self.sent_copy_check.setChecked(email_config.save_to_sent(self.cfg))
+        self.sent_copy_check.setToolTip(i18n.t(
+            "Filed over IMAP after each send, so it shows in Outlook and "
+            "webmail. A mailbox that refuses the copy still sends."))
+        self.sent_copy_check.toggled.connect(self._sync)
+        details.addRow(self._field_label(i18n.t("Sent folder")), self.sent_copy_check)
+
         self.pace_note = C.label("", level="SUPPORT", wrap=True)
         details.addRow("", self.pace_note)
         pace_col.addWidget(self.pace_details)
         for w in (self.gap_spin, self.jitter_spin, self.per_run_spin,
                   self.per_day_spin):
             w.valueChanged.connect(self._sync)
-        self._show_pace(self._policy != email_config.send_policy({}))
+        self._show_pace(self._policy != email_config.send_policy({})
+                        or not email_config.save_to_sent(self.cfg))
         root.addWidget(pace)
 
         # ── optional: let Prism write it ──────────────────────────────────
@@ -819,7 +833,9 @@ class EmailComposeDialog(PrismDialog):
         when = (i18n.t("sends {when}").format(
                     when=time.strftime(_WHEN_FMT, time.localtime(start)))
                 if start else i18n.t("sends now"))
-        return " · ".join([gap, per_run, per_day, when])
+        copy = (i18n.t("copy kept in Sent") if self.save_to_sent()
+                else i18n.t("no copy in Sent"))
+        return " · ".join([gap, per_run, per_day, when, copy])
 
     def policy(self) -> dict:
         """The four numbers as the controls show them right now."""
@@ -829,6 +845,10 @@ class EmailComposeDialog(PrismDialog):
             "max_per_run": int(self.per_run_spin.value()),
             "max_per_day": int(self.per_day_spin.value()),
         }
+
+    def save_to_sent(self) -> bool:
+        """Whether this send files a copy in the account's Sent folder."""
+        return self.sent_copy_check.isChecked()
 
     def start_at(self) -> float:
         """When the send begins, as time.time(); 0 = the moment Send is
@@ -876,11 +896,15 @@ class EmailComposeDialog(PrismDialog):
         return ". ".join(words) + "."
 
     def _remember_policy(self):
-        """The numbers persist: set once, kept for the next window."""
+        """The numbers persist: set once, kept for the next window. The
+        Sent-folder switch travels with them."""
         new = self.policy()
-        if new == email_config.send_policy(self.cfg):
+        copy = self.save_to_sent()
+        if (new == email_config.send_policy(self.cfg)
+                and copy == email_config.save_to_sent(self.cfg)):
             return
         self.cfg = email_config.with_send_policy(self.cfg, new)
+        self.cfg = email_config.with_save_to_sent(self.cfg, copy)
         try:
             CB.config.save(self.cfg)
         except Exception:                                   # noqa: BLE001
@@ -1326,7 +1350,8 @@ class EmailComposeDialog(PrismDialog):
         self.status.setText(i18n.t("Signing in to {host}…").format(
             host=sender.get("host", "")))
         self._send_worker = SendWorker(
-            email_config.cfg_for_sender(self.cfg, sender),
+            email_config.cfg_for_sender(
+                email_config.with_save_to_sent(self.cfg, self.save_to_sent()), sender),
             list(recipients), subject, body, self.source_files,
             delay=policy["gap_seconds"], jitter=policy["jitter_seconds"],
             start_at=start)

@@ -170,3 +170,22 @@ count is taken against. An entry written before that field existed counts
 against every address, on purpose.
 
 Tests: `tests/test_email_pacing.py`.
+
+
+## A copy in Sent (2026-09-10)
+
+A plain SMTP send reaches the recipient and never touches the sender's own
+mailbox, so a Prism-sent email used to be invisible in Outlook and webmail.
+The engine now files a copy of every message into the account's Sent
+folder over IMAP after each send (Harsh, `core/mailer.py`): best-effort, so
+a mailbox that refuses the copy, has IMAP off or has no Sent folder still
+sends; providers whose SMTP already files sent mail are skipped.
+
+The window shows it in the **Pace and limits** card — **Keep a copy of
+each email in the account's Sent folder**, ticked by default — and the
+folded summary says *copy kept in Sent* or *no copy in Sent*. The switch
+is handed to the worker as ticked, remembered with the pace when Send is
+pressed, and carried across an account save the way `folder` is:
+`cfg["email"]["save_to_sent"]`, read by `email_config.save_to_sent()`,
+written by `with_save_to_sent()`. Missing means on. The terminal's `/email`
+reads the same key.
