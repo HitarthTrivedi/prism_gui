@@ -10,6 +10,30 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.1 — an Intel driver on an M2 is found, removed and explained
+
+Found by the first client install of the Apple silicon DMG (10 Sep 2026):
+the first run died with `[Errno 86] Bad CPU type in executable`. Chrome
+was universal and fine. The cached browser driver in
+`~/Library/Application Support/undetected_chromedriver` was x86_64 —
+carried over from an older Intel Mac by Migration Assistant — and the M2
+had no Rosetta to run it.
+
+**Was:** the cleanup that should have removed it shelled out to `file`
+and swallowed every failure, so it did nothing and said nothing, and the
+raw errno reached the customer.
+
+**Now:** the engine reads the Mach-O header itself (thin x86_64, thin
+arm64, universal), removes an Intel driver on Apple silicon before Chrome
+starts and says so, an errno 86 out of the launch purges the cache and
+retries once with a fresh download, and a second errno 86 becomes plain
+words that name the folder. Linux and Windows are untouched: the check
+only decides on Darwin/arm64. Tests: `tests/test_chrome_driver_arch.py`.
+
+Client-side, until they update: delete that folder and start Prism again.
+
+---
+
 # 1.5.0 — the rules and fallbacks of 9–10 Sep, in a build
 
 1.4.3 was built on 8 Sep, before any of Rounds 17–28 existed, so every
