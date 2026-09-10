@@ -520,6 +520,44 @@ class OnlyPrismsOwnChromeIsClosed(unittest.TestCase):
         self.assertEqual(automation._posix_chrome_pids(ps, self.marker),
                          ["4021", "4044"])
 
+    # A Mac's Chrome lives at a path with spaces in it. The first version
+    # of this matcher took the first whitespace-separated token as the
+    # program — `/Applications/Google`, basename "Google" — so no Mac Chrome
+    # ever matched and _release_profile() was a no-op on every Mac. That is
+    # what left the Login-tabs Chrome, and uc's orphan after a failed
+    # driver start, holding the profile on a client's M2 (10 Sep 2026).
+    MAC = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    MAC_HELPER = ("/Applications/Google Chrome.app/Contents/Frameworks/"
+                  "Google Chrome Framework.framework/Versions/153.0.7100.1/"
+                  "Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/"
+                  "Google Chrome Helper (Renderer)")
+
+    def test_a_mac_chrome_is_matched(self):
+        ps = (f" 4021 {self.MAC} {self.marker} --profile-directory=Default "
+              "--remote-debugging-port=53695\n")
+        self.assertEqual(automation._posix_chrome_pids(ps, self.marker), ["4021"])
+
+    def test_a_mac_login_tabs_chrome_is_matched(self):
+        """open_login_tabs launches a plain Chrome with only the profile
+        flags and a URL — the very process that held the profile."""
+        ps = (f" 4100 {self.MAC} {self.marker} --profile-directory=Default "
+              "https://chatgpt.com/\n")
+        self.assertEqual(automation._posix_chrome_pids(ps, self.marker), ["4100"])
+
+    def test_a_mac_helper_process_is_matched(self):
+        ps = f" 4044 {self.MAC_HELPER} --type=renderer {self.marker}\n"
+        self.assertEqual(automation._posix_chrome_pids(ps, self.marker), ["4044"])
+
+    def test_the_users_everyday_mac_chrome_is_left_alone(self):
+        ps = (f" 3300 {self.MAC} --user-data-dir=/Users/om/Library/Application "
+              "Support/Google/Chrome --profile-directory=Default\n")
+        self.assertEqual(automation._posix_chrome_pids(ps, self.marker), [])
+
+    def test_a_mac_script_that_mentions_the_path_is_still_not_chrome(self):
+        ps = (f" 5150 /bin/zsh -c echo {self.marker} >> notes.txt\n"
+              f" 5151 /usr/bin/python3 /Users/om/tools/inspect.py {self.marker}\n")
+        self.assertEqual(automation._posix_chrome_pids(ps, self.marker), [])
+
 
 # ── 5. finding Chrome at all ─────────────────────────────────────────────────
 

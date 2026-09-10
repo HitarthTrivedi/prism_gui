@@ -284,12 +284,47 @@ def _selftest(app) -> int:
     return 1 if failed else 0
 
 
+def _ensure_tls_trust() -> None:
+    """Give `ssl` a CA bundle on a Mac that is running Prism from source.
+
+    The packaged app gets this from packaging/rthook_ssl_certs.py, a
+    PyInstaller runtime hook — and only the packaged app does. The source
+    zip (`Install and Run Prism.command`) runs a python-build-standalone
+    interpreter that, like every CPython on macOS, does not read the system
+    Keychain, so the first `urlopen()` — the Apple silicon chromedriver
+    download, uc's own download, SMTP — fails with CERTIFICATE_VERIFY_FAILED.
+    Same patch as the hook, same rule: only supply a cafile when the caller
+    did not, and only where the OS default does not work (macOS)."""
+    if sys.platform != "darwin" or paths.is_frozen():
+        return
+    try:
+        import certifi
+        import ssl
+    except ImportError:
+        return
+    if getattr(ssl, "_prism_cafile", None):
+        return
+    original = ssl.create_default_context
+
+    def patched(purpose=ssl.Purpose.SERVER_AUTH, *, cafile=None, capath=None,
+                cadata=None, **kwargs):
+        if cafile is None and capath is None and cadata is None:
+            cafile = certifi.where()
+        return original(purpose, cafile=cafile, capath=capath,
+                        cadata=cadata, **kwargs)
+
+    ssl.create_default_context = patched
+    ssl._create_default_https_context = patched
+    ssl._prism_cafile = certifi.where()
+
+
 def main():
     # First line of the program: guarantee our text streams speak UTF-8 before
     # any engine code can print() the emoji that used to crash a whole run on a
     # cp1252 Windows console. Cheap, side-effect-free, must come before the
     # core_bridge import below.
     _force_utf8_streams()
+    _ensure_tls_trust()
     # Before Qt starts: what every child of this process inherits — the
     # video player Play opens, xdg-open, Chrome — and what Qt's own platform
     # theme reads. See paths.scrub_environment for the two ways it was

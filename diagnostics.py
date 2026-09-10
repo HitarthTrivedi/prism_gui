@@ -277,6 +277,17 @@ def report() -> str:
     except Exception as e:                          # noqa: BLE001
         lines.append(f"(couldn't probe: {e})")
 
+    # The questions a Mac driver failure raises, answered up front: which
+    # CPU, is Rosetta there, where is Chrome, which CPU is every driver file
+    # built for, and is a Chrome already sitting on Prism's profile. The
+    # client's M2 took two releases to diagnose from "errno 86" alone.
+    lines += ["", "── Browser driver ──"]
+    try:
+        import core_bridge as CB
+        lines += CB.get_automation().driver_report()
+    except Exception as e:                          # noqa: BLE001
+        lines.append(f"(couldn't inspect the driver: {e})")
+
     lines += ["", "── Recent log ──"]
     lines.append(tail(400) or "(the log is empty)")
     return "\n".join(lines)

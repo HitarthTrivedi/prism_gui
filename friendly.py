@@ -177,10 +177,43 @@ _rule(r"cannot connect to chrome at",
           "background and only one can use it at a time.",
           ("Close every Chrome window, including any Prism opened for signing "
            "in, then try again.",
+           "On a Mac, closing Chrome's windows leaves it running — quit it "
+           "with ⌘Q (Chrome menu → Quit Google Chrome) first.",
            "If it happens again, restart the computer — that clears it for "
            "certain.",
            "If you use antivirus or company security software, it may be "
            "stopping Prism from starting Chrome. Allow Prism through it.")))
+
+# BEFORE the version-mismatch rule, whose pattern ("chromedriver") is in
+# both of these messages. Found on a client's M2 (10 Sep 2026): the engine
+# raised a careful explanation -- an Intel driver, a Mac with no Rosetta --
+# and this file rewrote it into "Chrome updated itself, update Chrome", with
+# the true text folded away under Technical detail. The customer did what
+# the screen said and it changed nothing.
+_rule(r"bad cpu type|errno 86|built for intel macs|no rosetta",
+      Problem(
+          "The browser driver that ran is built for Intel Macs",
+          "This Mac has an Apple silicon chip and no Rosetta, so the Intel "
+          "build of the browser driver cannot run. Prism fetches its own "
+          "Apple silicon driver; it needs to be online once to do that.",
+          ("Check this Mac is online and press Start again.",
+           "If it comes back, open Terminal, paste this line, then try once "
+           "more:  rm -rf ~/Library/Application\\ Support/undetected_chromedriver",
+           "Still stuck? Settings → Export diagnostics and send us the file."),
+          action="support", action_label="Get help"))
+
+_rule(r"apple silicon browser driver",
+      Problem(
+          "Prism needs its Apple silicon browser driver",
+          "This Mac has an Apple silicon chip. Prism drives Chrome through a "
+          "small helper built for that chip, which it downloads once from "
+          "Google's Chrome for Testing site — and this Mac could not reach it.",
+          ("Check this Mac is online and press Start again. The download is "
+           "about 10 MB and happens once per Chrome version.",
+           "On a company network, ask IT to allow googlechromelabs.github.io "
+           "and storage.googleapis.com.",
+           "Still stuck? Settings → Export diagnostics and send us the file."),
+          action="support", action_label="Get help"))
 
 _rule(r"could not determine browser executable",
       Problem(
@@ -236,6 +269,8 @@ _rule(r"profile appears to be in use|user data directory is already",
           "A previous run left a Chrome window running in the background, and "
           "only one can use Prism's browser at a time.",
           ("Close every Chrome window, including any Prism opened.",
+           "On a Mac, quit Chrome with ⌘Q — closing its windows leaves it "
+           "running.",
            "If that doesn't help, restart the computer — it clears it for "
            "certain.")))
 

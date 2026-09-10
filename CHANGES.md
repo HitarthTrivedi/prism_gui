@@ -10,6 +10,78 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.3 — a Mac closes its own leftover Chrome, and never runs an Intel driver without Rosetta
+
+Found by reading the client's M2 failure end to end (10 Sep 2026) instead
+of the errno alone. "Chrome opened, no profile, no ChatGPT" was four things
+stacked; 1.5.2 removed one of them.
+
+**Was:**
+
+* `_posix_chrome_pids()` took the first whitespace-separated token of the
+  `ps` line as the program. On a Mac that is `/Applications/Google` (the
+  binary is `…/Google Chrome.app/Contents/MacOS/Google Chrome`), basename
+  "Google", so no Mac Chrome ever matched and `_release_profile()` was a
+  silent no-op on every Mac. The Chrome left running by Login tabs (closing
+  a Mac app's windows does not quit it) and the browser undetected-
+  chromedriver launches *before* it starts the driver were never closed;
+  the next launch handed itself to them and chromedriver said "cannot
+  connect to chrome". That is also why the 1.5.1/1.5.2 errno-86 retry
+  could not work on a Mac: the retry's Chrome handed off to the first
+  attempt's orphan.
+* undetected-chromedriver 3.5.5 has no `mac-arm64` in its platform table
+  (`win32`, `linux64`, `mac-x64`), so on *every* Mac it downloads the Intel
+  driver. Whenever Prism's own arm64 download failed — offline, a proxy,
+  Chrome for Testing not yet listing a just-updated major — the fallback
+  was a certain errno 86, shown as "Chrome updated itself, update Chrome".
+  The reason every Mac at Alphakore worked: Rosetta was already on them,
+  pulled in long ago by some Intel app, so the Intel driver ran. macOS
+  never offers to install Rosetta for a binary a program executes; that
+  just fails.
+* `friendly.py`'s version-mismatch rule (pattern "chromedriver") rewrote
+  the engine's Intel/Rosetta explanation; the true text sat under
+  Technical detail.
+* uc's browser finder looks in `/Applications` only. Prism's own finder
+  knows `~/Applications` (a no-admin install), but never told uc — so
+  Login tabs worked and every run said Chrome was not installed.
+* The source-zip hand-off (`Install and Run Prism.command`) ran a Python
+  with no CA bundle; the certifi patch lived only in the PyInstaller hook.
+
+**Now:**
+
+* The program is everything before the first ` --`; five Mac `ps` lines in
+  `tests/test_cross_platform_browser.py`, helper process included, the
+  everyday Mac Chrome and a script that names the path still left alone.
+* `_refuse_intel_fallback()`: on Apple silicon with no arm64 driver and no
+  Rosetta (`_rosetta_installed()` — two files, then a real `arch -x86_64`
+  exec), Prism stops with "needs its Apple silicon browser driver … check
+  this Mac is online and press Start again" and never calls uc. With
+  Rosetta, uc chooses as before. `_apple_silicon_driver()` now tries the
+  exact major, then `STABLE`, then any arm64 driver already in
+  `~/.prism/chromedriver/` (newest first) before giving up.
+* `browser_executable_path` is passed to uc from Prism's own finder.
+* `friendly.py`: rules for errno 86 / "built for Intel Macs" and for the
+  missing arm64 driver, placed before the version-mismatch rule; the
+  "cannot connect" and "profile in use" rules tell a Mac user to quit
+  Chrome with ⌘Q. The engine's own "cannot connect" text says the same on
+  Darwin.
+* `main.py` `_ensure_tls_trust()`: the same certifi patch as the runtime
+  hook, applied when running from source on macOS.
+* Export diagnostics gains a "Browser driver" section
+  (`automation.driver_report()`): CPU, Rosetta, Chrome path and version,
+  every driver file with the CPU it was built for, and whether a Chrome is
+  sitting on Prism's profile right now.
+
+Tests: `tests/test_chrome_driver_arch.py` (+9, incl. `NoRosettaNoIntelDriver`
+and `TheDriverReport`; `test_without_an_own_driver_uc_chooses_as_before`
+is now conditional on Rosetta, and says why), `tests/test_cross_platform_browser.py`
+(+5 Mac lines), `tests/test_friendly_mac.py` (new, 6). Windows and Linux
+paths are untouched except that uc is now told the browser path Prism
+already found. Full read-through: `artifacts/mac-chrome-driver-cases-2026-09-10.html`
+in the parent folder.
+
+---
+
 # 1.5.2 — Prism brings its own Apple silicon driver
 
 The client's M2 updated to 1.5.1 and still stopped with errno 86 on the
