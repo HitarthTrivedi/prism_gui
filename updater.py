@@ -271,6 +271,25 @@ def note_rollback(from_version: str) -> None:
         pass
 
 
+_session: Any = None
+
+
+def _http():
+    """One keep-alive session for the whole update, not a fresh connection
+    per file. A release is ~1000 files fetched one after another; opening a
+    new TLS connection to github.com and then following its redirect to the
+    asset CDN for every one of them is what turned an 80 MB, 111-file
+    update into a 25-minute crawl (measured 2026-09-08: 3 s per tiny file
+    from a long-running process, 0.3 s from a fresh one — GitHub throttles a
+    client that keeps reconnecting). Lazy, so `import updater` stays as
+    cheap as licensing/client.py's local-import style keeps it."""
+    global _session
+    if _session is None:
+        import requests  # local import: see module docstring / client.py parity
+        _session = requests.Session()
+    return _session
+
+
 def _get(url: str, *, timeout: int, fetch: Callable[..., Any] | None = None,
         max_bytes: int | None = None) -> bytes:
     """The one place Phase 1 touches the network for a GET. `fetch` is an
@@ -289,8 +308,7 @@ def _get(url: str, *, timeout: int, fetch: Callable[..., Any] | None = None,
     come back, so there's nothing for a cap to protect against there."""
     if fetch is not None:
         return fetch(url, timeout=timeout)
-    import requests  # local import: see module docstring / client.py parity
-    response = requests.get(url, timeout=timeout, stream=True)
+    response = _http().get(url, timeout=timeout, stream=True)
     response.raise_for_status()
     if max_bytes is None:
         return response.content
@@ -329,6 +347,18 @@ def platform_tag() -> str:
         os_tag = "linux"
     arch = {"x86_64": "x64", "AMD64": "x64", "aarch64": "arm64",
            "arm64": "arm64"}.get(platform.machine(), platform.machine())
+    if os_tag == "macos":
+        # A NEW channel name, deliberately. Every macOS build before 1.4.1
+        # swapped `Prism.app/Contents/MacOS` instead of the bundle (see
+        # install_dir()); a 1.4.0 Mac that found a manifest on the old
+        # `macos-arm64` channel would fetch the new bundle-relative file
+        # list, rename Contents/MacOS aside, drop a whole .app tree in its
+        # place and never start again. Retiring the old name is the one
+        # guard that reaches a binary already on a customer's disk: those
+        # clients fetch `manifest.macos-arm64.signed`, get a 404, and take
+        # the browser-download fallback — the only safe path for them.
+        # Do not publish anything under the old name again.
+        return f"{os_tag}-{arch}-app"
     return f"{os_tag}-{arch}"
 
 
@@ -564,6 +594,15 @@ def install_dir() -> str:
     (`_internal/`) rather than the install root, and getting this path wrong
     would make perform_swap() rename the wrong directory.
 
+    On macOS the executable sits INSIDE the bundle — `Prism.app/Contents/
+    MacOS/Prism` — and its parent is not the install: renaming
+    `Contents/MacOS` out from under a bundle leaves a `Prism.app` with no
+    `Contents/Info.plist`, no `Frameworks/`, and a broken code-signature seal,
+    which Finder then refuses to open (ISSUES_AND_FIXES.md 3.1). The unit
+    that gets swapped there is the whole `.app`, so this walks up to it. CI
+    hashes `dist/Prism.app` for the macOS manifest for the same reason: the
+    `path` entries have to be relative to the directory this returns.
+
     Only meaningful for a frozen build — a source checkout has no single
     "installed folder" to swap, so Phase 1 self-update does not apply to it.
     """
@@ -571,7 +610,24 @@ def install_dir() -> str:
         raise UpdateError("Self-update only applies to a packaged build, "
                           "not a source checkout.")
     import sys
-    return os.path.dirname(sys.executable)
+    return bundle_root(sys.executable)
+
+
+def bundle_root(executable: str) -> str:
+    """The directory apply_update.py swaps, for the executable at `executable`.
+
+    A `.app` ancestor wins (macOS bundle); otherwise it is the executable's
+    own directory (PyInstaller onedir on Linux/Windows). Pure path logic,
+    separated from install_dir() so it can be tested on any OS."""
+    exe_dir = os.path.dirname(os.path.abspath(executable))
+    probe = exe_dir
+    while True:
+        if probe.endswith(".app") and os.path.isdir(os.path.join(probe, "Contents")):
+            return probe
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return exe_dir
+        probe = parent
 
 
 def relaunch_argv() -> list[str]:

@@ -113,8 +113,25 @@ class ConfirmAndRollback(unittest.TestCase):
         AU.confirm_startup_success(self.install_dir, self.backup_dir)
         self.assertFalse(os.path.isdir(self.backup_dir))
 
-    def test_pending_marker_at_next_launch_triggers_rollback(self):
+    def test_the_first_launch_after_a_swap_is_not_rolled_back(self):
+        """The bug that undid every in-app update through 1.4.1: the new
+        build's own first launch found the marker and rolled itself back.
+        The first launch must proceed; only a SECOND launch that finds the
+        marker still there (the first never confirmed) rolls back."""
         AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        self.assertFalse(AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir))
+        with open(os.path.join(self.install_dir, "marker.txt")) as f:
+            self.assertEqual(f.read(), "new-version")       # still the new build
+        self.assertTrue(AU.is_pending_confirm(self.install_dir))
+        # …and that launch got to the window: the normal happy path.
+        AU.confirm_startup_success(self.install_dir, self.backup_dir)
+        self.assertFalse(AU.is_pending_confirm(self.install_dir))
+        self.assertFalse(os.path.isdir(self.backup_dir))
+
+    def test_a_second_unconfirmed_launch_triggers_rollback(self):
+        AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        self.assertFalse(AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir))
+        # The first launch crashed before confirming. Next launch:
         rolled_back = AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)
         self.assertTrue(rolled_back)
         with open(os.path.join(self.install_dir, "marker.txt")) as f:
@@ -131,12 +148,28 @@ class ConfirmAndRollback(unittest.TestCase):
         import shutil
         shutil.rmtree(self.backup_dir)
         AU.mark_pending_confirm(self.install_dir, "1.4.0")
+        AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)  # first launch
         rolled_back = AU.check_and_rollback_if_pending(self.install_dir, self.backup_dir)
         self.assertFalse(rolled_back)
         self.assertTrue(os.path.isdir(self.install_dir))
 
 
 class PidLifecycle(unittest.TestCase):
+    def test_pid_alive_works_in_a_bare_interpreter(self):
+        """The apply helper is a bare process: no Qt, no licensing, no
+        pytest — nothing that happens to have imported ctypes.wintypes
+        first. On Windows through 1.4.2 that made pid_alive() raise
+        AttributeError and the helper silently skip the swap. Run it the
+        way the helper runs it: fresh interpreter, only this module."""
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run(
+            [sys.executable, "-I", "-c",
+             f"import sys; sys.path.insert(0, {here!r}); import os, apply_update; "
+             "print(apply_update.pid_alive(os.getpid()), apply_update.pid_alive(2**22 - 1))"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split(), ["True", "False"])
+
     def test_pid_alive_true_for_self(self):
         self.assertTrue(AU.pid_alive(os.getpid()))
 
@@ -201,6 +234,64 @@ class EndToEndApplyHelper(unittest.TestCase):
             time.sleep(0.05)
         self.assertTrue(os.path.exists(relaunch_marker),
                         "spawn_detached's relaunch never ran")
+
+
+class MacBundle(unittest.TestCase):
+    """The macOS-specific path logic is pure path logic, so it IS testable
+    here: a fake `Prism.app/Contents/MacOS/Prism` on Linux exercises exactly
+    the branch a real Mac takes. What is still not covered is Gatekeeper —
+    see the banner in apply_update.py."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="prism-mac-")
+        self.app = os.path.join(self.tmp, "Applications", "Prism.app")
+        self.exe = os.path.join(self.app, "Contents", "MacOS", "Prism")
+        os.makedirs(os.path.dirname(self.exe))
+        open(self.exe, "w").close()
+
+    def test_install_dir_is_the_whole_bundle_not_contents_macos(self):
+        import updater
+        self.assertEqual(updater.bundle_root(self.exe), self.app)
+
+    def test_onedir_layout_is_unchanged(self):
+        import updater
+        exe = os.path.join(self.tmp, "opt", "Prism", "Prism")
+        os.makedirs(os.path.dirname(exe))
+        open(exe, "w").close()
+        self.assertEqual(updater.bundle_root(exe), os.path.dirname(exe))
+
+    def test_a_dot_app_in_the_path_only_counts_if_it_is_a_bundle(self):
+        import updater
+        exe = os.path.join(self.tmp, "my.app", "Prism", "Prism")   # no Contents/
+        os.makedirs(os.path.dirname(exe))
+        open(exe, "w").close()
+        self.assertEqual(updater.bundle_root(exe), os.path.dirname(exe))
+
+    def test_pending_marker_lives_beside_the_bundle_not_inside_it(self):
+        marker = AU.confirm_marker_path(self.app)
+        self.assertEqual(os.path.dirname(marker), os.path.dirname(self.app))
+        self.assertFalse(marker.startswith(self.app + os.sep))
+        AU.mark_pending_confirm(self.app, "1.4.0")
+        self.assertTrue(AU.is_pending_confirm(self.app))
+        self.assertEqual(os.listdir(self.app), ["Contents"])   # bundle untouched
+        AU.confirm_startup_success(self.app, self.app + ".old")
+        self.assertFalse(AU.is_pending_confirm(self.app))
+
+    def test_swap_and_rollback_move_the_bundle_as_one_unit(self):
+        staged = os.path.join(self.tmp, "staged")
+        os.makedirs(os.path.join(staged, "Contents", "MacOS"))
+        with open(os.path.join(staged, "Contents", "Info.plist"), "w") as f:
+            f.write("new")
+        backup = self.app + ".old"
+        AU.perform_swap(self.app, staged, backup)
+        self.assertTrue(os.path.isfile(os.path.join(self.app, "Contents", "Info.plist")))
+        self.assertTrue(os.path.isfile(os.path.join(backup, "Contents", "MacOS", "Prism")))
+        AU.mark_pending_confirm(self.app, "1.4.0")
+        self.assertFalse(AU.check_and_rollback_if_pending(self.app, backup))  # first launch
+        # …which never confirmed → the next launch brings the old bundle back whole.
+        self.assertTrue(AU.check_and_rollback_if_pending(self.app, backup))
+        self.assertTrue(os.path.isfile(self.exe))
+        self.assertFalse(os.path.exists(os.path.join(self.app, "Contents", "Info.plist")))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
-from dialogs.reel_dialog import ReelDialog  # noqa: E402
+from addons.reel.dialog import ReelDialog  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -88,7 +88,7 @@ class ChoosingStudioRunsStudio(unittest.TestCase):
 
     def _capture_run(self, dlg):
         """Intercept the worker rather than let it open a browser."""
-        import dialogs.reel_dialog as mod
+        import addons.reel.dialog as mod
         seen = {}
 
         class Fake:

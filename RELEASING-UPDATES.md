@@ -131,3 +131,38 @@ bundle written by another running app pick up the same quarantine treatment
 a browser download gets). Run those two experiments
 (`update-plan.md` §9) before the first real customer hits this path on
 either platform — Linux is the only one that's been tested end to end.
+
+**1.4.0 clients cannot update in-app at all — do not try to serve them.**
+1.4.0's `updater.updates_root()` called `licensing.user_dir("updates")`
+(a zero-argument function), so every `stage_update()` raised `TypeError`
+before fetching a byte and the blanket handler in `UpdateWorker` opened
+the browser. Fixed in f192686 (2026-09-01, in 1.4.1). Nothing on the
+server side reaches that binary: a customer on 1.4.0 makes ONE browser
+download (straight to the newest release) and is on the in-app path from
+then on. Found on 2026-09-09 when a real 1.4.0 Desktop install kept
+opening the browser after everything else was fixed — and after 170 files
+had been uploaded to the main release on the theory that 1.4.0 merely
+read from a different place (it did, but it never got that far).
+
+**Two hard-won facts from shipping 1.4.1's assets (2026-09-08):**
+GitHub caps a release at **1000 assets** — `packaging/manifest.py` now
+refuses a build that would need more, and `prism.spec` trims licence texts
+and `.pyi` stubs to stay under. And a `gh release upload` that dies midway
+leaves an asset in state `starter` that every later upload of that name
+answers with `HTTP 422`; delete it via the API
+(`gh api -X DELETE repos/<repo>/releases/assets/<id>`) before retrying —
+`release_all.py` will not do that for you. Note also that
+`devtools/verify_upload.py` takes the *assets* tag
+(`v1.4.1-assets-linux-x64`), never the main tag.
+
+**macOS, 1.4.1:** two things that made the Mac path *certain* to fail are
+fixed, so the experiment above is now worth running. Before 1.4.1
+`updater.install_dir()` returned `Prism.app/Contents/MacOS` and the swap
+renamed that folder — gutting the bundle on the first update — and CI hashed
+`dist/Prism` (the PyInstaller COLLECT folder) rather than `dist/Prism.app`,
+so the macOS manifest described a tree no installed Mac had. Now the whole
+`.app` is the swap unit, the manifest is built from `dist/Prism.app`, and the
+pending-confirm marker is written *beside* the bundle rather than inside it
+(a stray file under a `.app` breaks the signature seal). A 1.4.0 Mac client
+still runs the OLD logic for the 1.4.0 → 1.4.1 hop, so it falls back to the
+browser download exactly as the 1.3.2 → 1.4.0 case did above.

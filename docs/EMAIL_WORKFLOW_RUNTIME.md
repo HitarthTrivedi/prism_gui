@@ -204,10 +204,10 @@ plan any more.
 | `core/mailflow.py` | The daily loop that joins them — one `check()` call. | ✅ built |
 
 **The screens — built, and rebuilt once.** Two surfaces: the sidebar screen
-(`widgets/inquiry_panel.py`) is a plain launcher — "What needs you today" in
+(`addons/inquiry/panel.py`) is a plain launcher — "What needs you today" in
 words, with a button on each line that opens the working window on exactly
 that list, then this month's figures as a two-column table; the working
-window (`dialogs/inquiry_dialog.py`) has six tabs in the order an inquiry
+window (`addons/inquiry/dialog.py`) has six tabs in the order an inquiry
 lives — *To quote · No answer yet · They answered · Order came · All
 inquiries · All mail* — each the same shape: one sentence, a Show:/search
 toolbar (with the owner's own from/to dates), the table, and a "Selected

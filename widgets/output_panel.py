@@ -944,6 +944,7 @@ class OutputPanel(QWidget):
     back_requested = Signal()
     stop_requested = Signal()
     skip_requested = Signal()
+    fallback_requested = Signal()
     edit_reel = Signal(str)         # a card's Studio reel wants the editor
 
     def __init__(self, parent=None):
@@ -990,6 +991,20 @@ class OutputPanel(QWidget):
             "produced so far — and move on to the next one. Use it when a "
             "tool is stuck generating."))
         head.addWidget(self.skip_btn)
+
+        # The other way past a stuck tool. Skip gives the step up; this
+        # hands it to the next tool in its category right now -- what the
+        # failover pass would do by itself once the cap ran out, for the
+        # person who can already see the tool has errored and does not want
+        # to sit out ten minutes for Prism to notice.
+        self.fallback_btn = C.button(i18n.t("Use fallback"), "secondary",
+                                     "arrow-right", small=True,
+                                     on_click=self._on_fallback)
+        self.fallback_btn.setToolTip(i18n.t(
+            "Stop waiting for this tool and hand the step to its fallback "
+            "tool now. Use it when you can see the tool has errored and "
+            "you don't want to wait for the timeout."))
+        head.addWidget(self.fallback_btn)
 
         # A run is tens of minutes of browser automation. Without this the
         # only way out is force-quitting the app, which loses every step that
@@ -1047,6 +1062,11 @@ class OutputPanel(QWidget):
         # legitimate thing to do. The engine clears the flag per press.
         self.skip_requested.emit()
 
+    def _on_fallback(self):
+        # Not latched either: a second press during the retry means "not
+        # that tool either" and moves to the next one.
+        self.fallback_requested.emit()
+
     def _on_stop(self):
         # Latch immediately so a second click can't queue a second stop, and
         # so the label stops claiming an action that is already under way. The
@@ -1061,6 +1081,7 @@ class OutputPanel(QWidget):
         self._running = bool(running)
         self.stop_btn.setVisible(running)
         self.skip_btn.setVisible(running)
+        self.fallback_btn.setVisible(running)
         if running:
             self._finished = False
             self.stop_btn.setEnabled(True)

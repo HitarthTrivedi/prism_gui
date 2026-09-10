@@ -304,7 +304,8 @@ class ARendererThatAlreadyRan(unittest.TestCase):
     def test_the_renderer_is_called_again_with_the_recovered_images(self):
         rerender_calls = []
 
-        def fake_run_local(kind, prior_text, attachments, cfg, stage, brand=None):
+        def fake_run_local(kind, prior_text, attachments, cfg, stage, brand=None,
+                           studio=None):
             rerender_calls.append((kind, stage, list(attachments)))
             return "/runs/reel_2.mp4", "reel rendered — reel_2.mp4"
 

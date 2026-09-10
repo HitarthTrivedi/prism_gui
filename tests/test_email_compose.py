@@ -27,10 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PySide6.QtCore import Signal, QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-import sent_log  # noqa: E402
-from dialogs import email_dialog as ED  # noqa: E402
-from dialogs.email_dialog import EmailComposeDialog  # noqa: E402
-from widgets.email_panel import EmailPanel, LIST_LABEL, ONE_LABEL  # noqa: E402
+from addons.email import sent_log  # noqa: E402
+from addons.email import dialog as ED  # noqa: E402
+from addons.email.dialog import EmailComposeDialog  # noqa: E402
+from addons.email.panel import EmailPanel, LIST_LABEL, ONE_LABEL  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
@@ -161,9 +161,10 @@ class _FakeSendWorker(QObject):
     failed = Signal(str)
     stopped = False
 
-    def __init__(self, cfg, recipients, subject, body, files):
+    def __init__(self, cfg, recipients, subject, body, files, **pace):
         super().__init__()
         self.recipients = recipients
+        self.pace = pace                  # delay / jitter / start_at, as given
         _FakeSendWorker.last = self
 
     def start(self):

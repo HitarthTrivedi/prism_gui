@@ -41,7 +41,12 @@ does the swap, then relaunches the real app fresh. See main.py's
 ║                                                                            ║
 ║   macOS: does a .app bundle written to disk by another running app       ║
 ║   (rather than downloaded via a browser) pick up the same Gatekeeper/    ║
-║   quarantine treatment a browser download gets? Untested.                ║
+║   quarantine treatment a browser download gets? Untested. (Expected not  ║
+║   to: only apps that opt in via LSFileQuarantineEnabled tag what they    ║
+║   write, and shutil.copy2 does not carry xattrs on macOS.) What IS fixed ║
+║   is the unit being swapped — updater.install_dir() now returns the      ║
+║   whole `Prism.app`, never `Contents/MacOS` (that rename gutted the      ║
+║   bundle), and the pending marker sits beside the bundle, not inside it. ║
 ║                                                                            ║
 ║ Do not remove this banner or treat either path as proven until both      ║
 ║ have actually been run on the hardware in question.                      ║
@@ -86,7 +91,19 @@ def pid_alive(pid: int) -> bool:
     the one exercised by this module's own tests.
     """
     if sys.platform == "win32":
+        # `import ctypes` alone does NOT make ctypes.wintypes available — it
+        # is a submodule that must be imported by name. In the bare
+        # --prism-apply-update helper nothing else has imported it, so the
+        # DWORD() below raised AttributeError, perform_apply_and_relaunch()'s
+        # catch-all swallowed it, and on Windows every in-app update through
+        # 1.4.2 staged perfectly, then never swapped and never relaunched:
+        # the customer reopened the same exe and was still on the old
+        # version. Under pytest the attribute happened to exist (some other
+        # import had loaded the submodule), which is why the Windows test
+        # lane never saw it. tests/test_apply_update.py now runs this in a
+        # bare interpreter.
         import ctypes
+        import ctypes.wintypes
 
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
@@ -177,19 +194,62 @@ def perform_swap(install_dir: str, staged_dir: str, backup_dir: str, *,
 
 # ── startup-success confirmation & rollback ────────────────────────────────
 def confirm_marker_path(install_dir: str) -> str:
+    """Where the "swapped in, not yet confirmed" marker lives.
+
+    Inside the install folder for a plain onedir tree. BESIDE it for a macOS
+    `.app`: the bundle's code-signature seal covers everything under
+    `Contents/`, and Gatekeeper treats a bundle with unexpected files as
+    "damaged" — a marker written into the bundle by the previous launch is
+    exactly the kind of thing that turns a good update into "Prism.app is
+    damaged and can't be opened" on the very next start.
+    """
+    if install_dir.rstrip(os.sep).endswith(".app"):
+        return install_dir.rstrip(os.sep) + PENDING_MARKER
     return os.path.join(install_dir, PENDING_MARKER)
 
 
+LAUNCHED_LINE = "launched"
+
+
 def mark_pending_confirm(install_dir: str, from_version: str) -> None:
-    """Written right after a successful swap, before relaunching. Its mere
-    presence at the NEXT startup means the version that was just swapped in
-    never confirmed it started cleanly."""
+    """Written right after a successful swap, before relaunching.
+
+    Two-phase, and the second phase is what makes an update survive its own
+    first launch. The marker starts as just the outgoing version. The first
+    startup of the swapped-in build finds it WITHOUT a "launched" line,
+    appends one, and carries on — that launch is the one being judged. If
+    the build gets as far as the main window it calls
+    confirm_startup_success() and the marker goes. If instead the NEXT
+    startup finds the marker WITH "launched" already in it, the previous
+    launch never confirmed and the backup goes back.
+
+    The one-phase version of this — "any marker at startup means roll
+    back" — was the bug that made every in-app update through 1.4.1 undo
+    itself: the new build's very first launch was the one that found the
+    marker, and it rolled itself back before a single window opened.
+    """
     with open(confirm_marker_path(install_dir), "w", encoding="utf-8") as f:
-        f.write(from_version)
+        f.write(from_version.strip() + "\n")
 
 
 def is_pending_confirm(install_dir: str) -> bool:
     return os.path.isfile(confirm_marker_path(install_dir))
+
+
+def _marker_was_launched(install_dir: str) -> bool:
+    try:
+        with open(confirm_marker_path(install_dir), encoding="utf-8") as f:
+            return LAUNCHED_LINE in f.read().split()
+    except OSError:
+        return False
+
+
+def _note_launched(install_dir: str) -> None:
+    try:
+        with open(confirm_marker_path(install_dir), "a", encoding="utf-8") as f:
+            f.write(LAUNCHED_LINE + "\n")
+    except OSError:
+        pass
 
 
 def confirm_startup_success(install_dir: str, backup_dir: str) -> None:
@@ -213,8 +273,19 @@ def check_and_rollback_if_pending(install_dir: str, backup_dir: str) -> bool:
 
     A failed update must never be worse than never having offered the
     update-plan.md's S5 — this is what makes that true.
+
+    Returns False on the FIRST launch after a swap (see mark_pending_confirm
+    for the two-phase marker) and True only when a previous launch already
+    had its chance and never confirmed.
     """
     if not is_pending_confirm(install_dir):
+        return False
+    if not _marker_was_launched(install_dir):
+        # This IS the first launch after the swap — the one under judgement.
+        # Note it and let startup proceed; confirm_startup_success() clears
+        # the marker once the window is up, and a launch that never gets
+        # there leaves "launched" behind for the next one to act on.
+        _note_launched(install_dir)
         return False
     try:
         os.remove(confirm_marker_path(install_dir))

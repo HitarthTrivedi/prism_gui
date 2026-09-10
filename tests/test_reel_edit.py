@@ -82,8 +82,8 @@ class TheTwoPages(unittest.TestCase):
         spec["edits"] = [{"scene": 0, "path": [0, 0], "dx": 12, "dy": 0,
                           "scale": 1}]
         html = E.editable_html(spec)
-        for marker in ("__ed-bar", "__edApply", "__SCENES__",
-                       "Save &amp; render", '"dx": 12'):
+        for marker in ("studio-top", "__edApply", "__SCENES__",
+                       "Render MP4", '"dx": 12'):
             self.assertIn(marker, html)
 
     def test_the_render_page_gets_the_same_apply_script(self):
@@ -135,7 +135,7 @@ class TheLocalServer(unittest.TestCase):
         self.assertTrue(self.url.startswith("http://127.0.0.1:"))
         with urllib.request.urlopen(self.url, timeout=5) as r:
             body = r.read().decode()
-        self.assertIn("__ed-bar", body)
+        self.assertIn("studio-top", body)
         self.assertIn("Hello", body)
 
     def _wait_for(self, collected: list, timeout: float = 5.0):
@@ -193,7 +193,7 @@ class InARealBrowser(unittest.TestCase):
                 browser = p.chromium.launch()
                 page = browser.new_page(viewport={"width": 900, "height": 700})
                 page.goto(url, wait_until="load")
-                page.wait_for_selector("#__ed-bar")
+                page.wait_for_selector("#studio-timeline")
                 h1 = page.locator("#s0 h1")
                 h1.wait_for(state="visible")
 
@@ -202,16 +202,18 @@ class InARealBrowser(unittest.TestCase):
                 page.mouse.down()
                 page.mouse.move(box["x"] + 65, box["y"] + 45, steps=4)
                 page.mouse.up()
-                self.assertIn("__ed-sel", h1.get_attribute("class") or "")
+                self.assertIn("__studio-sel", h1.get_attribute("class") or "")
 
-                page.click("#__ed-bigger")
-                page.click("#__ed-save")
+                page.click("#studio-bigger")
+                page.click("#studio-save")
                 deadline = time.monotonic() + 5
                 while not saved and time.monotonic() < deadline:
                     time.sleep(0.05)
                 self.assertTrue(saved, "Save never reached the callback")
                 edits = saved[0]
-                target = next(e for e in edits if e["path"] == [0, 0])
+                # V2 addresses the layer by its durable id, never by path: the
+                # wrapper div is el-1-1, the h1 inside it el-1-2.
+                target = next(e for e in edits if e.get("element_id") == "el-1-2")
                 self.assertGreater(target["dx"], 10)
                 self.assertGreater(target["scale"], 1.0)
 
@@ -290,7 +292,7 @@ class TheWorkbenchCard(unittest.TestCase):
 class TheReelWindow(unittest.TestCase):
 
     def _dialog(self, runs_dir: str = ""):
-        from dialogs.reel_dialog import ReelDialog
+        from addons.reel.dialog import ReelDialog
         with mock.patch.object(CB.config, "RUNS_DIR",
                                runs_dir or tempfile.mkdtemp()):
             return ReelDialog({"agents": {"content": "ChatGPT"}}, [], None)
@@ -337,7 +339,7 @@ class TheReelWindow(unittest.TestCase):
         stop = mock.Mock()
         fake = mock.Mock()
         fake.serve.return_value = ("http://127.0.0.1:1/", stop)
-        import dialogs.reel_dialog as mod
+        import addons.reel.dialog as mod
         with mock.patch.object(CB, "get_reel_edit", return_value=fake), \
                 mock.patch.object(mod.QDesktopServices, "openUrl") as opened:
             d._edit_layout()
@@ -638,9 +640,13 @@ if not ok:
     print("NOT_AVAILABLE:" + why)
     sys.exit(0)
 from playwright.sync_api import sync_playwright
+from core import browser as prism_browser
 try:
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        # Use the same full-Chromium channel as production.  CI deliberately
+        # installs with --no-shell, so a bare launch asks for an artifact we
+        # intentionally do not ship and turns this release check into a skip.
+        b = prism_browser.launch_chromium(p)
         page = b.new_page()
         page.set_content("<h1>customer machine smoke test</h1>")
         assert page.inner_text("h1") == "customer machine smoke test"

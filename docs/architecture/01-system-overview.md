@@ -130,18 +130,36 @@ flowchart TB
 
 ### The rule that keeps the layers honest
 
-> **`main_window.py` is the only file that makes decisions.**
+> **One place decides. Widgets and dialogs do not.**
 
 Widgets emit signals and render what they are given. Dialogs collect input and
 return it. `workers.py` classes do one job off the UI thread and emit a result.
 The engine knows nothing about Qt. Everything that decides *what happens next*
 — which worker to start, what to do with its result, when to persist, when to
-stop for a human — lives in `main_window.py` or in the add-on dialog that owns
-that screen.
+stop for a human — lives in the shell or in the add-on that owns that screen.
 
-This is why `main_window.py` is 2,131 lines and why that is not, by itself, a
-problem to fix. It is also why a change to behaviour almost always lands in one
-file.
+**This rule changed shape in the add-ons restructure, and the change was
+deliberate.** It used to read *"`main_window.py` is the only file that makes
+decisions"*, and it justified that file being 2,131 lines: a change to
+behaviour almost always landed in one place, which is genuinely good for
+coherence.
+
+It is bad for four people shipping in parallel, and those two things trade
+against each other at exactly that file. Over ninety days every contributor
+edited `main_window.py`; it took 40 commits, and it and `workers.py` were the
+two files that most often needed manual conflict resolution. Branches
+diverged there, sat unmerged, and their fixes never reached `main` — which is
+felt as *"the same bugs keep coming back"*.
+
+So the principle is kept and the decision point is relocated: **one
+controller per add-on, inside that add-on.** The shell still decides shell
+things — navigation, the licence gate, the pipeline — and reads a manifest to
+know what add-ons exist without knowing which. Nothing about widgets or
+dialogs changed.
+
+See [9 · Boundaries](09-boundaries.md) for what that costs and what enforces
+it, per `README.md`'s own rule: when a fact here contradicts the code, the
+code wins.
 
 ---
 

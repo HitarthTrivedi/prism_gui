@@ -25,6 +25,16 @@ this set links out to them rather than restating them.
 | 6 | [Add-on subsystems](06-addons.md) | Email automation, BOQ, Gerber, Reel/Studio, Email blast |
 | 7 | [Operations](07-operations.md) | Build, CI, release, tests, configuration, environment, failure modes |
 | 8 | [System state & roadmap map](08-state-and-roadmap.md) | What is built, what is half-built, what is deliberately not built |
+| 9 | [Boundaries](09-boundaries.md) | What may depend on what — and the test that fails when it doesn't hold |
+| 10 | [Adding an add-on](10-adding-an-add-on.md) | The recipe, end to end, with a real worked example. **Start here if you are new** |
+
+Two more, outside this folder:
+
+* **[docs/ADDONS_MOVE_MAP.md](../ADDONS_MOVE_MAP.md)** — where every file went
+  in the add-ons restructure, and how to rebase a branch across it
+* **[OWNERS.md](../../OWNERS.md)** — who is looking after what, this sprint.
+  Kept separate from the architecture on purpose: ownership rotates, the
+  boundaries do not
 
 ---
 

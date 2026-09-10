@@ -150,6 +150,14 @@ for root, dirs, files in os.walk(ENGINE_DIR):
         rel = os.path.relpath(root, GUI_DIR)
         datas.append((src, rel))
 
+# Modules in the archive use paths relative to ``core`` at runtime, whereas
+# the generic engine-data loop above preserves the source checkout prefix.
+# Keep these browser modules in the location their frozen imports resolve.
+for _asset_dir in ("studio_assets", os.path.join("motion", "runtime")):
+    _source = os.path.join(ENGINE_DIR, "core", _asset_dir)
+    if os.path.isdir(_source):
+        datas.append((_source, os.path.join("core", _asset_dir)))
+
 # When frozen, core.router is imported from the archive, so its __file__ points
 # at <bundle>/core/router.py and its notes lookup walks up to the bundle root —
 # not to prism_terminal/. Put a copy there too, or the tool notes silently stop
@@ -193,16 +201,56 @@ def _engine_modules() -> list[str]:
     silently imported from disk instead. Now that the sources do not ship,
     anything missing from this list is an ImportError in front of a customer,
     in a windowed build with no console to print it. So enumerate, never list.
+
+    RECURSIVE, not a listdir of core/*.py. That mattered: core/motion/ is a
+    SUBPACKAGE, so the old flat scan never listed core.motion.generate,
+    core.motion.render or core.motion.schema, and no frozen build has ever
+    contained them. Motion Graphics has been shipped-but-disabled behind
+    core/motion/render.py's _DISABLED_PENDING_ASSET_FIX kill-switch, so the
+    omission has cost nothing yet -- turn that switch off without this change
+    and the feature is an ImportError in a windowed build with no console.
     """
     core = os.path.join(ENGINE_DIR, "core")
-    found = ["core"] + [
-        "core." + name[:-3] for name in sorted(os.listdir(core))
-        if name.endswith(".py") and name != "__init__.py"]
+    found = ["core"]
+    for folder, dirs, files in os.walk(core):
+        # pytest leaves .pytest_cache below packages it exercises.  Any hidden
+        # directory is metadata rather than an importable Python package; if
+        # it reaches this walk it becomes an invalid hidden import such as
+        # ``core..pytest_cache`` and dirties (or can break) release builds.
+        dirs[:] = [d for d in dirs
+                   if d != "__pycache__" and not d.startswith(".")]
+        rel = os.path.relpath(folder, core)
+        package = "core" if rel == "." else "core." + rel.replace(os.sep, ".")
+        if package != "core":
+            found.append(package)          # the subpackage itself
+        for name in sorted(files):
+            if name.endswith(".py") and name != "__init__.py":
+                found.append(package + "." + name[:-3])
     print(f"[prism] engine modules bundled: {len(found) - 1}")
     return found
 
 
-hiddenimports = _engine_modules() + [
+def _addon_modules() -> list[str]:
+    """Every module under addons/, so the shelf is not empty in a frozen build.
+
+    Belt and braces. addons/registry.py imports each add-on's manifest
+    STATICALLY, and those static imports are what PyInstaller's analyser
+    actually follows; this walk is the backstop for a module that only the
+    manifests' dotted strings refer to -- a panel or dialog named as
+    "addons.gerber.panel:GerberPanel" and never imported anywhere.
+
+    The failure this prevents is the worst one available in this design:
+    development is perfect, the build succeeds, and the customer opens a
+    windowed app with an empty add-on shelf and no console to say why.
+    """
+    import addons.registry as _registry
+    found = list(_registry.addon_modules())
+    print(f"[prism] add-on modules bundled: {len(found)} "
+          f"({_registry.EXPECTED} add-ons registered)")
+    return found
+
+
+hiddenimports = _engine_modules() + _addon_modules() + [
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "pyaudio",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`
@@ -455,6 +503,28 @@ if IS_MAC:
     if _pw_moved:
         print(f"[prism] {_pw_moved} playwright browser binaries moved to "
               f"datas so PyInstaller's ad-hoc signer skips them")
+
+# ── keep the file count under GitHub's 1000-assets-per-release cap ────────
+# Every non-empty regular file in the bundle becomes one release asset for
+# the in-app updater (packaging/manifest.py refuses a build over 1000).
+# 1.4.1's Linux build had 1022 — 30 of them licence texts inside
+# *.dist-info/ and 8 of them .pyi type stubs, none of which anything reads
+# at runtime. Metadata that IS read at runtime (keyring's entry_points.txt,
+# every RECORD/METADATA importlib.metadata resolves) is left alone.
+_TRIM_SUFFIXES = (".pyi",)
+_kept_datas, _trimmed = [], 0
+for t in a.datas:
+    dest = t[0].replace("\\", "/")
+    name = dest.rsplit("/", 1)[-1]
+    licence_text = (".dist-info/" in dest
+                    and ("/licenses/" in dest or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "AUTHORS"))))
+    if licence_text or dest.endswith(_TRIM_SUFFIXES):
+        _trimmed += 1
+        continue
+    _kept_datas.append(t)
+a.datas = _kept_datas
+print(f"[prism] trimmed {_trimmed} licence texts / .pyi stubs from datas "
+      "(release-asset cap; see packaging/manifest.py)")
 
 pyz = PYZ(a.pure, a.zipped_data)
 

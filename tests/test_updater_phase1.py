@@ -313,7 +313,11 @@ class StreamingSizeCap(unittest.TestCase):
         fake_response.iter_content.return_value = iter(
             [b"x" * 100, b"y" * 100, b"z" * 100])  # 300 bytes total
 
-        with mock.patch("requests.get", return_value=fake_response) as get:
+        # _get() goes through one keep-alive Session (updater._http), so
+        # the double stands in for the session, not for requests.get.
+        session = mock.Mock(); session.get.return_value = fake_response
+        with mock.patch.object(updater, "_http", return_value=session):
+            get = session.get
             with self.assertRaises(updater.UpdateError):
                 updater._get("https://example.invalid/file", timeout=5,
                              max_bytes=150)
@@ -331,7 +335,8 @@ class StreamingSizeCap(unittest.TestCase):
         fake_response.raise_for_status = mock.Mock()
         fake_response.iter_content.return_value = iter([b"ab", b"cd"])
 
-        with mock.patch("requests.get", return_value=fake_response):
+        session = mock.Mock(); session.get.return_value = fake_response
+        with mock.patch.object(updater, "_http", return_value=session):
             data = updater._get("https://example.invalid/file", timeout=5,
                                 max_bytes=10)
         self.assertEqual(data, b"abcd")

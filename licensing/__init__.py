@@ -390,6 +390,14 @@ def activate(key: str) -> LicenseState:
     return _apply(response, key=normalised)
 
 
+def release_device(key: str, device_id: int) -> None:
+    """Free another machine's seat on the licence `key` belongs to, so THIS
+    machine can take it. Raises ServerError / Unreachable like activate();
+    nothing local changes — the caller activates afterwards."""
+    client.release_device(keyformat.normalise(key), device_id,
+                          app_version=app_meta.VERSION)
+
+
 def deactivate() -> None:
     """Release this machine's seat. Local state is cleared even if the server
     call fails — a customer who has decommissioned a laptop should not be stuck

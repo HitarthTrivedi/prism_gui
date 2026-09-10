@@ -103,9 +103,13 @@ cryptography
 # the plaintext file the previous version used unconditionally, which is no
 # worse than before and is reported honestly in diagnostics.
 #
-# Uncomment to build with it. Recommended for release builds on Windows and
-# macOS, where a working backend is always present.
-# keyring
+# On since 1.4.1: every shipped build before that wrote the key in the clear
+# to ~/.prism/license.json, because this line was commented out "for later".
+# On macOS the Keychain item is tied to the app's code signature, so an
+# updated (re-signed) Prism gets a "wants to use your keychain" prompt the
+# first time; Deny is survivable — secretstore returns "" and the customer
+# retypes the key once.
+keyring
 
 # ── Voice input & wake word — needs PortAudio on the system first:
 #   macOS:  brew install portaudio

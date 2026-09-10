@@ -43,8 +43,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 import core_bridge as CB  # noqa: E402
 from core import inbox, mailflow, quoting, register, triage  # noqa: E402
-from dialogs import inquiry_dialog as UI  # noqa: E402
-from dialogs.inquiry_setup_dialog import (  # noqa: E402
+from addons.inquiry import dialog as UI  # noqa: E402
+from addons.inquiry.setup import (  # noqa: E402
     InquirySetupDialog, accounts_of, is_ready)
 
 _app = QApplication.instance() or QApplication([])

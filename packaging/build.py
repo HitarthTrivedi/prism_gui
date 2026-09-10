@@ -233,6 +233,11 @@ def nuitka_args() -> list[str]:
         f"=licensing/testdata",
         # Dynamically imported, so nothing static can find them.
         "--include-package=core",
+        # The add-on shelf. Nuitka follows registry.py's static imports, but
+        # the manifests also name panels and dialogs by DOTTED STRING, and a
+        # string is invisible to any analyser. Without this the Nuitka build
+        # can compile cleanly and open with an empty shelf.
+        "--include-package=addons",
         "--include-package=undetected_chromedriver",
         "--include-package=selenium",
         "--include-package=cryptography",
@@ -419,6 +424,11 @@ def main():
         made = archive_windows(app_dir)
     elif IS_MAC:
         made = archive_macos(target)
+        # The image is a separate signable object from the bundle inside it;
+        # see codesign.sign_macos_archive for why both need doing.
+        if not args.no_sign:
+            for path in made:
+                codesign.sign_macos_archive(path)
     else:
         made = archive_linux(app_dir)
     print("\n✓ artifacts:")

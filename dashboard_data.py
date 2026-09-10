@@ -95,7 +95,11 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
                 seen.add(name.lower())
                 tools.append(name)
         out.append({
-            "title": (record.get("query") or "").strip() or "Untitled task",
+            # The planner's short name for the job when the run has one;
+            # the request verbatim for records from before titles existed.
+            "title": ((record.get("title") or "").strip()
+                      or (record.get("query") or "").strip() or "Untitled task"),
+            "query": (record.get("query") or "").strip(),
             "tools": tools,
             # `when` from inside the try above, NOT a second getmtime. The
             # guard up there exists because Home is built during
@@ -176,7 +180,7 @@ def register_rows(cfg: dict) -> list[dict]:
     should stop Home from drawing — they just mean there is nothing to show.
     """
     try:
-        from dialogs.inquiry_setup_dialog import settings_of
+        from inquiry_config import settings_of
         folder = (settings_of(cfg) or {}).get("folder", "")
         if not folder:
             return []
@@ -205,7 +209,7 @@ def needs_you(cfg: dict, rows: list[dict] | None = None) -> dict:
     out = {"to_quote": 0, "waiting": 0, "due": 0, "replies": 0, "orders": 0,
            "sent_today": 0}
     try:
-        from dialogs.inquiry_setup_dialog import settings_of
+        from inquiry_config import settings_of
         settings = settings_of(cfg) or {}
         reg = CB.get_register()
         status = lambda r: (r.get("Status") or "").strip() or reg.NEW  # noqa: E731

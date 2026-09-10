@@ -180,30 +180,6 @@ def get_boq():
     return boq
 
 
-def get_boq_price():
-    """The pricing + Excel-export half of the BOQ add-on (core.boq_price).
-    Separate from get_boq() because measurement (boq) and pricing/output
-    (boq_price) are cleanly split — RA bills and rate analysis will land in
-    the pricing module without touching the measurement one."""
-    from core import boq_price
-    return boq_price
-
-
-# ── Sales Automation (Leads & Outreach) ──────────────────────────────────────
-# The pipeline lives GUI-side in the `prospector` package, not in the engine's
-# core.* — deliberately, like the prototype it grew from — and it leans on the
-# same Groq router the rest of Prism already uses. So there is no heavy optional
-# dependency to be missing here; this probe only confirms the package imports,
-# for symmetry with every other add-on's front door.
-
-def leads_available() -> tuple[bool, str]:
-    try:
-        from prospector import engine, reach  # noqa: F401
-        return True, ""
-    except Exception as e:                     # noqa: BLE001
-        return False, str(e)
-
-
 def gerber_available() -> tuple[bool, str]:
     """core.gerber has no hard dependency of its own — shapely is optional,
     same as ezdxf is for BOQ, and the module degrades rather than fails
@@ -230,6 +206,23 @@ def get_gerber_form():
     """Fill a client's own Excel quotation form from a measured job."""
     from core import gerber_form
     return gerber_form
+
+
+def step_available() -> tuple[bool, str]:
+    """core.stepfile imports without cadquery (its CAD imports are guarded)
+    and answers available() itself — so this asks it, the same question the
+    terminal's /step asks, and the STEP dialog can say "needs cadquery"
+    rather than fail on the first model."""
+    try:
+        from core import stepfile
+        return stepfile.available()
+    except Exception as e:
+        return False, str(e)
+
+
+def get_stepfile():
+    from core import stepfile
+    return stepfile
 
 
 # ── Inquiry automation ───────────────────────────────────────────────────────
@@ -285,6 +278,20 @@ def get_history():
 def get_files():
     from core import files
     return files
+
+
+def get_ui():
+    """The engine's own output layer, for installing a sink into.
+
+    core.ui writes to a Rich console, which in a windowed build has
+    nowhere to go -- set_sink() is the hook that mirrors those lines
+    somewhere a GUI user can see them, and diagnostics.install() is the
+    one caller. Exposed here rather than imported directly so that
+    core_bridge stays the only module that touches the engine; see
+    tests/test_engine_facade.py.
+    """
+    from core import ui
+    return ui
 
 
 def get_drafting():
@@ -356,6 +363,41 @@ def studio_render_selftest() -> tuple[bool, str]:
         return False, f"The web renderer isn't available ({e})."
     ok, why = browser.selftest()
     return ok, why if ok else _no_pip_in_a_frozen_build(why)
+
+
+def studio_assets_selftest() -> tuple[bool, str]:
+    """Are the browser-side files Studio and Motion load at runtime actually
+    on disk where the frozen imports resolve them?
+
+    core/reel_edit.py reads core/studio_assets/*.js next to its own
+    __file__ and core/motion/render.py reads core/motion/runtime/ the same
+    way. In a source checkout those files are simply there. In a bundle
+    they are data files PyInstaller has to be TOLD about (packaging/
+    prism.spec's `core/studio_assets` and `core/motion/runtime` entries),
+    and a build that lost them starts perfectly and raises FileNotFoundError
+    the first time a customer clicks Edit layout or renders Motion. This
+    reads each file the way the app does, so the packaging gate sees the
+    same failure the customer would.
+    """
+    problems = []
+    try:
+        from core import reel_edit
+        for name in ("apply.js", "editor.js", "editor.css"):
+            if not reel_edit._studio_asset(name).strip():
+                problems.append(f"studio_assets/{name} is empty")
+    except Exception as e:                      # noqa: BLE001
+        problems.append(f"studio_assets: {e}")
+    try:
+        import importlib
+        import os
+        render = importlib.import_module("core.motion.render")
+        runtime = os.path.join(os.path.dirname(render.__file__), "runtime")
+        for name in ("index.html", "runtime.js", "render_runner.js", "gsap.min.js"):
+            if not os.path.isfile(os.path.join(runtime, name)):
+                problems.append(f"motion/runtime/{name} missing")
+    except Exception as e:                      # noqa: BLE001
+        problems.append(f"motion runtime: {e}")
+    return (not problems), "; ".join(problems)
 
 
 def get_studio():

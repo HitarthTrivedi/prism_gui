@@ -232,6 +232,33 @@ def sign_macos(target: str) -> bool:
     return True
 
 
+def sign_macos_archive(path: str) -> bool:
+    """Sign, notarise and staple the .dmg itself — the file the customer
+    actually downloads.
+
+    sign_macos() has to run on the bare .app BEFORE the image is made (the
+    bundle inside a UDZO image is read-only), which left the image itself
+    unsigned: Gatekeeper evaluates the download first, and an unsigned .dmg
+    around a notarised .app still produces the "can't check for malicious
+    software" dialog on mount. Notarising the image a second time is quick —
+    Apple has already seen every binary inside it — and stapling here is
+    what makes an offline first launch work straight from the mounted image.
+    """
+    if not path.endswith(".dmg"):
+        return False   # a .zip carries the stapled .app inside; nothing to sign
+    identity = os.environ.get("MACOS_SIGN_IDENTITY", "")
+    if not identity:
+        return _skip("MACOS_SIGN_IDENTITY is not set (dmg)")
+    _run(["codesign", "--force", "--timestamp", "--sign", identity, path])
+    _run(["codesign", "--verify", "--verbose=2", path])
+    if not _notarise(path):
+        print("!  .dmg signed but NOT notarised.")
+        return True
+    _run(["xcrun", "stapler", "staple", path])
+    print("✓ .dmg signed, notarised and stapled")
+    return True
+
+
 def _notarise(target: str) -> bool:
     if not shutil.which("xcrun"):
         return False
@@ -241,8 +268,11 @@ def _notarise(target: str) -> bool:
         return False
 
     # notarytool only accepts a zip, a dmg or a pkg — never a bare .app.
-    archive = os.path.join(tempfile.mkdtemp(), f"{app_meta.NAME}.zip")
-    _run(["ditto", "-c", "-k", "--keepParent", target, archive])
+    if target.endswith(".app"):
+        archive = os.path.join(tempfile.mkdtemp(), f"{app_meta.NAME}.zip")
+        _run(["ditto", "-c", "-k", "--keepParent", target, archive])
+    else:
+        archive = target
 
     cmd = ["xcrun", "notarytool", "submit", archive, "--wait"]
     if profile:

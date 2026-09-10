@@ -106,7 +106,9 @@ def _selftest(app) -> int:
     # and Prism can fetch it at runtime (core/ffmpeg.py).
     try:
         from PIL import Image, ImageDraw   # noqa: F401
-        from core import reel              # noqa: F401
+        CB.get_reel()   # via the bridge: core_bridge is the only
+                        # module that may import the engine directly,
+                        # and tests/test_engine_facade.py enforces it.
         reel_ok, reel_err = True, ""
     except Exception as e:
         reel_ok, reel_err = False, str(e)
@@ -131,6 +133,9 @@ def _selftest(app) -> int:
     # would have passed on the broken build. This starts it, paints a frame
     # and closes it, which is the same round trip a render takes.
     studio_ok, studio_err = CB.studio_render_selftest()
+    # The editor's own JS/CSS and Motion's runtime are data files, not
+    # modules — a bundle can lose them without a single import failing.
+    assets_ok, assets_err = CB.studio_assets_selftest()
 
     # The dependencies nothing else here would notice. Every one of them is
     # imported lazily, inside the function that needs it, so a build that
@@ -212,11 +217,42 @@ def _selftest(app) -> int:
     if paths.is_frozen():
         checks.append((f"Prism Studio browser (Chromium)"
                        f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
+    checks.append((f"Studio editor + Motion runtime files"
+                   f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
     from main_window import MainWindow
     win = MainWindow()
     win.show()
     checks.append(("main window", win.isVisible()))
     checks.append(("sidebar", win.sidebar.width() > 0))
+
+    # ── the add-on census ────────────────────────────────────────────────
+    # The single worst failure mode this restructure can produce: an add-on
+    # invisible to PyInstaller's analyser, so development is perfect, the
+    # build succeeds, and the customer opens a windowed executable with an
+    # empty shelf and no console to say why.
+    #
+    # Counting is not enough -- a manifest is just data and will import
+    # anywhere. So this also RESOLVES every dotted reference each manifest
+    # names, which is what actually proves the panels and dialogs reached
+    # the archive. packaging/smoke_test.py runs this against the real
+    # executable, which is the only place the answer can differ.
+    from addons import registry
+    unresolved = []
+    for addon in registry.REGISTRY:
+        for field in ("panel", "dialog", "probe"):
+            dotted = getattr(addon, field, "")
+            if not dotted:
+                continue
+            try:
+                if registry.resolve(dotted) is None:
+                    unresolved.append(f"{addon.key}.{field}={dotted}")
+            except Exception as exc:                    # noqa: BLE001
+                unresolved.append(f"{addon.key}.{field}={dotted} ({exc})")
+    checks.append((f"add-ons registered ({len(registry.REGISTRY)})",
+                   len(registry.REGISTRY) == registry.EXPECTED))
+    checks.append(("add-on entry points resolve"
+                   + (f" — {', '.join(unresolved)}" if unresolved else ""),
+                   not unresolved))
 
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:
@@ -236,8 +272,7 @@ def _selftest(app) -> int:
     # build actually shipped one — which is the single fact this line exists
     # to establish, and the one that was wrong on Windows.
     try:
-        from core import ffmpeg as _ffmpeg
-        ffmpeg_which = _ffmpeg.describe()
+        ffmpeg_which = CB.get_ffmpeg().describe()
     except Exception:
         ffmpeg_which = "unknown"
     print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
@@ -255,6 +290,11 @@ def main():
     # cp1252 Windows console. Cheap, side-effect-free, must come before the
     # core_bridge import below.
     _force_utf8_streams()
+    # Before Qt starts: what every child of this process inherits — the
+    # video player Play opens, xdg-open, Chrome — and what Qt's own platform
+    # theme reads. See paths.scrub_environment for the two ways it was
+    # poisoned (a snap's GTK_PATH; PyInstaller's LD_LIBRARY_PATH).
+    scrubbed = paths.scrub_environment()
 
     app = QApplication(sys.argv)
     app.setApplicationName(app_meta.NAME)
@@ -284,6 +324,12 @@ def main():
     # Before anything that can fail: from here on, a crash lands in
     # ~/.prism/logs instead of on a stdout a windowed build does not have.
     diagnostics.install()
+    if scrubbed:
+        diagnostics.write("INFO", "environment: dropped "
+                          + ", ".join(scrubbed) + " for child processes — "
+                          "a snap's or a bundle's library paths, which break "
+                          "the system apps Prism opens (see paths."
+                          "scrub_environment)")
 
     # Rollback check for the in-app updater (Phase 1) — as early as possible,
     # before anything else assumes the files on disk are the ones the last

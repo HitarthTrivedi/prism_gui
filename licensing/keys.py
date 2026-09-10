@@ -33,9 +33,6 @@ PRODUCTION: dict[str, str] = {
 # product. The exclusion is the only thing making it safe for this to exist.
 DEVELOPMENT: dict[str, str] = {
     "dev1": "4d9841e8c8d8f133c6789f0afa1eab2b7eac395e94404d0a662c68622880dbb0",
-    # Local dev-unlock key for trying the Leads add-on from source. Uncommitted;
-    # its private half is devtools/dev-signing-key.hex (gitignored). See mint.py.
-    "dev2": "ce761613a5031ab439503a352b71f73445d09eae43dfa88add58fc8912fa27c0",
 }
 
 

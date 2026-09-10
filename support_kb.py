@@ -179,6 +179,9 @@ _START = Topic(
                 ("On Windows, click More info, then Run anyway.",
                  "On a Mac, right-click the Prism icon, choose Open, then "
                  "Open again in the box that appears.",
+                 "On macOS 15 (Sequoia) or newer that box has no Open button. "
+                 "Close it, open System Settings, go to Privacy & Security, "
+                 "scroll down and click Open Anyway next to Prism.",
                  "If a Mac says the app is damaged, open Terminal and paste: "
                  "xattr -dr com.apple.quarantine /Applications/Prism.app",
                  "Open Prism normally from then on — the warning does not "

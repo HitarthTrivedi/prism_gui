@@ -881,8 +881,6 @@ class SettingsPanel(QWidget):
                    "without one."),
             key_edit, lambda: self._save_key(key_edit)))
 
-        col.addWidget(self._verifier_keys_card())
-
         col.addWidget(self._agents_editor(chosen, premium))
 
         picked = [(stage, chosen.get(stage))
@@ -972,55 +970,6 @@ class SettingsPanel(QWidget):
             i18n.t("Save"), "primary",
             on_click=lambda: self._save_agents(picker, premium_boxes))]))
         return card
-
-    # Verifier/finder keys live here (the keys hub) AND in Leads & Outreach —
-    # both read/write the same config, so a key set in either place is used
-    # everywhere. Prism tries the free tiers first, so most checks cost nothing.
-    _VERIFIER_ROWS = [
-        ("verifalia_api_key",   "Verifalia — verify · 25/day free",            "key:secret (optional)"),
-        ("reoon_api_key",       "Reoon — verify · 600/month free",             "API key (optional)"),
-        ("zerobounce_api_key",  "ZeroBounce — verify · 100/month free",        "API key (optional)"),
-        ("abstractapi_api_key", "AbstractAPI — verify · 100/month free",       "API key (optional)"),
-        ("kickbox_api_key",     "Kickbox — verify · 50/month free",            "API key (optional)"),
-        ("tomba_key",           "Tomba — finds the real address · 25/mo free", "key:secret (optional)"),
-        ("hunter_api_key",      "Hunter — finds + verifies · ~100/month",      "API key (optional)"),
-    ]
-
-    def _verifier_keys_card(self) -> Card:
-        """The email verification + finding keys, one card. All optional and
-        BYO-key: Prism tries the FREE tiers first (top to bottom) so most checks
-        cost nothing; a paid key is only a fallback. Used by Leads & Outreach."""
-        fields: dict[str, QLineEdit] = {}
-        card = Card()
-        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
-                         theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
-        col.addWidget(C.kicker(i18n.t("Email verification & finding")))
-        col.addWidget(C.label(i18n.t(
-            "Optional, BYO-key. Prism confirms (and finds) the addresses your "
-            "Leads & Outreach hot-list will email — free tiers first, top to "
-            "bottom, so most checks cost nothing. Verifalia and Tomba take a "
-            "key:secret pair."), level="META", wrap=True))
-        for cfg_key, label, ph in self._VERIFIER_ROWS:
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(theme.SPACE_3)
-            lbl = C.label(i18n.t(label), level="META")
-            lbl.setMinimumWidth(250)
-            row.addWidget(lbl)
-            fld = QLineEdit(self.cfg.get(cfg_key, ""))
-            fld.setPlaceholderText(i18n.t(ph))
-            fields[cfg_key] = fld
-            row.addWidget(fld, stretch=1)
-            col.addLayout(row)
-        col.addWidget(self._buttons([C.button(
-            i18n.t("Save"), "primary",
-            on_click=lambda: self._save_verifier_keys(fields))]))
-        return card
-
-    def _save_verifier_keys(self, fields: dict):
-        for cfg_key, field in fields.items():
-            self.cfg[cfg_key] = field.text().strip()
-        self._after_save(i18n.t("Saved."))
 
     def _save_key(self, field: QLineEdit):
         key = field.text().strip()

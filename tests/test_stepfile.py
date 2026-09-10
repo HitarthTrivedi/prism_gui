@@ -164,10 +164,13 @@ class TheCustomersOwnEnclosure(unittest.TestCase):
         html = open(drawn["html"], encoding="utf-8").read()
         for name in ("top", "bottom", "side"):
             self.assertIn(name, html)
-            svg = os.path.join(out, f"{name}.svg")
+            svg = os.path.join(out, SF.view_name("Assem1", name, 0))
             self.assertTrue(os.path.exists(svg), svg)
             self.assertGreater(os.path.getsize(svg), 5000, svg)
         self.assertIn("101.00 x 93.00 x 71.00", html)
+        # The sheet itself carries the model's name, and so does its title.
+        self.assertEqual(os.path.basename(drawn["html"]),
+                         "Assem1 - drawing sheet.html")
 
 
 class ThePlanIsValidatedNotTrusted(unittest.TestCase):
@@ -325,23 +328,27 @@ class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
 
     def test_after_the_build_both_drawings_are_on_the_page(self):
         out = tempfile.mkdtemp()
-        for name in ("drawing.png", "drawing_after.png"):
+        names = SF.names(self.REPORT)
+        for name in (names["png"], names["png_after"]):
             open(os.path.join(out, name), "wb").write(b"png")
         after = {"parts": [{"name": "p", "size_mm": (60.0, 40.0, 8.0),
                             "thickness_mm": 5.9, "volume_cm3": 37.5,
                             "holes": [{"dia_mm": 6.0, "count": 2}]}]}
         page = open(SF.review_html(self.REPORT, self.PLAN, out,
                                    after=after), encoding="utf-8").read()
-        self.assertIn("drawing_after.png", page)
+        # URL-quoted in the src attribute — the name carries spaces.
+        self.assertIn("x%20-%20drawing%20sheet%20after%20change.png", page)
         self.assertIn("from the BUILT file", page)
 
     def test_before_the_build_only_the_received_drawing_shows(self):
         out = tempfile.mkdtemp()
-        for name in ("drawing.png", "drawing_after.png"):
+        names = SF.names(self.REPORT)
+        for name in (names["png"], names["png_after"]):
             open(os.path.join(out, name), "wb").write(b"png")
         page = open(SF.review_html(self.REPORT, self.PLAN, out),
                     encoding="utf-8").read()
-        self.assertNotIn("drawing_after.png", page)
+        self.assertNotIn("after%20change.png", page)
+        self.assertIn("x%20-%20drawing%20sheet.png", page)
 
 
     def test_the_terminal_builds_only_after_the_page_and_the_yes(self):
@@ -350,8 +357,8 @@ class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
                    encoding="utf-8").read()
         body = src[src.index("def cmd_step_ask("):src.index("def cmd_gerber(")]
         self.assertLess(body.index("review_html"),
-                        body.index("build modified.step now"))
-        self.assertLess(body.index("build modified.step now"),
+                        body.index("Reviewed the page — build"))
+        self.assertLess(body.index("Reviewed the page — build"),
                         body.index("apply_plan"))
 
 
@@ -424,7 +431,219 @@ class TheTerminalDoor(unittest.TestCase):
         self.assertNotIn("F.attach(target", body)
         self.assertIn('F.attach(drawn["png"])', body)
         self.assertIn("groq_chat", body)
-        self.assertIn('"modified.step"', body)
+        self.assertIn('out["modified"]', body)
+
+
+class EveryFileCarriesTheModelsName(unittest.TestCase):
+    """An estimator keeps ten jobs' sheets in one folder, and ten files all
+    called dimensions.xlsx are ten files nobody can tell apart. Every
+    deliverable now starts with the customer's own file name, and where the
+    folders go is the person's choice (the GUI asks; the terminal has
+    /step-folder). Pure functions — no cadquery needed."""
+
+    def test_the_stem_is_the_customers_own_name(self):
+        self.assertEqual(SF.stem_of("~/Downloads/Assem1.STEP"), "Assem1")
+        self.assertEqual(SF.stem_of("housing v2.stp"), "housing v2")
+
+    def test_the_stem_is_safe_on_windows_and_never_empty(self):
+        self.assertEqual(SF.stem_of('bad:name?<x>.stp'), "badnamex")
+        self.assertEqual(SF.stem_of(""), "model")
+        self.assertEqual(SF.stem_of("?.stp"), "model")   # nothing legal left
+        self.assertLessEqual(len(SF.stem_of("x" * 200 + ".step")), 60)
+
+    def test_every_deliverable_starts_with_the_stem(self):
+        out = SF.names("Assem1")
+        for key, name in out.items():
+            self.assertTrue(name.startswith("Assem1 - "), (key, name))
+        self.assertEqual(out["xlsx"], "Assem1 - dimensions.xlsx")
+        self.assertEqual(out["modified"], "Assem1 - modified.step")
+        self.assertEqual(SF.view_name("Assem1", "top", 1),
+                         "Assem1 - view top.svg")
+        self.assertEqual(SF.ai_sheet_name("Assem1", 1, ".png"),
+                         "Assem1 - AI drawing sheet 1.png")
+
+    def test_names_read_the_stem_off_a_report(self):
+        report = {"file": "Assem1.STEP", "stem": "Assem1"}
+        self.assertEqual(SF.names(report)["png"], "Assem1 - drawing sheet.png")
+        # An older report without a stem still names correctly.
+        self.assertEqual(SF.names({"file": "x.step"})["review"],
+                         "x - change review.html")
+
+    def test_the_folder_is_named_after_the_model_under_the_chosen_root(self):
+        root = tempfile.mkdtemp()
+        got = SF.output_dir("/anywhere/Assem1.STEP", root)
+        self.assertEqual(got, os.path.join(root, "Assem1"))
+        self.assertFalse(os.path.exists(got))    # writers create it
+
+    def test_a_second_run_never_overwrites_the_first(self):
+        root = tempfile.mkdtemp()
+        first = SF.output_dir("/anywhere/Assem1.STEP", root)
+        os.makedirs(first)
+        self.assertEqual(SF.output_dir("/anywhere/Assem1.STEP", root), first,
+                         "an empty folder is reused, not numbered")
+        open(os.path.join(first, "Assem1 - dimensions.xlsx"), "w").close()
+        second = SF.output_dir("/anywhere/Assem1.STEP", root)
+        self.assertEqual(second, os.path.join(root, "Assem1 (2)"))
+        os.makedirs(second)
+        open(os.path.join(second, "f"), "w").close()
+        self.assertEqual(SF.output_dir("/anywhere/Assem1.STEP", root),
+                         os.path.join(root, "Assem1 (3)"))
+
+    def test_no_root_means_the_desktop_folder(self):
+        got = SF.output_dir("/anywhere/Assem1.STEP", "")
+        self.assertEqual(os.path.dirname(got), SF.DEFAULT_OUT_ROOT)
+        self.assertTrue(SF.DEFAULT_OUT_ROOT.endswith("Prism Step"))
+
+    def test_the_review_page_names_the_modified_file(self):
+        report = dict(TheReviewPageComesBeforeTheBuild.REPORT, stem="x")
+        out = tempfile.mkdtemp()
+        path = SF.review_html(report, TheReviewPageComesBeforeTheBuild.PLAN,
+                              out, question="q")
+        self.assertEqual(os.path.basename(path), "x - change review.html")
+        self.assertIn("x - modified.step", open(path, encoding="utf-8").read())
+
+    def test_the_terminal_uses_the_shared_names_and_the_chosen_root(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "prism_terminal", "prism.py"),
+                   encoding="utf-8").read()
+        measured = src[src.index("def _step_measured("):src.index("def cmd_step(")]
+        self.assertIn('SF.output_dir(target, cfg.get("step_out_dir"', measured)
+        self.assertIn('SF.names(report)["xlsx"]', measured)
+        self.assertNotIn('"dimensions.xlsx"', src)
+        self.assertNotIn('"drawing_after.png"', src)
+        self.assertNotIn('"modified.step"', src)
+        # /step-folder must be dispatched before the /step prefix swallows it.
+        self.assertIn("def cmd_step_folder(", src)
+        self.assertLess(src.index('line.startswith("/step-folder")'),
+                        src.index('line.startswith("/step") or'))
+
+    def test_the_config_knows_the_key(self):
+        from core import config as C
+        self.assertIn("step_out_dir", C.DEFAULT)
+        self.assertEqual(C.DEFAULT["step_out_dir"], "")
+
+
+@unittest.skipUnless(HAVE, "cadquery not installed")
+class TheSheetIsDrawnByPrismNotAnAI(unittest.TestCase):
+    """The dimensioned drawing sheet — three orthographic views per part
+    with the sizes on dimension lines, a hole table, notes and a title
+    block — comes out of the geometry itself, in a second, with no image
+    model in the loop. Checked on a box whose every figure is known."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = os.path.join(tempfile.mkdtemp(), "Bracket A.step")
+        _box_with_hole(cls.path)
+        cls.report = SF.analyse(cls.path, mode="metal")
+        cls.shape = cls.report["_shapes"][0][1]
+        cls.svg = SF.sheet_svg(cls.report)
+
+    def test_the_three_views_project_the_right_extents(self):
+        """Front sees X by Z, top sees X by Y, side sees Y by Z — the box is
+        60 x 40 x 8, so the projections must measure exactly that."""
+        want = {"FRONT VIEW": (60, 8), "TOP VIEW": (60, 40),
+                "SIDE VIEW": (40, 8)}
+        for title, n, xdir, _axes in SF._VIEWS:
+            proj = SF._project(self.shape, n, xdir)
+            self.assertIsNotNone(proj, title)
+            xmin, xmax, ymin, ymax = proj["bb"]
+            self.assertAlmostEqual(xmax - xmin, want[title][0], places=2, msg=title)
+            self.assertAlmostEqual(ymax - ymin, want[title][1], places=2, msg=title)
+            self.assertTrue(proj["visible"], title)
+
+    def test_the_hole_shows_up_as_hidden_lines_in_the_side_view(self):
+        """Looking from the side, a through hole is inside the material —
+        hidden-line removal must draw it dashed, not drop it."""
+        proj = SF._project(self.shape, (1, 0, 0), (0, 1, 0))
+        self.assertTrue(proj["hidden"])
+
+    def test_every_view_is_titled_and_dimensioned_in_mm(self):
+        for title in ("FRONT VIEW", "TOP VIEW", "SIDE VIEW"):
+            self.assertIn(title, self.svg)
+        for figure in ("60.00", "40.00", "8.00"):
+            self.assertIn(f">{figure}<", self.svg)
+        self.assertIn("millimetres (mm)", self.svg)
+
+    def test_the_hole_table_notes_and_title_block_are_there(self):
+        self.assertIn("HOLES (", self.svg)
+        self.assertIn("Ø5 x 1", self.svg)
+        self.assertIn("NOTES:", self.svg)
+        self.assertIn("JOB NAME:", self.svg)
+        self.assertIn("Bracket A.step", self.svg)
+        self.assertIn("DRAWN BY:", self.svg)
+        self.assertIn("Measured offline by Prism", self.svg)
+        self.assertIn("CRC SHEET", self.svg)
+
+    def test_every_figure_on_the_sheet_is_two_decimals(self):
+        for number in re.findall(r"\d+\.(\d+)<", self.svg):
+            self.assertLessEqual(len(number), 2)
+
+    def test_the_sheet_lands_under_the_models_name(self):
+        out = tempfile.mkdtemp()
+        drawn = SF.render_sheet(self.report, out)
+        self.assertEqual(os.path.basename(drawn["svg"]),
+                         "Bracket A - drawing sheet.svg")
+        self.assertEqual(os.path.basename(drawn["html"]),
+                         "Bracket A - drawing sheet.html")
+        html = open(drawn["html"], encoding="utf-8").read()
+        self.assertIn("<svg", html)
+        self.assertIn("60.00 x 40.00 x 8.00", html)
+
+    def test_a_part_with_no_geometry_still_gets_a_line(self):
+        report = dict(self.report, _shapes=[])
+        svg = SF.sheet_svg(report)
+        self.assertIn("no geometry to draw", svg)
+        self.assertIn("JOB NAME:", svg)
+
+    def test_a_narrow_dimension_puts_its_figure_outside_the_arrows(self):
+        sh = SF._Sheet()
+        sh.dim_h(100, 110, 50, 6.0)          # 10px wide: the figure won't fit
+        narrow = "".join(sh.items)
+        self.assertIn(">6.00<", narrow)
+        self.assertIn('x="132.0"', narrow)   # beside, not between
+        sh = SF._Sheet()
+        sh.dim_h(100, 300, 50, 60.0)         # 200px: the figure sits above
+        self.assertIn('x="200.0"', "".join(sh.items))
+
+
+class TheImageStageGetsItsBudget(unittest.TestCase):
+    """The AI-drawn sheet was coming back as a blurred preview: a generic
+    visual turn waits 60s and gives up after 12s if no picture has shown,
+    while ChatGPT's image model takes minutes and previews progressively.
+    Both surfaces now tell the engine a picture IS the deliverable."""
+
+    def _src(self, *parts):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return open(os.path.join(root, *parts), encoding="utf-8").read()
+
+    def test_the_terminal_promises_a_picture(self):
+        src = self._src("prism_terminal", "prism.py")
+        body = src[src.index("def cmd_step_auto("):src.index("def cmd_step_ask(")]
+        self.assertIn('image_stages={"visual"}', body)
+
+    def test_the_terminal_draws_with_chatgpt_only_and_never_falls_over(self):
+        src = self._src("prism_terminal", "prism.py")
+        body = src[src.index("def cmd_step_auto("):src.index("def cmd_step_ask(")]
+        self.assertIn('artist = "ChatGPT"', body)
+        self.assertIn("failover=False", body)
+        self.assertNotIn('agents.get("visual")', body)
+
+    def test_the_engine_gives_a_promised_stage_minutes_not_seconds(self):
+        src = self._src("prism_terminal", "core", "automation.py")
+        self.assertIn("image_stages=None", src)
+        block = src[src.index("elif stage in promised:"):]
+        block = block[:block.index("else:")]
+        cap = int(re.search(r"want, cap, grace = 1, (\d+), None", block).group(1))
+        self.assertGreaterEqual(cap, 300)
+
+    def test_a_preview_that_changes_is_not_finished(self):
+        """The wait watches the images' sources and sizes, and the page's
+        own 'creating image' text — not just how many images there are."""
+        src = self._src("prism_terminal", "core", "automation.py")
+        body = src[src.index("def _wait_for_images("):src.index("def _wait_for_files(")]
+        self.assertIn("sig != last_sig", body)
+        self.assertIn("creating image", body)
+        self.assertIn("not busy", body)
 
 
 if __name__ == "__main__":

@@ -59,7 +59,6 @@
     "Click to leave this step out of the run": "इस चरण को दौड़ से बाहर रखने के लिए क्लिक करें",
     "Click to run this step with a different tool": "इस चरण को किसी और टूल से चलाने के लिए क्लिक करें",
     "Close": "बंद करें",
-    "Coming soon — match a parts list against your stock and get the shortage list": "जल्द आ रहा है — पुर्ज़ों की सूची अपने स्टॉक से मिलाकर कमी की सूची पाएँ",
     "Companies to approach, with verified emails": "संपर्क करने लायक कंपनियाँ, जाँचे हुए ईमेल के साथ",
     "Connect Google Drive": "Google Drive जोड़ें",
     "Continue without it": "इसके बिना आगे बढ़ें",
@@ -80,7 +79,6 @@
     "Diagnostics": "जाँच रिपोर्ट",
     "Dictate the task instead of typing": "टाइप करने की जगह बोलकर काम बताएँ",
     "Discard": "हटाएँ",
-    "Done. Check the numbers against the saved file above.": "हो गया। ऊपर सहेजी फ़ाइल से आँकड़े मिलाकर देख लें।",
     "Double-click to attach": "जोड़ने के लिए डबल-क्लिक करें",
     "Draft & send an email from attached files": "जुड़ी फ़ाइलों से ईमेल लिखें और भेजें",
     "Drawing unit, if you know it — e.g. meters": "ड्रॉइंग की इकाई, अगर पता हो — जैसे मीटर",
@@ -129,7 +127,6 @@
     "Make a Reel": "रील बनाएँ",
     "Make a plan": "योजना बनाएँ",
     "Make a plan first — this fills in once Prism picks the steps.": "पहले योजना बनाएँ — Prism के चरण चुनते ही यह चालू हो जाएगा।",
-    "Make my BOQ": "मेरा BOQ बनाएँ",
     "Make my reel": "मेरी रील बनाएँ",
     "Make the images": "तस्वीरें बनाएँ",
     "Make the video": "वीडियो बनाएँ",
@@ -232,7 +229,6 @@
     "Team": "टीम",
     "Team members": "टीम के सदस्य",
     "Team workspace": "टीम का साझा फ़ोल्डर",
-    "Tell me what the BOQ is for — or attach a drawing.": "बताइए BOQ किस लिए है — या ड्रॉइंग जोड़ दीजिए।",
     "Tell me what the reel is about.": "बताइए रील किस बारे में है।",
     "That doesn't look like an email address.": "यह ईमेल पते जैसा नहीं लगता।",
     "The agent returned nothing.": "एजेंट ने कुछ नहीं लौटाया।",
@@ -249,7 +245,6 @@
     "Voice": "आवाज़",
     "Waiting for you to approve it in your browser…": "आपके ब्राउज़र में मंज़ूरी का इंतज़ार है…",
     "Wake word": "वेक वर्ड",
-    "What do you need a BOQ for?": "BOQ किस लिए चाहिए?",
     "What happened": "क्या हुआ",
     "What should the reel be about?": "रील किस बारे में हो?",
     "What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points": "ड्रॉइंग के चिह्नों का क्या मतलब है, अगर शीट पर न लिखा हो — जैसे गोले = लाइट पॉइंट",
@@ -260,7 +255,6 @@
     "Writes a file describing what happened. Your API key, passwords and licence key are not in it.": "एक फ़ाइल लिखता है जिसमें होता है कि क्या हुआ। आपकी API की, पासवर्ड और लाइसेंस की उसमें नहीं होते।",
     "Yes": "हाँ",
     "You picked this": "आपने यह चुना",
-    "Your BOQ will appear here.": "आपका BOQ यहाँ दिखेगा।",
     "Your licence is tied to this computer. Quote this code if you ever need us to free up a seat.": "आपका लाइसेंस इसी कंप्यूटर से जुड़ा है। सीट खाली करानी हो तो यह कोड बताइए।",
     "Your own runs. Each role's work stays in its own folder.": "आपकी अपनी दौड़ें। हर भूमिका का काम अपने ही फ़ोल्डर में रहता है।",
     "Your plan": "आपकी योजना",
@@ -308,5 +302,5 @@
     "Date": "तारीख",
     "Sent to {who}.": "{who} को भेज दिया."
   },
-  "count": 305
+  "count": 299
 }

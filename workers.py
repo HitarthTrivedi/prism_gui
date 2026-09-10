@@ -88,24 +88,26 @@ class RouteWorker(_Worker):
             self.failed.emit(str(e))
 
 
-class BoqPdfWorker(_Worker):
-    """Render the tender PDF off the UI thread. Launching Chromium and printing
-    the Schedule A+B document takes a second or two; the window must not freeze
-    while it does."""
+class PlanBriefWorker(_Worker):
+    """Write the prompts for the plan as the owner confirmed it.
 
-    done = Signal(str)      # output path
+    The router wrote its prompts before anyone looked at the plan. Once a
+    step has been dropped, added, moved or given another tool, those
+    prompts are wrong -- one Groq call rewrites them for the confirmed
+    steps, off the GUI thread, before the licence check and the run.
+    """
+    done = Signal(list)              # [(stage, tool, questions)], in order
     failed = Signal(str)
 
-    def __init__(self, boq, out_path: str):
+    def __init__(self, query: str, cfg: dict, steps: list, routing: dict):
         super().__init__()
-        self._boq = boq
-        self._out = out_path
+        self.query, self.cfg, self.steps, self.routing = query, cfg, steps, routing
 
     def run(self):
         try:
-            path = CB.get_boq_price().write_boq_pdf(self._boq, self._out)
-            self.done.emit(path)
-        except Exception as e:                          # noqa: BLE001
+            self.done.emit(CB.router.brief_confirmed_plan(
+                self.query, self.cfg, self.steps, self.routing))
+        except Exception as e:                      # noqa: BLE001
             self.failed.emit(str(e))
 
 
@@ -117,13 +119,37 @@ class AutomationWorker(_Worker):
     def __init__(self, routing: dict, cfg: dict, attachments: list, query: str,
                  custom_stages=None, chatgpt_analysis: bool = True,
                  reel_design_stage: str = "", motion_design_stage: str = "",
-                 resume_urls: dict | None = None):
+                 resume_urls: dict | None = None,
+                 skip_stages: list | None = None, followup: bool = False,
+                 files_out: list | None = None,
+                 image_stages=None, failover: bool = True):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        # Stage keys the caller promises will produce a picture — they get
+        # the engine's full image budget. See automation.run(image_stages=).
+        self.image_stages = set(image_stages or ())
+        # False = a stage that produced nothing is NOT handed to another
+        # tool in its category. The STEP dialog's Draft is ChatGPT's job and
+        # nobody else's: a "fallback" sheet from a different image model is
+        # a second, differently-wrong drawing, not a rescue.
+        self.failover = failover
         # {stage: conversation_url} — a follow-up resumes the SAME chat the
         # stage answered in, instead of opening a fresh one. None = normal run.
         self.resume_urls = resume_urls
+        # Steps the plan screen left out. The engine inserts a few stages of
+        # its own (Studio's image maker, for one) and has to be told which
+        # of them the owner switched off, or it puts them back.
+        self.skip_stages = list(skip_stages or [])
+        # A follow-up redoes a whole deliverable and gets the engine's longer
+        # wait ceiling (automation.FOLLOWUP_MIN_WAIT); the everyday budget
+        # was cutting those answers off mid-way.
+        self.followup = bool(followup)
+        # A caller-owned list the engine appends every harvested file record
+        # to (its pipeline_files_out) — how the STEP dialog gets the drawing
+        # sheet an image tool returned, the same way the terminal's
+        # /step-auto does. None = the caller does not want them.
+        self.files_out = files_out
         # custom_stages lets an add-on (e.g. BOQ) name its own ordered stages
         # instead of going through the router's fixed categories; the engine
         # accepts them directly. None = ordinary routed run, unchanged.
@@ -141,11 +167,18 @@ class AutomationWorker(_Worker):
         self._stop = threading.Event()
         # One press skips one step: the engine clears it when it acts.
         self._skip = threading.Event()
+        # "Use fallback": hand the running stage to the next tool in its
+        # category now, instead of waiting out the cap. Cleared by the
+        # engine per press, like _skip.
+        self._fallback = threading.Event()
 
     def skip(self):
         """Skip the stage that is running right now and move on — for a tool
         stuck generating. The rest of the run continues."""
         self._skip.set()
+
+    def use_fallback(self):
+        self._fallback.set()
 
     def stop(self):
         """Ask the run to wind up at the next safe point.
@@ -177,11 +210,22 @@ class AutomationWorker(_Worker):
                 kwargs["motion_design_stage"] = self.motion_design_stage
             if self.resume_urls:
                 kwargs["resume_urls"] = self.resume_urls
+            if self.skip_stages:
+                kwargs["skip_stages"] = self.skip_stages
+            if self.followup:
+                kwargs["min_wait"] = automation.FOLLOWUP_MIN_WAIT
+            if self.files_out is not None:
+                kwargs["pipeline_files_out"] = self.files_out
+            if self.image_stages:
+                kwargs["image_stages"] = self.image_stages
+            if not self.failover:
+                kwargs["failover"] = False
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
                 query=self.query, should_stop=self._stop.is_set,
-                skip_signal=self._skip, **kwargs,
+                skip_signal=self._skip, fallback_signal=self._fallback,
+                **kwargs,
             )
             self.done.emit(responses, links)
         except Exception as e:
@@ -189,17 +233,26 @@ class AutomationWorker(_Worker):
 
 
 class FollowupRouteWorker(_Worker):
-    """Work out which finished step a post-completion follow-up is about, so the
-    note goes to that step's assigned agent — Prism's "assign it automatically"
-    rule, applied to refinements. A quick Groq classify (JSON mode)."""
-    done = Signal(str)      # target stage key ("" = unsure/none)
+    """Work out which finished steps a post-completion follow-up needs, in
+    order — Prism's "assign it automatically" rule, applied to refinements.
+    A quick Groq classify (JSON mode).
+
+    A plan, not one step: "make a picture of the new truck and put it in
+    scene 3" needs the image tool, then the design chat, then the renderer.
+    For a task that filmed a reel, two engine-owned steps join the list —
+    `artwork` (make new pictures) and `reel` (change the scenes and re-film)
+    — and the plan says what pictures, if any.
+    """
+    done = Signal(dict)     # {"steps": [keys in order], "images": "…"}
     failed = Signal(str)
 
-    def __init__(self, followup: str, stages_info: list, cfg: dict):
+    def __init__(self, followup: str, stages_info: list, cfg: dict,
+                 reel: bool = False):
         super().__init__()
         self.followup = followup
         self.stages_info = stages_info   # [{"stage","agent","summary"}]
         self.cfg = cfg
+        self.reel = reel
 
     def run(self):
         try:
@@ -207,27 +260,41 @@ class FollowupRouteWorker(_Worker):
             lines = "\n".join(
                 f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
                 for s in self.stages_info)
-            keys = ", ".join(f'"{s["stage"]}"' for s in self.stages_info)
+            keys = [s["stage"] for s in self.stages_info]
+            extra = ""
+            if self.reel:
+                keys += ["artwork", "reel"]
+                extra = (
+                    '\nThis task filmed a reel, so two more steps exist: key '
+                    '"artwork" — make NEW pictures in the image tool (say '
+                    'what, in "images"); key "reel" — change the reel\'s '
+                    "scenes or look in its design chat and film it again. Any "
+                    'change that should show in the video ends with "reel". '
+                    'A picture that is only made and never placed is useless, '
+                    'so "artwork" is always followed by "reel".')
             prompt = (
                 "A multi-step task just finished. The steps that ran, each with "
                 "its category key, the tool that did it, and a snippet of its "
-                f"output:\n\n{lines}\n\n"
+                f"output:\n\n{lines}\n{extra}\n\n"
                 f'The user now says: "{self.followup}"\n\n'
-                "Which ONE step should handle this follow-up? Choose the step "
-                "whose work the follow-up is about. Reply with ONLY a JSON "
-                'object: {"stage": "<one of the keys above>"}. Valid keys: '
-                f"{keys}. If genuinely unsure, use the last key."
+                "Which steps does this follow-up need, IN ORDER? Usually one; "
+                "several only when one step's new output feeds the next. Reply "
+                'with ONLY a JSON object: {"steps": ["<key>", …], "images": '
+                '"<what pictures to make, or empty>"}. Valid keys: '
+                + ", ".join(f'"{k}"' for k in keys)
+                + ". If genuinely unsure, use the last step that ran."
             )
             out = CB.router.groq_chat(
                 self.cfg.get("api_key", ""), self.cfg.get("model", ""),
                 prompt, json_mode=True, timeout=45)
             data = json.loads(out)
-            stage = str(data.get("stage", "")).strip()
-            # Validate: the model must return one of the real keys. A made-up or
-            # empty stage becomes "unsure" ("") so the GUI asks rather than
-            # silently firing the wrong (possibly expensive) step.
-            valid = {s["stage"] for s in self.stages_info}
-            self.done.emit(stage if stage in valid else "")
+            steps = [str(s).strip() for s in (data.get("steps") or [])
+                     if str(s).strip() in keys]
+            if not steps and str(data.get("stage", "")).strip() in keys:
+                steps = [str(data["stage"]).strip()]     # the old one-key shape
+            plan = {"steps": list(dict.fromkeys(steps)),
+                    "images": str(data.get("images") or "").strip()}
+            self.done.emit(plan)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -277,14 +344,22 @@ class SendWorker(_Worker):
     list, which is exactly as long as the window would be frozen if this ran
     where it used to (straight off the Send button)."""
     progress = Signal(int, int, str, bool, str)   # i, total, email, ok, error
+    waiting = Signal(int)                         # seconds until a scheduled start
     done = Signal(list, list)                     # sent, failed
     failed = Signal(str)                          # couldn't even connect
 
     def __init__(self, cfg: dict, recipients: list, subject: str, body: str,
-                 files: list):
+                 files: list, *, delay: float | None = None,
+                 jitter: float = 0.0, limit: int = 0, start_at: float = 0.0):
         super().__init__()
         self.cfg, self.recipients = cfg, recipients
         self.subject, self.body, self.files = subject, body, files
+        # The pace and the limits, as the window resolved them from
+        # email_config.send_policy -- passed through, never re-read here, so
+        # what the customer confirmed is what goes out. delay None = the
+        # engine's own default.
+        self.delay, self.jitter = delay, jitter
+        self.limit, self.start_at = limit, start_at
         self._stop = threading.Event()
 
     def stop(self):
@@ -296,11 +371,16 @@ class SendWorker(_Worker):
 
     def run(self):
         try:
+            kwargs = {}
+            if self.delay is not None:
+                kwargs["delay"] = self.delay
             sent, failed = CB.mailer.send_bulk(
                 self.cfg, self.recipients, self.subject, self.body, self.files,
                 on_progress=lambda i, n, email, ok, err:
                     self.progress.emit(i, n, email, ok, err),
                 should_stop=self._stop.is_set,
+                jitter=self.jitter, limit=self.limit, start_at=self.start_at,
+                on_wait=self.waiting.emit, **kwargs,
             )
             self.done.emit(sent, failed)
         except Exception as e:
@@ -366,13 +446,11 @@ class MeasureWorker(_Worker):
     def __init__(self, path: str, unit: str = "", scope: list | None = None):
         super().__init__()
         self.path, self.unit, self.scope = path, unit, scope or []
-        self.dxf_path = ""      # the readable DXF (a .dwg gets converted to this)
 
     def run(self):
         try:
             boq = CB.get_boq()
             dxf_path, notes = boq.ensure_dxf(self.path)
-            self.dxf_path = dxf_path
             q = boq.measure(dxf_path)
             if self.unit:
                 boq.apply_known_unit(q, self.unit)
@@ -467,6 +545,45 @@ class ReelWorker(_Worker):
             engine.render(self.spec, self.out_path,
                           on_progress=lambda d, t: self.progress.emit(d, t))
             self.done.emit(self.out_path)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class StudioFollowupWorker(_Worker):
+    """A change to a filmed Studio reel: asked in the conversation that
+    designed it, then re-filmed here. See core.automation.studio_followup."""
+    stage_event = Signal(str, dict)
+    progress = Signal(int, int)      # frames done, total
+    done = Signal(str, str, str)     # mp4, spec path, note
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, spec: dict, agent: str, design_url: str,
+                 change: str, attachments: list | None = None,
+                 images: str = "", context: str = "", task: str = "",
+                 title: str = ""):
+        super().__init__()
+        self.cfg, self.spec, self.agent = cfg, spec, agent
+        self.design_url, self.change = design_url, change
+        self.attachments = list(attachments or [])
+        self.images, self.context = images or "", context or ""
+        self.task, self.title = task or "", title or ""
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
+    def run(self):
+        try:
+            out, spec_path, note = CB.get_automation().studio_followup(
+                self.cfg, self.spec, self.agent, self.design_url, self.change,
+                attachments=self.attachments, images=self.images,
+                context=self.context, task=self.task, title=self.title,
+                on_event=lambda k, p: self.stage_event.emit(k, p),
+                on_progress=lambda d, t: self.progress.emit(d, t))
+            self.done.emit(out, spec_path, note)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -715,215 +832,4 @@ class FFmpegWorker(_Worker):
             self.done.emit(ffmpeg.download(
                 lambda done, total: self.progress.emit(done, total)))
         except Exception as e:
-            self.failed.emit(str(e))
-
-
-class ProspectorWorker(_Worker):
-    """Qualify a sheet of leads and draft an email for each, off the UI thread.
-
-    Groq is called once per lead to qualify and once per reachable lead to
-    draft — minutes for a real list — so like the other engine workers this
-    cannot run inline. `progress` carries a line per lead so the window has a
-    live count instead of a frozen dialog.
-    """
-    progress = Signal(str)
-    done = Signal(object, list)      # RunResult, list[reach.Draft]
-    failed = Signal(str)
-
-    def __init__(self, path: str, offer: str, cfg: dict, *, sheet: str = None,
-                 limit: int = 25, verify_limit: int = 25, focus: str = "",
-                 sender: str = "", claims: list = None,
-                 exclude_domains: list = None):
-        super().__init__()
-        self.path, self.offer, self.cfg = path, offer, cfg
-        self.sheet, self.limit, self.focus = sheet, limit, focus
-        self.verify_limit = verify_limit
-        self.sender, self.claims = sender, claims or []
-        self.exclude_domains = exclude_domains or []
-
-    def run(self):
-        try:
-            from prospector import engine, reach, signals, verify
-            provider = signals.make_provider(self.cfg, self.focus,
-                                             exclude_domains=self.exclude_domains)
-            res = engine.run(
-                self.path, self.offer, self.cfg, sheet_name=self.sheet,
-                limit=self.limit, focus=self.focus, provider=provider,
-                on_progress=lambda i, n, l: self.progress.emit(
-                    f"Qualifying {i} of {n}: {l.display()}"))
-            vkeys = verify.collect_keys(self.cfg)
-            if vkeys and self.verify_limit:
-                self.progress.emit("Verifying the hot/warm emails…")
-                verify.verify_reachable(
-                    res.dossiers, vkeys, limit=self.verify_limit,
-                    on_progress=lambda i, n, l: self.progress.emit(
-                        f"Verifying {i} of {n}: {l.display()}"))
-            drafts = reach.draft_batch(
-                res.dossiers, self.offer, self.cfg, sender=self.sender,
-                claims=self.claims,
-                on_progress=lambda i, n, l: self.progress.emit(
-                    f"Writing {i} of {n}: {l.display()}"))
-            self.done.emit(res, drafts)
-        except Exception as e:                          # noqa: BLE001
-            self.failed.emit(str(e))
-
-
-class ListVerifyWorker(_Worker):
-    """Verify a loaded recipient list (name/email dicts) through the free-first
-    verifier waterfall, off the UI thread — so an Email 'Send to a list' can drop
-    the dead mailboxes BEFORE a blast instead of collecting 550 bounces after
-    (which is what burns the sending domain's reputation)."""
-    progress = Signal(int, int)
-    done = Signal(list)          # [(recipient_dict, status), …]
-    failed = Signal(str)
-
-    def __init__(self, recipients: list, cfg: dict):
-        super().__init__()
-        self.recipients, self.cfg = recipients, cfg
-
-    def run(self):
-        try:
-            from prospector import verify
-            keys = verify.collect_keys(self.cfg)
-            out = []
-            for i, r in enumerate(self.recipients, 1):
-                self.progress.emit(i, len(self.recipients))
-                status = verify.verify_email(r.get("email", ""), keys) if keys else ""
-                out.append((r, status))
-            self.done.emit(out)
-        except Exception as e:                          # noqa: BLE001
-            self.failed.emit(str(e))
-
-
-class LeadsSendWorker(_Worker):
-    """Send the prepared outreach — one personalised message per lead — off the
-    UI thread. SMTP blocks per message and a hot-list can be dozens of sends;
-    `stop()` lets a person pull out part-way, and the reach layer refuses
-    outright if no sending account is configured."""
-    progress = Signal(int, int, object)     # i, total, reach.Draft
-    done = Signal(list, list)               # sent emails, [(email, error), …]
-    failed = Signal(str)
-
-    def __init__(self, drafts: list, cfg: dict):
-        super().__init__()
-        self.drafts, self.cfg = drafts, cfg
-        self._stop = False
-
-    def stop(self):
-        self._stop = True
-
-    def run(self):
-        try:
-            from prospector import reach
-            sent, failed = reach.send(
-                self.drafts, self.cfg,
-                on_progress=lambda i, n, d: self.progress.emit(i, n, d),
-                should_stop=lambda: self._stop)
-            self.done.emit(sent, failed)
-        except Exception as e:                          # noqa: BLE001
-            self.failed.emit(str(e))
-
-
-class LeadsExportWorker(_Worker):
-    """Write the two deliverable spreadsheets off the UI thread — the leads
-    sheet does a live MX lookup per unique domain, which blocks, so it can no
-    more run inline than a blast can."""
-    progress = Signal(str)
-    done = Signal(list)                     # [leads_path, hotlist_path]
-    failed = Signal(str)
-
-    def __init__(self, all_leads: list, dossiers: list, out_dir: str):
-        super().__init__()
-        self.all_leads, self.dossiers, self.out_dir = all_leads, dossiers, out_dir
-
-    def run(self):
-        try:
-            import os
-            from prospector import exports
-            self.progress.emit("Verifying e-mails and writing the leads sheet…")
-            leads_path = exports.leads_xlsx(
-                self.all_leads, os.path.join(self.out_dir, "Prism leads.xlsx"))
-            self.progress.emit("Writing the hot list…")
-            hot_path = exports.hotlist_xlsx(
-                self.dossiers, os.path.join(self.out_dir, "Prism hot list.xlsx"))
-            self.done.emit([leads_path, hot_path])
-        except Exception as e:                          # noqa: BLE001
-            self.failed.emit(str(e))
-
-
-class SourceWorker(_Worker):
-    """The full from-scratch pipeline off the UI thread: build a list from the
-    ICP (Exa people-search), enrich it with real-domain e-mails, then qualify
-    and draft. Emits the SAME (RunResult, drafts) as ProspectorWorker, so the
-    dialog treats the sheet path and the ICP path identically."""
-    progress = Signal(str)
-    done = Signal(object, list)             # RunResult, list[reach.Draft]
-    failed = Signal(str)
-
-    def __init__(self, industries: list, roles: list, offer: str, cfg: dict, *,
-                 location: str = "India", target: int = 300, limit: int = 25,
-                 verify_limit: int = 25, focus: str = "", sender: str = "",
-                 claims: list = None, exclude_domains: list = None,
-                 leads_only: bool = False):
-        super().__init__()
-        self.industries, self.roles = industries, roles
-        self.offer, self.cfg = offer, cfg
-        self.location, self.target, self.limit = location, target, limit
-        self.verify_limit = verify_limit
-        self.focus, self.sender = focus, sender
-        self.claims = claims or []
-        self.exclude_domains = exclude_domains or []
-        self.leads_only = leads_only
-
-    def run(self):
-        try:
-            from prospector import source, enrich, engine, reach, signals, verify
-            key = signals.exa_key(self.cfg)
-            if not key:
-                self.failed.emit("Building a list from your ICP needs an Exa API "
-                                 "key — add it in the Why-now field and try again.")
-                return
-            self.progress.emit("Sourcing people across your industries…")
-            leads = source.source(
-                self.industries, self.roles, key, location=self.location,
-                target=self.target,
-                on_progress=lambda qi, n, ind, got: self.progress.emit(
-                    f"Sourcing {ind} — {got} found ({qi}/{n} searches)"))
-            if not leads:
-                self.failed.emit("No people came back — widen the industries or "
-                                 "roles, or check your Exa balance.")
-                return
-            self.progress.emit(f"Found {len(leads)} people. Finding real e-mail domains…")
-            enrich.enrich(leads, key)
-            if self.leads_only:
-                # The cheap deliverable: a ranked, enriched leads sheet with NO
-                # Groq at all (qualify + draft skipped) — so a rate-limited or
-                # exhausted Groq key never blocks the list the user actually wants.
-                from prospector import triage
-                ranked = triage.rank(leads, self.offer, self.roles)
-                res = engine.RunResult(dossiers=[], total_in_sheet=len(ranked),
-                                       signal_source="", all_leads=ranked)
-                self.done.emit(res, [])
-                return
-            provider = signals.make_provider(self.cfg, self.focus,
-                                             exclude_domains=self.exclude_domains)
-            res = engine.run_leads(
-                leads, self.offer, self.cfg, limit=self.limit, focus=self.focus,
-                provider=provider, roles=self.roles,
-                on_progress=lambda i, n, l: self.progress.emit(
-                    f"Qualifying {i} of {n}: {l.display()}"))
-            vkeys = verify.collect_keys(self.cfg)
-            if vkeys and self.verify_limit:
-                self.progress.emit("Verifying the hot/warm emails…")
-                verify.verify_reachable(
-                    res.dossiers, vkeys, limit=self.verify_limit,
-                    on_progress=lambda i, n, l: self.progress.emit(
-                        f"Verifying {i} of {n}: {l.display()}"))
-            drafts = reach.draft_batch(
-                res.dossiers, self.offer, self.cfg, sender=self.sender,
-                claims=self.claims,
-                on_progress=lambda i, n, l: self.progress.emit(
-                    f"Writing {i} of {n}: {l.display()}"))
-            self.done.emit(res, drafts)
-        except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))

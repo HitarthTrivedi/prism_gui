@@ -38,9 +38,19 @@ front, because the warnings look like malware alerts:
 **macOS** — "Prism can't be opened because Apple cannot check it for malicious
 software."
 > Right-click (or Control-click) Prism.app → **Open** → **Open**. Once per
-> install. If macOS instead claims the app "is damaged and can't be opened",
-> that is the quarantine flag on a downloaded unsigned app:
+> install. **macOS 15 (Sequoia) and newer** removed that Open button: close the
+> dialog, then System Settings → Privacy & Security → scroll down → **Open
+> Anyway** next to Prism. If macOS instead claims the app "is damaged and
+> can't be opened", that is the quarantine flag on a downloaded unsigned app:
 > `xattr -dr com.apple.quarantine /Applications/Prism.app`
+>
+> Also: the build is **Apple Silicon only**. It will not open on an Intel Mac.
+
+The pipeline is ready to sign the moment the credentials exist — every step
+(`packaging/codesign.py`: Developer ID + hardened runtime, notarytool,
+stapler, and the .dmg itself) runs automatically when the secrets listed in
+`.github/workflows/build.yml` under "Import the macOS signing certificate"
+are set on the repository. Nothing else to flip.
 
 **Windows** — "Windows protected your PC" (SmartScreen).
 > **More info** → **Run anyway**.

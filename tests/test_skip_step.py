@@ -82,6 +82,109 @@ class TheEngineContract(unittest.TestCase):
         self.assertIn("should_stop=stage_halt)", src)
 
 
+class SkipWorksDuringFailoverToo(unittest.TestCase):
+    """The second report, from a live reel run: "Make the images" had failed
+    on ChatGPT and was being retried with Canva, the customer pressed Skip
+    this step, and nothing happened. The nested run() the retry starts was
+    never given the skip flag, so the one place a customer is most likely to
+    press it — watching a second tool grind on the same stuck stage — was the
+    one place it did nothing."""
+
+    def _retry_src(self) -> str:
+        from core import automation
+        return inspect.getsource(automation._retry_failed_stages)
+
+    def test_the_retry_pass_is_given_the_flag(self):
+        from core import automation
+        params = inspect.signature(automation._retry_failed_stages).parameters
+        self.assertIn("skip_signal", params)
+        run_src = inspect.getsource(automation.run)
+        # rindex: the docstring mentions the function by name first.
+        call = run_src[run_src.rindex("_retry_failed_stages("):]
+        call = call[:call.index(")")]
+        self.assertIn("skip_signal=skip_signal", call)
+        self.assertIn("image_stages=image_stages", call)
+
+    def test_a_press_reaches_the_nested_runs_waits(self):
+        """As a stop, so the nested run winds up quietly and keeps what
+        landed — it has no on_event of its own, so nothing it emits reaches
+        the screen; the outer loop reports the skip."""
+        src = self._retry_src()
+        self.assertIn("should_stop=halt", src)
+        self.assertIn("def halt()", src)
+        self.assertIn("skipped()", src)
+
+    def test_a_press_abandons_the_other_alternatives(self):
+        """Skipping means "move on", not "try the third tool as well"."""
+        src = self._retry_src()
+        loop = src[src.index("for alternative in"):]
+        self.assertIn("if skipped():", loop)
+        self.assertIn("give_up(stage, info, texts)", loop)
+        self.assertIn("break", loop[loop.index("give_up(stage, info, texts)"):][:80])
+
+    def test_the_skip_is_reported_and_the_flag_cleared(self):
+        src = self._retry_src()
+        give_up = src[src.index("def give_up("):src.index("recovered: set")]
+        self.assertIn("skip_signal.clear()", give_up)
+        self.assertIn('"stage_skipped"', give_up)
+        self.assertIn("while it was being retried", give_up)
+
+
+class TheVideoWaitsForItsImages(unittest.TestCase):
+    """Same run, the other half: "Make the video — FAILED" on screen while
+    "Make the images" was still being retried underneath it. A local
+    renderer used to run in its turn regardless; now, when a stage before it
+    produced nothing and failover is about to retry that stage, the renderer
+    is held back and run after the retry pass."""
+
+    def _run_src(self) -> str:
+        from core import automation
+        return inspect.getsource(automation.run)
+
+    def test_a_local_stage_is_held_while_a_feeder_awaits_retry(self):
+        src = self._run_src()
+        branch = src[src.index('if agent_cfg.get("local"):'):]
+        branch = branch[:branch.index('emit("stage_start"')]
+        self.assertIn("if failover and failures:", branch)
+        self.assertIn("deferred_locals.append", branch)
+        # and no stage_start until it really runs — the card stays queued
+        self.assertNotIn("stage_start", branch)
+
+    def test_the_held_stages_run_after_the_retry_pass(self):
+        src = self._run_src()
+        after = src[src.index("_retry_failed_stages("):]
+        self.assertIn("for stage, agent_name, agent_cfg in deferred_locals:", after)
+        self.assertIn("_run_local_stage(stage, agent_name, agent_cfg)", after)
+
+    def test_one_function_renders_in_both_places(self):
+        """The main loop and the deferred pass must not drift apart."""
+        src = self._run_src()
+        self.assertEqual(src.count("_run_local_stage(stage, agent_name, agent_cfg)"), 2)
+        self.assertIn("def _run_local_stage(", src)
+
+
+class TheScriptExampleCannotBeMistakenForABrief(unittest.TestCase):
+    """The third fault in the same run. Claude answered the script stage
+    with "the tail end of your prompt demands a JSON schema about Bombay
+    Super Hybrid Seeds" and refused — the OUTPUT FORMAT block's example was
+    a realistic sample about a named seed company, and the model read it as
+    a smuggled second brief. No JSON, so the renderer had nothing to build."""
+
+    def test_the_example_names_no_real_company_or_figures(self):
+        from core import reel_web
+        src = inspect.getsource(reel_web)
+        self.assertNotIn("Bombay Super Hybrid Seeds", src)
+        self.assertNotIn("66.43 Cr", src)
+        self.assertNotIn("Rajkot expansion", src)
+
+    def test_the_example_says_it_is_a_placeholder(self):
+        from core import reel_web
+        src = inspect.getsource(reel_web)
+        self.assertIn("placeholders; every value must come from THIS task's "
+                      "material", src)
+        self.assertIn('"headline": "<Example Company Name>"', src)
+
+
 class TheWorkerSwitch(unittest.TestCase):
 
     def test_skip_sets_the_event_the_engine_is_given(self):
