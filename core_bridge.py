@@ -354,6 +354,17 @@ def studio_available() -> tuple[bool, str]:
     return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
+def studio_browser_path() -> str:
+    """Where Studio's Chromium is on this machine, or "" — for Export
+    diagnostics, so "Studio isn't offered here" comes with the path it
+    looked for (or the fact that Playwright named none)."""
+    try:
+        from core import browser
+        return browser.chromium_path() or ""
+    except Exception:                           # noqa: BLE001
+        return ""
+
+
 def studio_render_selftest() -> tuple[bool, str]:
     """Does a render actually work on this machine? Used by main.py's
     --selftest, i.e. by the packaging gate.

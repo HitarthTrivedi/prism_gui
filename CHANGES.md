@@ -10,6 +10,96 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.4 — a file the tool made is a result, on every step, and it lands in Artifacts
+
+Reported 10 Sep 2026: "the agent gives the document but Prism couldn't
+read it" — the card said *Prism couldn't read the response off the page*,
+the run recorded a failure, and the DOCX/XLSX the tool had plainly
+produced was either never saved or saved and never mentioned. BUGS.md #3.
+
+**Was:**
+
+* Files were harvested on six stages only (development, presentation,
+  format, content, write, audio). A tool asked on research, brains, leads
+  or summary for "an Excel of this" made one and Prism walked past it.
+* The candidate test for "this link is a file" was: extension in the
+  href, a `download` attribute, or a `blob:` URL. ChatGPT's generated-file
+  chip is none of those — a signed, extension-less URL whose only clue is
+  the link text "report.docx" — so it was skipped as a navigational link.
+  The click fallback then looked for a control labelled "Download"; the
+  chip is labelled with the filename; nothing was found.
+* Harvesting ran before the "did the tool answer?" decision but was not
+  part of it: a reply that was the file alone, with no prose over fifty
+  characters, fell through to `it returned nothing`.
+* The saved copy was named `<task> — Content.pdf`; the tool's own filename
+  was thrown away.
+
+**Now:**
+
+* `_harvest_stage_files()`: every non-image stage is looked at. The six
+  producer stages keep their patient wait; every other stage gets one
+  free probe of the page (no sleep) and waits only when a file link is
+  already there or the reply's own words say one is coming
+  (`_FILE_HINT_RE`). The click-and-wait fallback runs only with such a
+  reason (`click_fallback`). The customer's own attachments, which come
+  back as identical chips in their turn, are skipped by name.
+* `_filename_in_text()`: an anchor whose visible text is a filename counts
+  as a file, and that name is kept — the temp file, the attachment record
+  (`_site_name`) and the Artifacts copy (`save_artifact(name=…)` →
+  `<task> — Research — Product Brief.docx`).
+* A step that produced a file and no text is a result: the stage's text
+  becomes a short note naming the file (`_files_as_reply`), the run
+  records success, the next step receives both the note and the file.
+  `stage_done` carries `files`; the card prints "Saved to Prism
+  Artifacts: Product Brief.docx · 0.1 MB".
+
+Not changed: image harvesting stays on the visual/media/artwork stages
+(on a text step, an `<img>` sized like a picture is as likely to be the
+customer's own upload). Claude's side-panel artifact still depends on the
+page exposing a download control; the click path is unchanged there.
+
+Tests: `tests/test_cross_platform_browser.py` (+11: the ChatGPT chip, the
+customer's upload, the gated click fallback, every-stage probing, the
+file-only reply), `tests/test_artifacts_config.py` (+1, the kept name).
+
+## Also in 1.5.4 — "Studio makes artwork on Linux, not on Mac or Windows"
+
+Reported the same day. The artwork step exists only on the Studio path:
+the routed run inserts it before Prism Studio's design stage, and the
+Reel window inserts it only when the *Studio* renderer is chosen. On a
+machine where Studio's browser is not found, the Reel window greyed the
+Studio option with a tooltip and quietly ran *Quick*, which has no artwork
+step — so the report is accurate and the cause is upstream of artwork.
+
+Checked against the 1.5.2 release manifests: the macOS and Windows
+bundles DO ship Playwright's Chromium and node driver (353 and 314 files
+under `.local-browsers/`), so a missing browser in the build is not it.
+What is left, and what this release does about each:
+
+* **The Artifacts folder could not be written and nothing said so.**
+  `~/Desktop/Prism Artifacts` needs the person's permission on macOS
+  (a packaged app is asked once; "Don't Allow" made every save a
+  PermissionError that `_save_artifacts` swallowed), and on Windows with
+  OneDrive's Known Folder Move the Desktop is `…\OneDrive\Desktop` and
+  `C:\Users\x\Desktop` may not exist, so Prism made an invisible one.
+  Now: `config._desktop_dir()` asks the Windows shell where the Desktop
+  is; `config.artifacts_root()` verifies the folder is writable once per
+  process and otherwise falls back to `~/Prism Artifacts`, saying so; the
+  Artifacts screen and Settings show the folder actually in use;
+  `_save_artifacts` warns with the reason instead of `continue`.
+* **Studio unavailable was invisible.** The Reel window now says on the
+  page why Studio cannot run here, and Export diagnostics gains three
+  lines: `Prism Studio yes/no — why`, `Studio browser <path>`, and
+  `Artifacts folder <path>` with a note when the Desktop one was refused.
+* **Not verifiable from here:** whether the packaged Mac's Chromium and
+  node launch on a customer's machine at all. An unsigned, quarantined
+  `.app` can have its nested executables refused by Gatekeeper, and the
+  build gate runs on a runner that never sees quarantine. The next Mac or
+  Windows report should come with Export diagnostics; the three new lines
+  answer this in one look.
+
+---
+
 # 1.5.3 — a Mac closes its own leftover Chrome, and never runs an Intel driver without Rosetta
 
 Found by reading the client's M2 failure end to end (10 Sep 2026) instead

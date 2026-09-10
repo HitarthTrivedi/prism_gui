@@ -211,9 +211,10 @@ class _FakeAnchor:
     verified against a real Chrome before this test was written.
     """
 
-    def __init__(self, href: str, download=None):
+    def __init__(self, href: str, download=None, text: str = ""):
         self.href = href
         self._download = download
+        self.text = text
 
     def get_attribute(self, name):
         if name == "href":
@@ -331,6 +332,128 @@ class TheDeliverableIsWhatComesBack(unittest.TestCase):
         out = automation._harvest_files(driver, {}, "content")
         self.assertEqual(len(out), 1)
         self.assertTrue(out[0]["name"].endswith(".docx"))
+
+    # ChatGPT's generated-file chip: a signed, extension-less URL, no
+    # `download` attribute, and the filename only in the link text. This
+    # is the shape that was walked past as "an ordinary navigational link"
+    # — the document existed, and the step read as "couldn't read the
+    # response".
+    CHIP = ("https://chatgpt.com/backend-api/estuary/content?id=file-9Xk"
+            "&ts=488&p=fs&cid=1&sig=abc")
+
+    def test_a_link_whose_text_is_the_filename_is_a_file(self):
+        driver = _FakeDriver([_FakeAnchor("https://chatgpt.com/c/123"),
+                              _FakeAnchor(self.CHIP, text="Product Brief.docx")])
+        # The fake serves docx bytes only for hrefs ending in .docx; this one
+        # does not, so teach it the chip's href.
+        real = driver.execute_async_script
+
+        def serve(script, href):
+            return real(script, href + ".docx") if href == self.CHIP else real(script, href)
+        driver.execute_async_script = serve
+        out = automation._harvest_files(driver, {}, "research")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["_site_name"], "Product Brief.docx")
+        self.assertTrue(out[0]["name"].endswith("Product Brief.docx"),
+                        "the tool's own filename is kept, not content_file1")
+
+    def test_the_customers_own_upload_is_not_harvested_back(self):
+        """The customer's attachment appears as a chip in THEIR turn, with
+        the same kind of anchor. Whole-page harvesting must not re-save it
+        as something the tool made."""
+        driver = _FakeDriver([_FakeAnchor(self.CHIP, text="GA drawing.docx")])
+        out = automation._harvest_files(driver, {}, "research",
+                                        ignore_names={"GA drawing.docx"})
+        self.assertEqual(out, [])
+        self.assertEqual(driver.fetched, [])
+
+    def test_the_click_fallback_only_runs_when_asked(self):
+        """_harvest_via_download clicks the first download-ish control it
+        finds and then waits up to 45 s. On a plain-text step with no sign
+        of a file, that is the wrong thing to do."""
+        driver = _FakeDriver([_FakeAnchor("https://claude.ai/chats")])
+        with mock.patch.object(automation, "_harvest_via_download",
+                               return_value=[]) as clicker:
+            automation._harvest_files(driver, {}, "research", click_fallback=False)
+            clicker.assert_not_called()
+            automation._harvest_files(driver, {}, "content")
+            clicker.assert_called_once()
+
+    def test_filename_in_text(self):
+        f = automation._filename_in_text
+        self.assertEqual(f("Product Brief.docx"), "Product Brief.docx")
+        self.assertEqual(f("quotation.xlsx (24 KB)"), "quotation.xlsx")
+        self.assertEqual(f("Download"), "")
+        self.assertEqual(f("Read the docs."), "")
+        self.assertEqual(f(""), "")
+
+
+class EveryStageIsLookedAtForFiles(unittest.TestCase):
+    """Harvesting used to run on six stages only. A tool asked on a research
+    or summary step for "an Excel of this" made one and Prism walked past.
+    Now every stage gets a free look, and a real wait only when the page
+    shows a link or the reply says a file is coming."""
+
+    def _driver(self, links: int):
+        d = _FakeDriver([])
+        d.execute_script = lambda script, *a: links
+        return d
+
+    def test_a_text_stage_with_no_sign_of_a_file_costs_nothing(self):
+        d = self._driver(0)
+        with mock.patch.object(automation, "_harvest_files") as harvest, \
+                mock.patch.object(automation.time, "sleep",
+                                  side_effect=AssertionError("slept")):
+            out = automation._harvest_stage_files(
+                d, {}, "research", ["Here are the three suppliers I found."])
+        self.assertEqual(out, [])
+        harvest.assert_not_called()
+
+    def test_a_link_on_the_page_is_harvested_on_any_stage(self):
+        d = self._driver(1)
+        with mock.patch.object(automation, "_harvest_files",
+                               return_value=[{"name": "x.xlsx"}]) as harvest, \
+                mock.patch.object(automation, "_wait_for_files",
+                                  return_value=1):
+            out = automation._harvest_stage_files(d, {}, "summary", ["done"])
+        self.assertEqual(out, [{"name": "x.xlsx"}])
+        self.assertTrue(harvest.call_args.kwargs["click_fallback"])
+
+    def test_a_reply_that_promises_a_file_waits_for_it(self):
+        d = self._driver(0)
+        waits = []
+        with mock.patch.object(automation, "_harvest_files", return_value=[]), \
+                mock.patch.object(automation, "_wait_for_files",
+                                  side_effect=lambda *a, **k: waits.append(k) or 0):
+            automation._harvest_stage_files(
+                d, {}, "research", ["I've attached the report as report.pdf."])
+        self.assertEqual(len(waits), 2, "one free look, then a real wait")
+        self.assertGreater(waits[1]["cap"], 0)
+
+    def test_the_customers_attachments_are_passed_as_names_to_ignore(self):
+        d = self._driver(1)
+        with mock.patch.object(automation, "_harvest_files", return_value=[]) as harvest, \
+                mock.patch.object(automation, "_wait_for_files", return_value=1):
+            automation._harvest_stage_files(
+                d, {}, "brains", [], attachments=[{"name": "spec.pdf", "path": "/x/spec.pdf"}])
+        self.assertEqual(harvest.call_args.kwargs["ignore_names"], {"spec.pdf"})
+
+    def test_a_probe_with_no_cap_does_not_sleep(self):
+        d = self._driver(2)
+        with mock.patch.object(automation.time, "sleep",
+                               side_effect=AssertionError("slept")):
+            self.assertEqual(automation._wait_for_files(d, cap=0, grace=0), 2)
+
+    def test_a_file_only_reply_reads_as_a_result(self):
+        text = automation._files_as_reply(
+            [{"_site_name": "Quotation.xlsx", "kind": "sheet", "size": 24_000}])
+        self.assertIn("Quotation.xlsx", text)
+        self.assertIn("Prism Artifacts", text)
+        summary = automation._file_summaries(
+            [{"_site_name": "Quotation.xlsx", "kind": "sheet", "size": 24_000,
+              "path": "/tmp/q.xlsx", "text": "never shown"}])
+        self.assertEqual(summary[0]["name"], "Quotation.xlsx")
+        self.assertNotIn("text", summary[0])
 
 
 # ── 3. attachments going the other way ───────────────────────────────────────
@@ -1143,3 +1266,22 @@ class ScriptsSurviveAWindowsConsole(unittest.TestCase):
         # é IS in cp1252 — a Windows console prints it fine, and flagging it
         # would send someone chasing a bug that is not there.
         self.assertEqual(self._unprintable_on_windows('print("café")'), set())
+
+
+class ASaveThatFailsIsSaid(unittest.TestCase):
+    """_save_artifacts was best-effort and silent per item. A refused
+    Desktop folder (macOS permission) therefore looked like "artwork not
+    made" -- the file existed in temp and nothing had said the copy failed."""
+
+    def test_a_refused_copy_is_warned_about_with_the_reason(self):
+        from core import config as CFG
+        said = []
+        with mock.patch.object(CFG, "save_artifact",
+                               side_effect=PermissionError("Operation not permitted")), \
+                mock.patch.object(automation.ui, "warn", said.append), \
+                mock.patch.object(automation.ui, "info", lambda *a, **k: None):
+            automation._save_artifacts([{"path": "/tmp/prism_artwork_img1.png"}],
+                                       "a reel", "artwork")
+        self.assertEqual(len(said), 1)
+        self.assertIn("Operation not permitted", said[0])
+        self.assertIn("prism_artwork_img1.png", said[0])

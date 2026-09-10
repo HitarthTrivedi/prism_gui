@@ -158,14 +158,21 @@ test that pins it; none is a rule that lives in a sentence.
   Enter; after submitting, verify the composer emptied before entering the
   wait loop; if not, retry the click.
 
-### 3. Artifact/file responses are invisible to the scraper 🔴
+### 3. Artifact/file responses are invisible to the scraper 🟡 — mostly FIXED 10-09 (1.5.4)
 - **Symptom:** Claude produced the best BOQ of the day as a **DOCX artifact in
   a side panel**. Prism's scraper reads chat text only → dialog reported
   "Nothing came back" and the run recorded a failure. The user had to download
-  the file by hand.
-- **Fix:** detect artifact/file panes and pull their content or download link;
-  and/or add "answer in the chat itself — do not create files/artifacts" to
-  writer-stage prompts.
+  the file by hand. Seen again 10-09 with a ChatGPT-generated document:
+  "the agent gives the document but Prism couldn't read it".
+- **Fixed (1.5.4, `CHANGES.md`):** files are harvested on every stage, not
+  six; a link whose text is the filename (ChatGPT's file chip) counts as a
+  file; a file-only reply is recorded as the step's result and named on the
+  card; the tool's filename is kept in Artifacts.
+- **Still open:** Claude's side-panel artifact when the page exposes no
+  download control Prism can find — the click path (`_click_download_control`)
+  looks for `a[download]`, `[aria-label*=download]`, `[data-testid*=download]`
+  and visible "Download" text; if Claude's panel needs the artifact card
+  clicked first, that step is missing. Needs a look at the live DOM.
 
 ### 4. Planner brief contradicts renderer contract 🔴
 - **Symptom (Reel pipeline):** the assembled brief contained BOTH the planner's

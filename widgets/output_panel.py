@@ -760,14 +760,33 @@ class StageCard(QWidget):
 
     def set_done(self, texts: list[str], url: str, timed_out: bool = False,
                  blocked: str = "", exhausted: bool = False, count: int = None,
-                 snippet: str = ""):
+                 snippet: str = "", files: list | None = None):
         """A stage came back. Four different endings live in here and the
         engine tells us which — it always did, and the difference used to be
         thrown away at the door.
+
+        `files` are the documents/sheets/decks the engine harvested from this
+        step and saved to Prism Artifacts — named on the card, so a step whose
+        whole answer was a DOCX reads as "made a file", not as prose that
+        happens to mention one.
         """
         self._set_url(url)
         self._count = int(count if count is not None else len(texts or []))
         note = ""
+        if files:
+            rows = []
+            for f in files:
+                name = _escape(str(f.get("name") or os.path.basename(
+                    f.get("saved") or f.get("path") or "")) or i18n.t("file"))
+                size = ""
+                try:
+                    size = f" · {int(f.get('size') or 0) / 1e6:.1f} MB"
+                except (TypeError, ValueError):
+                    pass
+                rows.append(f"<b>{name}</b>{size}")
+            note += (f"<p style='line-height:150%'>"
+                     + _escape(i18n.t("Saved to Prism Artifacts")) + ": "
+                     + ", ".join(rows) + "</p>")
         if timed_out:
             # Our clock ran out, not the tool's: it is still generating in that
             # tab and will land the finished deck/doc/app there. Saying "done"
@@ -1239,11 +1258,12 @@ class OutputPanel(QWidget):
     def stage_done(self, stage: str, texts: list[str], url: str,
                    timed_out: bool = False, blocked: str = "",
                    exhausted: bool = False, count: int = None,
-                   snippet: str = ""):
+                   snippet: str = "", files: list | None = None):
         card = self._cards.get(stage)
         if card:
             card.set_done(texts, url, timed_out, blocked=blocked,
-                          exhausted=exhausted, count=count, snippet=snippet)
+                          exhausted=exhausted, count=count, snippet=snippet,
+                          files=files)
         if self._live == stage:
             self._live = ""
         self._refresh_header()

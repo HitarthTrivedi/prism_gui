@@ -2480,7 +2480,8 @@ class MainWindow(QMainWindow):
                 blocked=payload.get("blocked") or "",
                 exhausted=bool(payload.get("exhausted")),
                 count=payload.get("count"),
-                snippet=payload.get("snippet", ""))
+                snippet=payload.get("snippet", ""),
+                files=payload.get("files") or [])
             if texts:
                 snippet = (texts[0][:150] + "…") if len(texts[0]) > 150 else texts[0]
             elif timed_out:

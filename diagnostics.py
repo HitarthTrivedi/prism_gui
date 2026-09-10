@@ -274,6 +274,21 @@ def report() -> str:
                          + (f" — {str(why).splitlines()[0][:90]}" if not ok else ""))
         lines.append(f"{'Cloud folders':<22} "
                      + (", ".join(s["label"] for s in cloud.sources()) or "none"))
+        # Studio, separately from Reel: "Studio makes artwork on Linux but
+        # not on Windows/Mac" is, nine times in ten, Studio not being
+        # offered at all on that machine (the dialog then runs the Quick
+        # reel, which has no artwork step) -- and this line says why.
+        ok, why = _safe(CB.studio_available, (False, "unknown"))
+        lines.append(f"{'Prism Studio':<22} {'yes' if ok else 'no'}"
+                     + (f" — {str(why).splitlines()[0][:120]}" if not ok else ""))
+        lines.append(f"{'Studio browser':<22} "
+                     f"{_safe(CB.studio_browser_path, '') or 'not found'}")
+        wanted = CB.config.ARTIFACTS_DIR
+        actual = _safe(CB.config.artifacts_root, "")
+        lines.append(f"{'Artifacts folder':<22} {actual or wanted}"
+                     + ("" if actual == wanted else
+                        f"  (wanted {wanted}: not writable — Desktop access "
+                        "refused, or the Desktop was moved)"))
     except Exception as e:                          # noqa: BLE001
         lines.append(f"(couldn't probe: {e})")
 

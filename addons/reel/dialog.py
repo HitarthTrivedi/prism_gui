@@ -116,6 +116,13 @@ class ReelDialog(PrismDialog):
         if not studio_ok:
             self.studio_btn.setEnabled(False)
             self.studio_btn.setToolTip(studio_why)
+            # Said on the page, not only in a tooltip nobody hovers. A
+            # greyed radio and a silent fall-through to Quick is how "Studio
+            # makes artwork on Linux but not on my Mac" was reported: the
+            # artwork step belongs to Studio, Studio was never offered on
+            # that machine, and nothing on screen said why.
+            self.studio_btn.setText(self.studio_btn.text()
+                                    + "  — not available on this computer")
         # Two loose radio buttons under a prompt read as stray options. They
         # are a real choice between two renderers, so they get a titled well
         # that says so — and each one clears the 28px target.
@@ -135,6 +142,14 @@ class ReelDialog(PrismDialog):
             b.setMinimumHeight(C.MIN_TARGET)
             b.setCursor(Qt.PointingHandCursor)
             choice_col.addWidget(b)
+        if not studio_ok:
+            why = C.meta(i18n.t("Studio can't run here: {why}").format(
+                why=(studio_why or "").strip().splitlines()[0] if studio_why
+                else i18n.t("its browser was not found")))
+            why.setWordWrap(True)
+            why.setObjectName("studioWhy")
+            choice_col.addWidget(why)
+        self._studio_ok = studio_ok
         root.addWidget(choice)
 
         # A measured result ("your brand colours came off this logo"), not a

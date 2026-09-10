@@ -32,6 +32,22 @@ class GroupingByTask(unittest.TestCase):
         self.assertEqual(os.path.dirname(dest), self._tmp.name)
         self.assertTrue(os.path.isfile(dest))
 
+    def test_the_tools_own_filename_is_kept_after_the_runs_label(self):
+        """A harvested "Quotation - JK Cement.xlsx" used to be filed as
+        "<task> — Content.xlsx": the run's label survived, the name the
+        customer asked for did not. Both now."""
+        dest = self.CFG.save_artifact(self._src.name, "quote the OBMS job",
+                                      kind="content", task="quote the OBMS job",
+                                      name="Quotation - JK Cement.xlsx")
+        base = os.path.basename(dest)
+        self.assertIn("Content", base)
+        self.assertIn("Quotation - JK Cement", base)
+        self.assertTrue(base.endswith(".png"), "the extension is the real file's")
+        # No name: exactly as before.
+        plain = self.CFG.save_artifact(self._src.name, "quote the OBMS job",
+                                       kind="content", task="quote the OBMS job")
+        self.assertNotIn("—  ", os.path.basename(plain))
+
     def test_a_task_creates_its_own_subfolder(self):
         dest = self.CFG.save_artifact(self._src.name, "a poster", kind="visual",
                                       task="make me a poster of a spring")
@@ -140,3 +156,72 @@ class GroupingByTask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TheFolderThatCanBeWritten(unittest.TestCase):
+    """artifacts_root(): the Desktop folder when it can be written, and a
+    findable fallback -- said out loud -- when it cannot. "Studio makes
+    artwork on Linux but not on my Mac": the pictures were made, the copy
+    to ~/Desktop was refused (macOS folder permission), and nothing said
+    so. On Windows with OneDrive the Desktop is not ~/Desktop at all."""
+
+    def setUp(self):
+        from core import config as CFG
+        self.CFG = CFG
+        self._real = (CFG.ARTIFACTS_DIR, CFG.FALLBACK_ARTIFACTS_DIR,
+                      dict(CFG._root_cache))
+        self._tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        (self.CFG.ARTIFACTS_DIR, self.CFG.FALLBACK_ARTIFACTS_DIR, cache) = self._real
+        self.CFG._root_cache.clear()
+        self.CFG._root_cache.update(cache)
+        self._tmp.cleanup()
+
+    def test_the_desktop_folder_is_used_when_it_can_be_written(self):
+        want = os.path.join(self._tmp.name, "Desktop", "Prism Artifacts")
+        self.CFG.ARTIFACTS_DIR = want
+        self.assertEqual(self.CFG.artifacts_root(), want)
+        self.assertTrue(os.path.isdir(want))
+        self.assertEqual(os.listdir(want), [], "the write probe leaves nothing behind")
+
+    def test_an_unwritable_desktop_falls_back_to_the_home_folder_and_says_so(self):
+        from unittest import mock
+        blocker = os.path.join(self._tmp.name, "Desktop")
+        with open(blocker, "w") as f:          # a FILE where the folder should be
+            f.write("no")
+        self.CFG.ARTIFACTS_DIR = os.path.join(blocker, "Prism Artifacts")
+        fallback = os.path.join(self._tmp.name, "home", "Prism Artifacts")
+        self.CFG.FALLBACK_ARTIFACTS_DIR = fallback
+        said = []
+        from core import ui
+        with mock.patch.object(ui, "warn", said.append):
+            root = self.CFG.artifacts_root()
+            again = self.CFG.artifacts_root()
+        self.assertEqual(root, fallback)
+        self.assertEqual(again, fallback)
+        self.assertTrue(os.path.isdir(fallback))
+        self.assertEqual(len(said), 1, "decided once, said once")
+        self.assertIn("instead", said[0])
+        # And everything filed from here on lands in the fallback.
+        dest = self.CFG.save_artifact(__file__, "x", kind="visual", task="a task")
+        self.assertTrue(dest.startswith(fallback))
+
+    def test_windows_asks_the_shell_where_the_desktop_is(self):
+        import sys
+        import types
+        from unittest import mock
+        moved = os.path.join(self._tmp.name, "OneDrive", "Desktop")
+        os.makedirs(moved)
+
+        fake = types.ModuleType("winreg")
+        fake.HKEY_CURRENT_USER = object()
+        fake.OpenKey = lambda root, sub: "key"
+        fake.QueryValueEx = lambda key, name: (moved, 1)
+        with mock.patch.dict(sys.modules, {"winreg": fake}), \
+                mock.patch.object(self.CFG.os, "name", "nt"):
+            self.assertEqual(self.CFG._desktop_dir(), moved)
+
+    def test_off_windows_the_desktop_is_under_home(self):
+        self.assertEqual(self.CFG._desktop_dir(),
+                         os.path.join(os.path.expanduser("~"), "Desktop"))

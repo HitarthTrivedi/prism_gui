@@ -1278,7 +1278,7 @@ class SettingsPanel(QWidget):
         shared = workspace.is_shared(self.cfg)
         prism_dir = self._safe(paths.user_dir) or ""
         logs = self._safe(self._log_dir) or ""
-        artifacts_dir = CB.config.ARTIFACTS_DIR
+        artifacts_dir = self._safe(CB.config.artifacts_root) or CB.config.ARTIFACTS_DIR
 
         col.addWidget(self._facts([
             (i18n.t("Your work is written to"), self._path(root or "—")),

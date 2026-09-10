@@ -169,12 +169,15 @@ class ArtifactsPanel(Page):
                          on_click=self._open_folder)]
 
     def _open_folder(self):
-        os.makedirs(CB.config.ARTIFACTS_DIR, exist_ok=True)
-        QDesktopServices.openUrl(
-            QUrl.fromLocalFile(CB.config.ARTIFACTS_DIR))
+        folder = CB.config.artifacts_root()
+        os.makedirs(folder, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def build(self):
-        folder = CB.config.ARTIFACTS_DIR
+        # artifacts_root(), not ARTIFACTS_DIR: the folder that is actually
+        # written on this machine, which on a Mac that refused Desktop
+        # access is the fallback under the home folder.
+        folder = CB.config.artifacts_root()
         paths = []
         self._labels: dict[str, str] = {}
         if os.path.isdir(folder):
