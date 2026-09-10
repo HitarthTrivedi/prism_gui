@@ -202,8 +202,8 @@ class Guide(unittest.TestCase):
 
 
 class Plans(unittest.TestCase):
-    def test_the_three_plans_exist_and_are_distinct(self):
-        self.assertEqual(set(plans.ORDER), {"studio", "works", "complete"})
+    def test_the_two_plans_exist_and_are_distinct(self):
+        self.assertEqual(set(plans.ORDER), {"studio", "complete"})
         sets = [set(plans.PLANS[k].includes) for k in plans.ORDER]
         self.assertEqual(len(sets), len({frozenset(s) for s in sets}))
 
@@ -212,17 +212,23 @@ class Plans(unittest.TestCase):
         for key in plans.ORDER:
             self.assertIn("core", plans.PLANS[key].includes, key)
 
-    def test_the_manufacturing_plan_sells_the_shop_floor_tools(self):
-        works = plans.PLANS["works"].includes
-        for feature in ("boq", "bom", "attendance"):
-            self.assertIn(feature, works)
-        self.assertIn("marketing", plans.PLANS["works"].addons)
+    def test_studio_is_the_pipeline_plus_reel_and_nothing_else(self):
+        """Prism Studio is the base product: core + Reel & Studio. Every
+        other capability is an add-on sold on top of it."""
+        self.assertEqual(set(plans.PLANS["studio"].includes), {"core", "reel"})
 
-    def test_the_services_plan_sells_the_marketing_tools(self):
-        studio = plans.PLANS["studio"].includes
-        for feature in ("marketing", "leads"):
-            self.assertIn(feature, studio)
-        self.assertIn("boq", plans.PLANS["studio"].addons)
+    def test_every_add_on_is_sold_on_top_of_studio(self):
+        self.assertEqual(set(plans.PLANS["studio"].addons),
+                         {"boq", "email", "inbox", "leads", "gerber", "step"})
+
+    def test_every_add_on_is_something_the_app_actually_gates_on(self):
+        """A key nothing gates on unlocks nothing — a licence carrying it is a
+        sale of nothing. marketing/attendance/dev/bom were exactly that."""
+        from addons import registry
+        gated = {a.feature for a in registry.REGISTRY if a.feature}
+        for key in plans.FEATURES:
+            if key != "core":
+                self.assertIn(key, gated, key)
 
     def test_complete_really_is_everything(self):
         self.assertEqual(set(plans.PLANS["complete"].includes),
@@ -260,8 +266,8 @@ class Plans(unittest.TestCase):
 
     def test_a_bespoke_set_is_reported_as_custom_not_as_a_plan(self):
         self.assertEqual(plans.plan_of({"core", "boq"}), "Custom")
-        self.assertEqual(plans.plan_of(plans.features_for("works")),
-                         "Prism Works")
+        self.assertEqual(plans.plan_of(plans.features_for("complete")),
+                         "Prism Complete")
 
     def test_the_paywall_can_pitch_every_feature(self):
         from dialogs.paywall import PITCH

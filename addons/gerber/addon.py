@@ -7,13 +7,11 @@ from addons.manifest import ACCENT, RAIL, HOME, Addon, Offer
 MANIFEST = Addon(
     key="gerber",
     label="Gerber",
-    # Rides "boq", not a dedicated "gerber" key. There is no gerber feature
-    # on the licence server and this add-on has one prospective customer, so
-    # gating on a key nobody can be granted would deny everyone -- including
-    # the one account actually testing it. The day a real gerber feature
-    # exists there, this is a one-word diff and nothing else moves. That is
-    # precisely what plans.py's job-not-screen naming was built for.
-    feature="boq",
+    # Its own key since 2026-09-10: Gerber is sold as its own add-on
+    # (plans.FEATURES["gerber"]). It rode "boq" before that, so every licence
+    # that held "boq" on that date was granted "gerber" server-side and nobody
+    # lost access when this line changed.
+    feature="gerber",
     tip="PCB size, track width & spacing, drill size and count — measured "
         "from the Gerber files, never seen by an AI",
     blurb="Measured off the Gerber files",

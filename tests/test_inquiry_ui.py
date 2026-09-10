@@ -2703,9 +2703,9 @@ class TheFeatureIsSellable(unittest.TestCase):
         import plans
         self.assertIn("inbox", plans.FEATURES)
 
-    def test_it_is_inclusive_for_manufacturers(self):
+    def test_it_is_in_the_complete_plan(self):
         import plans
-        self.assertIn("inbox", plans.PLANS["works"].includes)
+        self.assertIn("inbox", plans.PLANS["complete"].includes)
 
     def test_it_is_an_addon_for_agencies(self):
         import plans

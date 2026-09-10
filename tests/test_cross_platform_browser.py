@@ -1102,9 +1102,12 @@ class TheOdaVersionSortIsNumeric(unittest.TestCase):
 
 
 class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
-    """Third trap of the same shape as the brief's two. BOM is gated on
-    'boq', so `--features core,bom` passes the name check and still padlocks
-    BOM."""
+    """Third trap of the same shape as the brief's two. 'bom' used to be a
+    declared feature that nothing gated on, so `--features core,bom` passed
+    the name check and still padlocked BOM. It is no longer declared — BOQ &
+    BOM is one add-on on 'boq' — so it now fails the name check, with a hint
+    saying which key to use instead. The ungated-feature check stays, read
+    from source, for the next key that gets declared before it is gated."""
 
     def setUp(self):
         sys.path.insert(0, os.path.join(
@@ -1121,8 +1124,11 @@ class AFeatureNothingGatesOnIsCalledOut(unittest.TestCase):
             self.mint.parse_features(features)
         return err.getvalue()
 
-    def test_bom_is_reported_as_unlocking_nothing(self):
-        self.assertIn("bom", self._stderr_of("core,boq,bom"))
+    def test_bom_is_refused_with_a_pointer_to_boq(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.mint.parse_features("core,boq,bom")
+        self.assertIn("bom", str(caught.exception))
+        self.assertIn("'boq'", str(caught.exception))
 
     def test_a_gated_feature_is_silent(self):
         self.assertEqual(self._stderr_of("core,boq,reel,inbox"), "")

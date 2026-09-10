@@ -1392,10 +1392,8 @@ class MainWindow(QMainWindow):
             getattr(dlg, "_links", {}))
 
     def _open_gerber(self):
-        # Licence feature is "boq" for now — see the comment in
-        # widgets/sidebar.py's Gerber entry for why, and swap it the day a
-        # dedicated "gerber" feature exists on the licence server.
-        self._authorized_then("boq", "addon", lambda: self._show_screen("gerber"))
+        # Gerber is its own add-on since 2026-09-10 -- see addons/gerber/addon.py.
+        self._authorized_then("gerber", "addon", lambda: self._show_screen("gerber"))
 
     def _open_gerber_dialog(self):
         # gerber_available() always succeeds — core.gerber has no hard
@@ -1411,9 +1409,8 @@ class MainWindow(QMainWindow):
         GerberDialog(self.cfg, self.attachments, self).exec()
 
     def _open_step(self):
-        # Gated on "boq" like Gerber and BOM -- nothing on the licence
-        # server sells STEP separately yet. See addons/step/addon.py.
-        self._authorized_then("boq", "addon", lambda: self._show_screen("step"))
+        # STEP is its own add-on since 2026-09-10 -- see addons/step/addon.py.
+        self._authorized_then("step", "addon", lambda: self._show_screen("step"))
 
     def _open_step_dialog(self):
         # Unlike Gerber this has a hard dependency -- cadquery, which

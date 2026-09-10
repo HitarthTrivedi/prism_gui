@@ -36,27 +36,24 @@ from test_gates import GateTest                         # noqa: E402
 
 # Rail key -> the licence feature it must not open without.
 #
-# gerber rides "boq" on purpose: there is no "gerber" key on the licence server
-# yet and one prospective customer, so gating on a key nobody can be granted
-# would deny everyone including the account testing it. See widgets/sidebar.py.
+# gerber and step each have their own key since 2026-09-10 -- they are sold
+# as their own add-ons. They rode "boq" before that.
+#
 # reel and motion are not on the rail (Reel's row was given to Artifacts) but
-# are reachable by command, which is exactly why they are tested here.
+# are reachable by command, which is exactly why they are tested here. Motion
+# rides "reel": Reel, Studio and Motion are one purchase.
 #
-# step rides "boq" for the same reason gerber does -- no "step" key on the
-# licence server yet. See addons/step/addon.py.
-#
-# bom rides "boq" for a different reason: there IS a "bom" key in
-# plans.FEATURES, but the add-on ships as a mode inside the BOQ dialog, so the
-# route it is reached by is BOQ's. The day BOM becomes its own screen, this
-# line and widgets/sidebar.py change together -- and
-# test_the_rail_and_this_file_agree_on_which_feature_gates_what below is what
-# makes "together" enforceable rather than remembered.
+# bom rides "boq" by design: "BOQ & BOM" is one add-on and BOM ships as a mode
+# inside the BOQ dialog, so the route it is reached by is BOQ's. The day BOM
+# becomes its own purchase, this line and widgets/sidebar.py change together
+# -- and test_the_rail_and_this_file_agree_on_which_feature_gates_what below
+# is what makes "together" enforceable rather than remembered.
 ADDON_FEATURES = {
     "inquiry": "inbox",
     "boq": "boq",
     "bom": "boq",
-    "gerber": "boq",
-    "step": "boq",
+    "gerber": "gerber",
+    "step": "step",
     "email": "email",
     "leads": "leads",
     "reel": "reel",

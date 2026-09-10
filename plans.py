@@ -53,45 +53,31 @@ FEATURES: dict[str, Feature] = {
         "Describe a job, get a plan, run it across your AI tools",
         "The heart of Prism — every licence includes it."),
 
-    "marketing": Feature(
-        "marketing", "Marketing & Design",
-        "Posts, creatives, campaign copy and brand artwork",
-        "Turn one line into a finished post: the words, the picture, and the "
-        "caption, in your brand's colours."),
+    # ── the base product: Prism Studio ───────────────────────────────────
+    # Reel, Studio and Motion are one capability tier and one key. Motion
+    # rides "reel" on purpose (addons/motion/addon.py) — it is the same
+    # purchase, not a separate one.
+    "reel": Feature(
+        "reel", "Reel & Studio",
+        "Short vertical video and motion graphics, rendered from a script",
+        "A finished reel in your brand's colours, ready to post."),
 
-    "leads": Feature(
-        "leads", "Leads & Outreach",
-        "Find real companies and named contacts, and email them",
-        "Stop buying lists. Prism finds companies that match, pulls verified "
-        "contacts, writes the email and sends each person their own copy."),
-
+    # ── add-ons, one key each, sold on top of Studio ─────────────────────
     "boq": Feature(
-        "boq", "BOQ — Bills of Quantities",
-        "Measure a CAD drawing and get the quantities",
+        "boq", "BOQ & BOM",
+        "Measure a CAD drawing: the quantities, and the parts list",
         # Says "quantities", not "priced". The engine measures and deliberately
         # leaves the Rate and Amount columns blank — the costing is the
         # customer's. Promising a priced BOQ in the paywall copy would be
         # selling something the product does not do, and the demo would be the
         # moment they found out.
+        #
+        # One key for BOQ and BOM: BOM ships as a mode inside the BOQ dialog
+        # and is reached by BOQ's route, so they are one add-on, not two.
         "Attach the drawing and get the measured quantities, line by line, in "
         "a spreadsheet you can check against the drawing. Your rates go in "
-        "the blank columns — Prism counts, you price."),
-
-    "bom": Feature(
-        "bom", "BOM & Stock",
-        "Match a parts list against what you actually hold",
-        "Give it the parts list and your stock, and get the shortage list — "
-        "before the job starts rather than halfway through it."),
-
-    "attendance": Feature(
-        "attendance", "Attendance & Rosters",
-        "Timesheets, shift rosters and site attendance",
-        "Turn a month of attendance into the summary your accountant needs."),
-
-    "reel": Feature(
-        "reel", "Reel & Studio",
-        "Short vertical video, rendered from a script",
-        "A finished reel in your brand's colours, ready to post."),
+        "the blank columns — Prism counts, you price. Give it the parts list "
+        "and your stock and get the shortage list before the job starts."),
 
     "email": Feature(
         "email", "Email sending",
@@ -100,18 +86,33 @@ FEATURES: dict[str, Feature] = {
         "address — never a bulk-mail service."),
 
     "inbox": Feature(
-        "inbox", "Inbox to Order",
+        "inbox", "Inquiry",
         "Read the mail, register the inquiries, quote, chase, track the order",
         "Prism reads your inbox, files every drawing, keeps your inquiry "
         "register, prices from your own rate sheet, chases the customers who "
         "go quiet and sends your SOPs — on your own computer. It stops twice: "
         "before a price goes out, and before you accept a PO."),
 
-    "dev": Feature(
-        "dev", "Build tools & pages",
-        "Stand up a small app, page or script",
-        "Describe the tool and get a working one, built by whichever AI is "
-        "best at it."),
+    "leads": Feature(
+        "leads", "Leads & Outreach",
+        "Find real companies and named contacts, and email them",
+        "Stop buying lists. Prism finds companies that match, pulls verified "
+        "contacts, writes the email and sends each person their own copy."),
+
+    "gerber": Feature(
+        "gerber", "Gerber",
+        "PCB size, track width and spacing, drill size and count, measured "
+        "from the Gerber files",
+        "Drop the Gerber files and get the board measured on your own "
+        "machine — the files are never shown to an AI."),
+
+    "step": Feature(
+        "step", "STEP",
+        "Every part's size, thickness, holes and weight, measured from the "
+        "3D model",
+        "Drop the STEP model and get every part measured on your own "
+        "machine, then draft, ask or edit — the model is never shown to an "
+        "AI."),
 }
 
 
@@ -128,42 +129,27 @@ class Plan:
 
 
 PLANS: dict[str, Plan] = {
-    # ── 1. services, agencies, consultants ───────────────────────────────
+    # ── the base product ─────────────────────────────────────────────────
     "studio": Plan(
         "studio", "Prism Studio",
-        "Marketing agencies, consultants, service businesses — anyone whose "
-        "output is words, pictures and proposals",
-        includes=("core", "marketing", "leads", "email", "reel", "dev"),
-        addons=("inbox", "boq", "bom", "attendance"),
-        note="Everything that makes and sells. The shop-floor tools are "
-             "there if they ever need one, sold separately."),
+        "Every customer starts here — the pipeline plus Reel & Studio",
+        includes=("core", "reel"),
+        addons=("boq", "email", "inbox", "leads", "gerber", "step"),
+        note="The base product. Everything else is an add-on sold on top, "
+             "one key each, and a licence is Studio plus whichever add-ons "
+             "the customer bought."),
 
-    # ── 2. manufacturing, fabrication, contracting ───────────────────────
-    "works": Plan(
-        "works", "Prism Works",
-        "Manufacturers, fabricators, electrical and civil contractors — "
-        "anyone whose output is a quoted, measured job",
-        includes=("core", "boq", "bom", "attendance", "email", "inbox"),
-        addons=("marketing", "leads", "reel", "dev"),
-        note="The measuring and quoting tools inclusive. Inbox to Order is in "
-             "here rather than sold on top, because it is the piece they use "
-             "every single day — it is what makes them open Prism at all, and "
-             "the rest is what they find once they have. Most of these firms "
-             "do little marketing at first and buy it later, which is exactly "
-             "why that is the add-on."),
-
-    # ── 3. everything ────────────────────────────────────────────────────
+    # ── everything ───────────────────────────────────────────────────────
     "complete": Plan(
         "complete", "Prism Complete",
-        "Firms doing both — a manufacturer with its own marketing team, or a "
-        "group with several businesses under it",
+        "Studio plus every add-on — the whole product",
         includes=tuple(FEATURES),
         addons=(),
         note="Everything, including anything added later in the same major "
              "version. The easiest one to sell and the easiest to support."),
 }
 
-ORDER = ("studio", "works", "complete")
+ORDER = ("studio", "complete")
 
 # A licence with nothing set at all still gets this. Never empty: a customer
 # whose licence arrives malformed should see a working pipeline and a support

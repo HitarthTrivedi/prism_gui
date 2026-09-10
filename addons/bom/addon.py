@@ -6,10 +6,9 @@ from addons.manifest import ACCENT, RAIL, HOME, Addon, Offer
 
 MANIFEST = Addon(
     key="bom",
-    # "BOM & Stock" is what the customer actually bought -- it is the name in
-    # plans.FEATURES["bom"] and it was already the name on Home. The rail said
-    # just "BOM", a fourth drift on the same add-on. The SKU name wins: it is
-    # the one a customer can match against their licence.
+    # "BOM & Stock" is the name on Home and the one a customer recognises;
+    # the SKU they bought is "BOQ & BOM" (plans.FEATURES["boq"]). The rail
+    # said just "BOM", a fourth drift on the same add-on. The fuller name wins.
     #
     # Safe on the shelf despite the ampersand, because AddonRow draws its name
     # through an _Elided QLabel rather than through the button's own setText,
@@ -17,12 +16,11 @@ MANIFEST = Addon(
     # rows that DO use setText.
     label="BOM & Stock",
     chip="BOM",                 # the history pill, where there is no room
-    # Rides "boq" for a different reason than Gerber does. A "bom" key DOES
-    # exist in plans.FEATURES and is sellable -- but the licence server has
-    # never been told about it, and the add-on ships as a mode inside the BOQ
-    # dialog, so BOQ's route is the one that has to be guarded. Consequence
-    # worth knowing before anyone prices it: today, buying "bom" without
-    # "boq" gets you nothing, and buying "boq" gets you BOM for free.
+    # Rides "boq" by design: BOQ and BOM are ONE add-on ("BOQ & BOM" in
+    # plans.FEATURES), and BOM ships as a mode inside the BOQ dialog, so
+    # BOQ's route is the one that has to be guarded. There is no "bom"
+    # licence key any more -- one used to be declared and nothing gated on
+    # it, so a licence carrying it unlocked nothing.
     feature="boq",
     tip="Bill of Materials — the parts list to fabricate it, measured from "
         "a CAD drawing or a written spec",

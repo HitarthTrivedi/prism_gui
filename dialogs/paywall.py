@@ -34,9 +34,8 @@ from widgets.controls import heading, kicker, meta
 import plans
 
 _ICONS = {
-    "core": "grid", "marketing": "image", "leads": "user", "boq": "file",
-    "bom": "list", "attendance": "clock", "reel": "video", "email": "mail",
-    "dev": "code",
+    "core": "grid", "reel": "video", "boq": "file", "email": "mail",
+    "inbox": "mail", "leads": "user", "gerber": "file", "step": "grid",
 }
 
 PITCH = {key: (f.label, _ICONS.get(key, "grid"), f.pitch or f.blurb)

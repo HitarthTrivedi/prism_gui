@@ -457,12 +457,12 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
     the rail row, the Home card, History's run attribution and the licence
     gate. These pin that the manifest says what the dialog does."""
 
-    def test_it_is_registered_and_gated_like_gerber(self):
+    def test_it_is_registered_and_gated_on_its_own_key(self):
         from addons import registry
         a = registry.by_key("step")
         self.assertIsNotNone(a)
         self.assertEqual(a.label, "STEP")
-        self.assertEqual(a.feature, registry.by_key("gerber").feature)
+        self.assertEqual(a.feature, "step")
         self.assertEqual(a.screen, "step")
         self.assertEqual(a.engine, ("stepfile",))
 
@@ -470,7 +470,7 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         from widgets import icons, sidebar
         entry = next(e for e in sidebar.ADDONS if e[0] == "step")
         self.assertEqual(entry[1], "STEP")
-        self.assertEqual(entry[4], "boq")
+        self.assertEqual(entry[4], "step")
         self.assertIn(entry[2], set(icons._STROKED) | set(icons._FILLED))
 
     def test_history_recognises_its_runs(self):
@@ -559,11 +559,11 @@ class TheWindowRoutesIt(GateTest):
     def test_it_is_paywalled_without_its_feature(self):
         """Also covered by tests/test_addon_gates.py; kept here so the
         add-on's own file says what it costs."""
-        self.grant([f for f in EVERYTHING if f != "boq"])
+        self.grant([f for f in EVERYTHING if f != "step"])
         win = self._window()
         with mock.patch.object(type(win), "_show_screen") as shown:
             win._handle_command("step")
-        self.assertIn("boq", self.paywalled)
+        self.assertIn("step", self.paywalled)
         shown.assert_not_called()
 
 

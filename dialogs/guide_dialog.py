@@ -144,7 +144,7 @@ TOPICS: tuple[Topic, ...] = (
         "list", "BOM & Stock",
         "Match a parts list against what you actually have in stock and get "
         "the shortage list.",
-        feature="bom",
+        feature="boq",
     ),
     # ── settings ───────────────────────────────────────────────────────
     Topic(

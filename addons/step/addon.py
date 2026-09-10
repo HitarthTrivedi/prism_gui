@@ -8,11 +8,11 @@ from addons.manifest import ACCENT, RAIL, HOME, Addon, Offer
 MANIFEST = Addon(
     key="step",
     label="STEP",
-    # Rides "boq" like Gerber and BOM, for the same reason: nothing on the
-    # licence server sells STEP separately yet, and gating on a key nobody
-    # can be granted would deny everyone -- including the account testing
-    # it. The day a real "step" feature exists there this is a one-word diff.
-    feature="boq",
+    # Its own key since 2026-09-10: STEP is sold as its own add-on
+    # (plans.FEATURES["step"]). It rode "boq" before that, so every licence
+    # that held "boq" on that date was granted "step" server-side and nobody
+    # lost access when this line changed.
+    feature="step",
     tip="Every part's size, thickness, holes and weight — measured from "
         "the 3D model itself, never seen by an AI. Then draft, ask or edit",
     blurb="Measured off the 3D model, then draft, ask or edit",

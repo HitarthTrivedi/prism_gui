@@ -77,11 +77,10 @@ def parse_features(raw: str) -> list[str]:
     Two names look obvious and are wrong, and both padlock something in
     front of a customer:
 
-      · **Gerber is gated on `boq`.** There is no "gerber" feature at all —
-        main_window._open_gerber() calls _authorized_then("boq", …), because
-        nothing on the licence server sells Gerber separately yet. So
-        `--features core,gerber` locks the most expensive add-on on the
-        price book AND the flag it was locked by means nothing.
+      · **BOM is gated on `boq`.** There is no "bom" feature — BOQ & BOM is
+        one add-on, and main_window._open_bom() calls _authorized_then("boq",
+        …). So `--features core,bom` names a key the app never checks, and
+        BOM stays padlocked.
       · **Email automation is gated on `inbox`.** `email` is a DIFFERENT
         row — the draft-and-send screen. Minting `email` and expecting the
         automation screen to open gets a padlock.
@@ -97,8 +96,8 @@ def parse_features(raw: str) -> list[str]:
     if unknown:
         known = ", ".join(sorted(plans.FEATURES))
         hint = ""
-        if "gerber" in unknown:
-            hint += "\n  Gerber is gated on 'boq' — there is no 'gerber' feature."
+        if "bom" in unknown:
+            hint += "\n  BOQ & BOM is one add-on: use 'boq'. There is no 'bom' feature."
         if "email" in unknown:      # defensive: 'email' is real, but pair it
             hint += "\n  Email automation needs 'inbox'; 'email' is the draft screen."
         raise SystemExit(
@@ -112,10 +111,10 @@ def parse_features(raw: str) -> list[str]:
               file=sys.stderr)
 
     # The other half of the same trap: a feature that IS declared and that
-    # nothing actually gates on. 'bom' is the live example — the BOM add-on
-    # is gated on 'boq' (main_window._open_bom), so `--features core,bom`
-    # passes the name check above and still padlocks BOM. Three add-ons now
-    # sit on 'boq': BOQ, BOM and Gerber.
+    # nothing actually gates on. 'bom' was the live example until it was
+    # dropped from plans.FEATURES (BOQ & BOM is one add-on on 'boq'). Nothing
+    # is ungated today; the check stays for the next key somebody declares
+    # before the gate exists.
     #
     # Computed from the source rather than listed here, so it cannot go stale
     # the moment somebody adds a gate — the entire point being that a
