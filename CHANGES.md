@@ -10,6 +10,35 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.6 — a design that went into a side panel is read, and asked for in the chat
+
+Reported from a client's Mac (11 Sep 2026): the Studio run stopped with
+*No JSON found in the agent's reply. The art-direction stage has to return
+the design JSON.* Studio's art-direction turn is a long, code-shaped JSON
+answer — exactly the kind Claude moves into an artifact panel and ChatGPT
+into a canvas on its own. Prism reads the conversation text; a side panel
+is invisible to it, and nothing in the prompt had said not to use one.
+
+**Now:**
+
+* Every JSON-returning Studio prompt (script, art direction, each scene)
+  says: put it in this chat message itself, no artifact, canvas, document
+  or file — `reel_web.IN_CHAT_RULE`.
+* Before the design conversation starts, `_design_turn_text()` looks for
+  a reply that parses: the captures newest-first (not only the last one),
+  then any code panel on the page that carries the design keys
+  (`_rescue_json_from_page`: `pre`, `code`, CodeMirror, artifact and
+  canvas containers, minus Prism's own prompt echo), then one re-ask that
+  names the problem and asks for the JSON in the chat, then both again.
+  Only when all of that fails does the run stop with the same message
+  and the same saved file as before.
+
+What the saved file on that Mac says decides whether this was the whole
+story; the change covers the two likeliest causes and costs a plain-text
+step nothing. `tests/test_design_in_chat.py`.
+
+---
+
 # 1.5.5 — the macOS in-app update produced an app that would not open
 
 Found by the first real macOS in-app update (1.5.2 → 1.5.4, 10 Sep 2026):
