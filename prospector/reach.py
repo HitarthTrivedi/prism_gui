@@ -391,11 +391,13 @@ def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
             d.status = "sent"
             sent.append(d.recipient["email"])
             _suppress([email])                     # don't re-contact on a re-run
+            suppressed.add(email)                  # …nor later in this same batch
         else:
             d.status, d.error = "failed", (f[0][1] if f else "unknown error")
             failed.append((d.recipient["email"], d.error))
             if _is_bounce(d.error):
                 _suppress([email])                 # a hard bounce → never retry
+                suppressed.add(email)              # …not even a repeat in this batch
         if on_progress:
             on_progress(i, total, d)
     return sent, failed
