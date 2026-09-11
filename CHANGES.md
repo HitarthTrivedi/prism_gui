@@ -357,6 +357,39 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 30 — a picture is an inquiry, and the Files step speaks plainly
+
+The client's case (11 Sep): a customer mails a crop of a brochure — the
+product photo with "SS Locker (8 Comp)  KJP 3" printed under it — and
+nothing else. Until now that inquiry had no product and nothing to quote.
+
+* **Pictures are read on the machine.** `core/ocr.py`: RapidOCR
+  (`rapidocr-onnxruntime`, models inside the package, ~30 MB with its
+  runtime, the same wheel on Windows, macOS and Linux, nothing to install)
+  first; the OS's own reader on a Mac as a fallback from source;
+  tesseract if it happens to be there. On the client's crop it reads
+  "ss Locker (8 Comp)" and "KJP3" in 0.2 s. The picture never leaves the
+  machine.
+* **The check reads what it files.** Every picture attached to a new
+  inquiry (or a reply) is read as it is saved; the text is kept beside it
+  as `image_text.txt`; when the mail itself said nothing, "Product asked"
+  becomes the picture's words marked *(read from the picture)*. The code
+  finder reads the same file, so "KJP3" in a picture matches the
+  catalogue row "KJP 3", and the quantity comes from the mail's words. A
+  picture with no quantity anywhere is held, as it should be.
+* **The quotation window says what it read** — *Read from their picture:
+  SS Locker (8 Comp) · KJP3* — beside what they typed, so the person can
+  see the code came off a screenshot.
+* **The Files step, rewritten for a workshop owner.** Three things, said
+  in their words: *Price list (catalogue)* — one row per product, code,
+  name, unit, price, Excel/CSV/PDF/Word; *I don't have fixed prices — I
+  work each price out* — the cost sheet, folded away because a catalogue
+  seller never needs it (open when one is saved); *Your old inquiry sheet*
+  — the Excel they kept by hand, so numbering carries on, with "This is
+  NOT your price list" in the help. Selftest reports the picture reader.
+
+Tests: `tests/test_picture_inquiry.py`.
+
 # Round 29 — quote by product code, and send it yourself if you say so
 
 A client's ask (11 Sep): their customers write the catalogue code and the

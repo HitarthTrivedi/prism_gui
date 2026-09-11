@@ -275,6 +275,19 @@ class QuotationDialog(PrismDialog):
             "{n}", row.get("Quantity", "") or _quantity_of(row)))
         ask_qty.setObjectName("meta")
         ask_col.addWidget(ask_qty)
+        # A picture they sent, read by Prism: shown as its own lines so the
+        # person can see the code came off a screenshot and check it.
+        picture = autoquote.picture_text(row)
+        self.picture_label = QLabel("")
+        self.picture_label.setWordWrap(True)
+        self.picture_label.setObjectName("meta")
+        if picture.strip():
+            lines = [ln for ln in picture.splitlines() if ln.strip() and not ln.startswith("[")]
+            self.picture_label.setText(
+                i18n.t("Read from their picture: {text}").replace(
+                    "{text}", " · ".join(lines)[:220]))
+        self.picture_label.setVisible(bool(picture.strip()))
+        ask_col.addWidget(self.picture_label)
         ask_col.addStretch(1)
         compare.addWidget(ask_card, stretch=1)
 

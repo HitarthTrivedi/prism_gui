@@ -171,6 +171,12 @@ for note in ("pros_cons.txt", "tool_notes.md", "tool_notes.txt"):
 # dynamically; without this the frozen app raises at driver setup, which is the
 # one moment the user is furthest from a terminal that would show the error.
 datas += collect_data_files("undetected_chromedriver")
+# RapidOCR keeps its detection/recognition models and its config inside the
+# package; without them core.ocr imports fine and then reads nothing.
+try:
+    datas += collect_data_files("rapidocr_onnxruntime")
+except Exception:                                       # not installed: source-only
+    pass
 
 # The FFmpeg executable, which lives inside the imageio_ffmpeg package as a
 # data file rather than as Python. include_py_files is off, so this picks up
@@ -251,6 +257,7 @@ def _addon_modules() -> list[str]:
 
 
 hiddenimports = _engine_modules() + _addon_modules() + [
+    "rapidocr_onnxruntime", "onnxruntime",
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "pyaudio",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`

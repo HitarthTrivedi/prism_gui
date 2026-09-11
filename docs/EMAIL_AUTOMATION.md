@@ -236,3 +236,27 @@ sending account with the saved terms, the quotation CSV is saved in the
 inquiry's folder and in Artifacts, and the register shows the row as
 Quoted. Anything less is held in "To quote" with `auto-quote held: …` in
 the row's Notes so the person opening it sees why.
+
+
+## A picture as an inquiry (2026-09-11)
+
+Customers send a crop of a brochure with the code under the photo. Prism
+reads the text in every picture attached to an inquiry on the machine
+itself (RapidOCR; nothing is uploaded), keeps it beside the picture as
+`image_text.txt` in the inquiry folder, and uses it two ways: "Product
+asked" is filled from it when the mail has no words, and the code finder
+reads it, so a code in a picture is matched to the price list exactly like
+a typed one. The quotation window shows *Read from their picture: …* so
+the person can check the reading. A picture alone gives no quantity, so
+such an inquiry is held for a person rather than auto-quoted.
+
+## What the three files in Setup → Files are
+
+- **Price list (catalogue)** — your products: code, name, unit, price.
+  This is what inquiries are matched against and quotes are priced from.
+- **I don't have fixed prices** (folded) — a cost sheet: how you work a
+  price out from material, labour and overheads. Only for made-to-order
+  work; a catalogue seller never needs it.
+- **Your old inquiry sheet** — the Excel of inquiries you kept by hand,
+  imported once so Prism carries on from your last number. Not a price
+  list.

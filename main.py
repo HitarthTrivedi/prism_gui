@@ -260,6 +260,11 @@ def _selftest(app) -> int:
     ok, why = wakeword.available()
     print(f"  {'✓' if ok else '!'} voice input{'' if ok else f' — {why}'}"
           "  (optional — needs PortAudio on the machine)")
+    import core_bridge          # deferred like the engine itself: see main()
+    ok, why = core_bridge.ocr_available()
+    print(f"  {'✓' if ok else '!'} reading text from pictures"
+          f"{f' ({why})' if ok else f' — {why}'}"
+          "  (a picture of a catalogue page becomes an inquiry)")
     if not paths.is_frozen():
         print(f"  {'✓' if studio_ok else '!'} Prism Studio browser"
               f"{'' if studio_ok else f' — {studio_err}'}"

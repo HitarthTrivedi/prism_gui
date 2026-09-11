@@ -18,6 +18,7 @@ itself stays in the inquiry window (it owns the worker and the register).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -52,7 +53,20 @@ def inquiry_text(row: dict, message=None) -> str:
             parts.append(CB.get_history().read(folder) or "")
         except Exception:                               # noqa: BLE001
             pass
+    parts.append(picture_text(row))
     return "\n".join(p for p in parts if p)
+
+
+def picture_text(row: dict) -> str:
+    """What the check read out of the pictures attached to this inquiry
+    (core.ocr wrote it beside them), or ""."""
+    folder = row.get("Folder", "")
+    if not folder:
+        return ""
+    try:
+        return CB.get_ocr().recall(folder)
+    except Exception:                                   # noqa: BLE001
+        return ""
 
 
 def plan(row: dict, items: list, message=None) -> Plan:
@@ -64,6 +78,13 @@ def plan(row: dict, items: list, message=None) -> Plan:
     if not requests:
         out.reason = i18n.t("no product code from the rate list in the mail")
         return out
+    # The register's own Quantity column (what the sorter read out of the
+    # mail) is the last resort for a single code with no number beside it.
+    if len(requests) == 1 and not requests[0].confident:
+        from_row = quoting.to_decimal(
+            (re.search(r"\d[\d,]*", row.get("Quantity", "") or "") or [None])[0] or "0")
+        if from_row > 0:
+            requests[0].quantity = from_row
     for r in requests:
         if not r.confident:
             out.reason = i18n.t("no quantity written next to {code}").format(code=r.item.code)

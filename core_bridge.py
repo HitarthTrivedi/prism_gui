@@ -302,6 +302,18 @@ def get_ui():
     return ui
 
 
+def ocr_available() -> tuple[bool, str]:
+    """Reading the text in a picture a customer sends (core.ocr): RapidOCR
+    in a build, the OS's own reader as a fallback from source."""
+    from core import ocr
+    return ocr.available()
+
+
+def get_ocr():
+    from core import ocr
+    return ocr
+
+
 def get_drafting():
     from core import drafting
     return drafting

@@ -154,7 +154,8 @@ class _Disclosure(QWidget):
     the field somebody actually had to fill in scrolled off the bottom.
     """
 
-    def __init__(self, label: str, body: str, parent=None):
+    def __init__(self, label: str, body: str, parent=None, *, widget=None,
+                 open_: bool = False):
         super().__init__(parent)
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
@@ -173,18 +174,26 @@ class _Disclosure(QWidget):
         row.addStretch(1)
         column.addLayout(row)
 
-        self.body = QLabel(i18n.t(body), self)
-        self.body.setWordWrap(True)
-        self.body.setObjectName("meta")
+        # A body of prose, or -- for a field most people never need -- the
+        # field itself, folded until the person says it applies to them.
+        if widget is not None:
+            self.body = widget
+            self.body.setParent(self)
+        else:
+            self.body = QLabel(i18n.t(body), self)
+            self.body.setWordWrap(True)
+            self.body.setObjectName("meta")
         self.body.setVisible(False)
         column.addWidget(self.body)
 
-        def toggle(open_: bool):
+        def toggle(is_open: bool):
             icons.button_icon(self.button,
-                              "chevron-down" if open_ else "chevron-right",
+                              "chevron-down" if is_open else "chevron-right",
                               13, theme.ACCENT_RAMP[700])
-            self.body.setVisible(open_)
+            self.body.setVisible(is_open)
         self.button.toggled.connect(toggle)
+        if open_:
+            self.button.setChecked(True)
 
 
 class InquirySetupDialog(PrismDialog):
@@ -740,13 +749,20 @@ class InquirySetupDialog(PrismDialog):
         # Everything below is for QUOTING. Reading the inbox and building the
         # register works with none of it, and saying so is what lets somebody
         # finish setup today and add their price list next week.
-        later, later_form = _group("For quoting — add these when you're ready")
+        later, later_form = _group("Your price list — so Prism can quote")
+        price_note = C.label(i18n.t(
+            "Your catalogue, one row per product: the product code, its "
+            "name, the unit and the price. Prism finds the code a customer "
+            "wrote (or sent in a picture), takes the price from this list, "
+            "and prepares the quotation. Excel, CSV, PDF or Word."),
+            role="meta", wrap=True)
+        later_form.addRow(price_note)
         self.rate_file = _Picker(
             saved.get("rate_list", ""),
             filters=i18n.t("Price lists (*.csv *.xlsx *.xlsm *.pdf *.docx *.txt);;"
                            "All files (*)"),
-            placeholder=i18n.t("your price list — Excel, CSV, PDF or Word"))
-        later_form.addRow(i18n.t("Rate list:"), self.rate_file)
+            placeholder=i18n.t("your catalogue with codes and prices"))
+        later_form.addRow(i18n.t("Price list (catalogue):"), self.rate_file)
 
         # Quote by code, without a person. Off unless switched on: a price
         # going to a customer on its own is the owner's decision, and the
@@ -763,11 +779,29 @@ class InquirySetupDialog(PrismDialog):
             "held for you instead."))
         later_form.addRow("", self.auto_quote)
 
+        # Only for a shop that has no fixed price per product and works a
+        # price out from material, labour and overheads. A catalogue seller
+        # never needs it, so it sits folded under the price list rather than
+        # beside it as an equal -- side by side, half the people asked which
+        # of the two their catalogue went into.
         self.cost_file = _Picker(
             saved.get("cost_sheet", ""),
             filters=i18n.t("Cost sheets (*.csv *.xlsx *.xlsm);;All files (*)"),
-            placeholder=i18n.t("optional — your formulas, for made-to-drawing work"))
-        later_form.addRow(i18n.t("Cost sheet:"), self.cost_file)
+            placeholder=i18n.t("optional — only if you have no fixed prices"))
+        cost_box = QWidget()
+        cost_col = QVBoxLayout(cost_box)
+        cost_col.setContentsMargins(0, 0, 0, 0)
+        cost_col.setSpacing(theme.SPACE_1)
+        cost_col.addWidget(C.label(i18n.t(
+            "No fixed price per product? If you work a price out each time "
+            "from material, labour and overheads, give Prism that working "
+            "here instead. Most catalogue sellers skip this."),
+            role="meta", wrap=True))
+        cost_col.addWidget(self.cost_file)
+        self.cost_disclosure = _Disclosure(
+            "I don't have fixed prices — I work each price out",
+            "", widget=cost_box, open_=bool(saved.get("cost_sheet")))
+        later_form.addRow(self.cost_disclosure)
 
         # How far the owner will bend, in their own words. Only ever read when
         # they press "Win this back", and the negotiation prompt refuses to
@@ -809,11 +843,16 @@ class InquirySetupDialog(PrismDialog):
         # A shop that has been trading for twenty years already keeps an
         # inquiry list. Starting them at row one would mean running two
         # registers side by side until they gave up on ours.
-        already, already_form = _group("Already keep a list?")
+        already, already_form = _group("Your old inquiry list (optional)")
+        already_form.addRow(C.label(i18n.t(
+            "Been writing inquiries down in an Excel sheet until now? Give "
+            "Prism that sheet once and it carries on from your last number, "
+            "with your old inquiries in the register. This is NOT your price "
+            "list — that goes above."), role="meta", wrap=True))
         self.existing_register = _Picker(
-            "", filters=i18n.t("Registers (*.csv);;All files (*)"),
-            placeholder=i18n.t("optional — the list you already keep"))
-        already_form.addRow(i18n.t("Import it once:"), self.existing_register)
+            "", filters=i18n.t("Inquiry lists (*.csv *.xlsx);;All files (*)"),
+            placeholder=i18n.t("optional — the sheet you kept by hand"))
+        already_form.addRow(i18n.t("Old inquiry sheet:"), self.existing_register)
         self.import_note = QLabel("")
         self.import_note.setWordWrap(True)
         self.import_note.setObjectName("meta")
