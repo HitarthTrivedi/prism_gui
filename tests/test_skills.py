@@ -703,6 +703,32 @@ class TheTerminalShowsWhatTheCheckerSaid(unittest.TestCase):
         self.assertIn("[slide-deck]", seen[-1])
         self.assertIn("[client name]", seen[-1])
 
+    def test_without_rich_the_brackets_survive_too(self):
+        """rich is in the engine's requirements, not the app's, so no packaged
+        build has it and neither does any CI lane. The fallback stripper ate
+        the brackets there -- this pins that path whatever is installed."""
+        import contextlib
+        import io
+        from unittest import mock
+        from core import ui
+        seen, out = [], io.StringIO()
+        with mock.patch.object(ui, "_RICH", False), \
+                contextlib.redirect_stdout(out):
+            ui.set_sink(lambda level, text: seen.append(text))
+            try:
+                ui.info("   · " + ui.literal(
+                    "[slide-deck] Placeholder text left in: [client name]."))
+                ui.info("[bold]a tag[/bold] still goes")
+            finally:
+                ui.set_sink(None)
+        self.assertEqual(
+            seen, ["· [slide-deck] Placeholder text left in: [client name].",
+                   "a tag still goes"])
+        self.assertIn(
+            "   · [slide-deck] Placeholder text left in: [client name].\n",
+            out.getvalue())
+        self.assertNotIn("\\[", out.getvalue())
+
     def test_the_engine_escapes_a_fault_before_printing_it(self):
         import inspect
         self.assertIn('ui.info(f"   · {ui.literal(fault)}")',

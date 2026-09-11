@@ -3,9 +3,11 @@
 #  Prism — install (if needed) and run, on a Mac with nothing on it.
 #
 #  Double-click this file. The first time it:
-#    1. finds a Python 3.11+ on this Mac, or fetches its own standalone one
+#    1. finds Python 3.12 on this Mac, or fetches its own standalone one
 #       into runtime/ (no admin password, no Homebrew, nothing installed
-#       system-wide);
+#       system-wide). 3.12 exactly: rapidocr-onnxruntime will not install
+#       on 3.13+, gerbonara needs 3.12+, and pip installs the list all or
+#       nothing — so a Homebrew 3.13 used to fail the whole install;
 #    2. makes a private virtual environment in .venv/;
 #    3. installs Prism's requirements into it;
 #    4. fetches the bundled Chromium for Prism Studio / PDF export;
@@ -27,7 +29,7 @@ cd "$DIR" || exit 1
 LOG="$DIR/install.log"
 PY_VERSION="3.12.14"
 PY_RELEASE="20260901"
-MIN_MAJOR=3; MIN_MINOR=11
+PY_WANT="3.12"
 
 say()  { printf '%s\n' "$*" | tee -a "$LOG"; }
 step() { printf '\n%s\n' "── $* ──────────────────────────────" | tee -a "$LOG"; }
@@ -42,30 +44,35 @@ printf '\n🌈  Prism — %s\n' "$(date '+%d %b %Y %H:%M')" | tee -a "$LOG"
 xattr -rd com.apple.quarantine "$DIR" 2>/dev/null || true
 
 # ── 1. a Python ──────────────────────────────────────────────────────────
-good_python() {      # $1 = a python; true when it is 3.11+ and has venv
-    "$1" -c "import sys, venv; sys.exit(0 if sys.version_info >= ($MIN_MAJOR, $MIN_MINOR) else 1)" \
+# The Mac's own chip, not this Terminal's: under Rosetta `uname -m` says
+# x86_64 on Apple silicon, and an Intel Python pulls Intel builds of
+# everything, the browser driver included (see 1.5.3).
+if [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = "1" ]; then
+    MACHINE="arm64"; ARCH="aarch64"
+else
+    MACHINE="x86_64"; ARCH="x86_64"
+fi
+
+good_python() {      # $1 = a python; true when it is 3.12, native, with venv and pip
+    "$1" -c "import sys, platform, venv, ensurepip; sys.exit(0 if sys.version_info[:2] == (3, 12) and platform.machine() == '$MACHINE' else 1)" \
         >/dev/null 2>&1
 }
 
 PY=""
 for candidate in \
         "$DIR/runtime/python/bin/python3" \
-        python3.12 python3.11 python3.13 \
+        python3.12 \
+        /opt/homebrew/bin/python3.12 /opt/homebrew/opt/python@3.12/bin/python3.12 \
+        /usr/local/bin/python3.12 /usr/local/opt/python@3.12/bin/python3.12 \
         /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
-        /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
-        /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
-        /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+        python3; do
     path="$(command -v "$candidate" 2>/dev/null || true)"
-    [ -n "$path" ] && good_python "$path" && { PY="$path"; break; }
+    # /usr/bin/python3 is Apple's 3.9, or a stub that opens an installer.
+    [ -n "$path" ] && [ "$path" != "/usr/bin/python3" ] && good_python "$path" && { PY="$path"; break; }
 done
 
 if [ -z "$PY" ]; then
-    step "No Python $MIN_MAJOR.$MIN_MINOR+ on this Mac — fetching a standalone one"
-    case "$(uname -m)" in
-        arm64)  ARCH="aarch64" ;;
-        x86_64) ARCH="x86_64" ;;
-        *) fail "Unknown Mac type: $(uname -m)" ;;
-    esac
+    step "No Python $PY_WANT on this Mac — fetching a standalone one"
     TARBALL="cpython-${PY_VERSION}+${PY_RELEASE}-${ARCH}-apple-darwin-install_only.tar.gz"
     URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PY_RELEASE}/${TARBALL}"
     mkdir -p "$DIR/runtime"
@@ -87,6 +94,12 @@ say "🐍  Python: $PY ($("$PY" -c 'import platform; print(platform.python_versi
 
 # ── 2 + 3. the venv and the requirements ─────────────────────────────────
 VENV="$DIR/.venv"
+if [ -e "$VENV" ] && { [ ! -x "$VENV/bin/python" ] || ! good_python "$VENV/bin/python"; }; then
+    # Made by an earlier run on a Python this no longer accepts (a Homebrew
+    # 3.13, say), where the install could never finish. It only holds packages.
+    step "Rebuilding Prism's private environment on Python $PY_WANT"
+    rm -rf "$VENV"
+fi
 STAMP="$VENV/.prism-installed"
 WANT="$(shasum -a 256 "$DIR/requirements.txt" | cut -c1-16)-$("$PY" -c 'import platform; print(platform.python_version())')"
 HAVE="$(cat "$STAMP" 2>/dev/null || true)"

@@ -44,6 +44,23 @@ real parts and are gone. A sheet for review by someone in the trade is at
 replaces or adds to a shipped skill; a checker is only ever loaded from the
 app itself. `/skills` in the terminal lists what applies.
 
+**A checker's fault keeps its brackets in the log.** A fault reads
+"[slide-deck] Placeholder text left in: [client name]", and rich reads both
+as style tags, so `ui.literal()` escapes them — but it did so only when rich
+was installed. rich is in the engine's requirements, not the app's, so every
+packaged build and every CI lane runs without it, and there the fallback
+stripper ate both: the log said "·  Placeholder text left in: .". The
+escape now happens either way, and the fallback and the plain console take
+it off. `tests/test_skills.py` pins the path without rich.
+
+**The source-zip launcher uses Python 3.12** (`packaging/Install and Run
+Prism.command`). It took any 3.11+, so on a Mac whose Homebrew Python is
+3.13 or newer that one won — and rapidocr-onnxruntime will not install on
+3.13 while gerbonara needs 3.12, so the whole install failed. It now takes
+3.12 only, native to the chip even from a Rosetta Terminal, never runs
+Apple's installer stub at `/usr/bin/python3`, and rebuilds a `.venv` that
+an earlier run made on another Python.
+
 **Updating to 1.5.8.** Nothing an installed version relies on has changed:
 no settings, licence, run-record or manifest format, and no updater code.
 The update adds 21 files in new folders, which the updater of every version
