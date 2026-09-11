@@ -217,6 +217,15 @@ def _selftest(app) -> int:
     if paths.is_frozen():
         checks.append((f"Prism Studio browser (Chromium)"
                        f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
+        # FFmpeg too, and for the same reason. Studio's availability probe
+        # asks for FFmpeg BEFORE it looks at the browser (reel_web.available),
+        # so a bundle whose FFmpeg cannot be resolved turns Studio off — and
+        # with it the reel's artwork step — while this gate, which only ever
+        # proved the browser, passed. That is one of the two ways "Prism
+        # makes no artwork on Windows" can happen. Frozen only: a source
+        # checkout without imageio-ffmpeg is normal, and Prism fetches it.
+        checks.append((f"Reel encoding (FFmpeg)"
+                       f"{'' if ffmpeg_ok else f' — {ffmpeg_err}'}", ffmpeg_ok))
     checks.append((f"Studio editor + Motion runtime files"
                    f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
     from main_window import MainWindow
@@ -454,6 +463,12 @@ def main():
             import apply_update
             _dir = updater.install_dir()
             apply_update.confirm_startup_success(_dir, _dir + ".old")
+            # This version has now actually run, which is the only honest
+            # moment to record it as the highest this machine has accepted.
+            # It used to be recorded when the files finished downloading, so
+            # a swap that failed afterwards convinced Prism it was already
+            # up to date and sent the next "Update" press to the browser.
+            updater.note_installed(app_meta.VERSION)
         except Exception:                            # noqa: BLE001
             pass
 

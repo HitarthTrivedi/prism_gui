@@ -223,6 +223,27 @@ class PlanToolChip(ToolChip):
         menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
 
 
+def _makes_copy(kind: str) -> str:
+    """What a step will hand back, as its row says it (core/contract.py).
+
+    One literal i18n.t call per phrase so devtools/extract_strings.py can
+    find each of them; a dict looked up at run time would be invisible to
+    it. A written answer is every step's default, so it says nothing —
+    printing "writes an answer" on every row would be noise.
+    """
+    if kind == "file":
+        return i18n.t("makes a file to download")
+    if kind == "image":
+        return i18n.t("makes pictures")
+    if kind == "video":
+        return i18n.t("makes a video")
+    if kind == "links":
+        return i18n.t("finds companies and contacts")
+    if kind == "data":
+        return i18n.t("writes a spec for the renderer")
+    return ""
+
+
 class PlanRow(QFrame):
     """One step: number, marker, icon, name, the real prompt, tool, status —
     and the six controls that make the plan an editable object rather than a
@@ -256,6 +277,25 @@ class PlanRow(QFrame):
         self._suggested = suggested or ""
         self._forced = forced or ""
         self._included = included
+        # What the PLAN said, kept separate from what the row shows now. The
+        # difference is the whole point: a row the planner never turned on
+        # and the person never touched is not the same thing as a row the
+        # person deliberately switched off, and treating them alike is how a
+        # planner omission became an instruction to the engine — "visual was
+        # not planned" reaching automation.run() as skip_stages, which
+        # switches off Studio's own artwork step (2026-09-10 reel runs).
+        self._planned = included
+        # What this step owes as the planner declared it, and the request it
+        # was planned from. Together with the tool they decide the row's
+        # "makes …" line (_refresh_engine, core/contract.py). Set after
+        # construction by AgentsPanel.set_content, which has both.
+        self._planner_kind = ""
+        self._query = ""
+        # Whether the person switched this step on or off themselves, and
+        # whether it is the ONE step the request's file falls to (set by
+        # AgentsPanel._apply_file_promotion, the same choice the engine makes).
+        self._touched = False
+        self._promoted = False
         self._origin = (ORIGIN_YOURS if forced else
                         ORIGIN_SUGGESTED if (suggested and suggested != current)
                         else ORIGIN_PLANNED)
@@ -537,15 +577,13 @@ class PlanRow(QFrame):
         """The row is still the switch — clicking anywhere that is not a
         control includes or drops the step."""
         if event.button() == Qt.LeftButton:
-            self.set_included(not self._included)
-            self.toggled.emit()
+            self.toggle()
             self.changed.emit()
         super().mousePressEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
-            self.set_included(not self._included)
-            self.toggled.emit()
+            self.toggle()
             self.changed.emit()
             return
         super().keyPressEvent(event)
@@ -600,7 +638,19 @@ class PlanRow(QFrame):
     def _refresh_engine(self):
         entry = CB.agents.resolve_agent(self.stage, self.chip.current()) or {}
         wait = int(entry.get("wait_time") or 0)
-        bits = [b for b in (entry.get("cost"), entry.get("avg")) if b]
+        bits = []
+        # What the step will hand back, first — so a reel plan with no step
+        # that makes pictures, or a document request whose writing step can
+        # only produce chat text, is visible BEFORE the run, not after it.
+        # Recomputed when the tool changes: a tool that cannot make a file
+        # changes this line, which is the point.
+        kind = CB.contract.for_stage(self.stage, self._planner_kind, entry)
+        if self._promoted and kind == "text":
+            kind = "file"
+        makes = _makes_copy(kind)
+        if makes:
+            bits.append(makes)
+        bits += [b for b in (entry.get("cost"), entry.get("avg")) if b]
         if wait:
             bits.append(i18n.t("waits up to {t}").format(t=_minutes(wait)))
         self.engine_meta.setText("  ·  ".join(bits))
@@ -616,6 +666,36 @@ class PlanRow(QFrame):
 
     def is_checked(self) -> bool:
         return self._included
+
+    def was_planned(self) -> bool:
+        """Was this step on when the plan arrived? See left_out_stages()."""
+        return self._planned
+
+    def set_kind(self, kind: str, query: str = "") -> None:
+        """The planner's declared deliverable for this step, and the request
+        it was planned from. Refreshes the "makes …" line."""
+        self._planner_kind = kind or ""
+        self._query = query or ""
+        self._refresh_engine()
+
+    def kind_and_tool(self) -> tuple:
+        """(this step's kind before the request is applied, its tool entry)."""
+        entry = CB.agents.resolve_agent(self.stage, self.chip.current()) or {}
+        return CB.contract.for_stage(self.stage, self._planner_kind, entry), entry
+
+    def set_promoted(self, promoted: bool) -> None:
+        if promoted != self._promoted:
+            self._promoted = promoted
+            self._refresh_engine()
+
+    def was_touched(self) -> bool:
+        return self._touched
+
+    def toggle(self) -> None:
+        """The person switched this step on or off — see left_out_stages()."""
+        self._touched = True
+        self.set_included(not self._included)
+        self.toggled.emit()
 
     def title(self) -> str:
         """The step's name as the plan shows it — "Find the people", not
@@ -936,6 +1016,7 @@ class AgentsPanel(QWidget):
                        for s in (routing.get("_suggestions") or [])
                        if isinstance(s, dict) and s.get("stage")}
         forced = routing.get("_named_tools") or {}
+        self._plan_query = query or ""
         for stage in A.PIPELINE_ORDER:
             if stage == "summary":
                 continue
@@ -946,11 +1027,14 @@ class AgentsPanel(QWidget):
             questions = [q for q in (data.get("questions") or []) if q and q.strip()]
             needed = bool(data.get("needed") and questions)
             hint = suggestions.get(stage) or {}
-            self._add_row(PlanRow(
+            plan_row = PlanRow(
                 stage, A.CATEGORIES.get(stage, {}), current, needed,
                 hint.get("suggested"), forced.get(stage), questions,
-                (hint.get("reason") or "")))
+                (hint.get("reason") or ""))
+            plan_row.set_kind(data.get("kind") or "", query)
+            self._add_row(plan_row)
         self._collect_extras(routing, agents_cfg)
+        self._apply_file_promotion()
         # `_brief` is on the routing dict already — no wiring needed for the
         # single most useful sentence the router produces.
         self._brief = " ".join((routing.get("_brief") or "").split())
@@ -1009,6 +1093,8 @@ class AgentsPanel(QWidget):
     def _add_row(self, row: PlanRow, at: int = -1):
         row.toggled.connect(self._refresh_count)
         row.changed.connect(self._on_edit)
+        row.toggled.connect(self._apply_file_promotion)
+        row.changed.connect(self._apply_file_promotion)
         row.move_requested.connect(self._move)
         row.remove_requested.connect(self._remove)
         row.duplicate_requested.connect(self._duplicate)
@@ -1019,6 +1105,27 @@ class AgentsPanel(QWidget):
             self.rows_box.insertWidget(at, row)
             self._rows.insert(at, row)
         return row
+
+    def _apply_file_promotion(self, *_args) -> None:
+        """Mark the one step that will hand back a file the person asked for.
+
+        The same choice the engine makes (contract.file_step_index), so the
+        plan and the run agree on which step owes it. A writing step that
+        comes before a renderer Prism drives itself is writing that
+        renderer's script, which a program reads, so it is not a candidate.
+        """
+        rows = [r for r in self._rows if r.is_checked()]
+        entries = [(r.stage,) + r.kind_and_tool() for r in rows]
+        renderer_at = max((i for i, e in enumerate(entries)
+                           if (e[2] or {}).get("local")), default=-1)
+        entries = [(st, "data" if i < renderer_at and kind == "text" else kind, cfg)
+                   for i, (st, kind, cfg) in enumerate(entries)]
+        at = CB.contract.file_step_index(entries, getattr(self, "_plan_query", ""))
+        for i, row in enumerate(rows):
+            row.set_promoted(i == at)
+        for row in self._rows:
+            if not row.is_checked():
+                row.set_promoted(False)
 
     def _move(self, row: PlanRow, delta: int):
         try:
@@ -1166,11 +1273,22 @@ class AgentsPanel(QWidget):
                 and not row.questions()]
 
     def left_out_stages(self) -> list:
-        """Stage keys of the rows the owner unticked. Handed to the engine as
-        `skip_stages`: a few stages are inserted by the engine rather than
-        planned here (Studio's image maker), and unticking their row has to
-        reach them or the run puts them straight back."""
-        return [row.stage for row in self._rows if not row.is_checked()]
+        """Stage keys of the rows the owner actually TURNED OFF.
+
+        Handed to the engine as `skip_stages`: a few stages are inserted by
+        the engine rather than planned here (Studio's image maker), and
+        unticking their row has to reach them or the run puts them straight
+        back.
+
+        Only a row the person actually switched off counts. A row the
+        planner never turned on, and nobody touched, is not a decision, and
+        sending it here reads to the engine as one — which is how a reel
+        whose plan happened to omit "Make the images" came out with no
+        pictures and nothing on screen saying why.
+        """
+        return [row.stage for row in self._rows
+                if not row.is_checked()
+                and (row.was_planned() or row.was_touched())]
 
     def unprompted_stages(self) -> list:
         """The same rows by stage key — what selected_agents() is keyed by,

@@ -17,10 +17,22 @@ the process is alive (see update-research-inapp-download.md §2) — nothing
 running AS that process can rename its own directory out from under itself.
 The fix used here, and by every serious self-updater surveyed in
 update-research.md (Squirrel, Sparkle, electron-updater, Firefox), is the
-same: the running app relaunches ITSELF with a hidden flag, in a NEW detached
-process, then quits; the new process waits for the old PID to actually exit,
-does the swap, then relaunches the real app fresh. See main.py's
-`--prism-apply-update` handling, right at the top before QApplication exists.
+same: something OUTSIDE the install folder waits for the old PID to exit,
+does the swap, and starts the new build.
+
+On Linux and macOS that something is Prism itself, relaunched with a hidden
+flag in a new detached process — the folder can be renamed out from under a
+running process there, so this is safe and it is the path the tests
+exercise. See main.py's `--prism-apply-update` handling.
+
+On WINDOWS it cannot be Prism, and for a year it was: the helper was
+Prism.exe, started from inside the very directory it then tried to rename,
+which Windows refuses while an executable in it is running. Every Windows
+in-app update therefore staged perfectly, swapped nothing, relaunched
+nothing, and left the customer opening the same version — with no log to say
+so. The Windows path now writes a small script to ~/.prism/updates and runs
+it through cmd.exe (see _WIN_HELPER), which is what
+update-research-inapp-download.md specified in the first place.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║ UNVERIFIED ON REAL WINDOWS/macOS HARDWARE — read before touching this.    ║
@@ -32,12 +44,12 @@ does the swap, then relaunches the real app fresh. See main.py's
 ║ update-research-inapp-download.md §2/§5.4, but TWO assumptions they      ║
 ║ depend on have never been exercised on real hardware:                    ║
 ║                                                                            ║
-║   Windows: does the OS release the folder/file locks on Prism.exe and    ║
-║   its DLLs promptly after the process exits, or does antivirus real-time ║
-║   scanning (or the PyInstaller bootloader itself) hold them a while      ║
-║   longer? The retry loop in perform_swap() exists for exactly this, but  ║
-║   the right retry window is a guess until someone runs the ~30-minute    ║
-║   experiment update-plan.md §9 calls for.                                ║
+║   Windows: the helper is now an external .bat (the in-process one could  ║
+║   never have worked — see the docstring above), but how long antivirus   ║
+║   or the PyInstaller bootloader holds a lock on the folder AFTER the     ║
+║   process exits is still unmeasured. Both the .bat and perform_swap()    ║
+║   retry for ~60s before giving up and leaving everything as it was.      ║
+║   ~/.prism/logs/update-apply.log now records which of those happened.    ║
 ║                                                                            ║
 ║   macOS: does a .app bundle written to disk by another running app       ║
 ║   (rather than downloaded via a browser) pick up the same Gatekeeper/    ║
@@ -64,6 +76,7 @@ exit code, which is deferred; see update-plan.md's Phase 3 list.
 """
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import subprocess
@@ -71,6 +84,78 @@ import sys
 import time
 
 PENDING_MARKER = ".prism_update_pending"
+
+
+def log_path() -> str:
+    """Where the swap writes what it did.
+
+    The swap is the one step that runs with no Prism and no window, and
+    until now it wrote nothing at all: a Windows update that staged
+    perfectly and then silently failed to swap left the customer reopening
+    the same version with no trace anywhere of why. Its own small log, in
+    the folder every other Prism log lives in.
+    """
+    # PRISM_APPLY_LOG exists for the test suite, which must never write
+    # into the developer's own ~/.prism.
+    return (os.environ.get("PRISM_APPLY_LOG")
+            or os.path.join(os.path.expanduser("~"), ".prism", "logs",
+                            "update-apply.log"))
+
+
+def note(line: str) -> None:
+    """Append one line to the apply log. Never raises — a swap must not fail
+    because it could not describe itself."""
+    try:
+        path = log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {line}\n")
+    except OSError:
+        pass
+
+
+def _tidy_staging(staged_dir: str) -> None:
+    """Remove what staging leaves behind once the swap has moved the tree.
+
+    Staging now happens beside the install (updater.stage_root), so the
+    leftover `<version>.VERSION` file and the empty staging folder would
+    otherwise sit next to Prism.app or the install folder for ever. rmdir,
+    not rmtree: the folder is removed only if the swap really emptied it.
+    """
+    base = staged_dir.rstrip(os.sep)
+    try:
+        os.remove(base + ".VERSION")
+    except OSError:
+        pass
+    try:
+        os.rmdir(os.path.dirname(base))
+    except OSError:
+        pass
+
+
+def _move(src: str, dst: str) -> None:
+    """Rename — or, ONLY when the two are on different volumes, copy and delete.
+
+    `os.rename` fails with EXDEV across volumes, and a portable Prism on D:
+    with its profile on C: is exactly that. shutil.move does the copy there.
+
+    It must not do so for any other error, and the first version did. A
+    rename refused because one file inside was still locked (antivirus, a
+    straggling process) became a copy followed by a delete that stopped at
+    the first locked file — leaving the live install holding that one file
+    and nothing else, with no restore run. A rename is atomic: refused means
+    nothing moved, so every other error goes back to perform_swap's retry
+    loop untouched.
+    """
+    try:
+        os.rename(src, dst)
+    except OSError as e:
+        cross_volume = (e.errno == errno.EXDEV
+                        # ERROR_NOT_SAME_DEVICE, when Windows reports it raw.
+                        or getattr(e, "winerror", None) == 17)
+        if not cross_volume:
+            raise
+        shutil.move(src, dst)
 
 
 class ApplyError(Exception):
@@ -167,21 +252,23 @@ def perform_swap(install_dir: str, staged_dir: str, backup_dir: str, *,
     last_error: OSError | None = None
     while time.monotonic() < deadline:
         try:
-            os.rename(install_dir, backup_dir)
+            _move(install_dir, backup_dir)
             break
         except OSError as e:
             last_error = e
             time.sleep(retry_interval)
     else:
+        note(f"could not move aside {install_dir!r}: {last_error}")
         raise ApplyError(f"Could not move aside {install_dir!r} after "
                          f"{retry_seconds:.0f}s (still in use?): {last_error}")
 
     try:
-        os.rename(staged_dir, install_dir)
+        _move(staged_dir, install_dir)
     except OSError as e:
         # The one bad partial state: put the old tree straight back.
+        note(f"could not move the new version into place: {e}")
         try:
-            os.rename(backup_dir, install_dir)
+            _move(backup_dir, install_dir)
         except OSError as restore_error:
             raise ApplyError(
                 f"Update swap failed AND could not restore the previous "
@@ -309,7 +396,8 @@ def check_and_rollback_if_pending(install_dir: str, backup_dir: str) -> bool:
 
 
 # ── spawning the detached apply helper ─────────────────────────────────────
-def spawn_detached(argv: list[str]) -> None:
+def spawn_detached(argv: list[str], cwd: str | None = None,
+                   no_window: bool = False) -> None:
     """Launch `argv` as a process with no lifetime tie to the current one —
     get this wrong (e.g. a plain subprocess.Popen with no flags, whose child
     is killed alongside its parent's process group on some platforms/shells)
@@ -317,15 +405,140 @@ def spawn_detached(argv: list[str]) -> None:
     before it has waited for the PID or moved anything. See this module's
     top docstring for why POSIX is the branch actually exercised by tests
     here and Windows is not.
+
+    `no_window` is for a console script on Windows. DETACHED_PROCESS gives
+    cmd.exe no console at all, so each tasklist/find/ping it runs opens a
+    console window of its own — two minutes of windows flashing up while
+    the swap waits. CREATE_NO_WINDOW gives it one hidden console its
+    children share.
     """
     kwargs: dict = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS)
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            | (subprocess.CREATE_NO_WINDOW if no_window
+               else subprocess.DETACHED_PROCESS))
     else:
         kwargs["start_new_session"] = True
     subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, **kwargs)
+                     stderr=subprocess.DEVNULL, cwd=cwd, **kwargs)
+
+
+#: The Windows swap, as a script that lives OUTSIDE the folder being
+#: replaced.
+#:
+#: This is the fix for "the update downloads, Prism restarts, and it is still
+#: the old version". The helper used to be Prism.exe itself, relaunched with
+#: a hidden flag — from inside the very directory it then tried to rename.
+#: Windows will not rename a directory that contains a running executable, so
+#: the rename failed every time, the retry loop ran its 30 seconds, the
+#: helper exited with a code nobody could see, and nothing was ever swapped
+#: or relaunched. update-research-inapp-download.md said so from the start:
+#: "write a detached apply.bat … have the EXTERNAL script wait for the PID to
+#: die, then ren Prism Prism.old and move the staged tree into place."
+#:
+#: Written to ~/.prism/updates, which is never the folder being swapped.
+#:
+#: Three details that each decide whether it works at all:
+#:   · `cd /d "%~dp0"` first, and cwd= on the spawn. cmd.exe otherwise
+#:     inherits Prism's working folder — the install folder, when Prism was
+#:     started from Explorer or the Start menu — and Windows will not rename
+#:     a folder that is some process's current directory. Every move would
+#:     be refused for exactly the reason this script exists to avoid.
+#:   · `chcp 65001`. The file is written as UTF-8 and cmd.exe reads a batch
+#:     file in the console's code page, so a profile folder like "Jürgen"
+#:     would turn every path in the script into a different one.
+#:   · If the install cannot be moved aside, the old version is started
+#:     again: the customer already closed Prism, and leaving them with no
+#:     window at all is worse than the update not happening.
+_WIN_HELPER = """@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+setlocal enableextensions
+set "LOG={log}"
+>>"%LOG%" echo [%date% %time%] apply starting (pid {pid})
+
+set "VER="
+if exist "{verfile}" set /p VER=<"{verfile}"
+
+set /a waited=0
+:waitloop
+tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
+if errorlevel 1 goto gone
+set /a waited+=1
+if %waited% GEQ 120 goto neverleft
+ping -n 2 127.0.0.1 >nul
+goto waitloop
+
+:neverleft
+>>"%LOG%" echo [%time%] the old Prism never exited - nothing was changed
+exit /b 1
+
+:gone
+if exist "{backup}" rmdir /s /q "{backup}"
+set /a tries=0
+:moveaside
+move "{install}" "{backup}" >>"%LOG%" 2>&1
+if not errorlevel 1 goto movedaside
+set /a tries+=1
+if %tries% GEQ 30 goto stuck
+ping -n 2 127.0.0.1 >nul
+goto moveaside
+
+:stuck
+>>"%LOG%" echo [%time%] could not move the install aside - nothing was changed, starting it again
+start "" "{exe}"
+exit /b 2
+
+:movedaside
+move "{staged}" "{install}" >>"%LOG%" 2>&1
+if errorlevel 1 goto restore
+>"{marker}" echo(%VER%
+if exist "{verfile}" del /q "{verfile}" >nul 2>&1
+rmdir "{stagingparent}" >nul 2>&1
+>>"%LOG%" echo [%time%] swapped in, starting the new version
+start "" "{exe}"
+exit /b 0
+
+:restore
+>>"%LOG%" echo [%time%] could not move the new version in - putting the old one back
+move "{backup}" "{install}" >>"%LOG%" 2>&1
+start "" "{exe}"
+exit /b 3
+"""
+
+
+def _windows_helper_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), ".prism", "updates")
+
+
+def write_windows_helper(pid_to_wait: int, install_dir: str, staged_dir: str,
+                         backup_dir: str, exe: str) -> str:
+    """Write the .bat that performs the swap. Returns its path, or "".
+
+    Separated from begin_apply() so it can be read and checked by a test on
+    any platform — the thing that went wrong here was never visible in a
+    Linux test run, and a script generated but never inspected is the same
+    trap one level down.
+    """
+    try:
+        folder = _windows_helper_dir()
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "apply.bat")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(_WIN_HELPER.format(
+                log=log_path(), pid=int(pid_to_wait),
+                verfile=staged_dir.rstrip(os.sep) + ".VERSION",
+                stagingparent=os.path.dirname(staged_dir.rstrip(os.sep)),
+                install=install_dir.rstrip(os.sep),
+                staged=staged_dir.rstrip(os.sep),
+                backup=backup_dir.rstrip(os.sep),
+                marker=confirm_marker_path(install_dir),
+                exe=exe))
+        return path
+    except OSError as e:
+        note(f"could not write the Windows helper: {e}")
+        return ""
 
 
 def begin_apply(pid_to_wait: int, install_dir: str, staged_dir: str,
@@ -336,6 +549,22 @@ def begin_apply(pid_to_wait: int, install_dir: str, staged_dir: str,
     immediately after this returns, so the old process's own locks/handles
     are released for the new one to wait on.
     """
+    note(f"asked to swap {staged_dir!r} into {install_dir!r} "
+         f"(pid {pid_to_wait}, {sys.platform})")
+    if sys.platform == "win32":
+        # The helper must not live inside the folder it is about to rename —
+        # see _WIN_HELPER. Only if the script cannot be written at all does
+        # this fall back to the old in-place route, which is better than
+        # nothing on a machine where ~/.prism is unwritable.
+        script = write_windows_helper(pid_to_wait, install_dir, staged_dir,
+                                      backup_dir,
+                                      relaunch_argv[0] if relaunch_argv else "")
+        if script:
+            spawn_detached(["cmd.exe", "/c", script],
+                           cwd=os.path.dirname(script), no_window=True)
+            return
+        note("falling back to the in-process helper — this cannot rename a "
+             "folder that holds a running exe, and will most likely fail")
     helper_argv = [*relaunch_argv, "--prism-apply-update", str(pid_to_wait),
                   install_dir, staged_dir, backup_dir]
     spawn_detached(helper_argv)
@@ -368,9 +597,13 @@ def perform_apply_and_relaunch(pid_to_wait: int, install_dir: str,
 
         perform_swap(install_dir, staged_dir, backup_dir)
         mark_pending_confirm(install_dir, version)
+        _tidy_staging(staged_dir)
+        note(f"swapped in {version or 'the new version'} — relaunching")
         spawn_detached(relaunch_argv)
         return 0
-    except ApplyError:
+    except ApplyError as e:
+        note(f"swap failed, previous version left in place: {e}")
         return 2
-    except Exception:  # noqa: BLE001 - this process has no UI to report to
+    except Exception as e:  # noqa: BLE001 - this process has no UI to report to
+        note(f"swap helper crashed: {e}")
         return 3

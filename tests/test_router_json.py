@@ -115,22 +115,43 @@ class ThePlanCall(unittest.TestCase):
         self.assertIn("Make a plan again", str(caught.exception))
 
 
-class StudioImageryGuardrail(unittest.TestCase):
-    def test_studio_reel_gets_visual_stage_when_planner_omits_it(self):
+class ReelImageryGuardrail(unittest.TestCase):
+    """1.5.7: the guardrail sets a flag instead of forcing a second image
+    STEP into the plan. The engine already inserts its own image step ahead
+    of a local renderer, so forcing one produced two — see
+    router.apply_reel_imagery_guardrail's docstring. What it must still do
+    is turn the pictures off when the person asked for type only."""
+
+    def test_a_reel_gets_pictures_by_default(self):
         routing = {"media": {"needed": True, "questions": ["Film it."]}}
-        forced = R.apply_studio_imagery_guardrail(
+        self.assertEqual("on", R.apply_reel_imagery_guardrail(
             "make a brand reel", routing,
-            {"media": "Prism Studio", "visual": "ChatGPT"})
-        self.assertTrue(forced)
-        self.assertTrue(routing["visual"]["needed"])
+            {"media": "Prism Studio", "visual": "ChatGPT"}))
+        self.assertIs(True, routing["_reel_imagery"])
+        # and no duplicate image step is invented
+        self.assertNotIn("visual", routing)
 
     def test_explicit_type_only_request_stays_type_only(self):
         routing = {"media": {"needed": True, "questions": ["Film it."]}}
-        forced = R.apply_studio_imagery_guardrail(
+        self.assertEqual("off", R.apply_reel_imagery_guardrail(
             "make a typography-only reel without images", routing,
-            {"media": "Prism Studio", "visual": "ChatGPT"})
-        self.assertFalse(forced)
-        self.assertNotIn("visual", routing)
+            {"media": "Prism Studio", "visual": "ChatGPT"}))
+        self.assertIs(False, routing["_reel_imagery"])
+
+    def test_motion_is_covered_too_not_only_studio(self):
+        """The bug this replaces: the rule read agents['media'] == 'Prism
+        Studio', so a Motion reel never reached it."""
+        routing = {"media": {"needed": True, "questions": ["Film it."]}}
+        self.assertEqual("on", R.apply_reel_imagery_guardrail(
+            "make a brand reel", routing,
+            {"media": "Prism Motion", "visual": "ChatGPT"}))
+
+    def test_a_hosted_video_tool_is_left_alone(self):
+        routing = {"media": {"needed": True, "questions": ["Film it."]}}
+        self.assertEqual("", R.apply_reel_imagery_guardrail(
+            "make a brand reel", routing,
+            {"media": "Runway", "visual": "ChatGPT"}))
+        self.assertNotIn("_reel_imagery", routing)
 
 
 if __name__ == "__main__":

@@ -246,8 +246,10 @@ class OneTurnPerScene(unittest.TestCase):
         prompt = RW.scene_instructions(0, 3, {}, {"headline": "x"})
         self.assertIn("THIS WHOLE REPLY IS ONE SCENE", prompt)
         self.assertIn("no minimum element count or animation count", prompt)
-        self.assertIn("readable hold", prompt)
         self.assertNotIn("12 to 30 elements", prompt)
+        # The readable hold is part of HOW MOTION WORKS, said once in the
+        # design turn that every scene is written straight after.
+        self.assertIn("readable hold", RW.design_instructions())
 
     def test_the_prompt_frees_the_scene_from_worrying_about_names(self):
         """Scoping is only half a win if the model still hedges. Telling it
@@ -467,12 +469,18 @@ class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
         self.assertIn("A panel may sit behind copy, never across it", asked)
 
     def test_each_scene_is_told_to_keep_copy_above_artwork(self):
+        """The layer rules are said once, in the design turn, and every scene
+        is written in that same tab straight after it. The scene prompt names
+        the contract instead of carrying a second copy (it used to, as LAYER
+        ORDER)."""
         asked = RW.scene_instructions(
             0, 1, {"job": "hook", "look": "dark", "motion": "rise"},
             {"role": "hook", "headline": "Make it clear", "seconds": 4},
             "asset:art1")
-        self.assertIn("Required copy must be the top readable layer", asked)
-        self.assertIn("explicit z-index", asked)
+        self.assertIn("THE LAYER CONTRACT", asked)
+        design = RW.design_instructions(request="make a reel", assets="asset:art1")
+        self.assertIn("Required copy must be the top readable layer", design)
+        self.assertIn("explicit z-index", design)
 
     def test_it_is_told_what_to_write_when_it_cannot_see_one(self):
         asked = RW.imagery_instructions("x", True, attached=["art1"])
@@ -490,30 +498,34 @@ class WhatMadeOneReelWorkAndAnotherNot(unittest.TestCase):
     the same facts in a sentence.
 
     Written into the prompt across several trades on purpose, so it does not
-    read as advice about circuit boards.
+    read as advice about circuit boards. It is a rule for every scene, so it
+    lives in the design turn, which every scene is written straight after in
+    the same tab; it used to be repeated in each scene prompt as well.
     """
 
     def test_it_asks_for_the_customers_own_material(self):
-        prompt = RW.scene_instructions(0, 5, {}, {"headline": "x"})
+        prompt = RW.design_instructions()
         self.assertIn("CUSTOMER'S OWN MATERIAL", prompt)
         self.assertIn("not from adjectives", prompt)
 
     def test_the_examples_are_not_all_one_industry(self):
         """A single worked example gets copied — that is exactly how the
         template renderer's prompt went wrong."""
-        prompt = RW.scene_instructions(0, 5, {}, {})
+        prompt = RW.design_instructions()
         for trade in ("fabricator", "seed company", "workshop"):
             self.assertIn(trade, prompt, trade)
 
     def test_layers_serve_legibility_without_forcing_decoration(self):
-        prompt = RW.scene_instructions(0, 5, {}, {})
-        self.assertIn("LAYER ORDER", prompt)
-        self.assertIn("add depth only when it clarifies the subject", prompt)
+        prompt = RW.design_instructions()
+        self.assertIn("THE LAYER CONTRACT", prompt)
+        self.assertIn("Add depth only when it clarifies the subject", prompt)
         self.assertIn("Required copy must be the top readable layer", prompt)
+        # The scene prompt's second copy of these rules is gone for good.
+        self.assertNotIn("LAYER ORDER", RW.scene_instructions(0, 5, {}, {}))
 
     def test_a_count_may_be_drawn_rather_than_printed(self):
         """238 dots read as 238 holes. The number alone reads as a number."""
-        self.assertIn("DRAWING that", RW.scene_instructions(0, 5, {}, {}))
+        self.assertIn("DRAWING that", RW.design_instructions())
 
 
 class TheLogoReachesTheSceneThatPlacesIt(unittest.TestCase):

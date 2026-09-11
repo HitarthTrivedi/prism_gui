@@ -19,7 +19,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import apply_update as AU
+# The swap now writes what it did to its own log (apply_update.note). Pointed
+# at a temp file so this suite never writes into the developer's ~/.prism.
+os.environ.setdefault("PRISM_APPLY_LOG", os.path.join(
+    tempfile.mkdtemp(prefix="prism-apply-log-"), "update-apply.log"))
+
+import apply_update as AU  # noqa: E402
 
 
 def _reap_in_background(proc: subprocess.Popen) -> None:

@@ -519,18 +519,27 @@ if IS_MAC:
 # at runtime. Metadata that IS read at runtime (keyring's entry_points.txt,
 # every RECORD/METADATA importlib.metadata resolves) is left alone.
 _TRIM_SUFFIXES = (".pyi",)
-_kept_datas, _trimmed = [], 0
+_kept_datas, _trimmed, _qt_qm = [], 0, 0
 for t in a.datas:
     dest = t[0].replace("\\", "/")
     name = dest.rsplit("/", 1)[-1]
     licence_text = (".dist-info/" in dest
                     and ("/licenses/" in dest or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "AUTHORS"))))
-    if licence_text or dest.endswith(_TRIM_SUFFIXES):
+    # Qt's own interface translations (qtbase_de.qm and a few hundred like
+    # it). Prism never installs a QTranslator — i18n.py explains why it
+    # translates its own strings instead — so not one of these is read, and
+    # Qt has none for Hindi or Gujarati anyway. They were what pushed 1.5.6
+    # over the cap once the picture-reading stack arrived: Linux 1053 files,
+    # macOS 1028. Only .qm files go; QtWebEngine's locale packs (.pak) stay.
+    qt_translation = "/Qt/translations/" in dest and name.endswith(".qm")
+    if licence_text or dest.endswith(_TRIM_SUFFIXES) or qt_translation:
         _trimmed += 1
+        _qt_qm += qt_translation
         continue
     _kept_datas.append(t)
 a.datas = _kept_datas
-print(f"[prism] trimmed {_trimmed} licence texts / .pyi stubs from datas "
+print(f"[prism] trimmed {_trimmed} licence texts / .pyi stubs / unused Qt "
+      f"translations ({_qt_qm} .qm) from datas "
       "(release-asset cap; see packaging/manifest.py)")
 
 pyz = PYZ(a.pure, a.zipped_data)

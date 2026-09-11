@@ -93,10 +93,14 @@ class TheScenePromptHoldsTheSceneToIt(unittest.TestCase):
         self.assertIn("switches typeface family", said)
 
     def test_the_overlap_rule_is_stated(self):
+        # Stated once, in the design turn's WHAT WILL BE REJECTED. The scene
+        # prompt is written in the same tab straight after it and names that
+        # section rather than carrying a second copy of the rule.
         said = RW.scene_instructions(0, 2, {}, {"headline": "x"})
-        self.assertIn("No two texts may overlap", said)
-        self.assertIn("two texts whose boxes overlap",
-                      RW.design_instructions({}, "a reel", LISTING))
+        self.assertIn("WHAT WILL BE REJECTED", said)
+        design = RW.design_instructions({}, "a reel", LISTING)
+        self.assertIn("WHAT WILL BE REJECTED", design)
+        self.assertIn("two texts whose boxes overlap", design)
 
 
 class ASceneWithoutItsPictureIsSentBack(unittest.TestCase):

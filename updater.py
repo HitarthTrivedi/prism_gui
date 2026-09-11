@@ -78,6 +78,10 @@ _DEFAULT: dict[str, Any] = {
     # cleared — see acknowledge_rollback() below.
     "pending_rollback": False,
     "rolled_back_from": "",
+    # A version that failed its first launch here and was rolled back. Kept
+    # apart from rolled_back_from, which the one-time banner clears, so it
+    # can go on stopping that same build being offered again.
+    "failed_version": "",
 }
 
 # Fixed at build time, exactly like licensing/client.py's DEFAULT_SERVER —
@@ -240,6 +244,49 @@ def updates_root() -> str:
     return paths.user_dir("updates")
 
 
+def stage_root(install_dir: str = "") -> str:
+    """Where a staged copy of the next version is built.
+
+    Beside the install when that directory can be written, because the last
+    step of the swap is a RENAME and a rename cannot cross volumes: a
+    portable Prism on D: with the profile on C: staged perfectly into
+    ~/.prism/updates and then failed the final move every time, restoring
+    the old tree and reporting nothing. ~/.prism/updates stays the fallback
+    for an install folder the customer cannot write to (Program Files, an
+    /opt install), where the copy across volumes is slower but works.
+    """
+    parent = os.path.dirname(os.path.abspath(install_dir)) if install_dir else ""
+    if parent:
+        candidate = os.path.join(parent, ".prism-update-staging")
+        if _writable_dir(candidate):
+            return candidate
+    return updates_root()
+
+
+def _writable_dir(path: str) -> bool:
+    """Can a folder really be made and written here? Tried, not asked.
+
+    os.access(folder, W_OK) is always True for a folder on Windows, whatever
+    its permissions — so a Program Files install "could be written", staging
+    tried C:\\Program Files\\.prism-update-staging, and the update died on a
+    raw PermissionError instead of falling back to the profile folder.
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".prism-write-probe")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def note_installed(version: str) -> None:
+    """Record the version that has actually started. See stage_update()."""
+    _record_seen_version(version)
+
+
 def _highest_seen_version() -> str:
     return str(_load().get("highest_seen_version") or "")
 
@@ -266,7 +313,8 @@ def note_rollback(from_version: str) -> None:
     happened, so the banner can say so once."""
     try:
         _save({**_load(), "pending_rollback": True,
-              "rolled_back_from": from_version})
+              "rolled_back_from": from_version,
+              "failed_version": from_version})
     except Exception:                                # noqa: BLE001
         pass
 
@@ -418,6 +466,13 @@ def check_for_update(*, running: str | None = None,
         raise UpdateError(f"Update manifest failed verification: {e}") from e
 
     version = payload["version"]
+    # A build that already failed its first launch on this machine, and was
+    # rolled back, is not offered again. Now that a version counts as
+    # accepted only once it has STARTED (note_installed), nothing else would
+    # stop the same broken build being downloaded, swapped in, crashing and
+    # rolling back on every check. A newer build is offered as normal.
+    if version and version == str(_load().get("failed_version") or ""):
+        return None
     highest = _highest_seen_version()
     if highest and not newer(version, highest):
         return None  # not newer than something we've already accepted — ignore
@@ -466,7 +521,7 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
     import shutil
 
     manifest = check.manifest
-    stage_dir = os.path.join(updates_root(), check.version)
+    stage_dir = os.path.join(stage_root(install_dir), check.version)
     if os.path.isdir(stage_dir):
         shutil.rmtree(stage_dir, ignore_errors=True)
     os.makedirs(stage_dir, exist_ok=True)
@@ -578,7 +633,15 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
     with open(stage_dir + ".VERSION", "w", encoding="utf-8") as f:
         f.write(check.version)
 
-    _record_seen_version(check.version)
+    # NOT _record_seen_version() any more. Recording the version here — at
+    # download time — meant a swap that then failed left the machine
+    # believing it had already accepted that version: the next check found
+    # "nothing newer", the GUI read that as "no update available" and opened
+    # the download page in a browser instead. That is exactly the "it takes
+    # me to GitHub instead of updating" a customer reported going from 1.5.2,
+    # and it cleared only when a still-newer version was published. The
+    # version is recorded when it has actually STARTED — see note_installed(),
+    # called from main.py once the window is up.
     return StagedUpdate(version=check.version, stage_dir=stage_dir, manifest=manifest)
 
 

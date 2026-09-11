@@ -760,7 +760,8 @@ class StageCard(QWidget):
 
     def set_done(self, texts: list[str], url: str, timed_out: bool = False,
                  blocked: str = "", exhausted: bool = False, count: int = None,
-                 snippet: str = "", files: list | None = None):
+                 snippet: str = "", files: list | None = None,
+                 prism_note: str = "", missing: str = ""):
         """A stage came back. Four different endings live in here and the
         engine tells us which — it always did, and the difference used to be
         thrown away at the door.
@@ -787,6 +788,13 @@ class StageCard(QWidget):
             note += (f"<p style='line-height:150%'>"
                      + _escape(i18n.t("Saved to Prism Artifacts")) + ": "
                      + ", ".join(rows) + "</p>")
+            if prism_note:
+                # "Prism saved the step's own text as a Word document" — the
+                # tool answered in prose, so the file is Prism's, and the
+                # person is told so rather than left to assume the tool made
+                # it (core/contract.document_from_text).
+                note += (f"<p style='color:{theme.NEUTRAL[600]};"
+                         f"line-height:150%'>" + _escape(prism_note) + "</p>")
         if timed_out:
             # Our clock ran out, not the tool's: it is still generating in that
             # tab and will land the finished deck/doc/app there. Saying "done"
@@ -823,6 +831,14 @@ class StageCard(QWidget):
 
         if texts:
             self._raw = "\n\n———\n\n".join(texts)
+            if missing and not timed_out:
+                # The step answered, but not with the thing it was for — an
+                # image step that wrote about a picture, a document step that
+                # pasted text. It used to read "completed", and the gap was
+                # found only when the reel came out blank (core/contract.py).
+                note = (f"<p style='color:{theme.NEUTRAL[700]};line-height:150%'>"
+                        f"<b>{_escape(missing[:1].upper() + missing[1:])}.</b></p>"
+                        + note)
             # render the AI's response as formatted markdown (it's a document),
             # but keep the raw text for copy so paste-elsewhere is verbatim
             self.body.setHtml(note + render_markdown(self._raw))
@@ -836,6 +852,9 @@ class StageCard(QWidget):
                 self.set_state("needs_review", note=i18n.t(
                     "Prism stopped waiting, but the tool is still working — "
                     "open it to pick up the finished result."))
+            elif missing:
+                self.set_state("needs_review",
+                               note=missing[:1].upper() + missing[1:])
             else:
                 self.set_state("completed", note=preview or self._blurb,
                                note_echoes_body=bool(preview))
@@ -1258,12 +1277,13 @@ class OutputPanel(QWidget):
     def stage_done(self, stage: str, texts: list[str], url: str,
                    timed_out: bool = False, blocked: str = "",
                    exhausted: bool = False, count: int = None,
-                   snippet: str = "", files: list | None = None):
+                   snippet: str = "", files: list | None = None,
+                   prism_note: str = "", missing: str = ""):
         card = self._cards.get(stage)
         if card:
             card.set_done(texts, url, timed_out, blocked=blocked,
                           exhausted=exhausted, count=count, snippet=snippet,
-                          files=files)
+                          files=files, prism_note=prism_note, missing=missing)
         if self._live == stage:
             self._live = ""
         self._refresh_header()

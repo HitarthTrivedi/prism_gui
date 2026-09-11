@@ -109,6 +109,7 @@ from core import agents as agents          # noqa: E402
 from core import bom as bom                # noqa: E402
 from core import lang as lang              # noqa: E402
 from core import router as router          # noqa: E402
+from core import contract as contract      # noqa: E402  (what a step must produce)
 
 # Count Groq tokens for licence metering. Installed here, from the GUI side,
 # rather than in core/router.py: prism_terminal is a submodule shared with the

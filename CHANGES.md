@@ -10,6 +10,140 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.7 — a step is held to what it was for, and the update actually swaps
+
+Audited against the owner's own 49 saved runs (11 Sep 2026; report at
+`prism+gui/artifacts/prompt-pipeline-and-deliverables-2026-09-11.html`).
+Four complaints: the prompts were "over engineered … the agent that reads
+messes up", a reel asked for with research came back as research only, the
+agent asked to make a document made none, and Windows made no artwork. A
+fifth turned up on the way: an in-app update that downloads, restarts, and is
+still the old version.
+
+**A step has a deliverable, and is checked against it** (`core/contract.py`).
+Every step now has a kind — text, file, image, video, data, links — taken
+from the stage, the planner, and the person's own words ("give me a .docx"
+makes the one writing step that finishes the piece a file step, whatever
+the plan said; "summarise the attached PDF" and "an excellent post" do not).
+One line of the
+message says what to hand back. When the step ends Prism checks: a file step
+that answered in chat text is asked once for the file, and if it still
+answers in prose, Prism writes the document itself from that text and the
+card says so. An image step with no picture shows as needing review instead
+of "completed". At the end, the run says which of the things it was asked
+for were not produced, rather than "All done".
+
+**The document Claude built is collected.** Claude's card reads
+"Document·DOCX" with no extension anywhere, so it was never recognised as a
+file; and the download click matched the wrapper around the button, reported
+success, and waited 45 seconds for a download that never started
+(run of 2026-09-08 15:07). Cards are now read by their type label, and the
+click takes the innermost real control.
+
+**The planner writes briefs, not specifications** (`router.build_prompt`).
+It was handed 20,695 characters of rules that contradicted each other
+("Prefer ONE stage" beside rules that forced four), with the field notes
+declared to outrank the rules, and it had to write every step as a role, a
+deliverable spec, a quality bar and non-goals — which is where "Non-Goals: Do
+NOT generate an actual .docx file" came from. 89% of the owner's saved stage
+prompts opened "Your ONLY task is", and 34% of the tools' replies contained a
+"HANDOFF FOR" section. Now each step gets a kind and a 40–80 word brief in
+plain language: no role-play, no format rules, no hand-off rules — Prism adds
+those itself, once. Field notes are sent only for the tools in the plan, and
+a tool carrying several steps is described once. The engine's hand-off went
+from four numbered rules to one paragraph, and "THIS OVERRIDES EVERY OTHER
+FORMATTING INSTRUCTION" is gone from the reel prompts because there is no
+longer anything to override. "document", "report", "proposal" and similar
+now route to a writing step, and a bare "api" no longer sends "documentation
+for this API" to an app builder.
+
+**A reel gets its pictures.** A plan row the planner never turned on was
+sent to the engine as "switched off", and "visual" switched off Studio's own
+artwork step; only rows the person actually unticks count now. Dropping a
+step that has no prompt no longer turns the pictures off either — the dialog
+had promised the opposite in the same breath. Prism Motion gets an artwork
+step of its own and is given the pictures earlier steps made; it used to be
+offered the client's attachments only, so a Motion reel could not contain a
+generated picture. The imagery guardrail sets a flag instead of forcing a
+second image step, covers Motion as well as Studio, and still honours "type
+only".
+
+**The reel prompts say each rule once** (`core/reel_web.py`,
+`core/motion/generate.py`). A scene is written in the same chat straight
+after the design turn, yet every scene prompt restated the whole motion,
+layer and shape rulebook, and the safe area was given in two different sets
+of numbers inside one message. The rules now live once in the design turn
+(Studio) or the storyboard turn (Motion); each scene carries its own row, its
+asset names and the JSON shape. Measured on a six-scene reel with brand
+colours and four pictures: Studio went from 72,023 to 30,086 characters
+typed, Motion from 56,718 to 34,567, and a Studio scene prompt from about
+9,600 characters to about 2,400. Essential copy has one safe area everywhere,
+clear of the platform's caption and buttons at the bottom of the frame.
+
+**Prompts are written for the tool that reads them** (`agents._PROFILES`).
+Each tool carries what it can produce, how to ask it for a file, and its
+known drift ("write it in the chat, not a side panel"); a step is not held
+to a file its tool cannot make. The signed licence payload can replace any
+profile (`licensing/payload.profiles_for`), so how Prism talks to a tool is
+kept current from the admin console rather than by a release.
+
+**The update swaps** (`apply_update.py`, `updater.py`).
+
+* Windows: the swap helper was Prism.exe, started from inside the folder it
+  then tried to rename, which Windows refuses. No Windows in-app update could
+  ever have swapped. It is now a script in `~/.prism/updates` run through
+  `cmd.exe`.
+* The new version is recorded as accepted when it has **started**, not when
+  it finished downloading, so a failed swap no longer makes the next check
+  say "nothing newer" and open GitHub instead — the report from 1.5.2.
+* Staging happens beside the install so the swap is a rename; across volumes
+  it falls back to a copy, and what staging leaves behind is removed.
+* `~/.prism/logs/update-apply.log` records what the swap did.
+* A build that failed its first launch and was rolled back is not offered
+  again; only a newer one is.
+* The Windows script leaves the install folder before moving it, reads its
+  paths as UTF-8, runs in a hidden console, and starts the old version again
+  if the folder will not move.
+* A rename refused because a file is in use changes nothing and is retried.
+  Only a move between drives falls back to copying — copying on any error,
+  as this fix first did, could empty a live install when one file was locked.
+
+**Windows artwork.** Artwork exists only on the Studio and Motion paths, so
+anything that swaps them out removes it. A failed Chromium lookup is now
+retried after a minute instead of being cached as "not installed" until
+restart; the frozen build's self-test now fails a bundle whose FFmpeg cannot
+be resolved (Studio checks FFmpeg before the browser, and that gate only ever
+proved the browser); and the "run with Prism Reel instead?" dialog says Prism
+Reel makes no pictures.
+
+**The build fits GitHub's file limit again.** The picture-reading stack
+added in Round 30 took the Linux bundle to 1,053 files and the macOS bundle
+to 1,028, over the 1,000 assets one release can hold, which is why 1.5.6
+could not be published. Qt's own interface translations, which Prism never
+loads (see i18n.py), are no longer bundled: 96 files on every platform.
+
+**Updating from 1.5.6 or earlier on Windows.** The in-app update is run by
+the version being replaced, so a Windows install on 1.5.6 or earlier still
+uses the old helper, which cannot swap. If the update does not take, the
+next press of Update opens the download page: download 1.5.7 there once.
+Every update after 1.5.7 goes through the new helper.
+
+**Known, not fixed here.** In the packaged macOS build the picture-reading
+package fails to import, so reading text from pictures is unavailable on
+Mac; it works in the Windows and Linux builds. The frozen app's OpenCV
+loader looks for its native library where the .app layout does not put it,
+and diagnosing that needs a macOS build.
+
+Tests: `tests/test_task_contract.py`, `tests/test_tool_profiles.py`,
+`tests/test_update_swap.py`, `tests/test_plan_deliverables.py`; changes to
+`tests/test_updater_phase1.py`, `tests/test_router_json.py`,
+`tests/test_canva.py`, and to `tests/test_scene_by_scene.py` and
+`tests/test_asset_plan.py`, whose checks on scene-prompt wording now look in
+the design turn, where those rules moved. 13 new UI strings have no Hindi or
+Gujarati translation yet.
+
+---
+
 # 1.5.6 — a design that went into a side panel is read, and asked for in the chat
 
 Reported from a client's Mac (11 Sep 2026): the Studio run stopped with

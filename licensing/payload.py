@@ -184,3 +184,49 @@ def selectors_for(claims: dict[str, Any]) -> dict[str, dict[str, str]]:
         if clean:
             out[name] = clean
     return out
+
+
+#: Fields of a tool's prompt profile a payload may set — see
+#: prism_terminal/core/agents.py `_PROFILES`. Same allow-list reasoning as
+#: selectors_for: these change the WORDS Prism sends to a tool, never where
+#: it sends them.
+_PROFILE_KEYS = ("produces", "file_hint", "avoid")
+
+#: The kinds a tool may be declared to produce. A payload cannot invent one:
+#: an unknown kind would make every step of that kind unverifiable.
+_PROFILE_KINDS = ("text", "file", "image", "video", "data", "links")
+
+
+def profiles_for(claims: dict[str, Any]) -> dict[str, dict]:
+    """The per-tool prompt profiles in a verified payload.
+
+    Here for the reason the owner gave on 11 Sep 2026: "when any agent is
+    changed the prompt should also be built for how that agent thinks, and
+    this should be updated every now and then". How a tool likes to be asked
+    changes when the tool changes — Claude moves a document into a side
+    panel, ChatGPT starts routing images through a connected app — and that
+    is a sentence of guidance, not a code change. Through this channel it is
+    a row in the admin console that reaches every customer on their next
+    check-in.
+
+    Strictly filtered, and never able to change WHERE Prism goes or WHAT it
+    runs: three text/list fields per tool, with the producible kinds checked
+    against a fixed list.
+    """
+    out: dict[str, dict] = {}
+    for name, prof in (claims.get("content", {}).get("profiles") or {}).items():
+        if not isinstance(name, str) or not isinstance(prof, dict):
+            continue
+        clean: dict = {}
+        for key in _PROFILE_KEYS:
+            value = prof.get(key)
+            if key == "produces":
+                if isinstance(value, (list, tuple)):
+                    picked = tuple(v for v in value if v in _PROFILE_KINDS)
+                    if picked:
+                        clean[key] = picked
+            elif isinstance(value, str) and len(value) <= 400:
+                clean[key] = value
+        if clean:
+            out[name] = clean
+    return out

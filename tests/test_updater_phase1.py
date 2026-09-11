@@ -297,6 +297,47 @@ class StagingAnUpdate(Harness):
         with open(os.path.join(backup_dir, "Prism")) as f:
             self.assertEqual(f.read(), "old-binary-contents")
 
+    def _staged_two(self):
+        new_binary = "brand-new-prism-binary"
+        entry = self._entry("Prism", new_binary, mode=0o111)
+        token = self._sign({"version": "2.0.0", "files": [entry]})
+        fetch = self._fake_fetch({
+            updater._manifest_url(): token.encode("utf-8"),
+            updater._file_url("2.0.0", "Prism"): new_binary.encode("utf-8"),
+        })
+        check = updater.check_for_update(running="1.0.0", fetch=fetch)
+        return updater.stage_update(check, self.install_dir, fetch=fetch), fetch
+
+    def test_downloading_a_version_is_not_the_same_as_having_run_it(self):
+        """1.5.7. The version used to be recorded as accepted the moment it
+        finished downloading. A swap that then failed left the machine on
+        1.0.0 believing it already had 2.0.0 — so the next check said
+        "nothing newer" and the GUI opened the download page instead: the
+        "it takes me to GitHub instead of updating" report."""
+        _staged, fetch = self._staged_two()
+        # The swap failed; the machine is still on 1.0.0. Same update, offered again.
+        self.assertIsNotNone(updater.check_for_update(running="1.0.0", fetch=fetch))
+        # Only a launch of 2.0.0 makes it the version this machine has accepted.
+        updater.note_installed("2.0.0")
+        self.assertIsNone(updater.check_for_update(running="1.0.0", fetch=fetch))
+
+    def test_staging_happens_beside_the_install_so_the_swap_is_a_rename(self):
+        staged, _fetch = self._staged_two()
+        self.assertEqual(
+            os.path.join(os.path.dirname(self.install_dir), ".prism-update-staging"),
+            os.path.dirname(staged.stage_dir))
+
+    def test_a_build_that_failed_its_first_launch_is_not_offered_again(self):
+        """1.5.7. With the version recorded only once it has started, a
+        build that crashed before its window and was rolled back would be
+        offered, downloaded, swapped in and rolled back on every check. It
+        stays refused after the one-time banner is dismissed."""
+        _staged, fetch = self._staged_two()
+        updater.note_rollback("2.0.0")
+        self.assertIsNone(updater.check_for_update(running="1.0.0", fetch=fetch))
+        updater.acknowledge_rollback()
+        self.assertIsNone(updater.check_for_update(running="1.0.0", fetch=fetch))
+
 
 class StreamingSizeCap(unittest.TestCase):
     """_get()'s max_bytes cap is only meaningful on the real-network path

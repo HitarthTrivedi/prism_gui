@@ -476,7 +476,7 @@ def _fetch_payload(license_id: str) -> bool:
     if not blob:
         # Nothing published. Drop any overrides we were holding, so unpublishing
         # is a real undo rather than something that only affects new installs.
-        _apply_payload_content({}, [])
+        _apply_payload_content({}, [], {})
         store.clear_payload(user_dir())
         store.update(user_dir(), payload_etag="")
         return True
@@ -487,7 +487,8 @@ def _fetch_payload(license_id: str) -> bool:
         return False
 
     _apply_payload_content(payload.selectors_for(claims),
-                           payload.models_for(claims))
+                           payload.models_for(claims),
+                           payload.profiles_for(claims))
     store.save_payload(user_dir(), blob)
     # The etag we record is the SIGNED one, never the envelope's — otherwise a
     # stale payload relabelled in transit would stop us asking for the real fix.
@@ -495,12 +496,15 @@ def _fetch_payload(license_id: str) -> bool:
     return True
 
 
-def _apply_payload_content(selectors: dict, models: list | None = None) -> None:
+def _apply_payload_content(selectors: dict, models: list | None = None,
+                           profiles: dict | None = None) -> None:
     """Hand verified overrides to the engine. Never raises.
 
-    Two independent things, applied separately: which selectors read a tool's
-    answer, and which Groq models are tried. A bad selector costs one tool; a
-    dead model chain costs planning entirely, which is why both are here.
+    Three independent things, applied separately: which selectors read a
+    tool's answer, which Groq models are tried, and how each tool likes to
+    be asked. A bad selector costs one tool; a dead model chain costs
+    planning entirely; a stale profile costs the quality of one tool's
+    answers — which is why all three are published rather than built in.
     """
     try:
         import core_bridge as CB
@@ -510,6 +514,11 @@ def _apply_payload_content(selectors: dict, models: list | None = None) -> None:
     try:
         import core_bridge as CB
         CB.router.apply_model_chain(models or [])
+    except Exception:
+        pass
+    try:
+        import core_bridge as CB
+        CB.agents.apply_profiles(profiles or {})
     except Exception:
         pass
 
@@ -532,8 +541,9 @@ def apply_cached_payload() -> int:
         return 0
     selectors = payload.selectors_for(claims)
     models = payload.models_for(claims)
-    _apply_payload_content(selectors, models)
-    return len(selectors) + len(models)
+    profiles = payload.profiles_for(claims)
+    _apply_payload_content(selectors, models, profiles)
+    return len(selectors) + len(models) + len(profiles)
 
 
 def _refresh_lease_once() -> bool:

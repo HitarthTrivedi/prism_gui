@@ -254,7 +254,11 @@ class SelfDirectingTools(unittest.TestCase):
         prompt = R.build_prompt("write about batteries", "",
                                 {"research": "LAZYCOOK"})
         self.assertIn("SELF-DIRECTING", prompt)
-        self.assertIn('Do NOT use the "Your ONLY task is:" opener', prompt)
+        # 1.5.7: the rigid opener and the mandatory DELIVERABLE SPEC were
+        # removed from the planner's rules altogether, so the carve-out no
+        # longer has to name them — what it still has to say is "do not
+        # prescribe how this tool works".
+        self.assertIn("Do NOT prescribe the steps", prompt)
 
     def test_the_rule_is_absent_when_no_such_tool_is_in_the_plan(self):
         """A rule about a tool that is not running is prompt budget spent for

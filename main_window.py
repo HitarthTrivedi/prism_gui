@@ -1095,6 +1095,7 @@ class MainWindow(QMainWindow):
         self._last_query = ""
         self._stage_agents = {}
         self._stage_results = []
+        self._run_shortfall = []
         self.pending_mentions = []
         # The queue belongs to the journey that just ended, not the next one.
         self._task_queue = []
@@ -2004,6 +2005,16 @@ class MainWindow(QMainWindow):
         self._explain(error, "plan")
 
     # ── running the pipeline ────────────────────────────────────────────────
+    #: Renderers that make their own scene artwork: when one of these is the
+    #: media tool, automation.run() inserts an image step ahead of it, so a
+    #: reel gets pictures whether or not the plan has a "Make the images"
+    #: row of its own.
+    _OWN_ARTWORK = ("Prism Studio", "Prism Motion")
+
+    def _makes_own_artwork(self, run_agents: dict) -> bool:
+        return any(name in self._OWN_ARTWORK
+                   for name in (run_agents or {}).values())
+
     def _run_pipeline(self):
         if not self.routing:
             return
@@ -2048,9 +2059,9 @@ class MainWindow(QMainWindow):
                     if len(unprompted) > 1 else
                     i18n.t("{steps} has no prompt yet, so nothing would be "
                            "sent for it.")).format(steps=", ".join(unprompted))
-            if "visual" in stages and "Prism Studio" in run_agents.values():
-                note += i18n.t(" Prism Studio makes its own artwork, so the "
-                               "reel still gets its pictures.")
+            if "visual" in stages and self._makes_own_artwork(run_agents):
+                note += i18n.t(" The reel still gets its pictures — Prism "
+                               "makes its own artwork for it.")
             answer = QMessageBox.question(
                 self, "Run",
                 note + "\n\n" + i18n.t("Run the rest of the plan without "
@@ -2063,7 +2074,15 @@ class MainWindow(QMainWindow):
             run_agents = {stage: name for stage, name in run_agents.items()
                           if stage not in stages}
             run_steps = [s for s in run_steps if s[2]]
-            dropped |= stages
+            # Dropped steps reach the engine by name, as everything else the
+            # owner left out does — except "Make the images" on a reel Prism
+            # illustrates itself. There, skip_stages also switches off the
+            # artwork step the engine inserts, which made the dialog's own
+            # promise above ("the reel still gets its pictures") false in the
+            # same breath as it was made.
+            keeps_artwork = self._makes_own_artwork(run_agents)
+            dropped |= {stage for stage in stages
+                        if not (stage == "visual" and keeps_artwork)}
             if not run_agents:
                 QMessageBox.information(
                     self, "Run", i18n.t("Every remaining step needs a prompt "
@@ -2110,8 +2129,18 @@ class MainWindow(QMainWindow):
             if not ok:
                 answer = QMessageBox.question(
                     self, "Prism Studio",
+                    # Says what the swap costs. Prism Reel has no step that
+                    # makes pictures, so choosing it removes the reel's
+                    # artwork — and saying nothing about that is how "Prism
+                    # doesn't make artwork on Windows" was reported as a
+                    # mystery rather than as a choice someone was offered.
+                    # Two strings rather than one reworded one, so the
+                    # question keeps its existing Hindi and Gujarati text.
                     i18n.t("{why}\n\nRun with the fixed house style "
-                           "(Prism Reel) instead?").format(why=why),
+                           "(Prism Reel) instead?").format(why=why)
+                    + " " + i18n.t("Prism Reel makes no pictures of its "
+                                   "own, so the reel will be type and "
+                                   "colour only."),
                     QMessageBox.Yes | QMessageBox.Cancel)
                 if answer != QMessageBox.Yes:
                     return
@@ -2127,8 +2156,18 @@ class MainWindow(QMainWindow):
             if not ok:
                 answer = QMessageBox.question(
                     self, "Prism Motion",
+                    # Says what the swap costs. Prism Reel has no step that
+                    # makes pictures, so choosing it removes the reel's
+                    # artwork — and saying nothing about that is how "Prism
+                    # doesn't make artwork on Windows" was reported as a
+                    # mystery rather than as a choice someone was offered.
+                    # Two strings rather than one reworded one, so the
+                    # question keeps its existing Hindi and Gujarati text.
                     i18n.t("{why}\n\nRun with the fixed house style "
-                           "(Prism Reel) instead?").format(why=why),
+                           "(Prism Reel) instead?").format(why=why)
+                    + " " + i18n.t("Prism Reel makes no pictures of its "
+                                   "own, so the reel will be type and "
+                                   "colour only."),
                     QMessageBox.Yes | QMessageBox.Cancel)
                 if answer != QMessageBox.Yes:
                     return
@@ -2225,6 +2264,7 @@ class MainWindow(QMainWindow):
         self.output_panel.set_task(getattr(self, "_last_query", ""))
         self._stage_agents = {}
         self._stage_results = []
+        self._run_shortfall = []
         self.input_panel.set_state("running")
         self._set_stage("run")
         self._run_finished = False
@@ -2433,6 +2473,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Stopping — finishing the current step, keeping what's done…", 0)
 
+    def _shortfall_words(self) -> str:
+        """The missing deliverables of the last run, in the person's words."""
+        words = {"file": i18n.t("a file to download"),
+                 "image": i18n.t("pictures"),
+                 "video": i18n.t("a video file")}
+        return ", ".join(words.get(k, k)
+                         for k in (getattr(self, "_run_shortfall", None) or []))
+
     def _on_stage_event(self, kind: str, payload: dict):
         stage = payload.get("stage", "")
         if kind == "browser_lost":
@@ -2459,6 +2507,17 @@ class MainWindow(QMainWindow):
             # this the stopped step kept its clock ticking indefinitely.
             self.output_panel.run_cancelled(stage, done)
             return
+        if kind == "run_shortfall":
+            # What the run was asked for, against what exists on the disk —
+            # see core/contract.py. Kept for the completion screen, and said
+            # now, because a row of finished steps over an empty folder is
+            # exactly what this exists to stop.
+            self._run_shortfall = list(payload.get("missing") or [])
+            if self._run_shortfall:
+                self.statusBar().showMessage(
+                    i18n.t("This run did not produce: {what}").format(
+                        what=self._shortfall_words()), 30000)
+            return
         if kind == "stage_start":
             agent = payload.get("agent", "")
             self._stage_agents[stage] = agent
@@ -2481,7 +2540,9 @@ class MainWindow(QMainWindow):
                 exhausted=bool(payload.get("exhausted")),
                 count=payload.get("count"),
                 snippet=payload.get("snippet", ""),
-                files=payload.get("files") or [])
+                files=payload.get("files") or [],
+                prism_note=payload.get("note") or "",
+                missing=payload.get("missing") or "")
             if texts:
                 snippet = (texts[0][:150] + "…") if len(texts[0]) > 150 else texts[0]
             elif timed_out:
@@ -2720,7 +2781,17 @@ class MainWindow(QMainWindow):
             self._advance_queue()
             return
 
-        self.statusBar().showMessage("All done — saved to History.", 6000)
+        if getattr(self, "_run_shortfall", None):
+            # The last thing said about a run has to be true. "All done"
+            # over a reel with no video, or a document request with no file,
+            # is how the gap went unnoticed until someone opened the folder
+            # (core/contract.py).
+            self.statusBar().showMessage(
+                i18n.t("Finished, but this run did not produce: {what}. "
+                       "Saved to History.").format(what=self._shortfall_words()),
+                20000)
+        else:
+            self.statusBar().showMessage("All done — saved to History.", 6000)
         self._finish_queue()
         self._offer_followup(responses, links)
 
@@ -2755,6 +2826,7 @@ class MainWindow(QMainWindow):
         # run they already read "no more tasks", which is what keeps the loop
         # offering a further follow-up instead of advancing a phantom queue.
         self._stage_results = []
+        self._run_shortfall = []
         self._task_runs = []
         self._offer_followup(responses, links or {}, artifacts_dir=artifacts_dir)
 
@@ -2976,6 +3048,7 @@ class MainWindow(QMainWindow):
         # it alone, not stacked under the task it refines. (The follow-up
         # session, not these accumulators, is what carries the task forward.)
         self._stage_results = []
+        self._run_shortfall = []
         self._task_runs = []
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
@@ -3079,6 +3152,7 @@ class MainWindow(QMainWindow):
             self.output_panel.set_plan(run_agents)
             self.output_panel.set_task(self._followup_text)
             self._stage_results = []
+            self._run_shortfall = []
             self._task_runs = []
         self.input_panel.set_state("running")
         self._run_finished = False

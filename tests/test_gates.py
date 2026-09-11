@@ -935,3 +935,24 @@ class UnpromptedStepGate(GateTest):
         win, _ = self._window_with_a_hand_ticked_step()      # leads, no prompt
         asked, worker = self._run(win, QMessageBox.Yes)
         self.assertIn("leads", worker.call_args.kwargs["skip_stages"])
+
+    def test_dropping_the_image_step_of_a_reel_keeps_its_pictures(self):
+        """1.5.7. The dialog tells the owner the reel still gets its
+        pictures; dropping the unprompted "Make the images" step must not
+        then switch off the artwork step the engine inserts for the reel."""
+        from PySide6.QtWidgets import QMessageBox
+        win, _ = self._window_with_a_hand_ticked_step(
+            agents={"visual": "ChatGPT", "content": "ChatGPT",
+                    "media": "Prism Studio"},
+            routing={"visual": {"needed": False, "questions": []},
+                     "content": {"needed": True, "questions": ["Write it."]},
+                     "media": {"needed": True, "questions": ["Film it."]}},
+            tick="visual")
+        import main_window
+        with mock.patch.object(main_window.CB, "studio_available",
+                               return_value=(True, "")):
+            asked, worker = self._run(win, QMessageBox.Yes)
+        self.assertTrue(worker.called)
+        self.assertNotIn("visual", worker.call_args.kwargs["skip_stages"])
+        self.assertNotIn("visual",
+                         [s[0] for s in worker.call_args.kwargs["custom_stages"]])
