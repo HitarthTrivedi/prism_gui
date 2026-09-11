@@ -5092,11 +5092,11 @@
   "Tip.  Click any step to leave it out, or click its tool chip to run that step somewhere else.": [
    "main_window.py"
   ],
-  "To": [
-   "addons/email/dialog.py"
-  ],
   "to": [
    "addons/inquiry/dialog.py"
+  ],
+  "To": [
+   "addons/email/dialog.py"
   ],
   "To: {who}": [
    "addons/inquiry/dialog.py"
