@@ -357,6 +357,36 @@ get the fix — their own code only stages and swaps.
   `packaging/manifest.py` fails the build over 1000 rather than letting
   `release_all.py` discover it an hour later.
 
+# Round 29 — quote by product code, and send it yourself if you say so
+
+A client's ask (11 Sep): their customers write the catalogue code and the
+pieces ("chair 1128K x 40"), the code is on their price list, and they
+want the quotation to go straight back. The Rate list under Email
+automation → Setup → Files was already that price list; three things were
+missing.
+
+* **Any file.** The rate list reads from PDF, Word and plain text as well
+  as Excel and CSV (`quoting.load_rates` → `_rows_from_document`, over the
+  same text extraction attachments use). A scanned PDF is refused with a
+  reason; the picker and the help text say which formats work.
+* **Every code in the mail.** `quoting.find_requests(text, items)` reads
+  each rate-list code the mail names, in order, with the quantity written
+  beside it ("1128K x 40", "40 pcs of chair 1128K", "1129K: 12 pieces").
+  A code is exact, never fuzzy. A code with no quantity comes back
+  unconfident. The quotation window shows a lines table when a mail names
+  more than one code, prefills the single form when it names one, and the
+  quotation itself carries every line.
+* **Auto-send, opt-in.** A switch in the same setup group: "Quote
+  automatically when the mail names product codes from this list with
+  quantities". Off by default. After every mailbox check, each new inquiry
+  is planned (`addons/inquiry/autoquote.py`): if every code matched and
+  every line has a quantity, the quotation is numbered, saved, and sent
+  from the default account under the saved terms, and the row is marked
+  Quoted like a hand-sent one; otherwise the row stays in "To quote" with
+  `auto-quote held: <why>` in its Notes. Sends run one at a time.
+
+Tests: `tests/test_autoquote.py`.
+
 # Round 28 — Harsh's BOQ pricing and Sent-copy get their windows
 
 Harsh's 10 Sep landing (engine `de4ed63`) brought two things the GUI could

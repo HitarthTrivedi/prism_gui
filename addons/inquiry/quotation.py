@@ -37,6 +37,7 @@ import email_config
 import i18n
 import theme
 from dialogs.base import PrismDialog
+from addons.inquiry import autoquote
 from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
@@ -240,11 +241,18 @@ class QuotationDialog(PrismDialog):
 
         quoting = CB.get_quoting()
         self.matches = quoting.match_item(row.get("Product asked", ""), items)
+        # Codes are exact: every rate-list code the mail names, with the
+        # quantity written beside it. Two or more become a lines table;
+        # one prefills the form below; none leaves the fuzzy match to do
+        # what it always did.
+        self.requests = quoting.find_requests(autoquote.inquiry_text(row), items)
+        self._lines_mode = len(self.requests) >= 2
 
         layout = self.body
         layout.setSpacing(theme.ROW_GAP)
 
-        self._confident = quoting.is_confident(self.matches)
+        self._confident = quoting.is_confident(self.matches) or bool(
+            self.requests and all(r.confident for r in self.requests))
 
         # Side by side, because the one judgement this whole dialog exists
         # for is comparing these two: what the customer wrote, against what
@@ -318,6 +326,43 @@ class QuotationDialog(PrismDialog):
         self.source.currentIndexChanged.connect(self._source_changed)
         form.addRow(i18n.t("Price from:"), self.source)
 
+        self.lines_table = QTableWidget(0, 6)
+        self.lines_table.setHorizontalHeaderLabels([
+            i18n.t("Code"), i18n.t("Description"), i18n.t("Qty"), i18n.t("Unit"),
+            i18n.t("Rate (₹)"), i18n.t("Amount (₹)")])
+        self.lines_table.verticalHeader().setVisible(False)
+        self.lines_table.setSelectionBehavior(QAbstractItemView.SelectItems)
+        head = self.lines_table.horizontalHeader()
+        head.setSectionResizeMode(1, QHeaderView.Stretch)
+        for column in (0, 2, 3, 4, 5):
+            head.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self._filling_lines = False
+        for r, req in enumerate(self.requests):
+            self.lines_table.insertRow(r)
+            qty = req.quantity if req.confident else Decimal(1)
+            cells = [req.item.code, req.item.description, f"{qty}", req.item.unit,
+                     f"{req.item.rate_for(qty)}", ""]
+            for c, text in enumerate(cells):
+                cell = QTableWidgetItem(text)
+                if c in (0, 1, 5):
+                    cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
+                if c == 2 and not req.confident:
+                    cell.setBackground(QColor(theme.WARN_BG))
+                    cell.setToolTip(i18n.t("No quantity was written next to "
+                                           "this code — check it."))
+                self.lines_table.setItem(r, c, cell)
+        row_h = self.lines_table.verticalHeader().defaultSectionSize()
+        self.lines_table.setFixedHeight(
+            head.sizeHint().height() + row_h * max(2, min(8, len(self.requests))) + 4)
+        self.lines_table.itemChanged.connect(self._recalculate)
+        self.lines_table.setVisible(self._lines_mode)
+        self.lines_note = C.label(i18n.t(
+            "Every product code in the mail, priced from your rate list. "
+            "Qty and Rate can be edited."), level="SUPPORT", wrap=True)
+        self.lines_note.setVisible(self._lines_mode)
+        layout.addWidget(self.lines_note)
+        layout.addWidget(self.lines_table)
+
         self.item_picker = QComboBox()
         for match in self.matches:
             self.item_picker.addItem(
@@ -367,9 +412,20 @@ class QuotationDialog(PrismDialog):
         form.addRow(self.weight_label, self.weight)
 
         self.quantity = QLineEdit(_quantity_of(row))
+        if len(self.requests) == 1:
+            only = self.requests[0]
+            for index in range(self.item_picker.count()):
+                if self.item_picker.itemData(index) is only.item:
+                    self.item_picker.setCurrentIndex(index)
+                    break
+            if only.confident:
+                self.quantity.setText(f"{only.quantity}")
         self.quantity.textChanged.connect(self._recalculate)
         form.addRow(i18n.t("Quantity:"), self.quantity)
-        layout.addLayout(form)
+        self.single_form = QWidget()
+        self.single_form.setLayout(form)
+        self.single_form.setVisible(not self._lines_mode)
+        layout.addWidget(self.single_form)
 
         self.workings = QPlainTextEdit()
         self.workings.setReadOnly(True)
@@ -468,7 +524,49 @@ class QuotationDialog(PrismDialog):
         self.workings.setVisible(cost)
         self._recalculate()
 
+    def _lines_from_table(self) -> list:
+        quoting = CB.get_quoting()
+        lines = []
+        for r, req in enumerate(self.requests):
+            def text(c):
+                cell = self.lines_table.item(r, c)
+                return cell.text().strip() if cell else ""
+            quantity = quoting.to_decimal(text(2)) or Decimal(1)
+            rate = quoting.to_decimal(text(4))
+            basis = "rate list" if rate == req.item.rate_for(quantity) else "entered by hand"
+            lines.append(quoting.QuoteLine(
+                req.item.description or req.item.code, quantity,
+                text(3) or req.item.unit, rate, req.item.hsn, basis=basis))
+        return lines
+
+    def _finalise_lines(self):
+        quoting = CB.get_quoting()
+        settings = settings_of(self.cfg)
+        lines = self._lines_from_table()
+        rows = getattr(self.parent_dialog, "_register_rows", []) or []
+        self.quote = autoquote.build_quotation(self.cfg, self.row, rows, lines)
+        self._filling_lines = True
+        for r, line in enumerate(lines):
+            cell = self.lines_table.item(r, 5)
+            if cell is not None:
+                cell.setText(quoting.indian_currency(line.amount))
+        self._filling_lines = False
+        self.preview.setPlainText(
+            quoting.render_text(self.quote, settings.get("company", "")))
+        self.quote_line_label.setText(i18n.t("{n} lines").format(n=len(lines)))
+        self.total_label.setText(f"₹{quoting.indian_currency(self.quote.total)}")
+        first = lines[0].description if lines else ""
+        if not self.subject.text().strip():
+            self.subject.setText(
+                f"{i18n.t('Quotation')} {self.quote.number} — {first[:50]}")
+        if not self.mail_body.toPlainText().strip():
+            self.mail_body.setPlainText(_default_body(self.quote, settings))
+
     def _recalculate(self, *_):
+        if getattr(self, "_lines_mode", False):
+            if not getattr(self, "_filling_lines", False):
+                self._finalise_lines()
+            return
         if self._mode() == "cost":
             self._recalculate_from_cost()
         else:
@@ -505,20 +603,8 @@ class QuotationDialog(PrismDialog):
         render it, and fill the covering mail if it is still untouched."""
         quoting = CB.get_quoting()
         settings = settings_of(self.cfg)
-        terms_cfg = settings.get("terms") or {}
-        terms = quoting.Terms(
-            gst_percent=Decimal(str(terms_cfg.get("gst_percent", 18))),
-            validity_days=int(terms_cfg.get("validity_days", 15) or 15),
-            payment=terms_cfg.get("payment", "") or "",
-            delivery=terms_cfg.get("delivery", "") or "")
         rows = getattr(self.parent_dialog, "_register_rows", []) or []
-        self.quote = quoting.Quotation(
-            number=quoting.next_quote_number(rows), date=date.today(),
-            customer=self.row.get("Customer", "") or self.row.get("Email", ""),
-            contact=self.row.get("Contact person", ""),
-            email=self.row.get("Email", ""),
-            inquiry_no=self.row.get("Inquiry no", ""),
-            lines=[line], terms=terms)
+        self.quote = autoquote.build_quotation(self.cfg, self.row, rows, [line])
         self.preview.setPlainText(
             quoting.render_text(self.quote, settings.get("company", "")))
         self.quote_line_label.setText(
@@ -996,6 +1082,10 @@ def _quantity_of(row: dict) -> str:
 
 
 def _default_body(quote, settings: dict) -> str:
+    return autoquote.default_body(quote, settings)
+
+
+def _default_body_legacy(quote, settings: dict) -> str:
     return i18n.t(
         "Dear Sir,\n\nThank you for your enquiry. Our quotation "
         "{number} is attached, valid for {days} days.\n\n"

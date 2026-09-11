@@ -743,9 +743,25 @@ class InquirySetupDialog(PrismDialog):
         later, later_form = _group("For quoting — add these when you're ready")
         self.rate_file = _Picker(
             saved.get("rate_list", ""),
-            filters=i18n.t("Price lists (*.csv *.xlsx *.xlsm);;All files (*)"),
-            placeholder=i18n.t("your price list — needed only for quoting"))
+            filters=i18n.t("Price lists (*.csv *.xlsx *.xlsm *.pdf *.docx *.txt);;"
+                           "All files (*)"),
+            placeholder=i18n.t("your price list — Excel, CSV, PDF or Word"))
         later_form.addRow(i18n.t("Rate list:"), self.rate_file)
+
+        # Quote by code, without a person. Off unless switched on: a price
+        # going to a customer on its own is the owner's decision, and the
+        # gate is deliberately strict -- every code in the mail must be on
+        # the list and every line must carry a written quantity; anything
+        # less is held in "To quote" with the reason on the row.
+        self.auto_quote = QCheckBox(i18n.t(
+            "Quote automatically when the mail names product codes from "
+            "this list with quantities"))
+        self.auto_quote.setChecked(bool(saved.get("auto_quote", False)))
+        self.auto_quote.setToolTip(i18n.t(
+            "Sent from your default account with the saved terms. A mail "
+            "with a code Prism cannot find, or a code with no quantity, is "
+            "held for you instead."))
+        later_form.addRow("", self.auto_quote)
 
         self.cost_file = _Picker(
             saved.get("cost_sheet", ""),
@@ -773,7 +789,11 @@ class InquirySetupDialog(PrismDialog):
             "A rate list needs a heading row with at least a description and "
             "a rate — for example: Code, Description, Unit, Rate. A "
             "letterhead above it is fine. Columns like \"Rate @ 1000\" are "
-            "read as quantity discounts."))
+            "read as quantity discounts. Excel and CSV read best; a PDF or "
+            "Word file works when its table has real text (not a scan).\n\n"
+            "Give every product its code and customers can order by it: "
+            "\"1128K x 40\" in a mail is matched to the row exactly, and "
+            "with the switch above on, quoted without you."))
         layout.addWidget(_Disclosure(
             "What should a cost sheet look like?",
             "A cost sheet is your own working, three columns wide: the name "
@@ -1089,6 +1109,7 @@ class InquirySetupDialog(PrismDialog):
             "account": {k: v for k, v in first.items() if k != "state"},
             "folder": folder,
             "rate_list": self.rate_file.value(),
+            "auto_quote": self.auto_quote.isChecked(),
             "cost_sheet": self.cost_file.value(),
             "company": self.company.text().strip(),
             "signature": self.signature.text().strip(),

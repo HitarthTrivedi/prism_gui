@@ -221,7 +221,7 @@ class PricingTable(QWidget):
         start = rate_list_path(self.cfg) or os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(
             self, i18n.t("Your rate list"), start,
-            i18n.t("Price lists (*.csv *.xlsx *.xlsm);;All files (*)"))
+            i18n.t("Price lists (*.csv *.xlsx *.xlsm *.pdf *.docx *.txt);;All files (*)"))
         if path:
             self.load_rates(path)
 

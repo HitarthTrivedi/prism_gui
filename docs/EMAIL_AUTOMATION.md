@@ -215,3 +215,24 @@ are also in [DEFERRED.md](DEFERRED.md), per its house rule):
 > from your quotation before you accept it. Nothing goes to a customer and
 > no order is accepted without your OK — those two clicks are yours. It runs
 > on your own PC; nothing about your customers goes to anybody's cloud."*
+
+
+## Quoting by product code (2026-09-11)
+
+Customers who order from a catalogue write the code and the pieces. The
+Rate list under Setup → Files is the price list Prism reads: any row with a
+code, description, unit and rate, from Excel, CSV, PDF, Word or plain text.
+
+When an inquiry arrives, Prism finds every code from that list in the mail
+and the quantity written beside it. The quotation window then shows one
+line per code; with a single code it fills the usual form. A code with no
+quantity next to it is shown but flagged.
+
+**Automatic quoting** is a switch in the same setup group, off by default.
+With it on, after each mailbox check a new inquiry is quoted and sent
+without a person when, and only when, every code in the mail is on the
+rate list and every line has a written quantity. It goes from the default
+sending account with the saved terms, the quotation CSV is saved in the
+inquiry's folder and in Artifacts, and the register shows the row as
+Quoted. Anything less is held in "To quote" with `auto-quote held: …` in
+the row's Notes so the person opening it sees why.

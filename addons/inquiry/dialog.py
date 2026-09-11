@@ -54,6 +54,7 @@ import email_config
 import i18n
 import theme
 from dialogs.base import PrismDialog
+from addons.inquiry import autoquote
 from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, active_accounts_of, is_ready, settings_of,
 )
@@ -2227,6 +2228,105 @@ class InquiryDialog(QWidget):
         # never go out to somebody whose reply arrived in this same check and
         # has not been filed yet.
         self._chase_automatically()
+        self._auto_quote(result)
+
+    # ── quoting by code, without a person ────────────────────────────────
+    def _auto_quote(self, result):
+        """Quote and send every new inquiry this check brought in whose mail
+        names rate-list codes with quantities -- only with the switch on,
+        and one at a time. Anything the plan cannot settle stays in
+        "To quote" with the reason on the row."""
+        if not autoquote.enabled(self.cfg) or not getattr(result, "new_inquiries", None):
+            return
+        settings = self._settings()
+        rate_path = settings.get("rate_list", "")
+        if not rate_path or not os.path.exists(rate_path):
+            return
+        try:
+            items = CB.get_quoting().load_rates(rate_path)
+        except Exception as e:                              # noqa: BLE001
+            self._explain(str(e))
+            return
+        register = CB.get_register()
+        queue = []
+        for item in result.new_inquiries:
+            row = register.find(self._register_rows, item.inquiry_no)
+            if row is None or (row.get("Quotation no") or "").strip():
+                continue
+            plan = autoquote.plan(row, items, getattr(item, "message", None))
+            if plan.ok and row.get("Email"):
+                queue.append((row, plan))
+            else:
+                note = autoquote.held_note(plan.reason or i18n.t("no email address to reply to"))
+                if note not in (row.get("Notes") or ""):
+                    row["Notes"] = ((row.get("Notes") or "") + " " + note).strip()
+        if queue:
+            self._auto_queue = queue
+            self._auto_next()
+        else:
+            self._save_register_quietly()
+
+    def _save_register_quietly(self):
+        try:
+            CB.get_register().save(self._register_rows, self._paths().register_csv)
+        except Exception as e:                              # noqa: BLE001
+            self._explain(str(e))
+
+    def _auto_next(self):
+        if not getattr(self, "_auto_queue", None):
+            self._save_register_quietly()
+            self._refresh_register()
+            return
+        row, plan = self._auto_queue.pop(0)
+        quoting = CB.get_quoting()
+        settings = self._settings()
+        quote = autoquote.build_quotation(self.cfg, row, self._register_rows, plan.lines)
+        folder = row.get("Folder", "") or self._paths().root
+        try:
+            os.makedirs(folder, exist_ok=True)
+            written = quoting.write_csv(quote, os.path.join(
+                folder, f"{quote.number.replace('/', '-')}.csv"))
+            CB.config.save_artifact(written, quote.number, kind="quote",
+                                    task=row.get("Inquiry no", "") or quote.number)
+        except Exception as e:                              # noqa: BLE001
+            self._explain(str(e))
+            self._auto_next()
+            return
+        if not email_config.can_send(self.cfg):
+            row["Notes"] = ((row.get("Notes") or "") + " " + autoquote.held_note(
+                i18n.t("no sending account set up"))).strip()
+            self._auto_next()
+            return
+        subject, body = autoquote.covering_mail(quote, settings)
+        sender = email_config.default_sender(self.cfg)
+        self._auto_worker = SendWorker(
+            email_config.cfg_for_sender(self.cfg, sender),
+            [{"email": row.get("Email", ""), "name": row.get("Contact person", "")}],
+            subject, body,
+            [{"path": written, "name": os.path.basename(written), "mime": "text/csv"}])
+        register = CB.get_register()
+
+        def _done(sent, failed, row=row, quote=quote, subject=subject, body=body):
+            if failed:
+                row["Notes"] = ((row.get("Notes") or "") + " " + autoquote.held_note(
+                    i18n.t("send failed: {why}").format(why=failed[0][1]))).strip()
+            else:
+                register.mark_quoted(row, quote.number, quote.total)
+                row["Notes"] = ((row.get("Notes") or "") + " " + i18n.t(
+                    "quoted automatically by code")).strip()
+                self._log_sent("quotation", row, subject, body=body)
+            self._auto_next()
+
+        def _failed(message, row=row):
+            row["Notes"] = ((row.get("Notes") or "") + " " + autoquote.held_note(
+                i18n.t("send failed: {why}").format(why=message))).strip()
+            self._auto_next()
+
+        self._auto_worker.done.connect(_done)
+        self._auto_worker.failed.connect(_failed)
+        self.status.setText(i18n.t("Quoting {who} by code…").replace(
+            "{who}", row.get("Email", "")))
+        self._auto_worker.start()
 
     def _remember(self, result):
         """Persist the bookmark and anything the sorter learned — the direct
