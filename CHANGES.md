@@ -10,6 +10,48 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.5.8 — skills: house standards for each kind of job, and a check on the answer
+
+**Prism carries skills** (`core/skills.py`, `prism_terminal/skills/`). A skill
+is one folder: a one-line description the planner reads, the standards for
+one kind of deliverable, and, for nine of the twelve, a checker that reads
+the answer. Research reports, slide decks, PDF and Word documents,
+documentation, stories, storyboards and cold emails are offered to the
+planner, which names the one that fits a step; where it names none, the
+person's own words pick at most one. The add-ons attach theirs directly:
+bill of quantities, bill of materials, negotiation and follow-up emails, the
+PCB quote reply, machined-part advice and lead outreach.
+
+**The standards go where they fit, by the step's kind.** A text step gets
+the whole skill. A step that builds its deliverable — a maker, the
+presentation stage, or a file, image or video step — gets the standards
+without the text layout, which would tell it to write the thing out instead
+of building it. A step a program reads, and a links step, get nothing.
+
+**A text step's answer is checked**, as Prism captures it: the page as it is
+displayed, not markdown. A step with faults is asked once to fix them, and
+the second answer is kept only if it is cleaner. A step whose deliverable
+the contract found missing has already had its one re-ask, and a reply that
+is a built file is never judged as text. Checkers are tested against samples
+rendered in real Chrome and against the owner's own saved replies.
+
+**The trade rules were fact-checked** against Indian standards and
+manufacturer catalogues. Six size ranges in the parts-list checker rejected
+real parts and are gone. A sheet for review by someone in the trade is at
+`prism+gui/artifacts/skills-trade-review-2026-09-11.html`.
+
+**A customer can change them without a release.** `~/.prism/skills/<key>/`
+replaces or adds to a shipped skill; a checker is only ever loaded from the
+app itself. `/skills` in the terminal lists what applies.
+
+**Updating to 1.5.8.** Nothing an installed version relies on has changed:
+no settings, licence, run-record or manifest format, and no updater code.
+The update adds 21 files in new folders, which the updater of every version
+that can update in-app creates as it stages. Windows installs on 1.5.6 or
+earlier still need the one browser download described under 1.5.7.
+
+---
+
 # 1.5.7 — a step is held to what it was for, and the update actually swaps
 
 Audited against the owner's own 49 saved runs (11 Sep 2026; report at

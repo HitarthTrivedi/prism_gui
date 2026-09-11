@@ -1,0 +1,4 @@
+Email settings
+This powerful and seamless feature makes email easy.
+Simply open the app and then click Settings and pick an account from the list, and then press save.
+TODO: add screenshots

@@ -1,0 +1,11 @@
+The order landed on a Tuesday in March: 18 tonnes of conveyor structure, due the Friday before Diwali.
+
+Ravi had wanted the work for two years. When the drawing finally came, the packing line at the plant was already half built, and the structures were the part holding everything else up. Eleven working days, and four of them were a festival.
+
+The problem was not the schedule. It was the 6 mm plate. The drawing called for IS 2062 E250 in 6 mm and nobody in Ahmedabad had it in stock; the nearest roll was in Raipur, six days away. His foreman wanted to substitute 8 mm and absorb the weight.
+
+"We roll it ourselves or we lose the order," Ravi told the shop on the Thursday morning.
+
+They rolled it themselves. Fourteen hours across two nights, two setups, one sheet ruined learning the springback.
+
+The structures shipped on the Thursday before the holiday. The client has placed four orders since, and the last one named the 6 mm plate in the enquiry.

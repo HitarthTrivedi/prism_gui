@@ -140,7 +140,10 @@ _ENGINE_SKIP = {"run_prism.bat", "run_prism.command", "requirements.txt",
                 ".git", ".gitignore", ".gitmodules"}
 # demo/ is sample CSVs for a walkthrough that is not part of the product, and
 # nothing in the app reads it.
-_ENGINE_SKIP_DIRS = ("__pycache__", ".git", ".venv", "demo", "tests")
+# skills/ is handled by its own entry below, because its checks.py files
+# are DATA -- loaded from a path by core/skills.py, never imported -- and
+# the loop below drops every .py as code.
+_ENGINE_SKIP_DIRS = ("__pycache__", ".git", ".venv", "demo", "tests", "skills")
 for root, dirs, files in os.walk(ENGINE_DIR):
     dirs[:] = [d for d in dirs if d not in _ENGINE_SKIP_DIRS]
     for name in files:
@@ -149,6 +152,33 @@ for root, dirs, files in os.walk(ENGINE_DIR):
         src = os.path.join(root, name)
         rel = os.path.relpath(root, GUI_DIR)
         datas.append((src, rel))
+
+# The skills: house doctrine, and the checkers that enforce it. Shipped as a
+# whole tree INCLUDING the .py files, which the engine-data loop above has to
+# skip -- everything else ending in .py under prism_terminal/ is engine source
+# and shipping it was a licence bypass (see the note above). A skill's
+# checks.py is different in kind: nothing imports it, core/skills.py loads it
+# from its path, and without it every skill silently becomes advice with
+# nothing checking it. Destination matches skills.SHIPPED_DIRS, which walks up
+# from core/ at runtime.
+# Walked file by file rather than added as a whole tree, for one reason:
+# loading a checks.py leaves a __pycache__ beside it on the developer's
+# machine, and a directory entry would ship that too.
+_SKILLS_DIR = os.path.join(ENGINE_DIR, "skills")
+_n = 0
+for _root, _dirs, _files in os.walk(_SKILLS_DIR):
+    _dirs[:] = [d for d in _dirs if d != "__pycache__"]
+    _rel = os.path.relpath(_root, ENGINE_DIR)
+    for _name in sorted(_files):
+        # README.md is for people writing a skill, not for the app, and every
+        # shipped file is one more asset against GitHub's 1,000-per-release
+        # cap -- Linux sits at 978 with the skills in.
+        if _name.endswith((".pyc", ".pyo")) or _name in (".gitignore", "README.md"):
+            continue
+        datas.append((os.path.join(_root, _name),
+                      os.path.join("prism_terminal", _rel)))
+        _n += _name == "SKILL.md"
+print(f"[prism] skills bundled: {_n}")
 
 # Modules in the archive use paths relative to ``core`` at runtime, whereas
 # the generic engine-data loop above preserves the source checkout prefix.

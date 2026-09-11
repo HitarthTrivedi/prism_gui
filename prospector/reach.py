@@ -160,7 +160,21 @@ HARD RULES:
 - Every fact must come from THE REASON above, the person's details, or VALUE CLAIMS. Invent nothing.
 - FORBIDDEN unless it appears verbatim in VALUE CLAIMS or THE REASON: any number, any percentage, "up to X%", "Nx", statistics, client names, dates, product names. When in doubt, leave it out and just ask for a call.
 - If THE REASON is NONE, open on their role/industry — never pretend there was an announcement.
-- Sound like a person wrote it. No "Dear Sir/Madam", no "I hope this email finds you well"."""
+- Sound like a person wrote it. No "Dear Sir/Madam", no "I hope this email finds you well".{_doctrine()}"""
+
+
+def _doctrine() -> str:
+    """The house cold-email skill, when one is installed -- through the
+    bridge, never by importing the engine directly (CONTRIBUTING rule 3).
+
+    Never raises and never blocks a send: prospecting worked before skills
+    existed and must keep working if the folder is missing or unreadable.
+    """
+    try:
+        import core_bridge as CB
+        return CB.skills.addendum("leads.reach", "api")
+    except Exception:                                       # noqa: BLE001
+        return ""
 
 
 # ── the independent number check (don't trust one pass) ───────────────────────

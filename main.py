@@ -263,6 +263,28 @@ def _selftest(app) -> int:
                    + (f" — {', '.join(unresolved)}" if unresolved else ""),
                    not unresolved))
 
+    # ── the skills census ────────────────────────────────────────────────
+    # A skill's checks.py is DATA to PyInstaller: core/skills.py loads it from
+    # a path, and the spec's engine-data loop drops every .py, so skills/ has
+    # an entry of its own. A build that lost it would ship the standards with
+    # nothing checking them, and only a customer would ever notice. Loading
+    # every checker here, inside the real executable packaging/smoke_test.py
+    # runs on every platform CI builds, is the one place that can be proven.
+    import core_bridge as _skills_bridge
+    _skills = _skills_bridge.skills.reload()
+    _checked = [s for s in _skills.values() if s.has_checks]
+    _broken = []
+    for _s in _checked:
+        try:
+            _mod = _skills_bridge.skills._checks_module(_s)
+            if not callable(getattr(_mod, "faults", None)):
+                _broken.append(_s.key)
+        except Exception as exc:                        # noqa: BLE001
+            _broken.append(f"{_s.key} ({exc})")
+    checks.append((f"skills ({len(_skills)}, {len(_checked)} with checkers)"
+                   + (f" — broken: {', '.join(_broken)}" if _broken else ""),
+                   bool(_skills) and bool(_checked) and not _broken))
+
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:
         print(f"  {'✓' if ok else '✗'} {name}")

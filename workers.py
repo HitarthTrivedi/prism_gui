@@ -123,7 +123,8 @@ class AutomationWorker(_Worker):
                  skip_stages: list | None = None, followup: bool = False,
                  files_out: list | None = None,
                  image_stages=None, failover: bool = True,
-                 motion_skeleton: str = ""):
+                 motion_skeleton: str = "",
+                 stage_skills: dict | None = None):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
@@ -166,6 +167,10 @@ class AutomationWorker(_Worker):
         # auto-detection, so every caller names this stage explicitly.
         self.motion_design_stage = motion_design_stage
         self.motion_skeleton = motion_skeleton
+        # {stage label: [skill key]} for an add-on that built its own
+        # stages, so the skill its prompt was written against also checks
+        # the answer. See automation.run(stage_skills=).
+        self.stage_skills = dict(stage_skills or {})
         self._stop = threading.Event()
         # One press skips one step: the engine clears it when it acts.
         self._skip = threading.Event()
@@ -224,6 +229,8 @@ class AutomationWorker(_Worker):
                 kwargs["image_stages"] = self.image_stages
             if not self.failover:
                 kwargs["failover"] = False
+            if self.stage_skills:
+                kwargs["stage_skills"] = self.stage_skills
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),

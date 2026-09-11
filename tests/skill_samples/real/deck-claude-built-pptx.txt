@@ -1,0 +1,8 @@
+Now let's validate the file structurally and check content for placeholders.
+Read 11 files, ran 11 commands, and 3 more tools
+
+Read 11 files, ran 11 commands, and 3 more tools
+This is clean. One card ("Lower Maintenance Spend") wraps to two lines while others don't, but it's still nicely centered and readable. Let's check the final slide.
+Read 3 files, edited a file, ran 2 commands
+
+Read 3 files, edited a file, ran 2 commands

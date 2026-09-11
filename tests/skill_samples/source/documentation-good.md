@@ -1,0 +1,23 @@
+# Add a second sending address
+For anyone who sends quotations from two email addresses.
+
+## Before you start
+You need the SMTP host, the port and an app password for the second address.
+
+## Steps
+1. Open `Settings`. The settings window opens.
+2. Press `Add account`. An empty row appears.
+3. Type the address and the app password. The row turns green when the login works.
+
+## Checking it worked
+The new address appears in the From list of the email composer.
+
+## When it goes wrong
+**Authentication failed.** The provider wants an app password, not your login password.
+**Nothing sends.** Port 465 is blocked on your network. Use 587.
+**The row disappears.** The settings file was open in another program. Close it and add the row again.
+
+## Reference
+| Setting | Meaning | Default |
+|---|---|---|
+| Port | The SMTP port | 587 |

@@ -1,0 +1,110 @@
+Lazycook
+Agentic orchestration for research & study notes
+Wisdom takes time.
+[PRODUCT LOGO HERE]
+Document Version: v1.0
+Status: Internal Use
+Source: Lazycook Landing Page
+Date: September 2026
+[IMAGE PLACEHOLDER — Lazycook product identity / logo; Alt text: “Lazycook logo”]
+Executive Summary
+Lazycook is positioned as agentic orchestration for research and study notes: a team of specialist agents that researches, cross-checks, writes and reviews information before presenting it to the user.
+Value proposition: Lazycook turns questions, papers and half-formed ideas into sourced answers and clean, revision-ready study notes through a visible research workflow.
+The product is built around a deliberate alternative to confident but unsupported answers. Users can see the research process unfold: agents plan the work, investigate sources, compose a response and review the result. Claims are presented with citations that trace back to real sources, while research sessions can be converted into structured study notes with headings, highlights and tags.
+The landing page presents Lazycook as a tool for researchers and students who value considered answers, transparent sourcing and useful outputs rather than simply fast responses. Its central message, “Wisdom takes time,” reinforces this positioning.
+[IMAGE PLACEHOLDER — Product mockup showing the agent pipeline; Alt text: “Lazycook research thread showing Planner, Researcher, Writer and Reviewer agents”]
+Product Overview
+What Lazycook Does
+Lazycook orchestrates four specialist agents—Planner, Researcher, Writer and Reviewer—around a research task. A user can provide a question, paper or partially formed idea without needing to construct a sophisticated prompt.
+The agents then work through a research session:
+Plan — the Planner structures the research and identifies angles to investigate.
+Research — the Researcher gathers and cross-checks relevant material.
+Write — the Writer synthesises the findings into a coherent answer or notes.
+Review — the Reviewer checks the work for weak reasoning and unsupported claims.
+The result is intended to be a sourced answer or structured study material, with the research process visible rather than hidden.
+[IMAGE PLACEHOLDER — Workflow figure; Alt text: “Lazycook workflow from user question through planning, research, writing and review to final answer”]
+Transparent Research
+A defining product principle is visibility. Users can follow the plan, see which sources were researched and understand what information was retained and why.
+This makes research less opaque and gives users a way to review the reasoning behind an answer rather than treating the output as an unexplained conclusion.
+Grounded Answers
+Lazycook states that claims carry citations and that citations trace back to real sources. The product examples reference Attention Is All You Need, Mamba: Linear-Time Sequence Modeling, and A Survey of Long-Context Methods.
+[IMAGE PLACEHOLDER — Citation/source display; Alt text: “Lazycook answer with numbered claims linked to named research sources”]
+Study-Ready Notes
+Research threads can become clean, structured study notes. The landing page illustrates notes containing headings, key ideas, highlights and tags, designed to support later revision.
+[IMAGE PLACEHOLDER — Study notes display; Alt text: “Lazycook structured study notes with key ideas and revision tags”]
+Technical Specifications
+Product Architecture
+The source describes Lazycook at the product-workflow level as an agentic orchestration system using four specialist agents:
+Component Stated role
+Planner Structures the research task and identifies angles to investigate
+Researcher Searches and cross-checks sources
+Writer Composes the synthesis
+Reviewer Reviews reasoning and unsupported claims
+[IMAGE PLACEHOLDER — Research session interface; Alt text: “Lazycook research session showing four specialist agent stages”]
+Research Sources and Connectors
+The landing page explicitly names three research sources/connectors:
+arXiv
+Semantic Scholar
+Zotero
+Lazycook also describes grounding in live/current web sources.
+Output and Visualisation
+The product supports sourced answers and study-ready notes. The landing page also presents interactive charts and visualisations, including charts and timelines embedded within research answers.
+What the Source Does Not Specify
+The source does not provide technical infrastructure details such as APIs, model providers, hosting architecture, latency targets, system requirements, supported file formats, security specifications or formal integration documentation. These details are therefore not stated in this document.
+Use Cases / Benefits
+Research
+Lazycook is designed for research questions that require multiple sources, cross-checking and verification. The visible research process helps users understand what was investigated and why particular material informed the answer.
+Benefit: Research becomes more transparent and easier to review.
+Study Notes
+Dense material can be transformed into organised, study-ready notes with headings, highlights and tags.
+Benefit: Research outputs become useful revision material rather than information that must be reorganised manually.
+Summaries
+Lazycook can compress long reads into the points that matter, helping users move from large amounts of source material toward a clearer understanding.
+Benefit: Less time is spent extracting the central ideas from dense material.
+Analysis
+The product can support analysis by identifying patterns and weighing trade-offs across information and data.
+Benefit: Users can work through comparisons and competing considerations in a structured research workflow.
+Collaboration
+Group research rooms allow teams to enter a shared thread and build on a researched answer together.
+Benefit: Research can become a shared working process rather than an isolated activity.
+Visual Research
+Inline visualisations place charts and timelines directly inside answers.
+Benefit: Relationships, comparisons and sequences can be understood alongside the written research.
+[IMAGE PLACEHOLDER — Capabilities/use-case table; Alt text: “Lazycook capabilities mapped to research and study use cases”]
+Core Benefits
+Transparent research. Users can see the research process rather than receiving only an opaque conclusion.
+Source-grounded answers. Claims are accompanied by citations that trace to source material.
+Revision-ready outputs. Dense information can become structured study notes.
+Reviewable reasoning. The workflow includes a review stage intended to catch weak reasoning and unsupported claims.
+Pricing & Ordering Info
+Getting Started
+The source repeatedly presents Lazycook as available to start for free, using calls to action such as “Get started free,” “Sign up free,” and “Begin your research.”
+The page also includes “Get started” and “Sign in” navigation actions.
+Pricing Information
+Paid pricing is not specified in the source.
+No subscription prices, plan tiers, currencies, usage limits, billing cycles, discounts, payment methods or paid ordering process are provided on the landing page.
+Pricing status: Not specified in source.
+The supported onboarding message is therefore simple: users can sign up free and begin their research.
+FAQs
+What is Lazycook?
+Lazycook is positioned as agentic orchestration for research and study notes, using specialist agents to plan, research, write and review work.
+Do I need prompt engineering?
+No. The landing page states that users can provide a question, paper or half-formed idea rather than requiring elaborate prompt construction.
+How does Lazycook produce answers?
+Agents plan the task, research sources, draft the response and review the result before presenting the output.
+Are Lazycook answers sourced?
+The product states that claims carry citations and trace back to real sources.
+Which research sources and connectors are supported?
+The landing page explicitly names arXiv, Semantic Scholar and Zotero, alongside live/current web research.
+Can Lazycook create study notes?
+Yes. The product describes structured, study-ready notes that can contain headings, highlights and tags.
+Can teams collaborate?
+Yes. Group research rooms are listed as a capability for shared research threads.
+Does Lazycook provide interactive visualisations?
+Yes. The product describes inline charts, visualisations and timelines within answers.
+Are pricing plans publicly specified?
+No. The source only states free-start/sign-up messaging and does not specify paid plans or pricing.
+Contact Details
+Let’s Talk
+Lazycook includes an Investors / Contact section positioned around the idea of building “calm, sourced research tooling for the long run.”
+The contact form provides fields for:

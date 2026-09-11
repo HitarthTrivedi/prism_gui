@@ -1,0 +1,19 @@
+**TOTAL: 12s, 3 scenes, 9:16**
+
+**SCENE 1 — HOOK — 4.0s**
+- ON SCREEN: "Freight ate it"
+- VISUAL: navy field, one amber line low
+- MOTION: the line wipes in left to right over 0.6s; the field drifts throughout
+- CARRIES: the amber line continues into scene 2
+
+**SCENE 2 — PROOF — 4.0s**
+- ON SCREEN: "6%"
+- VISUAL: the figure large, centre
+- MOTION: scales up from 0.9 while the line slides out down
+- CARRIES: the amber tone stays on the figure
+
+**SCENE 3 — SIGNOFF — 4.0s**
+- ON SCREEN: "Move the lane"
+- VISUAL: the mark, centre
+- MOTION: mask reveals right to left; the mark breathes while held
+- CARRIES: resolves the amber line into the mark

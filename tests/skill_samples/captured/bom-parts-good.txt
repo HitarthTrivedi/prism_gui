@@ -1,0 +1,8 @@
+# Description Standard / grade Size / designation Qty Unit Remarks
+1 Emergency stop, mushroom head, 1NC IP65 40 mm 2 nos Siemens 3SU1 or equivalent
+2 Channel section IS 2062 E250 BR ISMC 100 24 kg
+3 Hex bolt IS 1367 class 8.8 M12 × 40 mm 16 nos
+ASSUMPTIONS
+Fastener count derived at 4 per bracket.
+TO CONFIRM
+Paint shade is not stated on the drawing.

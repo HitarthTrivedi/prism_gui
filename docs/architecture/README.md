@@ -27,6 +27,7 @@ this set links out to them rather than restating them.
 | 8 | [System state & roadmap map](08-state-and-roadmap.md) | What is built, what is half-built, what is deliberately not built |
 | 9 | [Boundaries](09-boundaries.md) | What may depend on what — and the test that fails when it doesn't hold |
 | 10 | [Adding an add-on](10-adding-an-add-on.md) | The recipe, end to end, with a real worked example. **Start here if you are new** |
+| 11 | [Skills](11-skills.md) | Where Prism keeps what a good result looks like, how it reaches a tool, and how an answer is checked against it |
 
 Two more, outside this folder:
 

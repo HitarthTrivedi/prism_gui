@@ -560,6 +560,12 @@ class BoqDialog(PrismDialog):
         self._worker = AutomationWorker(
             {}, self.cfg, files, f"{self._run_prefix}{self.request}",
             custom_stages=[("format", self.writer_agent, [prompt])],
+            # The skill formatting_prompt was written against, so its
+            # checker also reads the answer -- a parts row with no grade, a
+            # 250 mm emergency stop. Only this stage: the standards and
+            # interpret stages return checklists and notes, not the table.
+            stage_skills={"format": [s.key for s in CB.skills.for_feature(
+                f"{self.mode}.format")]},
             chatgpt_analysis=False)
         self._worker.done.connect(self._on_written)
         self._worker.failed.connect(self._on_failed)

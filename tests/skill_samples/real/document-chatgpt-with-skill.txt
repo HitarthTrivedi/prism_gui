@@ -1,0 +1,77 @@
+Below is the finished two-page product document, structured to stand alone when forwarded or printed.
+Edit
+PRISM
+Measure CAD drawings. Build quantities. Quote with your own rates.
+Product: Prism desktop application
+For: Indian fabrication plant owners and estimating teams
+Subject: Faster, more consistent measurement, BOQ preparation and quotation follow-up
+Date: 11 September 2026
+From: Prism
+Contact: Prism Product Team
+PAGE 1 — WHAT PRISM DOES
+One place to turn fabrication drawings into quantities and customer-ready communication
+Prism is a desktop application built for Indian fabricators who need to move from CAD drawings to quantities, quantities to a quotation, and a quotation to follow-up without repeatedly measuring files and rebuilding calculations by hand.
+Prism works with the engineering files fabricators already receive. It can measure CAD drawings, Gerber files and STEP files, turn the measured information into a bill of quantities (BOQ), and use the plant owner's own rate sheet to draft quotation and follow-up emails.
+The aim is straightforward: reduce repetitive estimating work while keeping the commercial logic in the fabricator's hands.
+Core workflow
+Stage What Prism does Output
+1. Import Accepts CAD drawings, Gerber files and STEP files Engineering file ready for measurement
+2. Measure Extracts measurable information from the drawing or model Dimensions, quantities and measured items
+3. Build BOQ Organises measured information into a bill of quantities BOQ ready for costing
+4. Apply rates Uses the owner's own rate sheet Costed quantities based on the owner's rates
+5. Draft quotation Converts the costing into quotation communication Draft quotation email
+6. Follow up Drafts follow-up communication after quotation Follow-up email draft
+Table 1 — Prism workflow and resulting outputs
+Built around the plant owner's rates
+Prism does not require the owner to adopt a generic pricing model. The owner's own rate sheet is the commercial source. This means the estimating process can reflect the rates the business already uses rather than forcing a new pricing structure.
+Prism's role is to help turn engineering information into a structured commercial starting point. The plant owner remains responsible for reviewing quantities, rates, commercial terms and the final quotation before it is sent.
+What a plant owner can expect
+Less repetitive manual measurement of engineering files.
+A structured BOQ generated from measured drawing information.
+Support for CAD, Gerber and STEP files.
+Commercial calculations based on the owner's own rate sheet.
+Draft quotation emails prepared from the resulting information.
+Draft follow-up emails so enquiries do not depend entirely on remembering to chase them manually.
+Assumptions and exclusions
+Assumptions: Prism is intended to work from usable CAD, Gerber and STEP files and an owner-provided rate sheet. The accuracy and completeness of the resulting measurements depend on the source files and their engineering information. Rates are assumed to be supplied and maintained by the plant owner.
+Exclusions: This document does not promise a specific measurement accuracy, processing time, supported CAD/Gerber/STEP revision, quotation value, cost saving, or integration with any particular ERP, accounting, email or production system. Such details are to be confirmed before adoption. Prism-generated quantities, costing and email drafts should be reviewed by the responsible person before commercial use.
+PAGE 2 — WHY A PLANT OWNER WOULD TRY IT
+From engineering files to a reviewed quotation, with less repetitive work
+For a fabrication business, estimating often sits between two very different worlds: engineering information on one side and commercial decisions on the other. Prism is designed to reduce the manual work required to bridge that gap.
+The value is not that Prism decides what a job should cost. The owner still controls the rates and the final commercial decision. The value is that Prism can handle more of the repetitive measurement and drafting work surrounding that decision.
+What changes in the estimating process
+Conventional task With Prism Owner's role
+Inspect engineering drawing Prism measures supported files Review measured information
+Prepare quantities Prism structures a BOQ Confirm quantities
+Apply costing rates Prism uses the owner's rate sheet Maintain and approve rates
+Prepare quotation communication Prism drafts the email Review and send
+Prepare customer follow-up Prism drafts the follow-up email Review and send
+Table 2 — Estimating responsibilities: manual process versus Prism-assisted workflow
+The practical case for a trial
+A plant owner does not need to change the way the business prices work simply to evaluate Prism. The most direct trial is to use real fabrication files and the plant's existing rate sheet, then compare Prism's measured quantities and resulting drafts against the team's current process.
+The evaluation should focus on four questions:
+Measurement: Does Prism capture the information the estimator normally measures manually?
+BOQ: Does the resulting BOQ contain the information needed to prepare the job costing?
+Commercial fit: Does using the owner's rate sheet produce a useful starting point for the quotation?
+Communication: Are the quotation and follow-up drafts sufficiently useful to reduce writing and administrative effort?
+A successful trial should be judged on the plant's actual work rather than on a generic productivity claim.
+Commercial information
+Item Current status Basis / validity
+Prism software price To be confirmed Currency and pricing basis to be confirmed
+Licensing model To be confirmed Terms to be confirmed
+Setup / onboarding To be confirmed Scope and charges to be confirmed
+CAD / Gerber / STEP compatibility by file version To be confirmed Confirm against the plant's actual files
+Measurement accuracy specification To be confirmed Validate during trial
+Table 3 — Prism commercial and technical items requiring confirmation
+Assumptions and exclusions
+No software price, licensing term, implementation fee, processing-time commitment or accuracy percentage is stated here because those figures have not been provided. They should be confirmed before any purchase decision.
+A Prism-generated BOQ or email is a working draft, not an automatic commercial commitment. The plant owner or authorised estimator should verify measured quantities, applicable rates, taxes, freight, delivery commitments, scope, exclusions and customer-specific terms before issuing a quotation.
+NEXT STEP
+Start with a representative fabrication job.
+Provide a representative CAD, Gerber or STEP file together with the plant's current rate sheet. Review the measured quantities, BOQ and resulting quotation/follow-up drafts against the team's existing process.
+Reply to: Prism Product Team
+Product: Prism desktop application
+Document date: 11 September 2026
+Document validity: Product description valid as of 11 September 2026; pricing, compatibility details and commercial terms remain subject to confirmation.
+Tighten the document to two pages
+Add a sharper plant-owner value proposition

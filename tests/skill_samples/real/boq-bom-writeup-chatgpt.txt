@@ -1,0 +1,198 @@
+BILL OF QUANTITIES (BOQ) & BILL OF MATERIALS (BOM)
+Project: WO 00000 – OBMS, 1400 mm W × 1400 mm L × 800 mm H
+Client: the client
+Drawing: GA of WO 00000 OBMS 1400mm W × 1400mm L × 800mm H
+Drawing units: Inches
+Drawing entities: 9,663
+Layers: 60
+⚠️ DRAWING-SCOPE WARNING
+The attached DWG is not a civil/site survey or CCTV services layout. It is a General Arrangement (GA) / mechanical equipment drawing for an OBMS assembly. The layer names and geometry predominantly represent fabricated mechanical components such as channels, plates, shafts, rollers, bearings, bolts, bushes, belts and the magnet body.
+Therefore, CCTV, camera, cable, conduit, fibre, gate and perimeter quantities must NOT be derived from this drawing. Doing so would fabricate quantities that are not supported by the drawing.
+The quantities below are therefore presented as a mechanical BOQ/BOM take-off from the supplied GA drawing data. Rates and amounts are intentionally left blank. Material grades, thicknesses, weights and fabrication details should be independently verified against the approved manufacturing BOM/detail drawings before procurement or tendering.
+1. Drawing interpretation
+The drawing represents an OBMS (Over Band Magnetic Separator) general arrangement, approximately 1400 mm wide × 1400 mm long × 800 mm high. The layer structure identifies the major mechanical elements of the assembly.
+The supplied CAD extraction reports 9,663 entities across 60 layers. The layer nomenclature strongly supports a fabricated mechanical assembly rather than a building/site-services drawing.
+Examples include:
+MAGNET_BODY
+DRIVE_SHAFT
+NON-DRIVE_SHAFT
+IDELER_ROLLER_AS
+PIPE_FOR_ROLLER
+SIDE_CHANNEL__-1
+SIDE_CHANNEL__-2
+TOP_ROLLER_MTG_B
+UC_212-BEARING
+UC_215-BEARING
+UCF_BEARING_MTG_
+RUBBER_FOR_ROLLE
+BELT_
+FDN_PLATE
+MAIN_PLATE
+RES.PLATE
+ANGLE_CLEAT
+M-12_BOLT_
+M-12_NUT
+M-16_X_50_L_BOLT
+M-16_X_NUT
+This makes a mechanical fabrication/material BOM the appropriate interpretation of the requested BOQ.
+2. BOQ / BOM — Major Mechanical Components
+Basis: Quantities below reproduce the supplied CAD-measured quantities exactly. Length quantities are in inches, as reported from the drawing. They have not been recalculated or converted.
+Item Component / Description Unit Quantity Rate Amount
+1 Magnet Body in 19,490.00
+2 Side Channel – 1 in 16,478.99
+3 Side Channel – 2 in 19,236.07
+4 Angle Cleat in 18,563.91
+5 Distance Channel in 17,577.23
+6 Belt in 15,493.94
+7 Top Roller Mounting Bracket in 13,894.73
+8 UC 21591.530 Bearing in 11,469.55
+9 UC 215 Bearing in 11,250.58
+10 UC 212 Bearing – M in 10,825.58
+11 UC 212 Bearing in 9,996.91
+12 F 215 Y-H in 7,745.36
+13 T 215-H in 7,516.75
+14 Pipe for Roller in 7,010.02
+15 Pipe for Roller – duplicate drawing layer in 7,010.02
+16 PLT-1 in 6,800.00
+17 Foundation Plate in 6,448.00
+18 Locking Flat in 5,880.00
+19 Drive Shaft in 5,504.18
+20 F 212 Y-H – Mirror in 5,251.23
+21 F 212 Y-H – Mirror 3 in 5,251.23
+22 Non-Drive Shaft in 4,672.90
+23 BC-6 Coupling in 4,607.37
+24 Flat in 672.93
+25 PLT-2 in 3,280.00
+26 End Plate for PI in 3,168.00
+27 F 212 Y-H in 3,167.24
+28 Block-2 in 3,374.00
+29 Restraint Plate in 4,487.30
+30 Res. Bracket Clamp in 4,496.80
+31 Leg Channel in 4,291.44
+32 Block-1 in 2,645.66
+33 Lifting Hook in 2,400.00
+34 Main Plate in 2,188.11
+35 M-12 Bolt in 1,978.27
+36 Bush in 1,724.65
+37 Bush-1 in 1,545.61
+38 1/8–27 NPT in 1,505.90
+39 End Flat in 1,286.21
+40 Adjuster Bolt Mount in 1,129.60
+41 End Flat Locking in 1,041.70
+42 M-16 × 50 L Bolt in 1,032.40
+43 Bush for Bolt in 960.00
+44 Key for Bush in 584.00
+45 Key for Bush-1 in 584.00
+46 M-16 Nut in 626.74
+47 M-12 Nut in 632.65
+48 PLT-3 in 2,520.00
+49 Bottom Channel A in 64.00
+50 Terminal Box in 20.00
+51 60-110-65.1-27-U in 711.33
+52 Block-3 in 500.00
+53 Block-4 in 924.00
+54 2024_09_18_11_17 in 33,514.43
+55 General / Layer-0 geometry in 40,697.71
+56 75-130-77.8-30-U — Not separately reported
+57 SVR Data Design geometry in 3,987.04
+Important: The layer-level length values above are CAD geometry lengths, not necessarily purchasable material lengths. A single layer can contain multiple line/curve entities, construction geometry, repeated views or components. They should therefore not be interpreted as “57 pieces” or as raw steel procurement lengths without component-level detail extraction.
+3. BOM — Component / Hardware Identification
+The following is a more procurement-oriented grouping of the same drawing information.
+A. Magnetic / Main Assembly
+Item Material / Component Unit CAD Quantity Procurement Interpretation
+A1 Magnet Body in 19,490.00 Main magnetic assembly; confirm GA/detail drawing
+A2 Main Plate in 2,188.11 Fabricated plate
+A3 Foundation Plate in 6,448.00 Fabricated support/plate
+A4 Restraint Plate in 4,487.30 Fabricated plate
+A5 End Plate for PI in 3,168.00 Fabricated end component
+A6 PLT-1 in 6,800.00 Plate fabrication
+A7 PLT-2 in 3,280.00 Plate fabrication
+A8 PLT-3 in 2,520.00 Plate fabrication
+A9 Flat in 672.93 Flat-section material
+A10 End Flat in 1,286.21 Flat-section material
+A11 End Flat Locking in 1,041.70 Locking flat
+A12 Locking Flat in 5,880.00 Locking/support member
+B. Structural / Fabricated Sections
+Item Component Unit CAD Quantity
+B1 Side Channel – 1 in 16,478.99
+B2 Side Channel – 2 in 19,236.07
+B3 Distance Channel in 17,577.23
+B4 Leg Channel in 4,291.44
+B5 Bottom Channel A in 64.00
+B6 Angle Cleat in 18,563.91
+B7 Top Roller Mounting Bracket in 13,894.73
+B8 Restraint Bracket in 4,496.80
+C. Roller / Drive System
+Item Component Unit CAD Quantity
+C1 Drive Shaft in 5,504.18
+C2 Non-Drive Shaft in 4,672.90
+C3 Idler Roller Assembly in 26,321.99
+C4 Pipe for Roller in 7,010.02
+C5 Pipe for Roller – second layer in 7,010.02
+C6 Rubber for Roller in 7,840.00
+C7 Belt in 15,493.94
+C8 BC-6 Coupling in 4,607.37
+C9 Lifting Hook in 2,400.00
+D. Bearings / Bushes / Keys
+Item Component Unit CAD Quantity
+D1 UC 212 Bearing in 9,996.91
+D2 UC 212 Bearing – M in 10,825.58
+D3 UC 215 Bearing in 11,250.58
+D4 UC 21591.530 Bearing in 11,469.55
+D5 UCF Bearing Mounting in 1,887.08
+D6 Bush in 1,724.65
+D7 Bush-1 in 1,545.61
+D8 Bush for Bolt in 960.00
+D9 Key for Bush in 584.00
+D10 Key for Bush-1 in 584.00
+E. Fasteners
+Item Component Unit CAD Quantity
+E1 M-12 Bolt in 1,978.27
+E2 M-12 Nut in 632.65
+E3 M-16 × 50 L Bolt in 1,032.40
+E4 M-16 Nut in 626.74
+E5 Adjuster Bolt Mount in 1,129.60
+E6 1/8–27 NPT in 1,505.90
+4. Block / Insert Schedule
+The CAD extraction identified the following block/INSERT objects. These are kept separately because a block count is fundamentally different from a layer-length quantity.
+Block / Insert Count Drawing Layer
+A$C03df977d 1 0
+A$C2ce33073 1 0
+A$Ca95a334a 2 0
+A$Cc8e3d516 1 0
+A$Ccbd1f207 1 0
+A$Cecce2f73 1 0
+A4-H 1 0
+AA 2 0
+ADSHGSF 1 0
+D SHACKLE 2 0
+FSADJHBNASDAS 2 0
+KGF 2 0
+Total identified block instances: 17
+Because several block names are anonymous AutoCAD-generated names, their actual physical description cannot be reliably inferred from the block name alone. They should be resolved against the block definitions/detail views before converting them into procurement quantities.
+5. Drawing Layer Register
+For traceability, the source drawing contains these 60 layers:
+0, 1_8-27_NPT, 2024_09_18_11_17, 60-110-65.1-27-U, 75-130-77.8-30-U, ADJUSTER_BOLT_MT, ANGLE_CLEAT, BC-6_COUPLING_-_, BELT_, BLOCK_-_1_, BLOCK_-_2, BLOCK_-_3, BLOCK_-_4, BOTTOM_CHANNEL_A, BUSH, BUSH_1, BUSH_FOR_BOLT, CLAMP_RES.BRCKT, DISTANCE_CHANNEL, DRIVE_SHAFT, END_FLAT, END_FLAT_LOCKING, END_PLATE_FOR_PI, FDN_PLATE, FLAT, F_212_Y-H, F_212_Y-H_MIR, F_212_Y-H_MIR3, F_215_Y-H, IDELER_ROLLER_AS, KEY_FOR_BUSH, KEY_FOR_BUSH_1, LEG_CHANNEL, LIFTING_HOOK, LOCKING_FLAT, M-12_BOLT_, M-12_NUT, M-16_X_50_L_BOLT, M-16_X_NUT, MAGNET_BODY, MAIN_PLATE, NON-DRIVE_SHAFT, PIPE_FOR_ROLLER, PIPE_FOR_ROLLER_, PLT_-1_, PLT_-2, PLT_-3, RES.PLATE, RUBBER_FOR_ROLLE, SIDE_CHANNEL__-1, SIDE_CHANNEL__-2, TERMINAL_BOX, TOP_ROLLER_MTG_B, T_215-H, UCF_BEARING_MTG_, UC_212-BEARING, UC_212-BEARING_M, UC_215-BEARING, UC_21591.530-B, __SVR-DATA_DESIG.
+6. Areas
+Layer Area
+0 4,946,807.50 sq in
+FLAT 4,615.48 sq in
+These are CAD closed-area measurements, not automatically steel surface areas for procurement. The large Layer-0 area in particular should not be interpreted as a single fabricated plate.
+7. BOQ Commercial Columns
+The commercial BOQ should ultimately follow this structure:
+Item Description Unit Qty Rate Amount
+1 Mechanical fabricated components — As detailed above
+2 Bearings and bearing housings — As detailed above
+3 Shafts and roller components — As detailed above
+4 Belt / rubber components — As detailed above
+5 Fasteners and hardware — As detailed above
+6 Welding / fabrication LS To be established from fabrication drawings
+7 Machining LS To be established from component drawings
+8 Surface preparation / painting LS To be established from specification
+9 Assembly / erection LS To be established from scope
+Important quantity-control note
+The supplied quantities are CAD geometry measurements. They are authoritative for this take-off as instructed, but they are not equivalent to final procurement counts.
+For example, UC_212-BEARING = 9,996.91 in represents accumulated CAD geometry on that layer; it does not mean 9,996.91 inches of bearing should be purchased. Likewise, the 7,010.02-in PIPE_FOR_ROLLER layer represents geometry and must be decomposed into actual roller/pipe pieces before procurement.
+Final procurement BOM should therefore be generated from the individual component/detail drawings, with piece count, dimensions, material grade, thickness/diameter, weight and finish added.
+Scope exclusion
+CCTV / security BOQ: Not applicable to this drawing. There is no defensible basis in the supplied GA for deriving cameras, Cat6, fibre, conduits, PoE switches, gates, perimeter lengths or security-device locations. Those would require the actual site/civil GA or security layout.

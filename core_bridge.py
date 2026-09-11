@@ -126,6 +126,7 @@ from core import pathfinder as pathfinder  # noqa: E402
 from core import files as files            # noqa: E402
 from core import voice as voice            # noqa: E402
 from core import mailer as mailer          # noqa: E402
+from core import skills as skills          # noqa: E402
 
 
 def resolved_agents(chosen: dict) -> list[tuple[str, str]]:
