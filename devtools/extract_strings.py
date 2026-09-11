@@ -59,7 +59,9 @@ OUT = os.path.join(ROOT, "lang", "_catalogue.json")
 # engine — it is a submodule the CLI also uses, and translating the CLI is not
 # this app's business. The few engine strings that surface in the GUI arrive
 # through the status sink and are listed by hand in EXTRA below.
-SKIP_DIRS = {".git", ".venv", "build", "dist", "__pycache__", "prism_terminal",
+# "venv" as well as ".venv": the working interpreter on the owner's machine lives
+# in prism_gui/venv, and walking it catalogued thousands of PySide6 strings.
+SKIP_DIRS = {".git", ".venv", "venv", "build", "dist", "__pycache__", "prism_terminal",
              "tests", "packaging", "devtools", "assets", "docs", "lang",
              # Claude Code keeps temporary git worktrees here. A worktree is a
              # second checkout of this same repo, so walking it lists every
