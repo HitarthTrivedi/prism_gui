@@ -49,8 +49,16 @@ class TheRecreation(unittest.TestCase):
         self.assertEqual(len(spec["scenes"]), 10)
         rep = continuity.report(spec)
         self.assertEqual(rep["errors"], [])
-        self.assertEqual(rep["warnings"], [])
-        self.assertEqual(len(rep["bridges"]), 9)
+        # the light scene carries no key on purpose: its subject is the
+        # sweep itself, which must stay off-frame until the cut — so the
+        # spine reports exactly that gap and nothing else
+        # ...and the hub scene carries the sphere under its own key ("hub"),
+        # so the "signal" thread pauses there (index 3) and resumes with
+        # the cards
+        # the hub beat drops the "signal" thread (3, 4); the ring, not a held
+        # copy of the knowledge card, carries it into the orb
+        self.assertEqual(sorted(w["scene_index"] for w in rep["warnings"]), [3, 4])
+        self.assertEqual(len(rep["bridges"]), 7)
         resolved = resolve_motion_spec(spec)
         self.assertTrue(camera.is_continuous(resolved["camera"]["tracks"]))
         self.assertTrue(all(s["transition_in"] == "morph" for s in resolved["scenes"][1:]))
@@ -58,8 +66,8 @@ class TheRecreation(unittest.TestCase):
     def test_it_scales_with_the_frame(self):
         small = validate_motion_spec(inspo_fixture(360, 640, fps=12))
         orb = [n for n in small["scenes"][8]["nodes"] if n["id"] == "orb"][0]
-        self.assertAlmostEqual(orb["radius"], 170 / 3, places=1)
-        self.assertEqual(orb["position"], [166.0, 205.3])
+        self.assertAlmostEqual(orb["radius"], 160 / 3, places=1)
+        self.assertEqual(orb["position"], [180.0, 282.7])
 
 
 class ContentTimesAreSceneLocal(unittest.TestCase):
@@ -176,3 +184,27 @@ class OnTheFrame(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheStructureSectorHasAReachableCeiling(unittest.TestCase):
+    """Raw edge correlation punished a four-pixel shift by half, so no
+    render could ever reach 0.85 there. The structure sector is now the
+    correlation of coarse edge-density maps: a shifted copy keeps most of
+    its score, an unrelated frame does not, and the raw value is kept."""
+
+    def test_a_shifted_copy_keeps_its_structure_and_a_different_frame_does_not(self):
+        from PIL import Image, ImageChops, ImageDraw
+        from core.motion import benchmark
+        img = Image.new("RGB", (384, 848), (8, 8, 12))
+        d = ImageDraw.Draw(img)
+        for i in range(0, 380, 30):
+            d.rectangle([i, 180, i + 20, 200], fill=(120, 140, 220))
+        d.rounded_rectangle([40, 420, 300, 500], radius=30, fill=(240, 240, 250))
+        shifted = ImageChops.offset(img, 4, 3)
+        same = benchmark.frame_metrics(img, shifted)
+        self.assertGreater(same["structure"], 0.8, same)
+        self.assertLess(same["structure_raw"], same["structure"])
+        other = Image.new("RGB", (384, 848), (8, 8, 12))
+        ImageDraw.Draw(other).ellipse([100, 600, 300, 800], outline=(200, 200, 200), width=3)
+        diff = benchmark.frame_metrics(img, other)
+        self.assertLess(diff["structure"], 0.3, diff)

@@ -102,6 +102,29 @@ class StaticChecks(unittest.TestCase):
         spec.pop("_motion_profile")
         self.assertEqual(review.cold_cut_faults(studio.resolved_for(spec, [])), [])
 
+    def test_the_layout_pass_reads_scene_local_times(self):
+        """A later scene's entrance at 0.3 s is a 0.3 s entrance, not one
+        at global 2.8 s that 'never appears' — the review must run
+        inspect() on the scene-local spec, never the resolved one."""
+        from unittest import mock
+        spec = materials_fixture(360, 640, fps=12)
+        seen = []
+        with mock.patch.object(review._inspect, "inspect",
+                               side_effect=lambda one: seen.append(one["scenes"][0]) or []), \
+                mock.patch.object(review, "extract_frame", side_effect=lambda mp4, t, out, ff=None, fps=None: out), \
+                mock.patch.object(review, "_sheet", return_value="sheet.png"), \
+                mock.patch.object(review, "pop_faults", return_value=[]), \
+                mock.patch.object(review, "export_gate", return_value=[]), \
+                mock.patch.object(review, "measured_text_boxes", return_value={}), \
+                mock.patch.object(review, "_ffmpeg", return_value="ffmpeg"):
+            import tempfile
+            with tempfile.TemporaryDirectory() as folder:
+                review.review_sheet(spec, folder, mp4="x.mp4")
+        enter = seen[1]["nodes"][1]["children"][0]["children"][1]["animation"]["enter"]["time"]
+        self.assertEqual(enter, 0.3)
+        # scene-local: the schema's default start of 0, never a global start
+        self.assertEqual(float(seen[1].get("start", 0.0)), 0.0)
+
     def test_review_frames_cover_every_scene_and_handoff(self):
         frames = review.frame_times(_resolved())
         self.assertEqual(len([f for f in frames if f["kind"] == "scene"]), 12)

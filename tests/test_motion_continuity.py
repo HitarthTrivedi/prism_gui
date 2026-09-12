@@ -367,5 +367,227 @@ class ContinuityRepairTests(unittest.TestCase):
         self.assertEqual(len(prompts), 2)
 
 
+class AFieldIsBridgedToWhereItStarts(unittest.TestCase):
+    def test_a_field_that_streams_away_is_bridged_to_its_first_layout(self):
+        """The composed reel's second scene keeps the band and then
+        streams it into a column; the bridge from the first scene's band
+        must land on the band, not slide the whole field in from the
+        column's centre."""
+        band = {"kind": "band", "y": 800, "rows": 6, "cell": 30, "x0": 10, "x1": 1070}
+        column = {"kind": "column", "x": 800, "spread": 200, "y0": 950, "y1": 1700}
+        from core.motion.schema import validate_motion_spec
+        spec = validate_motion_spec({
+            "project": {"width": 1080, "height": 1920, "fps": 30, "duration": 4.0},
+            "scenes": [
+                {"id": "a", "duration": 2.0, "nodes": [
+                    {"id": "f0", "type": "particle_field", "position": [0, 0], "count": 60,
+                     "continuity_key": "signal", "phases": [{"at": 0.0, "layout": band}]}]},
+                {"id": "b", "duration": 2.0, "nodes": [
+                    {"id": "f1", "type": "particle_field", "position": [0, 0], "count": 60,
+                     "continuity_key": "signal",
+                     "phases": [{"at": 0.0, "layout": band},
+                                {"at": 1.2, "layout": column, "duration": 0.5}]}]},
+            ]})
+        rep = continuity.report(spec)
+        self.assertEqual(rep["errors"], [])
+        bridge = [b for b in rep["bridges"] if b["in_node"] == "f1"][0]
+        self.assertAlmostEqual(bridge["dx"], 0.0, places=3)
+        self.assertAlmostEqual(bridge["dy"], 0.0, places=3)
+
+
+class TextThatHasLeftIsNotClipped(unittest.TestCase):
+    """The settled camera cannot clip text whose node has already exited:
+    the composed reel's bubbles finish leaving across a cut, off the frame."""
+    def _spec(self, exit_block):
+        from core.motion.schema import validate_motion_spec
+        node = {"id": "leaving", "type": "shape_rect", "position": [-300, 900], "width": 700, "height": 200,
+                "fill": "#FFFFFF", "children": [{"id": "leaving_t", "type": "text", "position": [0, 0],
+                                                 "content": "still leaving the frame", "font_size": 52}]}
+        if exit_block:
+            node["animation"] = {"exit": exit_block}
+        return validate_motion_spec({"project": {"width": 1080, "height": 1920, "fps": 30, "duration": 3.0},
+                                     "scenes": [{"id": "a", "duration": 3.0, "shot": {"intent": "hold"},
+                                                 "nodes": [node]}]})
+
+    def test_text_off_frame_is_an_error_unless_it_has_left(self):
+        kept = continuity.report(self._spec(None))["errors"]
+        self.assertTrue(any("leaving_t" in e["message"] for e in kept), kept)
+        gone = continuity.report(self._spec({"time": 0.0, "duration": 0.5, "tweens": [
+            {"channel": "x", "from": 0, "to": -900}]}))["errors"]
+        self.assertFalse(any("leaving_t" in e["message"] for e in gone), gone)
+        late = continuity.report(self._spec({"time": 2.6, "duration": 0.4, "tweens": [
+            {"channel": "opacity", "from": 1, "to": 0}]}))["errors"]
+        self.assertTrue(any("leaving_t" in e["message"] for e in late), late)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheStoryContract(unittest.TestCase):
+    """The Alphakore run (10 Sep 2026) had seven scenes and no story: the
+    copy stage's script never reached the motion writer, turn one answered
+    whole scenes instead of a storyboard, and every scene prompt said
+    'carry the argument forward' with no argument. The contract: the
+    script is the story, each row carries its caption, a scene must carry
+    its caption, and a scenes-instead-of-storyboard reply is asked again."""
+
+    SCRIPT = "SCENE 01\nBUILT FOR THE NEXT\nGENERATION OF AI\nSCENE 02\nMORE COMPUTE. LESS FRICTION."
+
+    def test_the_storyboard_turn_carries_the_script_and_asks_for_captions(self):
+        from core.motion.generate import storyboard_instructions
+        prompt = storyboard_instructions("a reel for Alphakore", skeleton="cinematic_glass",
+                                         script=self.SCRIPT)
+        self.assertIn("THE SCRIPT", prompt)
+        self.assertIn("MORE COMPUTE. LESS FRICTION.", prompt)
+        self.assertIn('"caption"', prompt)
+        self.assertIn('"subject"', prompt)
+        self.assertNotIn("THE SCRIPT", storyboard_instructions("x", skeleton="cinematic_glass"))
+
+    def test_a_scene_prompt_states_its_caption_and_subject(self):
+        prompt = scene_instructions(1, 3, {"job": "prove it", "seconds": 3,
+                                           "caption": "MORE COMPUTE. LESS FRICTION.",
+                                           "subject": "the band, now a column"},
+                                    skeleton="cinematic_glass")
+        self.assertIn('ITS CAPTION: "MORE COMPUTE. LESS FRICTION."', prompt)
+        self.assertIn("ITS SUBJECT: the band, now a column", prompt)
+
+    def test_caption_faults_compare_words_not_punctuation(self):
+        from core.motion.generate import caption_faults
+        row = {"caption": "MORE COMPUTE.\nLESS FRICTION."}
+        ok = {"nodes": [{"type": "glass_panel", "children": [
+            {"type": "text", "content": "More compute,\nless friction"}]}]}
+        self.assertEqual(caption_faults(ok, row), [])
+        wrong = {"nodes": [{"type": "text", "content": "SYSTEM / SIGNAL / SCALE"}]}
+        self.assertIn("no text node carries it", caption_faults(wrong, row)[0])
+        partial = {"nodes": [{"type": "text", "content": "More compute"}]}
+        self.assertIn("only partly matches", caption_faults(partial, row)[0])
+        self.assertEqual(caption_faults(wrong, {"job": "x"}), [])
+
+    def test_scenes_instead_of_a_storyboard_are_asked_again(self):
+        prompts = []
+        replies = iter([
+            # the real storyboard, on the re-ask
+            '{"project":{"duration":4,"fps":30},"storyboard":[{"seconds":2,"job":"open",'
+            '"caption":"BUILT FOR AI"},{"seconds":2,"job":"close","caption":"MOVE FAST"}]}',
+            '{"nodes":[{"id":"h1","type":"text","content":"BUILT FOR AI","position":[540,900],'
+            '"continuity_key":"k","layer":"foreground"}]}',
+            '{"nodes":[{"id":"h2","type":"text","content":"MOVE FAST","position":[540,900],'
+            '"continuity_key":"k","layer":"foreground"}]}',
+        ])
+
+        def ask(prompt, expect):
+            prompts.append(prompt)
+            return next(replies, "")
+
+        whole = ('{"project":{"duration":4,"fps":30},"scenes":[{"duration":2,"nodes":[]},'
+                 '{"duration":2,"nodes":[]}]}')
+        spec = build_spec(whole, ask, skeleton="cinematic_glass")
+        self.assertIn("send the STORYBOARD only", prompts[0])
+        self.assertIn('ITS CAPTION: "BUILT FOR AI"', prompts[1])
+        self.assertEqual(spec["scenes"][1]["nodes"][0]["content"], "MOVE FAST")
+
+    def test_a_scene_that_drops_its_caption_is_sent_back(self):
+        prompts = []
+        replies = iter([
+            '{"nodes":[{"id":"h1","type":"text","content":"SOMETHING ELSE","position":[540,900],'
+            '"continuity_key":"k","layer":"foreground"}]}',
+            # the correction carries the caption
+            '{"nodes":[{"id":"h1","type":"text","content":"BUILT FOR AI","position":[540,900],'
+            '"continuity_key":"k","layer":"foreground"}]}',
+        ])
+
+        def ask(prompt, expect):
+            prompts.append(prompt)
+            return next(replies, "")
+
+        first = ('{"project":{"duration":2,"fps":30},"storyboard":[{"seconds":2,"job":"open",'
+                 '"caption":"BUILT FOR AI"}]}')
+        spec = build_spec(first, ask, skeleton="cinematic_glass", check=lambda s: [])
+        self.assertTrue(any("caption is" in p for p in prompts), prompts)
+        self.assertEqual(spec["scenes"][0]["nodes"][0]["content"], "BUILT FOR AI")
+
+
+class TheScriptReachesTheMotionWriter(unittest.TestCase):
+    def test_the_first_turn_is_rebuilt_with_the_copy_stages_script(self):
+        from core import automation
+        responses = {"brains": ["a plan"], "content": ["SCENE 01\nBUILT FOR THE NEXT\nGENERATION OF AI"]}
+        prompt = automation.motion_turn_one("make a reel for Alphakore", "cinematic_glass", responses)
+        self.assertIn("THE SCRIPT", prompt)
+        self.assertIn("GENERATION OF AI", prompt)
+        self.assertIn("make a reel for Alphakore", prompt)
+        self.assertEqual(automation.motion_turn_one("x", "cinematic_glass", {"brains": ["plan"]}), "")
+        self.assertEqual(automation.motion_script({"content": ["  "]}), "")
+
+
+class TheSubjectMustChangeState(unittest.TestCase):
+    def _spec(self, poses):
+        return validate_motion_spec({
+            "project": {"duration": 2 * len(poses), "fps": 30},
+            "_motion_profile": "cinematic_glass",
+            "scenes": [{"id": f"s{i}", "duration": 2, "nodes": [
+                {"id": f"logo_{i}", "type": "image", "src": "asset:logo", "position": list(p),
+                 "width": 300, "height": 200, "continuity_key": "mark"}]}
+                for i, p in enumerate(poses)]})
+
+    def test_the_same_pose_for_three_scenes_is_a_warning(self):
+        rep = continuity.report(self._spec([(540, 900), (540, 900), (540, 900), (540, 900)]))
+        sat = [w for w in rep["warnings"] if "never changes state" in w["message"]]
+        self.assertEqual(len(sat), 1, rep["warnings"])
+        self.assertEqual(sat[0]["scene_index"], 2)
+
+    def test_a_subject_that_moves_or_rescales_is_not(self):
+        rep = continuity.report(self._spec([(540, 900), (540, 900), (300, 600), (300, 600)]))
+        self.assertFalse(any("never changes state" in w["message"] for w in rep["warnings"]))
+        spec = self._spec([(540, 900), (540, 900), (540, 900)])
+        spec["scenes"][2]["nodes"][0]["scale"] = [1.4, 1.4]
+        rep = continuity.report(spec)
+        self.assertFalse(any("never changes state" in w["message"] for w in rep["warnings"]))
+
+
+class AFieldHandsOffFromWhereItsTilesAre(unittest.TestCase):
+    def test_the_pose_is_the_last_visible_layouts_centre(self):
+        field = {"id": "f", "type": "particle_field", "position": [0, 0], "continuity_key": "k",
+                 "phases": [{"at": 0, "layout": {"kind": "scatter", "box": [0, 0, 1000, 400]}},
+                            {"at": 1, "layout": {"kind": "band", "y": 855, "x0": 10, "x1": 1070}},
+                            {"at": 2, "layout": {"kind": "hidden"}}]}
+        rep = continuity.report(validate_motion_spec({"project": {"duration": 2, "fps": 30},
+                                                      "scenes": [{"id": "a", "duration": 2, "nodes": [field]}]}))
+        pose = rep["threads"]["k"][0]["pose"]
+        self.assertEqual((pose["x"], pose["y"]), (540.0, 855.0))
+
+
+class RepairHasASecondGuidedRound(unittest.TestCase):
+    FIRST = ('{"project":{"duration":2,"fps":30},"storyboard":[{"seconds":2,"job":"open",'
+             '"caption":"BUILT FOR AI"}]}')
+
+    def test_the_second_round_names_the_change_and_is_kept_when_cleaner(self):
+        from core.motion.generate import repair_prompt
+        prompts = []
+        still = ('{"nodes":[{"id":"h","type":"text","content":"BUILT FOR AI","position":[540,900],'
+                 '"layer":"foreground","continuity_key":"k"}]}')
+        moving = ('{"nodes":[{"id":"h","type":"text","content":"BUILT FOR AI","position":[540,900],'
+                  '"layer":"foreground","continuity_key":"k","shot":1,'
+                  '"animation":{"enter":{"time":0,"duration":0.4,"tweens":[{"channel":"opacity","from":0,"to":1}]},'
+                  '"exit":{"time":1.4,"duration":0.4,"tweens":[{"channel":"opacity","from":1,"to":0}]}}}],'
+                  '"shot":{"intent":"hold"}}')
+        replies = iter([still, still, moving])
+
+        def ask(prompt, expect):
+            prompts.append(prompt)
+            return next(replies, "")
+
+        def check(one):
+            node = one["scenes"][0]["nodes"][0]
+            return [] if node.get("animation", {}).get("exit") else [
+                'no "foreground" layer node has a real "enter" paired with either an "exit" '
+                'or "secondary_motion" — it appears once and then sits completely still until the cut']
+
+        spec = build_spec(self.FIRST, ask, skeleton="cinematic_glass", check=check)
+        self.assertEqual(len(prompts), 3)
+        self.assertIn("still has these problems", prompts[2])
+        self.assertIn('give the foreground node an "exit" block', prompts[2])
+        self.assertIn("Keep every node that was not named", prompts[2])
+        self.assertIn("exit", spec["scenes"][0]["nodes"][0]["animation"])
+        self.assertIn("→", repair_prompt(0, ['the scene names no "shot" — add one'], 1))
+        self.assertNotIn("→", repair_prompt(0, ['the scene names no "shot" — add one'], 0))

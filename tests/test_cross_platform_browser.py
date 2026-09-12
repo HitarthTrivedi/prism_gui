@@ -923,13 +923,14 @@ class TheLicenceFlagsThatPadlockADemo(unittest.TestCase):
         import mint
         self.mint = mint
 
-    def test_there_is_no_gerber_feature_so_minting_one_fails(self):
+    def test_gerber_is_its_own_key_and_mints(self):
+        # Gerber rode 'boq' until the Plans commit gave it (and STEP) a key
+        # of its own; main_window._open_gerber gates on "gerber" now, so the
+        # brief's `core,gerber` mints instead of failing the name check.
         import plans
-        self.assertNotIn("gerber", plans.FEATURES,
-                         "Gerber is gated on 'boq' — main_window._open_gerber")
-        with self.assertRaises(SystemExit) as caught:
-            self.mint.parse_features("core,gerber")
-        self.assertIn("boq", str(caught.exception))
+        self.assertIn("gerber", plans.FEATURES)
+        self.assertEqual(self.mint.parse_features("core,gerber"),
+                         ["core", "gerber"])
 
     def test_the_brief_s_own_mint_line_is_accepted(self):
         self.assertEqual(
