@@ -1060,13 +1060,15 @@ class TheDownloadButtonPathActuallyFindsTheButton(unittest.TestCase):
         """Page.setDownloadBehavior is a SESSION setting. Left redirected,
         every later download in that browser — including the user's own,
         since Prism keeps the browser open — landed in a temp folder."""
-        source = inspect.getsource(automation._harvest_via_download)
+        # The capture body moved into _capture_download (Round 32), which
+        # _harvest_via_download and NotebookLM's download both call.
+        source = inspect.getsource(automation._capture_download)
         self.assertIn("_restore_downloads", source)
         self.assertIn('"behavior": "default"',
                       inspect.getsource(automation._restore_downloads))
 
     def test_the_newest_download_wins_not_the_alphabetical_one(self):
-        source = inspect.getsource(automation._harvest_via_download)
+        source = inspect.getsource(automation._capture_download)
         self.assertIn("getmtime", source)
         self.assertNotIn("sorted(fresh)[0]", source)
 

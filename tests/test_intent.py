@@ -50,23 +50,17 @@ class TheWordsSurvive(unittest.TestCase):
                      "dont make this reel look AI ish", "sophisticated template"):
             self.assertIn(fact, block, f"lost: {fact}")
 
-    def test_it_is_labelled_as_the_human_speaking(self):
-        """An unlabelled paragraph at the top of a prompt reads as one more
-        instruction from Prism. It has to be obvious whose words these are."""
-        self.assertIn("in their own words", AU._intent_block(CONSIZ))
-
-    def test_the_brief_is_told_it_loses_a_conflict(self):
-        """The brief is a summary and summaries drop things. Without this the
-        model has two descriptions and no way to rank them."""
-        block = AU._intent_block(CONSIZ).lower()
-        self.assertIn("the words above win", block)
-        self.assertIn("summar", block)
-
-    def test_specific_facts_are_named_as_must_survive(self):
-        """Generic "prefer the original" is too weak — the failure was a model
-        happily writing about a mouse without ever mentioning the button."""
-        block = AU._intent_block(CONSIZ).lower()
-        self.assertIn("must survive", block)
+    def test_the_words_come_bare(self):
+        """Round 31 (owner, 11 Sep 2026): the same request typed to Claude by
+        hand as one line got the BOQ in a fraction of the tokens; Prism's
+        message, with its banner and its paragraph on why the words above
+        win, exhausted the chat. The tools need the words, not a label
+        saying whose they are or a rule on how to rank them."""
+        self.assertEqual(AU._intent_block(CONSIZ), CONSIZ + "\n\n")
+        low = AU._intent_block(CONSIZ).lower()
+        for gone in ("in their own words", "the words above win",
+                     "engineered summary", "must survive", "---"):
+            self.assertNotIn(gone, low)
 
     def test_an_empty_request_adds_nothing(self):
         """A stage with no user text behind it — an internal retry — must not

@@ -319,8 +319,10 @@ class PrismsOwnEchoIsRecognised(unittest.TestCase):
 
     def test_the_body_of_the_message_is_recognised(self):
         self.assertTrue(AU._is_prompt_echo(
-            "WHAT THE PERSON ACTUALLY ASKED FOR — in their own words:\n---\nx\n---\n"
-            "Below is Prism's engineered summary of that request."))
+            "make a reel about EV charging\n\nFrom the earlier step (Look "
+            "things up):\n- one\n\nFor this step: write the script.\n\n"
+            "At the end add a section headed 'HANDOFF FOR CLAUDE': at most "
+            "4 lines."))
 
 
 class ThePlannerWritesBriefsNotSpecifications(unittest.TestCase):
