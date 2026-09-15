@@ -10,6 +10,47 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 37 — Google Gemini joins Visual & Image, as ChatGPT's real fallback
+
+The owner's ask (15 Sep 2026), tested live before it shipped: add a
+Google image tool, and make it the next fallback after ChatGPT — which
+on this account had already hit its own free-tier image limit twice in
+one afternoon, both times seen in this session's own real end-to-end
+runs.
+
+**Read live, not guessed at.** Attached Playwright to Prism's own
+signed-in Chrome (the same technique used for NotebookLM's registry
+entry) and opened gemini.google.com/app for real. A plain prompt —
+"Generate an image: a stainless steel shoe rack product photo, industrial
+style, teal accent lighting, vertical 9:16 composition" — produced a
+clean, correctly-composed 572×1024 picture in about 15 seconds, settled,
+with a working "Download full size image" control once it finished.
+Google's current model behind this is Nano Banana (Gemini 2.5 Flash
+Image). No custom selectors were needed: the composer is a plain
+`contenteditable` div the generic textarea selector already matches, and
+the picture is a plain large `<img>` the generic image harvest
+(`_harvest_images`) already finds by its shape — the same reason
+Leonardo.ai, Adobe Firefly and Midjourney needed no special handling
+either.
+
+**Registered as a maker** (`core/agents.py`): `AGENT_REGISTRY["Google
+Gemini"]`, `_MAKES["Google Gemini"] = "generated images"`,
+`_PROFILES["Google Gemini"] = {"produces": ("image",), …}` — free, and
+the fastest tool in the category.
+
+**Positioned to actually be reached, not just added.** `alternatives_for()`
+offers the first two untried tools in `CATEGORIES["visual"]["agents"]`'s
+own order when one fails — so appended at the end it would never come up
+under the category's 2-tool cap. Placed second, right after Canva, it is
+now genuinely one of the two alternatives offered whenever ChatGPT is the
+tool that failed, which is the whole point of adding it.
+
+Tests: `tests/test_failover.py`'s `GoogleGeminiIsChatGPTsRealFallback`
+(4, new) — offered when ChatGPT fails, a maker of images, not a local
+renderer, present in both the category and the registry.
+
+---
+
 # Round 36 — "Email automation" is named "Email inquiry automation"
 
 The owner's ask, plain: rename it. "Email automation" was the add-on's

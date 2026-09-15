@@ -156,6 +156,39 @@ class PickingAnAlternative(unittest.TestCase):
                 self.assertIn(name, A.AGENT_REGISTRY, f"{stage} -> {name}")
 
 
+class GoogleGeminiIsChatGPTsRealFallback(unittest.TestCase):
+    """The owner's ask (15 Sep 2026): add a Google image tool to the visual
+    category, positioned so it is actually the next thing tried when
+    ChatGPT fails -- which on this account had already happened twice in
+    one afternoon (its free-tier image limit). Read live against
+    gemini.google.com (Nano Banana / Gemini 2.5 Flash Image) by attaching
+    Playwright to Prism's own signed-in Chrome: a plain image prompt in
+    the chat produced a clean, correctly-sized picture in about 15
+    seconds, with a working download control once it settled -- no
+    custom selectors needed, the generic composer and image-harvest logic
+    already handle its DOM shape.
+    """
+
+    def test_it_is_offered_when_chatgpt_fails(self):
+        self.assertIn("Google Gemini",
+                      A.alternatives_for("visual", ["ChatGPT"], {"agents": {}}))
+
+    def test_it_is_a_maker_of_images(self):
+        entry = A.AGENT_REGISTRY["Google Gemini"]
+        self.assertTrue(A.is_maker(entry))
+        self.assertEqual(entry["makes"], "generated images")
+        self.assertEqual(A.profile_for("Google Gemini")["produces"], ("image",))
+
+    def test_it_is_not_a_local_renderer(self):
+        """It is a real web tool, not one of Prism's own renderers -- the
+        same thing that rules Prism Reel/Studio/Motion out as alternatives."""
+        self.assertFalse(A.AGENT_REGISTRY["Google Gemini"].get("local"))
+
+    def test_it_stays_in_the_visual_category_and_the_registry(self):
+        self.assertIn("Google Gemini", A.CATEGORIES["visual"]["agents"])
+        self.assertIn("Google Gemini", A.AGENT_REGISTRY)
+
+
 # ── 3. the retry pass ────────────────────────────────────────────────────────
 
 class TheRetryPass(unittest.TestCase):
