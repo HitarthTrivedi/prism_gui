@@ -11,7 +11,7 @@ Everything here is sorted into four buckets:
 | **MONEY** | Code can't fix it. It needs a paid plan, or an account somewhere. |
 | **NEVER** | Nobody can fix it. Plan around it and be honest with customers. |
 
-Last reviewed against the working tree with 223 passing tests.
+Last reviewed against the working tree on 16 Sep 2026.
 
 ---
 
@@ -311,6 +311,66 @@ Prism drops to a plain keyword search instead.
 
 Connecting Canva to ChatGPT made every post come back as a flat template.
 Canva is now only used when the request actually asks for something editable.
+
+### 13. A brand-new Mac couldn't start Chrome — pressing Start just failed
+
+**What happened.** A client on a MacBook Air M2 could open Prism, type her
+request, and get a plan — but the moment she pressed *Start*, the run
+failed before Chrome ever opened. Nothing about her Mac was unusual: this
+was the first Mac to run this exact release that wasn't a developer's own
+machine, already set up with its own copy of Python from other work.
+
+**Why, in plain words.** The app Prism ships is built once, on one
+machine, and copied to everyone's computer after that. Part of what gets
+built in is *where to look for the internet's security certificates* —
+the list a computer checks before trusting a website, so it knows a page
+claiming to be Google really is Google. That location is baked in at
+build time, pointing at a folder that only ever existed on the machine
+that built the app. On a brand-new Mac, that folder is not there — so
+every time Prism tried to fetch something securely over the internet, it
+found nothing to check against and gave up, assuming the connection
+wasn't safe.
+
+There is exactly **one** place in the whole app where this happened: the
+moment Prism fetches its own copy of the browser driver for Apple Silicon
+Macs, right before it opens Chrome — which is precisely the step that was
+failing. Everything else Prism does over the internet goes through a
+different piece of code that never had this problem.
+
+**How we know this was the actual cause, not a guess.** We recreated the
+exact situation — a computer with nowhere to find that certificate list —
+and pointed it at the real page Prism downloads the browser driver from.
+It failed with the exact kind of error a "can't verify this is safe"
+problem gives. We then made the one-line fix below and ran the identical
+test again: it worked. Same computer state, same real website, only the
+fix changed.
+
+**What we did.** That one step now carries its own copy of the
+certificate list with it — the same one already packed inside the app for
+other purposes — instead of trusting wherever the build machine happened
+to keep its own. It no longer matters which computer built the app or
+what is or isn't installed on the customer's Mac.
+
+**What still isn't settled — said plainly, not brushed past.** Prism is
+not yet signed with an Apple developer certificate (we don't have one
+yet), so every fresh install still shows macOS's "unknown developer"
+warning, and on newer macOS (15 and up) that warning's dialog has no
+*Open* button — the fix is System Settings → Privacy & Security → *Open
+Anyway*, done within a few minutes of the failed attempt or the option
+disappears. Getting a customer past *that* screen does not automatically
+mean every later step is trusted the same way; we checked and could not
+find anything else it currently blocks, but we also don't have a second
+Apple Silicon Mac to physically confirm that on, so treat it as likely,
+not proven. Anyone bringing on a new Mac customer should still walk them
+through the Open Anyway step by hand rather than assume the app running
+once means everything is clear.
+
+**For a customer already on a broken older release:** the fix above needs
+a new build before it reaches anyone. Until that ships, our own source
+installer (`packaging/Install and Run Prism.command`) sets up Python on
+their machine fresh rather than copying a build from ours, which
+sidesteps this specific bug — a reasonable stand-in for the small number
+of Mac customers today, while the properly signed release catches up.
 
 ---
 

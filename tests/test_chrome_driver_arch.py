@@ -25,6 +25,7 @@ module for the duration of each test.
 from __future__ import annotations
 
 import os
+import ssl
 import struct
 import sys
 import tempfile
@@ -309,6 +310,91 @@ class NoRosettaNoIntelDriver(TheCleanupAndTheRetry):
         aside = [d for d in os.listdir(parent)
                  if d.startswith(os.path.basename(self.cache) + ".intel-")]
         self.assertEqual(len(aside), 1, aside)
+
+
+class TheDriverFetchVerifiesAgainstCertifi(unittest.TestCase):
+    """A client on a fresh Mac (16 Sep 2026): Prism opened, planned, then
+    failed the moment it tried to start Chrome -- the arm64 driver fetch
+    is the one plain-urllib HTTPS call in the whole engine, and a frozen
+    build's OpenSSL has its default certificate PATH compiled in at build
+    time, the machine that ran PyInstaller, never the customer's. Where
+    that path does not exist (SSL_CERT_FILE/DIR pointed at nothing here,
+    the same shape a client Mac's missing build-machine path takes), the
+    plain default context finds nothing to verify against and every
+    HTTPS request fails with "[SSL: CERTIFICATE_VERIFY_FAILED] unable to
+    get local issuer certificate" -- reproduced against the real
+    Chrome-for-Testing feed before this was fixed, not assumed.
+
+    certifi is already bundled into the frozen app (PyInstaller's own
+    hook adds it once anything imports it, and something here does, via
+    requests) -- nothing previously told Python's ssl module to verify
+    against that bundle instead of its own guess. _http_get now builds
+    its SSL context from certifi.where() explicitly, so which machine
+    built the app stops mattering.
+    """
+
+    def test_passes_certifis_bundle_to_the_ssl_context(self):
+        """The one line the whole fix rests on. Checked by what
+        _trusted_ssl_context() actually hands ssl.create_default_context
+        -- not by the trust-store CONTENTS, which would pass even if the
+        cafile argument were silently dropped, the exact shape of bug
+        this exists to catch."""
+        import certifi
+        with mock.patch.object(ssl, "create_default_context") as create:
+            AU._trusted_ssl_context()
+        create.assert_called_once_with(cafile=certifi.where())
+
+    def test_a_context_built_with_no_cafile_has_nothing_to_verify_against(self):
+        """Ad-hoc, outside this suite (this file's own rule is no network):
+        SSL_CERT_FILE/DIR pointed at a path that does not exist -- the
+        same shape a frozen app's build-time-baked-in default takes on a
+        different machine -- made the real Chrome-for-Testing feed refuse
+        with "[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer
+        certificate" through the OLD _http_get, and succeed through this
+        one, on 16 Sep 2026. What is checked here, staying inside the
+        suite's own no-network rule, is the one fact that reproduction
+        depends on: a context asked for with no cafile at all trusts
+        nothing, so the earlier bug was real and not a misreading of a
+        context that would have verified anyway."""
+        bare = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self.assertEqual(bare.cert_store_stats()["x509"], 0)
+
+    def test_uses_certifis_bundle_not_the_bare_default(self):
+        ctx = AU._trusted_ssl_context()
+        import certifi
+        self.assertEqual(ctx.cert_store_stats()["x509"],
+                         ssl.create_default_context(
+                             cafile=certifi.where()).cert_store_stats()["x509"])
+
+    def test_falls_back_to_the_plain_default_if_certifi_is_gone(self):
+        """Can only make a request MORE likely to verify, never less."""
+        with mock.patch.dict("sys.modules", {"certifi": None}):
+            ctx = AU._trusted_ssl_context()
+        self.assertIsInstance(ctx, ssl.SSLContext)
+
+    def test_http_get_passes_a_context_through_to_urlopen(self):
+        calls = []
+
+        class _Resp:
+            def read(self_inner):
+                return b"ok"
+
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None, context=None):
+            calls.append(context)
+            return _Resp()
+
+        # _http_get does `import urllib.request` locally; patching the
+        # module's own attribute by dotted path reaches that same import.
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            self.assertEqual(AU._http_get("https://example.invalid"), b"ok")
+        self.assertEqual(len(calls), 1)
+        self.assertIsInstance(calls[0], ssl.SSLContext)
 
 
 class FetchingTheArm64Driver(unittest.TestCase):

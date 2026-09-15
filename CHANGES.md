@@ -10,6 +10,57 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 38 — a brand-new Mac couldn't start Chrome, and it wasn't the driver
+
+A client's MacBook Air M2: Prism opened, took her request, wrote a plan —
+and failed the moment she pressed Start, before Chrome ever opened. Round
+33's memory of "M2 + Chrome won't start" pointed at the arm64 chromedriver
+work from earlier this month, but that machinery is sound and this was a
+different bug, hers being the first Mac to run this build that wasn't
+already a developer's own machine with its own Python history.
+
+**The actual cause.** A frozen build's Python has its default location for
+internet security certificates baked in at build time — wherever the
+machine that built the app happened to keep its own. On any OTHER Mac
+that folder does not exist, so every plain HTTPS request from the frozen
+app finds nothing to verify a site against and refuses the connection.
+There is exactly one such call in the whole engine:
+`core/automation.py`'s `_http_get`, used for exactly one thing — fetching
+Prism's own Apple Silicon chromedriver, the step that runs right before
+Chrome opens. Every other network call in the app goes through `requests`,
+which already carries its own certificate bundle and never had this
+problem.
+
+**Verified, not assumed.** Reproduced by hand: pointed Python's
+certificate lookup at a path that does not exist (the same shape a
+missing build-machine folder takes) and called the real
+Chrome-for-Testing feed through the old code — it failed with
+`[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer
+certificate`, the exact class of failure a customer's own fresh Mac would
+hit. Same broken environment, same real address, through the fixed code —
+it succeeded.
+
+**The fix.** `_http_get` now builds its own SSL trust from `certifi`'s
+bundled certificate file — already shipped inside the app for other
+reasons, just never pointed at for this one call — instead of trusting
+wherever the build machine's Python happened to keep its own. Which
+computer built the app, or what is or isn't installed on the customer's,
+stops mattering.
+
+**What this does not fix, said plainly.** Prism still isn't signed with
+an Apple developer certificate, so a fresh install still needs the
+"unknown developer" bypass by hand — and on macOS 15+, that dialog has no
+*Open* button; System Settings → Privacy & Security → *Open Anyway* is
+the only path, and it has to happen within a few minutes of the blocked
+attempt. Full write-up, in plain language, in `KNOWN_ISSUES.md` #13 —
+including what we checked and couldn't verify without a second Apple
+Silicon Mac to test on by hand.
+
+Tests: `tests/test_chrome_driver_arch.py`'s
+`TheDriverFetchVerifiesAgainstCertifi` (5, new).
+
+---
+
 # Round 37 — Google Gemini joins Visual & Image, as ChatGPT's real fallback
 
 The owner's ask (15 Sep 2026), tested live before it shipped: add a
