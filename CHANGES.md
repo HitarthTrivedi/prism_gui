@@ -10,6 +10,45 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 35 — a BOQ/BOM from an attached file is a guardrail again, not a second skills module
+
+Round 31's own small "Prism skills" loader was dropped on the 12 Sep pull
+in favour of the far more complete house-standards system a teammate
+landed the same day under the same module name (`core/skills.py`,
+`skills/boq-writeup/`, `skills/bom-parts/`) — the right call, and it stayed
+that way. But the thing the owner had actually asked for was gone with it:
+the owner's report of 11 Sep, that the same BOQ-from-a-drawing request
+typed to Claude by hand got the document in a fraction of the tokens a
+routed Prism run spent, because the routed run also answered with
+Think-it-through and Sum-it-up. The teammate's skills answer a different
+question — how a BOQ is *written* (measurement traceability, IS 1200
+rounding, unit rules) — and are flagged `stages: []`, so they were never
+wired to prune a plan's *stages* in the first place. Nothing there was
+going to fix this.
+
+**Rebuilt as a router guardrail instead of a second skills module**
+(`apply_boq_file_guardrail`, the same deterministic, no-LLM-judgement
+mechanism `apply_make_guardrail` and `apply_studio_guardrail` already use).
+With an attachment present and a BOQ/BOM word in the request, it turns off
+brains, leads, visual, summary, development, presentation, media, audio,
+design and artwork, and turns CONTENT into the one document step —
+kind `file`, briefed with the attached file's name and the requested
+format (default .docx). RESEARCH is left exactly as the planner decided,
+so "and research the company too" in the same breath still gets its
+research. Wired into `route()` right before the skills pass, so a skill is
+only ever offered a stage that is actually going to run — and on the
+owner's exact request the two now compose cleanly: the guardrail prunes to
+research + content, and the teammate's own skills system attaches
+`research-report` and `pdf-document` to those two, unchanged and untouched.
+
+This cannot collide the way Round 31's did: it touches no file under
+`skills/`, and `core/skills.py` is byte-identical to what the teammate
+shipped, verified by diff before and after this change.
+
+Tests: `tests/test_boq_file_guardrail.py` (14, new).
+
+---
+
 # Round 34 — a settling entrance animation is not the same as a broken layout
 
 The accent-colour bug in Round 33 was real and is fixed; the very next
