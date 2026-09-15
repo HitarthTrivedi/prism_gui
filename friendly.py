@@ -151,7 +151,7 @@ _rule(r"rate list or.*cost sheet",
           "Nothing to price from yet",
           "This inquiry needs your rate list or your cost sheet before Prism "
           "can work out a quotation.",
-          ("Open Email automation → Setup → Files.",
+          ("Open Email inquiry automation → Setup → Files.",
            "Add a rate list (a price per item) or a cost sheet (your own "
            "pricing formulas) — either one is enough.",
            "Come back and press Prepare a quotation again.")))

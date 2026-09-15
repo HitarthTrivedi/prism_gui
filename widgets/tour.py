@@ -57,7 +57,7 @@ from widgets import controls as C
 # crash the tour.
 #
 # `_gated` is the rail's dict of licensed add-on rows, so `sidebar._gated
-# [inquiry][0]` is the Email automation row itself — one row, about 34px tall,
+# [inquiry][0]` is the Email inquiry automation row itself — one row, about 34px tall,
 # instead of the 240px-wide rail it sits in.
 STEPS = [
     ("new_task",
@@ -67,7 +67,7 @@ STEPS = [
     ("addons",
      ["sidebar._gated[inquiry][0]", "sidebar._gated[boq][0]", "sidebar"],
      "Jobs you do every day",
-     "Email automation, BOQ and Gerber are ready-made — attach your files "
+     "Email inquiry automation, BOQ and Gerber are ready-made — attach your files "
      "and go, no plan needed."),
     ("home",
      ["home_panel", "sidebar._nav[home]"],
@@ -279,7 +279,7 @@ class TourOverlay(QWidget):
     def _resolve(self, path: str) -> QWidget | None:
         """Walk an attribute path, with `name[key]` for dicts and lists.
 
-        `sidebar._gated[inquiry][0]` is the Email automation row: the rail
+        `sidebar._gated[inquiry][0]` is the Email inquiry automation row: the rail
         keeps its licensed add-ons in a dict of tuples, and pointing at the
         row rather than at the rail is the whole difference between
         highlighting a control and highlighting a quarter of the window.

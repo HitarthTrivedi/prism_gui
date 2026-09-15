@@ -1,7 +1,7 @@
 """The shared vocabulary add-ons use to ask each other for work.
 
 No add-on may import another. But real work crosses them: an order comes in
-through Email automation and somebody has to measure the drawing that came
+through Email inquiry automation and somebody has to measure the drawing that came
 with it.
 
 That used to be done by Inquiry importing BOQ's dialog and constructing it,

@@ -2,7 +2,7 @@
 
 tests/test_mailflow.py holds the engine to its promises for ONE mailbox;
 tests/test_inquiry_ui.py holds the screen to its promises for one. These
-defend what the Email automation umbrella added on top, and each property is
+defend what the Email inquiry automation umbrella added on top, and each property is
 one that would fail silently:
 
   · **Every mailbox keeps its own bookmark.** Two accounts sharing one
@@ -558,7 +558,7 @@ class TheRailStillSellsIt(unittest.TestCase):
         existing key."""
         from widgets.sidebar import ADDONS
         entry = next(e for e in ADDONS if e[0] == "inquiry")
-        self.assertEqual(entry[1], "Email automation")
+        self.assertEqual(entry[1], "Email inquiry automation")
         self.assertEqual(entry[4], "inbox")
 
 

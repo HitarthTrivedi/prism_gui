@@ -10,6 +10,27 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 36 — "Email automation" is named "Email inquiry automation"
+
+The owner's ask, plain: rename it. "Email automation" was the add-on's
+label since it shipped (`addons/inquiry/addon.py`) — read the mailboxes,
+register inquiries, quote, chase. The name never said what it automates,
+and the app also has a separate "Email" add-on (the draft-and-send
+screen), so the two sat one word apart in every list that shows both.
+
+Only the label moved. The add-on's key (`inquiry`) and its licence feature
+(`inbox`) are unchanged, per the same rule the label's own comment already
+stated: "the SKU and the wiring did not move, only the name on the shelf."
+61 occurrences across 20 files — the rail, Home, the working screen's own
+header and dialogs, the setup wizard, the guided tour, the support
+articles, `--features` mint hints, and the golden-string assertions in
+`tests/test_inquiry_screen.py` and `tests/test_email_automation.py`.
+
+`devtools/extract_strings.py` re-run: 7 phrases removed, the same 7 added
+back under the new name — a clean swap, nothing else touched.
+
+---
+
 # Round 35 — a BOQ/BOM from an attached file is a guardrail again, not a second skills module
 
 Round 31's own small "Prism skills" loader was dropped on the 12 Sep pull

@@ -81,7 +81,7 @@ ARG_SLOTS = {
     "nav_button": (0, 3),   # (label, icon_name, small, tip)
     "_action": (0, 2),      # (label, icon_name, tip, slot)
     "_section": (0,),       # (text, faint) — the rail's group headers
-    # The Email automation window's tab pages and their action buttons:
+    # The Email inquiry automation window's tab pages and their action buttons:
     # (sentence, table, icon, empty_title, empty_body) and (key, text, …).
     "_TabPage": (0, 3, 4),
     "add_action": (1,),

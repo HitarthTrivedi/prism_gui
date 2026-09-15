@@ -1,4 +1,4 @@
-"""Email automation — read the mailboxes, register inquiries, quote, chase."""
+"""Email inquiry automation — read the mailboxes, register inquiries, quote, chase."""
 from __future__ import annotations
 
 from addons import names
@@ -6,11 +6,11 @@ from addons.manifest import OK, RAIL, HOME, Addon
 
 MANIFEST = Addon(
     key="inquiry",
-    # "Email automation", because that is the phrase the customer says when
+    # "Email inquiry automation", because that is the phrase the customer says when
     # they describe what they want. The licence feature underneath is still
     # "inbox" and the rail key is still "inquiry" -- the SKU and the wiring
     # did not move, only the name on the shelf.
-    label="Email automation",
+    label="Email inquiry automation",
     feature="inbox",
     tip="Read every mailbox, register the inquiries in one shared file, "
         "quote, chase, and check the PO",

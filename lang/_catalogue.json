@@ -593,7 +593,7 @@
    "widgets/tour.py",
    "widgets/wizard_panel.py"
   ],
-  "Back to Email automation": [
+  "Back to Email inquiry automation": [
    "addons/inquiry/dialog.py"
   ],
   "Back to the common questions": [
@@ -1403,20 +1403,20 @@
   "Email address:": [
    "addons/inquiry/setup.py"
   ],
-  "Email automation": [
+  "Email inquiry automation": [
    "addons/inquiry/addon.py",
    "addons/inquiry/dialog.py",
    "addons/inquiry/panel.py",
    "addons/inquiry/setup.py",
    "widgets/guide_panel.py"
   ],
-  "Email automation — setup": [
+  "Email inquiry automation — setup": [
    "addons/inquiry/setup.py"
   ],
-  "Email automation, BOQ and Email are dedicated tools for recurring jobs — they don't need a plan, just your files.": [
+  "Email inquiry automation, BOQ and Email are dedicated tools for recurring jobs — they don't need a plan, just your files.": [
    "widgets/guide_panel.py"
   ],
-  "Email automation, BOQ and Gerber are ready-made — attach your files and go, no plan needed.": [
+  "Email inquiry automation, BOQ and Gerber are ready-made — attach your files and go, no plan needed.": [
    "widgets/tour.py"
   ],
   "Email setup": [
@@ -2951,7 +2951,7 @@
   "Open console.groq.com": [
    "widgets/wizard_panel.py"
   ],
-  "Open Email automation": [
+  "Open Email inquiry automation": [
    "addons/inquiry/panel.py"
   ],
   "Open file": [
@@ -4368,7 +4368,7 @@
   "Set up a mailbox and a folder first.": [
    "addons/inquiry/dialog.py"
   ],
-  "Set up Email automation": [
+  "Set up Email inquiry automation": [
    "addons/inquiry/panel.py"
   ],
   "Set up the sending account": [

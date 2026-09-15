@@ -1182,7 +1182,7 @@ class FlowLayout(QLayout):
     failure mode and it is the one the owner photographed: seven buttons in
     a row on a window narrower than seven buttons, and the last two simply
     gone. A flow layout has no such width; whatever does not fit steps down
-    a line. Used for every action row in the Email automation window.
+    a line. Used for every action row in the Email inquiry automation window.
     """
 
     def __init__(self, parent=None, margin: int = 0,

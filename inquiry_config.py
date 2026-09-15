@@ -1,4 +1,4 @@
-"""Reading Email automation's settings out of the config dict.
+"""Reading Email inquiry automation's settings out of the config dict.
 
 Pure functions over a plain dict. No Qt, no engine, no widgets -- which is
 the point: they were trapped inside a 1,100-line Qt setup dialog, and
@@ -13,7 +13,7 @@ That inverted the layering in two places that matter:
 
 Both worked only because every one of those eight imports is inside a
 function rather than at module scope -- a deferred import is a circular
-dependency you have agreed not to look at. It also meant Email automation
+dependency you have agreed not to look at. It also meant Email inquiry automation
 could not be extracted into an add-on without dragging Home along with it,
 since Home reads the register through dashboard_data.
 
