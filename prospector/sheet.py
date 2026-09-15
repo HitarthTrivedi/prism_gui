@@ -51,6 +51,29 @@ def _norm(s) -> str:
     return re.sub(r"\s+", " ", str(s or "")).strip().lower()
 
 
+def _part(target) -> str:
+    """The zip entry a workbook relationship points at.
+
+    The two writers spell the target differently: Excel writes it relative to
+    the workbook ("worksheets/sheet1.xml"), openpyxl — which writes Prism's own
+    exports — writes the absolute part name ("/xl/worksheets/sheet1.xml").
+    Prefixing "xl/" blindly turned the second kind into "xl/xl/…", a part that
+    is not in the zip, so every tab fell through to the fallback below and a
+    three-industry export read back as tab one, three times over.
+    """
+    t = str(target or "").lstrip("/")
+    return t if not t or t.startswith("xl/") else "xl/" + t
+
+
+def _worksheet_parts(names) -> list:
+    """Every worksheet part, in sheet1, sheet2 … sheet10 order — shortest name
+    first, so sheet2 sorts before sheet10 the way a reader expects."""
+    parts = [n for n in names
+             if n.startswith("xl/worksheets/") and n.endswith(".xml")
+             and "/_rels/" not in n]
+    return sorted(parts, key=lambda n: (len(n), n))
+
+
 def _col_to_idx(ref) -> int:
     m = re.match(r"([A-Z]+)\d+", ref or "A1")
     letters = m.group(1) if m else "A"
@@ -79,12 +102,15 @@ def _read_xlsx(path: str):
         for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels")):
             rid_to_target[r.get("Id")] = r.get("Target")
 
-    for s in sheets:
-        target = rid_to_target.get(s.get("{%s}id" % _RNS))
-        p = "xl/" + target.lstrip("/") if target else None
+    for pos, s in enumerate(sheets):
+        p = _part(rid_to_target.get(s.get("{%s}id" % _RNS)))
         if not p or p not in names:
-            cand = [n for n in names if "worksheets" in n and n.endswith(".xml")]
-            p = cand[0] if cand else None
+            # A rels entry we could not resolve: fall back to the worksheet
+            # parts in their own order and take THIS tab's. Taking the first
+            # one for every tab is how a lost relationship used to become
+            # silent data loss — the same rows, repeated, and the rest gone.
+            cand = _worksheet_parts(names)
+            p = cand[pos] if pos < len(cand) else None
         if not p:
             continue
         rows = []

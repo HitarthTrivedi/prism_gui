@@ -14,6 +14,10 @@ when they share ANY of them:
 
     e:<email>             every address the lead carries (email + other_emails)
     u:<profile>           the profile link, normalised (linkedin.com/in/<slug>)
+    a:<apollo id>         Apollo's own id for the person — the ONLY key its free
+                          search row carries (no e-mail, a half-hidden surname),
+                          so it is what lets a later run skip someone before it
+                          spends a credit revealing them
     n:<name>|<company>    name + company, both normalised — the weakest key,
                           only formed when both halves are present
 
@@ -105,6 +109,9 @@ def keys_of(lead) -> frozenset:
     profile = norm_profile(extra.get("linkedin"))
     if profile:
         keys.add("u:" + profile)
+    apollo_id = str(extra.get("apollo_id") or "").strip()
+    if apollo_id:
+        keys.add("a:" + apollo_id)
     name = norm_text(getattr(lead, "name", ""))
     company = norm_company(getattr(lead, "company", ""))
     if name and company:

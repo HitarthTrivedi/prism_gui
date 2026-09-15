@@ -663,5 +663,120 @@ class Suggestions(unittest.TestCase):
         self.assertEqual(p._save_btn.objectName(), "fsave")
 
 
+# Every key the "?" walkthrough asks this panel for. Spelled out so renaming a
+# widget the tour points at fails here rather than on the owner's screen.
+_KEYS = ("filters_head", "count_badge", "clear_all", "save_search",
+         "facet_locations", "facet_job_titles", "similar_titles",
+         "facet_seniority", "facet_functions", "facet_industries",
+         "facet_headcount", "facet_revenue", "facet_companies",
+         "facet_company_hq", "facet_years", "facet_changed_jobs",
+         "facet_keywords")
+
+
+def _descends(widget, root) -> bool:
+    while widget is not None:
+        if widget is root:
+            return True
+        widget = widget.parentWidget()
+    return False
+
+
+class PointAtMe(_PanelCase):
+    """The guided walkthrough asks the panel where each filter IS
+    (help_targets) and to make it reachable (help_reveal). Every key must
+    answer with a real widget of this panel — nothing built for the tour — and
+    a reveal must never edit the spec, only open what is closed."""
+
+    def setUp(self):
+        super().setUp()
+        self.p.set_spec(_owner_spec())      # the badge and Clear all show only
+        self.changes.n = 0                  # once something is filtered
+
+    def targets(self):
+        return self.p.help_targets()
+
+    def test_every_key_points_at_a_widget_of_this_panel(self):
+        targets = self.targets()
+        self.assertEqual(sorted(targets), sorted(_KEYS))
+        for key, target in targets.items():
+            widget, rect = target if isinstance(target, tuple) else (target, None)
+            self.assertTrue(_descends(widget, self.p), key)
+            if rect is not None:
+                self.assertFalse(rect.isEmpty(), key)
+
+    def test_the_targets_are_the_real_controls(self):
+        targets = self.targets()
+        self.assertIs(targets["facet_locations"], self.section("locations"))
+        self.assertIs(targets["facet_revenue"], self.section("revenue"))
+        self.assertIs(targets["facet_years"], self.section("years_in_role"))
+        self.assertIs(targets["facet_company_hq"], self.section("company_hq"))
+        self.assertIs(targets["facet_changed_jobs"], self.p._jobs)
+        self.assertIs(targets["similar_titles"], self.p._similar)
+        self.assertIs(targets["count_badge"], self.p._badge)
+        self.assertIs(targets["clear_all"], self.p._clear_btn)
+        self.assertIs(targets["save_search"], self.p._save_btn)
+
+    def test_the_header_is_a_region_over_its_own_row(self):
+        self.p.resize(280, 1600)
+        self.p.layout().activate()          # geometry without showing a window
+        widget, rect = self.targets()["filters_head"]
+        self.assertIs(widget, self.p)
+        for part in (self.p._head_kick, self.p._badge, self.p._save_btn):
+            self.assertTrue(rect.contains(part.geometry()), part.objectName())
+
+    def test_reveal_opens_a_closed_facet_and_edits_nothing(self):
+        before = self.p.spec().to_dict()
+        self.assertFalse(self.section("revenue").is_open())
+        self.p.help_reveal("facet_revenue")
+        self.assertTrue(self.section("revenue").is_open())
+        self.assertFalse(self.section("revenue").editor.isHidden())
+        self.assertEqual(self.p.spec().to_dict(), before)
+        self.assertEqual(self.changes.n, 0)
+
+    def test_similar_titles_opens_the_facet_it_lives_in(self):
+        self.section("job_titles").set_open(False)
+        self.assertNotIn("similar_titles", self.targets())
+        self.p.help_reveal("similar_titles")
+        self.assertTrue(self.section("job_titles").is_open())
+        self.assertIs(self.targets()["similar_titles"], self.p._similar)
+
+    def test_no_reveal_touches_the_spec(self):
+        before = self.p.spec().to_dict()
+        for key in _KEYS + ("nonsense",):
+            self.p.help_reveal(key)
+        self.assertEqual(self.p.spec().to_dict(), before)
+        self.assertEqual(self.changes.n, 0)
+
+    def test_the_badge_and_clear_all_wait_for_a_filter(self):
+        self.p.clear()
+        targets = self.targets()
+        for gone in ("count_badge", "clear_all"):
+            self.assertNotIn(gone, targets)
+        for still in ("save_search", "filters_head", "facet_locations"):
+            self.assertIn(still, targets)
+
+    def test_the_public_key_set_is_every_key_it_answers(self):
+        # The workbench unfolds the rail for exactly these; a key missing here
+        # is a facet step skipped whenever Hide filters is on.
+        self.assertEqual(FP.HELP_KEYS, frozenset(_KEYS))
+
+    def test_a_walk_leaves_the_facets_open_the_way_it_found_them(self):
+        """The walk opens all eleven facets, one step at a time. The owner kept
+        two open, and gets two back — the spec untouched either way."""
+        for name, section in self.p._sections.items():
+            section.set_open(name in ("locations", "job_titles"))
+        before = self.p.spec().to_dict()
+        snap = self.p.help_snapshot()
+        for key in _KEYS:
+            self.p.help_reveal(key)
+        self.assertTrue(all(s.is_open() for s in self.p._sections.values()))
+        self.p.help_restore(snap)
+        self.assertEqual(sorted(n for n, s in self.p._sections.items() if s.is_open()),
+                         ["job_titles", "locations"])
+        self.assertTrue(self.section("revenue").editor.isHidden())
+        self.assertEqual(self.p.spec().to_dict(), before)
+        self.assertEqual(self.changes.n, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

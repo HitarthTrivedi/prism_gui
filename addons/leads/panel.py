@@ -9,11 +9,19 @@ builds every screen up front).
 
 `opened`, `navigate` and `open_run` stay as signals because MainWindow wires
 them for every add-on panel; this one only ever emits `navigate` (the "AI tools"
-shortcut). It never opens a modal.
+shortcut). It never opens a modal — including the "?" in the header, which
+slides addons/leads/help.py over the right of the body (F1 does the same) and
+leaves the screen behind it usable while you read.
+
+Two things float over the body, both children of it and neither in its layout:
+that help panel, and the walkthrough (addons/leads/tour.py), which the panel's
+"Show me on screen" button starts and `start_tour()` starts from code. Because
+they float, `resizeEvent` is what keeps them the size of the body.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 import i18n
@@ -34,12 +42,21 @@ class LeadsPanel(QWidget):
         super().__init__(parent)
         self.cfg = cfg or {}
         self._workbench = None
+        self._help = None
+        self._tour = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        # The "?" comes FIRST, and is the only action here that is not about
+        # the run: the team who asked for it were stuck before they had a run
+        # at all, so it must not sit past two buttons they were afraid to press.
+        self.help_btn = C.icon_button("help", i18n.t("What's on this screen (F1)"),
+                                      on_click=self.toggle_help)
+        self.help_btn.setFocusPolicy(Qt.StrongFocus)   # Tab reaches it
         self.header = C.PageHeader(
             i18n.t(self.TITLE), i18n.t(self.BLURB), [
+                self.help_btn,
                 C.button(i18n.t("AI tools"), "tertiary", icon_name="grid",
                          on_click=lambda: self.navigate.emit("agents"))])
         root.addWidget(self.header)
@@ -48,6 +65,16 @@ class LeadsPanel(QWidget):
         self._body_lay.setContentsMargins(0, 0, 0, 0)
         self._body_lay.setSpacing(0)
         root.addWidget(self._body, stretch=1)
+
+        # F1 anywhere on this screen, whatever holds the focus — which is why
+        # this is a WINDOW shortcut and not WidgetWithChildren: someone who has
+        # just landed here has focus on nothing in particular, and that is
+        # exactly the person pressing F1. Qt only fires a shortcut whose widget
+        # is visible, and MainWindow's stack hides every screen but one, so
+        # another screen's F1 (there is none today) would still be its own.
+        ask = QShortcut(QKeySequence(Qt.Key_F1), self)
+        ask.setContext(Qt.WindowShortcut)
+        ask.activated.connect(self.toggle_help)
 
     # -- lifecycle --------------------------------------------------------------
     def showEvent(self, event):
@@ -85,3 +112,55 @@ class LeadsPanel(QWidget):
         """A run or a saved list elsewhere should show here — re-scan on show."""
         if self._workbench is not None:
             self._workbench.refresh_lists()
+
+    # -- help -------------------------------------------------------------------
+    def help_panel(self):
+        """The help panel, built on first ask. Lazy for the same reason the
+        workbench is: most startups never open this screen, and none of them
+        open the help."""
+        if self._help is None:
+            from addons.leads.help import LeadsHelp
+            # Parented to the body, not to the panel: it covers the workbench
+            # and leaves the header — and the "?" that opened it — in view.
+            self._help = LeadsHelp(self._body)
+            self._help.closed.connect(
+                lambda: self.help_btn.setFocus(Qt.OtherFocusReason))
+            self._help.tourRequested.connect(self.start_tour)
+        return self._help
+
+    def toggle_help(self):
+        self.help_panel().toggle()
+
+    # -- the walkthrough ----------------------------------------------------------
+    def tour(self):
+        """The coach-mark walkthrough, built on first ask — same laziness as
+        the help panel, and for the same reason."""
+        if self._tour is None:
+            from addons.leads.tour import Guide, Tour
+            # Over the body, like the help panel, so the header's "?" stays in
+            # view. Guide walks the body for every part that answers
+            # help_targets(): the workbench rail, its filter panel, the cockpit.
+            self._tour = Tour(Guide(self._body), self._body)
+            self._tour.finished.connect(
+                lambda: self.help_btn.setFocus(Qt.OtherFocusReason))
+        return self._tour
+
+    def start_tour(self):
+        """Walk the screen, ringing one control at a time and saying what it
+        is. The help panel's primary button, and the way in from code."""
+        if self._workbench is None:
+            self._build()           # there is nothing to point at otherwise
+        if self._help is not None and self._help.is_open():
+            self._help.close_panel()        # the tour would open behind it
+        walk = self.tour()
+        walk.start()
+        return walk
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Both of these float over the body rather than sitting in its layout,
+        # so nothing re-places them for us when the window changes size.
+        if self._help is not None and self._help.is_open():
+            self._help.place()
+        if self._tour is not None and self._tour.is_open():
+            self._tour.place()

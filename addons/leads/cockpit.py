@@ -90,6 +90,13 @@ def status_of(dos, draft=None) -> str:
             "catch-all": "Catch-all", "unknown": "Unknown"}.get(ec, "Guessed")
 
 
+def needs_email(dos) -> bool:
+    """True while "Find e-mails" still has something to do for this lead: no
+    address at all, or one nobody has confirmed (a guess, a catch-all, an
+    invalid). A verified address is done — asking again only spends credits."""
+    return ((dos.lead.extra or {}).get("email_check") or "") != "valid"
+
+
 def unqualified_rows(dossiers, all_leads) -> list:
     """Everyone a run sourced whom the qualify pass didn't reach, as display-only
     rows. The table used to list qualified dossiers alone, so a leads-sheet-only
@@ -177,7 +184,23 @@ _FOCUS_MIN = 150
 _OUTLINE = frozenset({"Not qualified"})
 _EMPTY_TITLE = "No leads yet"
 _EMPTY_BODY = ("Set lead filters in the panel on the left, or import a sheet, then "
-               "press Prepare outreach. Lists you saved live under Lists.")
+               "press Find people. Lists you saved live under Lists.")
+# What the "?" walkthrough calls the parts of this screen (addons/leads/help.py).
+# A column has no widget of its own — the header paints all of them — so those
+# keys answer with a region of the header instead (_section_rect).
+_HELP_COLS = {"col_lead": _C_LEAD, "col_focus": _C_FOCUS, "col_fit": _C_FIT,
+              "col_status": _C_STATUS, "col_signal": _C_SIGNAL}
+_HELP_RAIL = frozenset({"refine_search", "refine_fit", "refine_qualified_only",
+                        "refine_deliverability"})
+_HELP_BULK = ("bulk_verify", "bulk_emails", "bulk_save", "bulk_export",
+              "bulk_qualify", "bulk_sequence")
+_HELP_KEYS = frozenset({"hide_filters", "toolbar_count", "view_toggle", "sort",
+                        "table", "select_all", "bulk_bar", "drawer"}
+                       | set(_HELP_COLS) | set(_HELP_RAIL) | set(_HELP_BULK))
+# The tab strip's own keys, in the order the tabs are built (_TABS).
+_HELP_TABS = ("tab_leads", "tab_sessions", "tab_lists", "tab_saved",
+              "tab_sequences", "tab_analytics")
+_REVEAL_PAD = 24       # a revealed target is scrolled this clear of the edge
 
 
 def _initials(name: str) -> str:
@@ -216,6 +239,23 @@ def _motion_ok(widget: QWidget) -> bool:
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
     return app is not None and app.platformName() != "offscreen"
+
+
+def _on_screen(target, root) -> bool:
+    """Whether a help target is really there to point at: nothing in the chain
+    up to `root` is hidden, and a region target has a box. A target that is not
+    on screen is left out of help_targets(), so the tour skips that step
+    instead of ringing a stale rectangle."""
+    widget, rect = target if isinstance(target, tuple) else (target, None)
+    if widget is None:
+        return False
+    # `root` answering for a region of ITSELF is on screen by definition — the
+    # tour is asking this widget where its own parts are, and whoever hosts it
+    # decides whether it is showing. (No widget is its own ancestor, so
+    # isVisibleTo would walk past it to a window that is hidden until shown.)
+    if widget is not root and not widget.isVisibleTo(root):
+        return False
+    return rect is None or not rect.isEmpty()
 
 
 def _asset(name: str) -> str:
@@ -759,10 +799,11 @@ class _Reveal(QWidget):
 
 
 class LeadsCockpit(QWidget):
-    """The dense results surface. `set_dossiers` fills it; the five *Requested
+    """The dense results surface. `set_dossiers` fills it; the six *Requested
     signals carry the checked dossiers out to the dialog's workers."""
 
     verifyRequested = Signal(list)
+    emailsRequested = Signal(list)
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -1269,6 +1310,14 @@ class LeadsCockpit(QWidget):
         lay.addWidget(self._bulk_clear)
         lay.addStretch(1)
         self._b_verify = QPushButton("Verify free")
+        # A Find-people run brings back nobody's address (finding people is
+        # free; finding addresses is not) — this is where that is spent, on the
+        # rows the owner ticked.
+        self._b_emails = QPushButton("Find e-mails")
+        self._b_emails.setToolTip("Look up a real e-mail for every selected "
+                                  "lead and check it — free verifiers first, "
+                                  "then a finder credit where they cannot "
+                                  "confirm it.")
         self._b_save = QPushButton("Save to list")
         self._b_export = QPushButton("Export")
         # Runs the qualify pass on the ticked people a run sourced but never
@@ -1279,6 +1328,7 @@ class LeadsCockpit(QWidget):
         self._b_seq = QPushButton("Add to sequence")   # Barlow has no →
         self._b_seq.setObjectName("primary")
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
+        self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
         self._b_export.clicked.connect(lambda: self.exportRequested.emit(self.selected()))
         self._b_qualify.clicked.connect(lambda: self.qualifyRequested.emit(self.selected()))
@@ -1289,10 +1339,11 @@ class LeadsCockpit(QWidget):
         self._b_more.clicked.connect(self._show_more)
         self._b_more.hide()
         self._qualify_wanted = False        # the run holds someone Qualify can reach
+        self._emails_wanted = False         # …and someone without a verified address
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
-        for b in (self._b_verify, self._b_save, self._b_export, self._b_qualify,
-                  self._b_more, self._b_seq):
+        for b in (self._b_verify, self._b_emails, self._b_save, self._b_export,
+                  self._b_qualify, self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
         self._bulk_bar_w = bar
@@ -1372,21 +1423,30 @@ class LeadsCockpit(QWidget):
             self._filters_btn.setText(text)
 
     def _bulk_actions(self) -> tuple:
-        return (self._b_verify, self._b_save, self._b_export, self._b_qualify, self._b_seq)
+        return (self._b_verify, self._b_emails, self._b_save, self._b_export,
+                self._b_qualify, self._b_seq)
 
     def _wanted(self, button: QPushButton) -> bool:
-        return button is not self._b_qualify or self._qualify_wanted
+        """An action the run can still use. Qualify and Find e-mails are about
+        work not yet done, so they leave the bar once it is."""
+        if button is self._b_qualify:
+            return self._qualify_wanted
+        if button is self._b_emails:
+            return self._emails_wanted
+        return True
 
     @staticmethod
     def _fold_set(level: int, actions: tuple) -> tuple:
         """Which actions sit in More at a compaction level: from 2 the two
-        least used, from 3 all but the primary."""
-        verify, save, export, qualify, _seq = actions
-        return {2: (verify, save), 3: (verify, save, export, qualify)}.get(level, ())
+        least used, from 3 all but the primary and Find e-mails (a list with no
+        addresses is unusable, so that stays on the bar as long as it fits)."""
+        verify, emails, save, export, qualify, _seq = actions
+        return {2: (verify, save), 3: (verify, save, export, qualify),
+                4: (verify, save, export, qualify, emails)}.get(level, ())
 
     def _bulk_need(self, level: int) -> int:
         """The width the bulk bar needs at a compaction level: 0 is all of it;
-        1 drops "Select all N"; 2 and 3 fold actions into More."""
+        1 drops "Select all N"; 2 to 4 fold actions into More."""
         lay = self._bulk_bar_w.layout()
         m = lay.contentsMargins()
         items = [self._sel_lbl.sizeHint().width() + theme.SPACE_2,
@@ -1406,7 +1466,7 @@ class LeadsCockpit(QWidget):
         level = 0
         if self._bulk.isVisible():
             width = self._bulk_bar_w.width()
-            while level < 3 and self._bulk_need(level) > width:
+            while level < 4 and self._bulk_need(level) > width:
                 level += 1
         folded = self._fold_set(level, self._bulk_actions())
         for b in self._bulk_actions():
@@ -1917,6 +1977,10 @@ class LeadsCockpit(QWidget):
                                    for d in self._dossiers)
         self._b_qualify.setEnabled(any(getattr(d, "status", "") in RETRYABLE
                                        for d in picked))
+        # The same rule for addresses: a confirmed one has nothing left to find,
+        # so the button is for the rows that are blank, guessed or unconfirmed.
+        self._emails_wanted = any(needs_email(d) for d in self._dossiers)
+        self._b_emails.setEnabled(any(needs_email(d) for d in picked))
         self._head.set_check_state(Qt.Unchecked if n == 0 else
                                    Qt.Checked if n >= shown else Qt.PartiallyChecked)
         self._table.viewport().update()     # a tick tints its whole row, not one cell
@@ -1929,6 +1993,163 @@ class LeadsCockpit(QWidget):
     def selected(self) -> list:
         return [self._dossiers[i] for i in sorted(self._checked)
                 if i not in self._hidden and 0 <= i < len(self._dossiers)]
+
+    # ── the guided walkthrough points at these ────────────────────────────────
+    def help_targets(self) -> dict:
+        """The parts of this screen the "?" tour can ring, by the key it asks
+        for: a real widget already on screen, or (widget, QRect) where the
+        target is a region of one — a column heading is painted by the header,
+        not a widget of its own. Nothing is built here.
+
+        A key whose part is not on screen right now is left out and the tour
+        skips it: the toolbar and the table before a run has loaded anything,
+        the bulk bar between ticks, the drawer before a lead is opened."""
+        out = {
+            "hide_filters": self._filters_btn,
+            "toolbar_count": self._count_lbl,
+            "view_toggle": self._seg,
+            "sort": self._sort,
+            "refine_search": self._search,
+            "refine_fit": self._fit_min,
+            "refine_qualified_only": self._only_qualified,
+            "refine_deliverability": self._status_region(),
+            "table": self._table,
+            "select_all": (self._head, self._section_rect(_C_TICK)),
+            "bulk_bar": self._bulk_bar_w,
+            "drawer": self._drawer_panel,
+        }
+        for key, col in _HELP_COLS.items():
+            out[key] = (self._head, self._section_rect(col))
+        for key, button in zip(_HELP_BULK, self._bulk_actions()):
+            # On a narrow window the least-used actions live in More (_fit_bulk),
+            # so a step about one points at the button that opens that menu.
+            out[key] = self._b_more if button in self._bulk_folded else button
+        return {k: t for k, t in out.items() if _on_screen(t, self)}
+
+    def help_reveal(self, key: str) -> None:
+        """Make one target reachable: unfold the rail and scroll to it, bring a
+        column's heading on screen, open the dossier drawer.
+
+        It ticks no row, changes no filter value and starts nothing. The bulk
+        bar only exists while rows are ticked, so a step about it is skipped
+        while it is down rather than ticked into being."""
+        if key not in _HELP_KEYS:
+            return
+        if key in _HELP_RAIL:
+            self.set_filters_shown(True)        # the rail may be folded away
+            for widget in self._rail_widgets(key):
+                self._rail.ensureWidgetVisible(widget, 0, _REVEAL_PAD)
+        elif key in _HELP_COLS or key == "select_all":
+            self._scroll_to_column(_HELP_COLS.get(key, _C_TICK))
+        elif key == "drawer":
+            self._help_open_drawer()
+
+    def _rail_widgets(self, key: str) -> list:
+        """What the rail scrolls to for a refine step, in order. The
+        deliverability grid is the last box and THEN the first: the last pulls
+        the grid's foot above the rail's bottom edge, the first then pulls its
+        head back down if that overshot. Aimed at the first box alone, the
+        ring ran below the rail with Invalid, No email and Mailed out of view;
+        aimed at the grid's parent, a scroll area centres a widget that tall
+        instead of showing its top."""
+        if key == "refine_deliverability":
+            boxes = list(self._status_boxes.values())
+            return [boxes[-1], boxes[0]] if boxes else []
+        widget = {"refine_search": self._search,
+                  "refine_fit": self._fit_min,
+                  "refine_qualified_only": self._only_qualified}.get(key)
+        return [widget] if widget is not None else []
+
+    def _status_region(self) -> tuple:
+        """The deliverability boxes as one region: they are laid out in a grid
+        with no box of their own to ring."""
+        boxes = list(self._status_boxes.values())
+        rect = QRect()
+        for box in boxes:
+            rect = rect.united(box.geometry())
+        return boxes[0].parentWidget(), rect
+
+    def _section_rect(self, col: int) -> QRect:
+        """One column's heading as a box in the header's own coordinates,
+        measured from the section — the header paints every label itself, so
+        there is no widget to ask."""
+        head = self._head
+        if head.isSectionHidden(col) or head.sectionSize(col) <= 0:
+            return QRect()
+        vp = head.viewport()
+        at = vp.mapTo(head, QPoint(head.sectionViewportPosition(col), 0))
+        return QRect(at.x(), at.y(), head.sectionSize(col), vp.height())
+
+    def _scroll_to_column(self, col: int) -> None:
+        """Scroll the table sideways until a column's heading is on screen:
+        dragged wide enough, the columns run past the results' right edge."""
+        head, bar = self._head, self._table.horizontalScrollBar()
+        left = head.sectionPosition(col)
+        right = left + head.sectionSize(col)
+        width = self._table.viewport().width()
+        if left < bar.value():
+            bar.setValue(left)
+        elif right > bar.value() + width:
+            bar.setValue(min(left, right - width))
+
+    def _help_open_drawer(self) -> None:
+        """A step about the dossier drawer needs a dossier in it. The drawer
+        follows the highlighted lead, so this highlights the first row on
+        screen — the same act as clicking that lead, and no tick, so nothing
+        the bulk bar would act on changes."""
+        if not self._drawer_w.isHidden():
+            return                              # already open on someone
+        for row in range(self._table.rowCount()):
+            if self._table.isRowHidden(row):
+                continue
+            if self._table.currentRow() == row:
+                self._show_selected()           # already highlighted, just shut
+            else:
+                self._table.setCurrentCell(row, _C_LEAD)
+            return
+
+    def help_snapshot(self) -> dict:
+        """What this screen's reveals move — the rail's fold, the highlighted
+        lead and its drawer, the scroll of the rail and the table — for the
+        walk to put back when it closes (help_restore)."""
+        table, rail = self._table, self._rail
+        return {
+            "rail_hidden": rail.isHidden(),
+            "row": table.currentRow(),
+            "column": table.currentColumn(),
+            "drawer_hidden": self._drawer_w.isHidden(),
+            "rail_scroll": rail.verticalScrollBar().value(),
+            "table_scroll": (table.horizontalScrollBar().value(),
+                             table.verticalScrollBar().value()),
+        }
+
+    def help_restore(self, snap: dict) -> None:
+        """Back to a help_snapshot(), touching only what differs — the walk
+        restores twice around a layout pass, and a second pass that re-set the
+        row would reopen a drawer the first one had just shut."""
+        if not isinstance(snap, dict):
+            return
+        self.set_filters_shown(not snap.get("rail_hidden", False))
+        table = self._table
+        row = snap.get("row", -1)
+        if table.currentRow() != row:
+            if row < 0 or row >= table.rowCount():
+                # The way the drawer's own x forgets a lead: no highlight left
+                # for the drawer to reopen on.
+                table.blockSignals(True)
+                table.setCurrentCell(-1, -1)
+                table.clearSelection()
+                table.blockSignals(False)
+            else:
+                table.setCurrentCell(row, max(0, snap.get("column", _C_LEAD)))
+        if snap.get("drawer_hidden", True):
+            self._close_drawer()
+        elif self._drawer_w.isHidden():
+            self._show_selected()
+        self._rail.verticalScrollBar().setValue(snap.get("rail_scroll", 0))
+        across, down = snap.get("table_scroll", (0, 0))
+        table.horizontalScrollBar().setValue(across)
+        table.verticalScrollBar().setValue(down)
 
     # ── gallery (the card view) ────────────────────────────────────────────────
     def _fill_gallery(self):
@@ -2342,7 +2563,7 @@ class _ListsTab(QWidget):
         files = self._scan()
         if not files:
             empty = QLabel(
-                "No lists yet.\n\nRun “Prepare outreach” or “Leads sheet only”, "
+                "No lists yet.\n\nRun “Find people” or “Find and prepare”, "
                 "or save a shortlist from the Leads tab — the files will appear "
                 "here.")
             empty.setAlignment(Qt.AlignCenter)
@@ -2924,12 +3145,13 @@ _TABS = ("Leads", "Sessions", "Lists", "Saved searches", "Sequences", "Analytics
 
 
 class LeadsWorkspace(QWidget):
-    """The whole Leads & Outreach surface. Re-exposes the cockpit's four bulk
+    """The whole Leads & Outreach surface. Re-exposes the cockpit's bulk
     signals and its `set_dossiers`, so the dialog wires to it exactly as it did
     to the bare cockpit — plus it keeps Analytics, Lists, Sessions and Saved
     searches in step."""
 
     verifyRequested = Signal(list)
+    emailsRequested = Signal(list)
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -2945,6 +3167,7 @@ class LeadsWorkspace(QWidget):
             os.path.expanduser("~"), "Documents", "Prism Leads")
         self.leads = LeadsCockpit()
         self.leads.verifyRequested.connect(self.verifyRequested)
+        self.leads.emailsRequested.connect(self.emailsRequested)
         self.leads.exportRequested.connect(self.exportRequested)
         self.leads.saveListRequested.connect(self.saveListRequested)
         self.leads.sequenceRequested.connect(self.sequenceRequested)
@@ -3026,6 +3249,37 @@ class LeadsWorkspace(QWidget):
             self._saved.refresh()
         elif w is self._analytics:
             self._analytics.refresh()
+
+    # ── the guided walkthrough points at these ────────────────────────────────
+    def help_targets(self) -> dict:
+        """The tab strip's own keys, over everything the Leads tab offers. Its
+        own win: a tab is this widget's, whatever the cockpit inside it calls
+        the same name."""
+        out = dict(self.leads.help_targets())
+        out.update(zip(_HELP_TABS, self._tabs))
+        return out
+
+    def help_reveal(self, key: str) -> None:
+        """Show the tab a step is on, then let the Leads tab reveal its own —
+        every key but the tabs' is inside it, and a rail cannot be scrolled to
+        while another screen is showing."""
+        if key in _HELP_TABS:
+            self._select(_HELP_TABS.index(key))
+        elif key in _HELP_KEYS:
+            self._select(0)
+            self.leads.help_reveal(key)
+
+    def help_snapshot(self) -> int:
+        """The tab on screen. Only the tab: the Leads tab's own state is the
+        cockpit's to record, and the walk asks it separately."""
+        return self._stack.currentIndex()
+
+    def help_restore(self, index) -> None:
+        # Only on a change: _select re-reads Sessions, Lists and Saved searches
+        # from disk, and the walk restores twice.
+        if isinstance(index, int) and 0 <= index < self._stack.count() \
+                and index != self._stack.currentIndex():
+            self._select(index)
 
     # ── forwarded from the dialog ──────────────────────────────────────────────
     def set_dossiers(self, dossiers: list, drafts=None, all_leads=None) -> None:

@@ -239,6 +239,21 @@ class WhatGoesIntoTheFile(_Folder):
         self.assertEqual(out["mode"], "icp")             # the mode argument wins
         self.assertEqual(out["industries"], ICP["industries"])
 
+    def test_the_source_comes_back_but_its_key_never_reaches_disk(self):
+        """Which database answered the filters is part of the run — reopening
+        one has to ask Apollo again, not whichever source the rail happens to
+        show. The key that opened that database is not: it sits in cfg, beside
+        the params, and only the whitelist keeps the two apart."""
+        params = dict(ICP, source="apollo", apollo_api_key="ap-SECRET-789",
+                      cfg={"apollo_api_key": "ap-SECRET-789"})
+        _save(self.folder, "s1", params=params)
+        for name in ("s1.json", S.INDEX):
+            self.assertNotIn(b"SECRET", self._bytes(name), name)
+        out = S.load(self.folder, "s1")["params"]
+        self.assertEqual(out["source"], "apollo")
+        self.assertNotIn("apollo_api_key", out)
+        self.assertLessEqual(set(out), set(S.PARAM_KEYS))
+
 
 class AHandEditedSessionStillOpens(_Folder):
 

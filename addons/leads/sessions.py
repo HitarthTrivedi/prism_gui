@@ -56,10 +56,13 @@ SCHEMA = 1
 MODES = ("sheet", "icp", "icp_leads_only")
 # "filters" is the run's SearchSpec dict (prospector/filters.py); the legacy
 # industries / roles / location stay beside it so an older build still reads
-# the run.
-PARAM_KEYS = ("mode", "sheet_path", "industries", "roles", "location", "target",
-              "offer", "limit", "verify_limit", "claims_path", "include_earlier",
-              "filters")
+# the run. "source" is which database answered them — "apollo" or "exa" — so a
+# reopened run asks the one it was run against, not whichever the rail happens
+# to have selected. It is a NAME, never a key: the keys stay in cfg, which
+# _clean_params exists to keep off disk.
+PARAM_KEYS = ("mode", "sheet_path", "industries", "roles", "location", "source",
+              "target", "offer", "limit", "verify_limit", "claims_path",
+              "include_earlier", "filters")
 
 INDEX = "index.json"
 _COUNT_KEYS = ("leads", "qualified", "hot", "warm", "drafted", "sent")

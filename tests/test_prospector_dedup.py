@@ -27,7 +27,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from prospector import engine, identity, reach, source, triage  # noqa: E402
+from prospector import (                                        # noqa: E402
+    engine, exports, identity, reach, sheet, source, triage)
 from prospector.identity import SeenIndex                       # noqa: E402
 from prospector.models import HOT, NO_MODEL, Dossier, Lead       # noqa: E402
 
@@ -444,6 +445,64 @@ class RunLeadsSpendsTheLimitOnNewPeople(unittest.TestCase):
         self.assertIs(run_leads.call_args.kwargs["skip"], self.skip)
         self.assertIs(run_leads.call_args.kwargs["stats"], stats)
         self.assertEqual(run_leads.call_args.kwargs["limit"], 2)
+
+
+# ── sheet ────────────────────────────────────────────────────────────────────
+
+class PrismReadsItsOwnExportBack(unittest.TestCase):
+    """The owner's round trip — find people, export the sheet, import it again
+    to find e-mails — belongs here because dedupe is what HID the bug.
+
+    The export writes one tab per industry. Reading it resolved every tab's
+    relationship to a part name that was not in the zip ("xl/xl/worksheets/…",
+    openpyxl writing the target absolute), fell back to the first worksheet for
+    all of them, and handed back tab one repeated. dedupe then collapsed the
+    repeats, so a three-industry list arrived as a third of the people with no
+    error anywhere — and the finished run autosaves over that same filename,
+    which put the loss on disk.
+    """
+
+    PEOPLE = (("Asha Rao", "Plant Head", "Acme Steel", "Steel"),
+              ("Bimal Shah", "GM", "Acme Steel", "Steel"),
+              ("Deepa Nair", "Director", "Zed Cement", "Cement"),
+              ("Farah Khan", "VP", "Qure Pharma", "Pharma"))
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        leads = [Lead(name=n, title=t, company=c, industry=i)
+                 for n, t, c, i in self.PEOPLE]
+        # No MX lookups: what is under test is the reading, not the DNS.
+        with mock.patch.object(exports, "build_email_checks", return_value={}):
+            self.path = exports.leads_xlsx(
+                leads, os.path.join(tmp.name, "Prism leads.xlsx"))
+
+    def test_every_industry_tab_comes_back_once(self):
+        self.assertEqual(sheet.sheet_names(self.path),
+                         ["Steel", "Cement", "Pharma"])
+        back = sheet.load(self.path)
+        self.assertEqual([(l.industry, l.company, l.name) for l in back],
+                         [(i, c, n) for n, _t, c, i in self.PEOPLE])
+
+    def test_one_tab_can_still_be_asked_for_by_name(self):
+        self.assertEqual([l.name for l in sheet.load(self.path, "Cement")],
+                         ["Deepa Nair"])
+
+    def test_a_relationship_target_is_read_the_way_both_writers_spell_it(self):
+        # Excel writes it relative to the workbook, openpyxl absolute.
+        self.assertEqual(sheet._part("worksheets/sheet2.xml"),
+                         "xl/worksheets/sheet2.xml")
+        self.assertEqual(sheet._part("/xl/worksheets/sheet2.xml"),
+                         "xl/worksheets/sheet2.xml")
+        self.assertEqual(sheet._part(None), "")
+
+    def test_the_fallback_walks_the_worksheets_instead_of_repeating_one(self):
+        names = ["xl/workbook.xml", "xl/worksheets/sheet10.xml",
+                 "xl/worksheets/_rels/sheet1.xml.rels", "xl/worksheets/sheet2.xml",
+                 "xl/worksheets/sheet1.xml"]
+        self.assertEqual(sheet._worksheet_parts(names),
+                         ["xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml",
+                          "xl/worksheets/sheet10.xml"])
 
 
 # ── reach ────────────────────────────────────────────────────────────────────

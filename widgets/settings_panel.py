@@ -115,6 +115,31 @@ SECTIONS = [
      "us."),
 ]
 
+# (config key, name, what it is for). The e-mail keys Prism brings its own way
+# of using: the free verifier waterfall confirms an address Prism already
+# guessed, and a finder is asked only when that fails (prospector/verify.py).
+# The order is the order they are tried, free-first, so the card reads as the
+# waterfall it configures. Apollo sits with the finders because that is what it
+# is here — and the same key is what Leads searches Apollo's database with, so
+# it is entered once, in the one place the other e-mail keys already live.
+_VERIFIER_ROWS = [
+    ("verifalia_api_key", "Verifalia",
+     "A browser-app credential pair, username:password. ~25 checks a day."),
+    ("reoon_api_key", "Reoon", "~600 checks a month on the free tier."),
+    ("zerobounce_api_key", "ZeroBounce", "100 checks a month, free."),
+    ("abstractapi_api_key", "AbstractAPI", "100 checks a month, free."),
+    ("kickbox_api_key", "Kickbox", "50 checks a month, free."),
+    ("tomba_key", "Tomba",
+     "Finds the real address when a guess won't verify. The pair "
+     "key:secret. ~25 a month, free."),
+    ("apollo_api_key", "Apollo",
+     "The same key Leads searches Apollo's database with — searching is "
+     "free, revealing a person costs about one Apollo credit."),
+    ("hunter_api_key", "Hunter",
+     "Finding only, so all ~50 free credits a month go to recovering an "
+     "address the free checks could not confirm."),
+]
+
 # How each licence status reads to a customer. Named STATUS_COPY because that
 # is one of the table names extract_strings.py scans; a status word rendered
 # through str.title() would be untranslatable and would also print the
@@ -882,6 +907,7 @@ class SettingsPanel(QWidget):
             key_edit, lambda: self._save_key(key_edit)))
 
         col.addWidget(self._agents_editor(chosen, premium))
+        col.addWidget(self._verifier_card())
 
         picked = [(stage, chosen.get(stage))
                   for stage in CB.agents.PIPELINE_ORDER
@@ -970,6 +996,42 @@ class SettingsPanel(QWidget):
             i18n.t("Save"), "primary",
             on_click=lambda: self._save_agents(picker, premium_boxes))]))
         return card
+
+    def _verifier_card(self) -> Card:
+        """Every e-mail key in one card, in the order they are tried. One Save
+        for the lot, unlike the single-field editors above: these are entered
+        in a sitting, from a page of sign-ups, and eight separate Saves would
+        be eight chances to lose the one that was not pressed."""
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                         theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        col.addWidget(C.kicker(i18n.t("E-mail verification and finding")))
+        col.addWidget(C.label(
+            i18n.t("Bring your own keys. Prism asks the free tiers first, so "
+                   "most checks cost nothing, and a key you have not set is "
+                   "simply skipped."), level="META", wrap=True))
+        edits: dict[str, QLineEdit] = {}
+        for key, name, blurb in _VERIFIER_ROWS:
+            col.addSpacing(theme.SPACE_2)
+            col.addWidget(C.label(i18n.t(name), level="SUPPORT",
+                                  colour=theme.TEXT, weight=500))
+            col.addWidget(C.label(i18n.t(blurb), level="META", wrap=True))
+            field = QLineEdit(self.cfg.get(key, ""))
+            field.setEchoMode(QLineEdit.Password)
+            edits[key] = field
+            col.addWidget(field)
+        col.addSpacing(theme.SPACE_1)
+        col.addWidget(self._buttons([C.button(
+            i18n.t("Save"), "primary",
+            on_click=lambda: self._save_verifier_keys(edits))]))
+        return card
+
+    def _save_verifier_keys(self, edits: dict):
+        """Write every e-mail key at once. An emptied field clears its key —
+        that is how a customer takes a key back off this machine."""
+        for key, field in edits.items():
+            self.cfg[key] = field.text().strip()
+        self._after_save(i18n.t("Saved."))
 
     def _save_key(self, field: QLineEdit):
         key = field.text().strip()
