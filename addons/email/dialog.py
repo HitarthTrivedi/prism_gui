@@ -1440,7 +1440,7 @@ class EmailComposeDialog(PrismDialog):
                 "the limit. Press Send again when you want them to go.").format(
                 k=len(held))
         self.status.setText(msg.split("\n")[0])
-        QMessageBox.information(self, i18n.t("Email"), msg)
+        QMessageBox.information(self, i18n.t("Email spamming"), msg)
         if held and not stopped:
             # What went is gone from the screen; what stayed is the list.
             self._held_back = []

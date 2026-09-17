@@ -1352,9 +1352,9 @@ class LeadsWorkbench(QWidget):
     def _need_account(self):
         QMessageBox.information(
             self, i18n.t("Set up your sending account"),
-            i18n.t("No sending account is set up yet. Open the Email screen "
-                   "> Change account, add your address and app password, "
-                   "then come back and send."))
+            i18n.t("No sending account is set up yet. Open the Email spamming "
+                   "screen > Change account, add your address and app "
+                   "password, then come back and send."))
 
     def _on_send(self):
         """'Send all' — every drafted lead not already mailed."""

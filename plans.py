@@ -80,7 +80,7 @@ FEATURES: dict[str, Feature] = {
         "and your stock and get the shortage list before the job starts."),
 
     "email": Feature(
-        "email", "Email sending",
+        "email", "Email spamming",
         "Send from your own account, one copy per recipient",
         "Prism drafts it, you approve it, and it goes out from your own "
         "address — never a bulk-mail service."),

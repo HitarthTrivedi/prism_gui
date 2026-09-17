@@ -1,4 +1,5 @@
-"""Email — draft and send an email from the attached files, your account."""
+"""Email spamming — draft and send an email from the attached files,
+your account."""
 from __future__ import annotations
 
 from addons import names
@@ -6,7 +7,7 @@ from addons.manifest import WARN, RAIL, HOME, Addon, Offer
 
 MANIFEST = Addon(
     key="email",
-    label="Email",
+    label="Email spamming",
     feature="email",
     tip="Draft & send an email from attached files",
     blurb="Draft & send, your account",
