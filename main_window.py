@@ -12,12 +12,12 @@ The work column is a two-page stack: composing (task + plan) and running
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
-from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
-    QMenu, QApplication, QProgressDialog, QGraphicsScene, QGraphicsBlurEffect,
+    QMenu, QApplication, QProgressDialog,
 )
 
 import app_meta
@@ -192,66 +192,6 @@ AGENT_FEATURES = {agent: addon.feature
                   for agent in addon.agents}
 
 
-class DashboardCentral(QWidget):
-    """Central widget that paints the wallpaper background cleanly scaled to cover,
-    preserving aspect ratio across any window size, and caches a Gaussian-blurred
-    version for pure frosted glassmorphism cards and sidebar."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("central")
-        self.setAttribute(Qt.WA_StyledBackground, False)
-        bg_path = paths.resource("assets", "dashboard-bg.jpg")
-        self._bg_orig = QPixmap(bg_path) if os.path.exists(bg_path) else None
-        self._cached_pixmap = None
-        self._cached_blurred = None
-        self._cached_size = None
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._update_cache()
-
-    def _update_cache(self):
-        if self._bg_orig and not self._bg_orig.isNull():
-            w, h = max(1, self.width()), max(1, self.height())
-            self._cached_pixmap = self._bg_orig.scaled(
-                w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
-            )
-            self._cached_size = (w, h)
-
-            # Generate high-performance Gaussian blurred version for glassmorphic cards
-            bw, bh = max(1, w // 2), max(1, h // 2)
-            small = self._cached_pixmap.scaled(bw, bh, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-            scene = QGraphicsScene()
-            item = scene.addPixmap(small)
-            blur = QGraphicsBlurEffect()
-            blur.setBlurRadius(24)
-            item.setGraphicsEffect(blur)
-            out = QImage(QSize(bw, bh), QImage.Format_ARGB32_Premultiplied)
-            out.fill(0)
-            p = QPainter(out)
-            scene.render(p)
-            p.end()
-            self._cached_blurred = QPixmap.fromImage(out).scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-
-    def get_blurred_pixmap(self) -> QPixmap | None:
-        if self._cached_blurred is None or self._cached_size != (self.width(), self.height()):
-            self._update_cache()
-        return self._cached_blurred
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        if self._cached_pixmap is None or self._cached_size != (self.width(), self.height()):
-            self._update_cache()
-
-        if self._cached_pixmap and not self._cached_pixmap.isNull():
-            pw, ph = self._cached_pixmap.width(), self._cached_pixmap.height()
-            x = (self.width() - pw) // 2
-            y = (self.height() - ph) // 2
-            painter.drawPixmap(x, y, self._cached_pixmap)
-        else:
-            painter.fillRect(self.rect(), QColor("#09090b"))
 
 
 class MainWindow(QMainWindow):
@@ -397,7 +337,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1060, 640)
 
     def _build_ui(self):
-        central = DashboardCentral()
+        central = QWidget()
         central.setObjectName("central")
         # A vertical shell so the licence banner can span the full width above
         # all three columns. It has to be impossible to miss and impossible to
@@ -410,8 +350,8 @@ class MainWindow(QMainWindow):
         columns = QWidget()
         columns.setObjectName("columns")
         outer = QHBoxLayout(columns)
-        outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(14)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         self.sidebar = Sidebar()
         outer.addWidget(self.sidebar)
@@ -734,12 +674,12 @@ class MainWindow(QMainWindow):
         else:
             self._banner_alt_action = None
         self._banner_alt.setVisible(bool(alt))
-        self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, "#ffffff"))
+        self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
         self._banner_text.setText(text)
-        self._banner_text.setStyleSheet("color: #f1f5f9; font-size: 13px;")
+        self._banner_text.setStyleSheet(f"color: {tone}; font-size: 13px;")
         self.banner.setStyleSheet(
-            "QFrame#licenceBanner { background: rgba(18, 20, 26, 0.85);"
-            "border-bottom: 1px solid rgba(255, 255, 255, 0.12); }")
+            f"QFrame#licenceBanner {{ background: {theme.NEUTRAL[100]};"
+            f"border-bottom: 1px solid {theme.DIVIDER}; }}")
         self.banner.setVisible(True)
 
     # ── updates (Phase 1: a real in-app download+install, see updater.py) ──

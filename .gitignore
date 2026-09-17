@@ -43,3 +43,10 @@ integrations/token.json
 # devtools/apollo_probe.py writes screenshots and a profile copy here
 devtools/apollo_probe_out/
 devtools/canva_probe_out/
+scratch/
+components/
+current_screen.png
+run_prism.bat
+take_interaction_screenshot.js
+take_screenshot.js
+take_ss.ps1

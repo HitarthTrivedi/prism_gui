@@ -14,7 +14,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QPalette, QColor
 from PySide6.QtWidgets import QApplication
 
 import app_meta
@@ -381,6 +381,18 @@ def main():
     theme.load_fonts()
     # Titlebar, taskbar, alt-tab and every dialog inherit this.
     app.setWindowIcon(icons.logo_icon())
+
+    # Set explicit application palette to guarantee clean light surfaces across
+    # all OS environments (especially Linux GNOME/KDE running in dark mode).
+    pal = QPalette()
+    pal.setColor(QPalette.Window, QColor("#f4f5f6"))
+    pal.setColor(QPalette.WindowText, QColor("#1d1f20"))
+    pal.setColor(QPalette.Base, QColor("#ffffff"))
+    pal.setColor(QPalette.AlternateBase, QColor("#f4f5f6"))
+    pal.setColor(QPalette.Text, QColor("#1d1f20"))
+    pal.setColor(QPalette.Button, QColor("#ffffff"))
+    pal.setColor(QPalette.ButtonText, QColor("#1d1f20"))
+    app.setPalette(pal)
 
     # Before the first widget exists, and before the licence gate — that
     # dialog is the very first thing a new customer sees, and it is the one

@@ -256,7 +256,8 @@ def nav_button(label: str, icon_name: str, small: bool = False,
     btn.setFlat(True)
     btn.setFocusPolicy(Qt.StrongFocus)
     size = 15 if small else 17
-    icons.button_icon(btn, icon_name, size, "#27272a")
+    icons.button_icon(btn, icon_name, size,
+                      theme.over(INK_ITEM if small else INK_PRIMARY))
     btn.setIconSize(QSize(size, size))
     btn.setProperty("cur", False)
     btn.setMinimumHeight(C.MIN_TARGET + 4)
@@ -776,7 +777,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
+        self._pip.setStyleSheet("background: #ffffff; border-radius: 2px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -998,7 +999,9 @@ class Sidebar(QFrame):
         wake_label = QLabel(i18n.t('Listen for "Prism"'))
         wake_label.setObjectName("railMuted")
         wake_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        wake_label.setStyleSheet("color: #27272a; font-size: 13px; font-weight: 500; background: transparent;")
+        wake_label.setStyleSheet(theme.type_css("SUPPORT",
+                                                theme.over(INK_ITEM))
+                                 + " background: transparent;")
         wake_row.addWidget(wake_label, stretch=1)
         self._wake_label = wake_label
 

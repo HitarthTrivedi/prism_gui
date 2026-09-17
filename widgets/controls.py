@@ -299,17 +299,16 @@ class Card(QFrame):
     blueprint registration marks the old design cornered its panels with.
     """
 
-    def __init__(self, stripe: bool = False, radius: int = 18,
+    def __init__(self, stripe: bool = False, radius: int = theme.R_CARD,
                  raised: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         self._radius = radius
         self._stripe = stripe
         self.setAttribute(Qt.WA_StyledBackground, True)
-        # QSS provides the base fill; paintEvent layers the glass optics on top.
         self.setStyleSheet(
-            f"#card {{ background: transparent; border-radius: {radius}px; "
-            f"border: none; }}"
+            f"#card {{ background: {theme.CARD}; border-radius: {radius}px; "
+            f"border: 1px solid {theme.HAIRLINE}; }}"
         )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
 
@@ -322,67 +321,15 @@ class Card(QFrame):
         return col
 
     def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._stripe:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-
-        r = QRectF(self.rect())
-        radius = float(self._radius)
-
-        # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
-        clip.addRoundedRect(r, radius, radius)
+        clip.addRoundedRect(QRectF(self.rect()), self._radius, self._radius)
         painter.setClipPath(clip)
-
-        # ── Layer 1: True Gaussian Backdrop Blur ──────────────────────────
-        central = self.window().findChild(QWidget, "central")
-        if central and hasattr(central, "get_blurred_pixmap"):
-            blurred = central.get_blurred_pixmap()
-            if blurred and not blurred.isNull():
-                pos = self.mapTo(central, QPoint(0, 0))
-                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
-                painter.drawPixmap(r.toRect(), blurred, src_rect)
-
-        # ── Layer 2: Frosted light glass sheen ────────────────────────────
-        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
-                                     QPointF(r.left(), r.bottom()))
-        glass_grad.setColorAt(0.00, QColor(255, 255, 255, 185))  # ~72% frosted white at top rim
-        glass_grad.setColorAt(0.40, QColor(255, 255, 255, 145))  # ~57% frosted white in middle
-        glass_grad.setColorAt(1.00, QColor(255, 255, 255, 125))  # ~49% frosted white at bottom
-        painter.setBrush(QBrush(glass_grad))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(r, radius, radius)
-
-        # ── Layer 3: Diagonal bright-light catch sheen ─────────────────────
-        sheen = QRadialGradient(QPointF(r.left() + r.width() * 0.2,
-                                        r.top() + r.height() * 0.1),
-                                r.width() * 0.65)
-        sheen.setColorAt(0.0, QColor(255, 255, 255, 100))
-        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setBrush(QBrush(sheen))
-        painter.drawRoundedRect(r, radius, radius)
-
-        # ── Layer 4: Outer glass specular and contact border ──────────────
-        border_grad = QLinearGradient(
-            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
-        border_grad.setColorAt(0.0, QColor(255, 255, 255, 230))
-        border_grad.setColorAt(0.5, QColor(255, 255, 255, 130))
-        border_grad.setColorAt(1.0, QColor(0, 0, 0, 24))
-        border_pen = QPen(QBrush(border_grad), 1.2)
-        painter.setPen(border_pen)
-        painter.setBrush(Qt.NoBrush)
-        inset = r.adjusted(0.6, 0.6, -0.6, -0.6)
-        painter.drawRoundedRect(inset, radius - 0.6, radius - 0.6)
-
-        # ── Stripe accent bar (optional) ───────────────────────────────────
-        if self._stripe:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor(255, 255, 255, 180)))
-            painter.drawRect(QRectF(r.left(), r.top(), r.width(), 3))
-        # painter is implicitly ended when it goes out of scope.
-        # We do NOT call super().paintEvent(event) here — QFrame would overdraw
-        # our glass layers with a solid background. Children are painted by Qt
-        # through their own paint events, not through this frame's paintEvent.
+        painter.fillRect(QRect(0, 0, self.width(), 3), theme.c(theme.ACCENT))
 
 
 class Pill(QLabel):
