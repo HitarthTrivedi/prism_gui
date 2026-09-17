@@ -21,6 +21,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QMessageBox, QProgressBar, QRadioButton, QButtonGroup,
+    QCheckBox,
 )
 
 import core_bridge as CB
@@ -29,7 +30,8 @@ import theme
 import wakeword
 from dialogs.base import PrismDialog
 from widgets import controls as C
-from workers import AutomationWorker, RecordWorker, ReelWorker, StudioFollowupWorker
+from workers import (AutomationWorker, RecordWorker, ReelWorker,
+                     StudioFollowupWorker)
 from widgets.ask_panel import AskPanel
 
 
@@ -57,6 +59,7 @@ class ReelDialog(PrismDialog):
         self.request = ""
 
         self.images: list[dict] = []
+        self.videos: list[str] = []
         self.brand: dict = {}
         self.spec: dict | None = None
         self.out_path = ""
@@ -89,8 +92,8 @@ class ReelDialog(PrismDialog):
         self.ask = AskPanel(
             'Just say it — for example:\n'
             '"a reel describing what we sell at Raj Infotech"\n\n'
-            "Attach their logo, business card or brochure and the brand "
-            "colours are taken straight from it.")
+            "Attach a logo for branding, or client .MOV/.MP4 clips to edit "
+            "into one vertical reel.")
         self.ask.speak_clicked.connect(self._toggle_record)
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
@@ -107,9 +110,13 @@ class ReelDialog(PrismDialog):
         self.reel_btn = QRadioButton(
             "Quick — drawn from templates. Same look every time, ready in "
             "under a minute.")
+        self.footage_btn = QRadioButton(
+            "Edit client footage — dynamic motion graphics captions, "
+            "cinematic transitions, and ducked audio. The video stays local.")
         self.render_choice = QButtonGroup(self)
         self.render_choice.addButton(self.studio_btn)
         self.render_choice.addButton(self.reel_btn)
+        self.render_choice.addButton(self.footage_btn)
         studio_ok, studio_why = CB.studio_available()
         # Studio is the better film, so it is the default wherever it can run.
         (self.studio_btn if studio_ok else self.reel_btn).setChecked(True)
@@ -138,7 +145,7 @@ class ReelDialog(PrismDialog):
                                       theme.SPACE_3, theme.SPACE_3)
         choice_col.setSpacing(theme.SPACE_2)
         choice_col.addWidget(C.kicker(i18n.t("How it is made"), muted=True))
-        for b in (self.studio_btn, self.reel_btn):
+        for b in (self.studio_btn, self.reel_btn, self.footage_btn):
             b.setMinimumHeight(C.MIN_TARGET)
             b.setCursor(Qt.PointingHandCursor)
             choice_col.addWidget(b)
@@ -151,6 +158,29 @@ class ReelDialog(PrismDialog):
             choice_col.addWidget(why)
         self._studio_ok = studio_ok
         root.addWidget(choice)
+
+        self.voiceover_check = QCheckBox(
+            i18n.t("Create an ElevenLabs voice-over from the reel script"), self)
+        self.voiceover_check.setObjectName("reelVoiceover")
+        self.voiceover_check.setChecked(
+            (CB.config.active_agents(self.cfg).get("audio") or "") ==
+            "ElevenLabs")
+        self.voiceover_check.setToolTip(i18n.t(
+            "Prism sends the written voice-over to ElevenLabs, downloads "
+            "the audio, and mixes it into the client footage with sidechain ducking."))
+        root.addWidget(self.voiceover_check)
+
+        self.caption_note = C.meta(i18n.t(
+            "Client-footage edits feature dynamic motion graphics captions, "
+            "curated transitions, and ducked audio."))
+        self.caption_note.setWordWrap(True)
+        root.addWidget(self.caption_note)
+        def _update_options():
+            self.voiceover_check.setVisible(self.footage_btn.isChecked() or self.studio_btn.isChecked())
+            self.caption_note.setVisible(self.footage_btn.isChecked())
+        _update_options()
+        self.footage_btn.toggled.connect(lambda _: _update_options())
+        self.studio_btn.toggled.connect(lambda _: _update_options())
 
         # A measured result ("your brand colours came off this logo"), not a
         # placeholder, so it stops wearing the dashed empty-state box.
@@ -232,10 +262,12 @@ class ReelDialog(PrismDialog):
         self._absorb(paths)
 
     def _absorb(self, paths: list):
-        """Only images matter here — they carry the brand. Anything else is
-        ignored rather than refused, so a user who attaches a PDF too isn't
-        stopped."""
+        """Keep artwork for branding and client clips for local editing."""
         for p in paths:
+            if p.lower().endswith((".mov", ".mp4", ".m4v", ".webm")):
+                if p not in self.videos:
+                    self.videos.append(p)
+                continue
             if not p.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
                 continue
             try:
@@ -244,14 +276,26 @@ class ReelDialog(PrismDialog):
                 continue
             if att["path"] not in [i["path"] for i in self.images]:
                 self.images.append(att)
-        if not self.images:
-            return
-        self.brand = self.reel.sample_brand([i["path"] for i in self.images]) or {}
+        if self.images:
+            self.brand = self.reel.sample_brand([i["path"] for i in self.images]) or {}
+        notes = []
         if self.brand:
-            self.brand_label.setText(
+            notes.append(
                 f"Brand colours read from {', '.join(i['name'] for i in self.images)} — "
                 f"accent {self.brand.get('accent')}, deep {self.brand.get('deep')}. "
                 "Measured from the artwork, not guessed.")
+        if self.videos:
+            # A video attachment is an action, not decoration. Studio cannot
+            # consume source footage, so silently leaving Studio selected made
+            # it generate an unrelated reel while the chosen clips sat unused.
+            self.footage_btn.setChecked(True)
+            self.run_btn.setText(i18n.t("Edit my videos"))
+            notes.append(f"{len(self.videos)} client video"
+                         f"{'s' if len(self.videos) != 1 else ''} ready to edit — "
+                         "capture order will be preserved, long takes will "
+                         "be balanced, and phone rotation will be corrected.")
+        if notes:
+            self.brand_label.setText("\n".join(notes))
             # Hidden until there is something to say — an empty tinted strip
             # under the prompt is a slot waiting to be filled, which is what
             # the dashed placeholder version of this always looked like.
@@ -292,6 +336,15 @@ class ReelDialog(PrismDialog):
         if not ok:
             QMessageBox.warning(self, "Reel", why)
             return
+        if self.footage_btn.isChecked():
+            if not self.videos:
+                QMessageBox.information(
+                    self, "Edit client footage",
+                    "Attach one or more .MOV or .MP4 videos first.")
+                return
+            self.request = request
+            self._run_footage(request)
+            return
 
         agents = CB.config.active_agents(self.cfg)
         writer = next((s for s in ("content", "brains", "media") if agents.get(s)), None)
@@ -315,6 +368,125 @@ class ReelDialog(PrismDialog):
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
 
+    def _run_footage(self, request: str):
+        """Write captions, optionally make speech, then edit locally."""
+        agents = CB.config.active_agents(self.cfg)
+        writer_stage = next((s for s in ("content", "brains")
+                             if agents.get(s)), None)
+        if not writer_stage:
+            QMessageBox.warning(
+                self, "Edit client footage",
+                "No writing agent is set up yet — open Agents and choose a "
+                "Content or Reasoning tool first.")
+            return
+        try:
+            video_attachments = [CB.files.attach(path) for path in self.videos]
+        except Exception as e:
+            QMessageBox.warning(self, "Edit client footage", str(e))
+            return
+        self._studio_audio = ""
+
+        total_footage_dur = 0.0
+        try:
+            from core import footage as _footage
+            probed_clips = [_footage.probe(p) for p in self.videos if os.path.isfile(p)]
+            total_footage_dur = sum(float(p.get("duration") or 0) for p in probed_clips)
+        except Exception:
+            pass
+
+        import re as _re
+        dur_match = _re.search(r"\b(\d+)\s*(?:s|sec|secs|second|seconds)\b", request.lower())
+        if dur_match:
+            try:
+                target_dur = float(dur_match.group(1))
+            except (TypeError, ValueError):
+                target_dur = 20.0
+        elif "minute" in request.lower():
+            target_dur = 60.0
+        elif total_footage_dur > 0:
+            target_dur = min(30.0, max(14.0, total_footage_dur * 0.85 if total_footage_dur > 24 else total_footage_dur))
+        else:
+            target_dur = 20.0
+
+        target_dur = round(max(10.0, min(60.0, target_dur)), 1)
+        num_scenes = max(len(self.videos), max(3, int(round(target_dur / 3.8))))
+        sec_per_scene = round(target_dur / num_scenes, 1)
+
+        stages = [
+            ("content", agents[writer_stage], [
+                "Write a promotional reel script with dynamic motion graphics captions for the supplied client footage. "
+                "Use the client's request as the source of truth.\n\n"
+                f"CLIENT REQUEST:\n{request}\n\n"
+                f"CRITICAL TIMING & DURATION BUDGET (STRICTLY REQUIRED):\n"
+                f"- The target finished video duration is EXACTLY {target_dur:.0f} seconds across {len(self.videos)} video clip(s).\n"
+                f"- Provide EXACTLY {num_scenes} scenes in the 'scenes' array.\n"
+                f"- The 'seconds' values across all scenes MUST SUM TO EXACTLY {target_dur:.0f} SECONDS (approximately {sec_per_scene:.1f}s each).\n"
+                f"- CRITICAL AUDIO CONSTRAINT: The spoken 'voiceover' line for each scene MUST be concise (under 10 words, 1 short sentence) so that when read aloud by ElevenLabs, the total voice-over speech takes under {target_dur:.0f} seconds and never overflows the video duration!\n\n"
+                "Return a JSON object with a 'scenes' array. Each scene must include:\n"
+                "- 'kicker': punchy 1-3 word category / section tag (e.g. '01 // OVERVIEW', 'PRECISION', 'PERFORMANCE')\n"
+                "- 'caption': punchy on-screen headline (under 8 words)\n"
+                "- 'highlight': 1-2 key words to pop with vibrant accent color\n"
+                "- 'transition': cinematic cut transition ('smoothleft', 'zoomin', 'wipeleft', 'hblur', or 'dissolve')\n"
+                "- 'voiceover': concise spoken narration line (under 10 words)\n"
+                f"- 'seconds': timing (around {sec_per_scene:.1f}s)\n"
+                "Write finished advertising copy. Reply with ONLY the JSON object."]),
+        ]
+        if self.voiceover_check.isChecked():
+            stages.append(("audio", "ElevenLabs", [
+                "Create one finished voice-over audio file. Read the "
+                "voiceover lines from the preceding reel-script JSON in "
+                "scene order. Do not speak the field names, JSON syntax, "
+                "captions, or instructions. Return the downloadable audio "
+                "file, not only a description."]))
+        stages.append(("media", "Prism Studio", []))
+
+        self.progress.setRange(0, 0)
+        self._busy(True, f"{agents[writer_stage]} is writing timed motion captions…")
+        self._worker = AutomationWorker(
+            {}, self.cfg, video_attachments,
+            f"edit client footage — {request}", custom_stages=stages,
+            chatgpt_analysis=False, failover=False)
+        self._worker.stage_event.connect(self._on_footage_event)
+        self._worker.done.connect(self._on_footage_done)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.start()
+
+    def _on_footage_event(self, kind: str, payload: dict):
+        stage = payload.get("stage", "")
+        if kind == "stage_start" and stage == "audio":
+            self._busy(True, "ElevenLabs is creating the voice-over…")
+        elif kind == "stage_start" and stage == "media":
+            detail = ("motion captions, dynamic transitions, and ducked voice-over"
+                      if self.voiceover_check.isChecked()
+                      else "motion captions and dynamic transitions")
+            self._busy(True, f"Editing the clips — adding {detail}…")
+        elif kind == "local_progress":
+            self._on_footage_progress(int(payload.get("done", 0)),
+                                      int(payload.get("total", 0)))
+
+    def _on_footage_done(self, responses: dict, links: dict):
+        out = links.get("media", "")
+        if not out or not os.path.isfile(out):
+            self._on_failed("The caption or audio step finished, but the "
+                            "client-footage editor did not produce a video.")
+            return
+        self.out_path = out
+        try:
+            captions = CB.get_automation()._footage_script(
+                responses.get("content") or [])
+            self.script_view.setPlainText("\n".join(
+                f"{i + 1}. {item['text']}" for i, item in enumerate(captions)))
+        except Exception:
+            pass
+        self._on_rendered(out)
+
+    def _on_footage_progress(self, done: int, total: int):
+        self.progress.setRange(0, max(1, total))
+        self.progress.setValue(min(done, total))
+        if total > 0 and done < total:
+            self.status.setText(
+                f"Editing video — {round(done * 100 / total)}% complete")
+
     # ── Studio ──────────────────────────────────────────────────────────
     # Two writing passes, not one. A single reply asked for both the words
     # and the look produces a design that DESCRIBES itself — "clean data
@@ -336,17 +508,36 @@ class ReelDialog(PrismDialog):
         director = agents.get("brains") or agents.get("content") or agents[writer]
         self._studio_director = director
         self._busy(True, f"{agents[writer]} is writing the words…")
+
+        stages = [
+            ("script", agents[writer],
+             ["Write the script for a short vertical brand reel.\n\n"
+              f"WHAT THE CLIENT ASKED FOR:\n{request}\n\n"
+              + studio.script_instructions()]),
+        ]
+
+        maker = agents.get("visual")
+        if maker:
+            stages.append(("artwork", maker, [
+                studio.imagery_instructions(request, bool(table), attached=list(table))
+            ]))
+
+        if self.voiceover_check.isChecked() and agents.get("audio"):
+            stages.append(("audio", agents["audio"], [
+                "Create one finished voice-over audio file. Read the "
+                "voiceover lines from the preceding reel-script JSON in "
+                "scene order. Do not speak the field names, JSON syntax, "
+                "captions, or instructions. Return the downloadable audio "
+                "file, not only a description."
+            ]))
+
+        stages.append(("design", director,
+             [studio.design_instructions(self.brand or None, request,
+                                         assets.manifest(table))]))
+
         self._worker = AutomationWorker(
             {}, self.cfg, self.images, f"design a reel — {request}",
-            custom_stages=[
-                ("script", agents[writer],
-                 ["Write the script for a short vertical brand reel.\n\n"
-                  f"WHAT THE CLIENT ASKED FOR:\n{request}\n\n"
-                  + studio.script_instructions()]),
-                ("design", director,
-                 [studio.design_instructions(self.brand or None, request,
-                                             assets.manifest(table))]),
-            ],
+            custom_stages=stages,
             chatgpt_analysis=False,
             # Names the stage whose reply is turn one of the design
             # conversation. A routed run infers this from the renderer in its
@@ -361,6 +552,7 @@ class ReelDialog(PrismDialog):
         self._worker.start()
 
     def _on_studio_event(self, kind: str, payload: dict):
+        stage = payload.get("stage", "")
         if kind == "reel_scene":
             n, total = payload.get("index", 0) + 1, payload.get("total", 0)
             self._busy(True, f"Designing scene {n} of {total} — "
@@ -368,7 +560,11 @@ class ReelDialog(PrismDialog):
             if total:
                 self.progress.setRange(0, total)
                 self.progress.setValue(n - 1)
-        elif kind == "stage_start" and payload.get("stage") == "design":
+        elif kind == "stage_start" and stage == "artwork":
+            self._busy(True, "Generating artwork and visual assets…")
+        elif kind == "stage_start" and stage == "audio":
+            self._busy(True, "Creating voice-over audio…")
+        elif kind == "stage_start" and stage == "design":
             self._busy(True, "Choosing the look and storyboarding the "
                              "scenes…")
 
@@ -407,11 +603,28 @@ class ReelDialog(PrismDialog):
         # portable spec; old specs simply keep manual editing available.
         spec["_studio"] = {"design_url": links.get("design", ""),
                            "agent": getattr(self, "_studio_director", "")}
+        audio_file = links.get("audio") or ""
+        self._studio_audio = audio_file if (audio_file and os.path.isfile(audio_file)) else ""
         self.spec = spec
         self._start_render(spec, studio=True)
 
     def _start_render(self, spec: dict, studio: bool = False):
         self._studio_last = studio
+        audio_file = getattr(self, "_studio_audio", "")
+        if audio_file and os.path.isfile(audio_file):
+            try:
+                from core import footage as _footage
+                voice_dur = float(_footage.probe(audio_file).get("duration") or 0)
+                if voice_dur > 0 and spec.get("scenes"):
+                    planned_secs = sum(float(sc.get("seconds", 4) or 4) for sc in spec["scenes"])
+                    if planned_secs > 0 and voice_dur > planned_secs:
+                        scale = voice_dur / planned_secs
+                        for sc in spec["scenes"]:
+                            cur = float(sc.get("seconds", 4) or 4)
+                            sc["seconds"] = round(cur * scale, 2)
+            except Exception:
+                pass
+
         lines = [f"{i + 1}. {sc.get('type') or 'scene'}  ·  "
                  f"{sc.get('seconds', 4)}s"
                  f"   {sc.get('heading') or sc.get('name') or ''}"
@@ -472,6 +685,8 @@ class ReelDialog(PrismDialog):
             return
         if self.brand:
             spec["brand"] = self.brand
+        audio_file = links.get("audio") or ""
+        self._studio_audio = audio_file if (audio_file and os.path.isfile(audio_file)) else ""
         self.spec = spec
         self._start_render(spec)
 
@@ -482,6 +697,15 @@ class ReelDialog(PrismDialog):
         self.play_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
         self._refresh_edit_btn()
+        audio = getattr(self, "_studio_audio", "")
+        if audio and os.path.isfile(audio):
+            try:
+                from core import footage as _footage
+                _footage.mix_audio(path, audio)
+            except Exception:
+                pass
+            finally:
+                self._studio_audio = ""
         # A closed Prism used to leave no way back to this file — it only
         # ever lived in ~/.prism/runs (hidden on macOS) or in this dialog's
         # own memory. Copying it out to a named, visible folder is what
@@ -524,6 +748,17 @@ class ReelDialog(PrismDialog):
         super().closeEvent(event)
 
     def _on_failed(self, error: str):
+        if (getattr(self, "_studio_last", False) and getattr(self, "spec", None)
+                and not getattr(self, "_auto_healed", False)
+                and any(k in error.lower() for k in ("accent", "preflight", "colour", "color"))):
+            self._auto_healed = True
+            try:
+                self.spec = CB.get_studio().ensure_accent_applied(self.spec)
+                self._busy(True, "Auto-healing brand colours and re-filming…")
+                self._start_render(self.spec, studio=True)
+                return
+            except Exception:
+                pass
         self._busy(False, "")
         QMessageBox.warning(self, "Reel", error)
 
@@ -673,7 +908,15 @@ class ReelDialog(PrismDialog):
         elif os.name == "nt":
             os.startfile(path)  # noqa: F821
         else:
-            subprocess.Popen(["xdg-open", path])
+            env = os.environ.copy()
+            # Prism is often launched from VS Code's Snap. Its private glibc
+            # path leaks through LD_LIBRARY_PATH and makes the system VLC load
+            # /snap/core20/libpthread against the host libc, then abort with
+            # __libc_pthread_init. Desktop apps must start in the host's own
+            # library environment, not the parent editor's runtime.
+            env.pop("LD_LIBRARY_PATH", None)
+            env.pop("LD_PRELOAD", None)
+            subprocess.Popen(["xdg-open", path], env=env)
 
     def _reveal(self):
         # The artifact copy first: it sits in Desktop/Prism Artifacts, a
@@ -687,4 +930,7 @@ class ReelDialog(PrismDialog):
         elif os.name == "nt":
             subprocess.Popen(["explorer", "/select,", path])
         else:
-            subprocess.Popen(["xdg-open", os.path.dirname(path)])
+            env = os.environ.copy()
+            env.pop("LD_LIBRARY_PATH", None)
+            env.pop("LD_PRELOAD", None)
+            subprocess.Popen(["xdg-open", os.path.dirname(path)], env=env)

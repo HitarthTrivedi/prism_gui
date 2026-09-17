@@ -1268,7 +1268,7 @@ class MainWindow(QMainWindow):
     def _open_reel(self):
         self._authorized_then("reel", "addon", self._open_reel_dialog)
 
-    def _open_reel_dialog(self):
+    def _open_reel_dialog(self, prefill: str = ""):
         ok, err = CB.reel_available()
         if not ok:
             # FFmpeg specifically is something Prism can fix by itself, so it
@@ -1279,7 +1279,10 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, i18n.t("Reel"), err)
             return
-        ReelDialog(self.cfg, self.attachments, self).exec()
+        dialog = ReelDialog(self.cfg, self.attachments, self)
+        if prefill:
+            dialog.ask.set_text(prefill)
+        dialog.exec()
 
     def _open_motion(self):
         # Same licence feature as Reel/Studio — Motion is the same "media"
@@ -1718,7 +1721,7 @@ class MainWindow(QMainWindow):
         # the "Already attached" guard.
 
     def _attach_file_dialog(self):
-        """Ask where the file is before asking which file.
+        """Ask where the files are before asking which files.
 
         A plain file dialog can only offer the disk, and half of what a
         company wants to feed Prism lives in its Drive. The choice comes
@@ -1749,13 +1752,15 @@ class MainWindow(QMainWindow):
             if chosen is not here:
                 start_in = chosen.data() or ""
 
-        # One chooser either way. Opening it INSIDE the cloud folder is the
-        # whole trick: from there it behaves exactly like picking any other
-        # file, and nothing downstream needs to know where it came from.
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Attach a file"), start_in)
-        if path:
-            self._attach_path(path)
+        # One multi-select chooser either way. Opening it INSIDE the cloud
+        # folder is the whole trick: from there it behaves exactly like
+        # picking local files, and a client can select every video clip in
+        # one pass rather than reopening the picker for each one.
+        picked, _ = QFileDialog.getOpenFileNames(
+            self, i18n.t("Attach files"), start_in)
+        if picked:
+            for path in picked:
+                self._attach_path(path)
         else:
             # Distinguishes "you closed the chooser" from "the chooser never
             # opened" and from "attaching failed" — three very different bugs

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,7 +52,8 @@ class BothRenderersAreOffered(unittest.TestCase):
         dlg = _dialog()
         self.assertTrue(dlg.studio_btn.text())
         self.assertTrue(dlg.reel_btn.text())
-        self.assertEqual(len(dlg.render_choice.buttons()), 2)
+        self.assertTrue(dlg.footage_btn.text())
+        self.assertEqual(len(dlg.render_choice.buttons()), 3)
 
     def test_studio_is_the_default_when_it_can_run(self):
         """It is the better film. The template renderer exists for the
@@ -70,6 +72,14 @@ class BothRenderersAreOffered(unittest.TestCase):
         dlg = _dialog()
         self.assertIn("minutes", dlg.studio_btn.text())
         self.assertIn("minute", dlg.reel_btn.text())
+
+    def test_attached_video_selects_the_footage_editor(self):
+        dlg = ReelDialog(
+            {"agents": {"content": "ChatGPT"}},
+            [{"path": "/tmp/client-shot.MOV"}], None)
+        self.assertTrue(dlg.footage_btn.isChecked())
+        self.assertIn("Edit", dlg.run_btn.text())
+        self.assertEqual(dlg.videos, ["/tmp/client-shot.MOV"])
 
     def test_an_unavailable_studio_is_disabled_with_its_reason(self):
         was = CB.studio_available
@@ -148,6 +158,25 @@ class ChoosingStudioRunsStudio(unittest.TestCase):
         self.assertEqual([s[0] for s in seen["kwargs"]["custom_stages"]],
                          ["script"])
         self.assertNotIn("reel_design_stage", seen["kwargs"])
+
+    def test_client_footage_runs_caption_writer_then_local_editor(self):
+        dlg = _dialog(content="ChatGPT")
+        with tempfile.NamedTemporaryFile(suffix=".MOV") as clip:
+            dlg._absorb([clip.name])
+            seen = self._capture_run(dlg)
+        self.assertEqual([s[0] for s in seen["kwargs"]["custom_stages"]],
+                         ["content", "media"])
+        self.assertEqual(seen["kwargs"]["custom_stages"][-1][1],
+                         "Prism Studio")
+
+    def test_client_footage_can_insert_elevenlabs_before_the_edit(self):
+        dlg = _dialog(content="ChatGPT", audio="ElevenLabs")
+        with tempfile.NamedTemporaryFile(suffix=".MOV") as clip:
+            dlg._absorb([clip.name])
+            seen = self._capture_run(dlg)
+        stages = seen["kwargs"]["custom_stages"]
+        self.assertEqual([s[0] for s in stages], ["content", "audio", "media"])
+        self.assertEqual(stages[1][1], "ElevenLabs")
 
 
 class TheRendererFollowsTheChoice(unittest.TestCase):

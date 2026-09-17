@@ -1237,6 +1237,15 @@ class OutputPanel(QWidget):
         card = self._cards.get(stage)
         if card is not None:
             return card
+        # If "artwork" comes in and "visual" was in the plan and is still queued,
+        # reuse the "visual" card: it is the same deliverable (making images).
+        if stage == "artwork" and "visual" in self._cards and self._cards["visual"]._state == "queued":
+            card = self._cards.pop("visual")
+            card.stage = "artwork"
+            self._cards["artwork"] = card
+            idx = self._order.index("visual")
+            self._order[idx] = "artwork"
+            return card
         self.empty.setVisible(False)
         card = StageCard(stage, agent, index=len(self._order) + 1)
         card.edit_reel.connect(self.edit_reel.emit)
