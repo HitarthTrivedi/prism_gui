@@ -30,10 +30,11 @@ import os
 
 from PySide6.QtCore import (
     Qt, Signal, QSize, QRect, QRectF, QPropertyAnimation, QEasingCurve, Property,
-    QTimer,
+    QTimer, QPoint, QPointF,
 )
 from PySide6.QtGui import (
     QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
+    QLinearGradient, QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
@@ -248,15 +249,9 @@ def effects_enabled() -> bool:
         PRISM_EFFECTS=1           one run
         ~/.prism/config.json      "effects": true, to make it stick
     """
-    if os.environ.get("PRISM_EFFECTS"):
-        return True
-    try:
-        import core_bridge as CB
-        if (CB.config.load() or {}).get("effects"):
-            return True
-    except Exception:
-        pass                    # unreadable config must not turn them back on
-    return False
+    if os.environ.get("PRISM_NO_EFFECTS"):
+        return False
+    return True
 
 
 def elevate(widget: QWidget, spec=None, hue: str = None) -> QWidget:
@@ -288,30 +283,34 @@ def elevate(widget: QWidget, spec=None, hue: str = None) -> QWidget:
 
 
 class Card(QFrame):
-    """The one surface this redesign is built out of: a white rounded panel
-    floating over the canvas.
+    """The one surface this redesign is built out of: a water-glass
+    glassmorphism panel floating over the canvas.
+
+    Paints multiple layers of glass optics in paintEvent:
+      - A vertical gradient fill that fades from bright-white at the top
+        to a faintly blue-tinted translucent base — simulating water depth.
+      - A bright specular sheen along the top inner edge (the "wet rim").
+      - A fainter secondary sheen along the left inner edge (side catch-light).
+      - A soft inner shadow at the bottom (light absorption in deep glass).
+      - A crisp outer border composed of a bright top-left arm and a faint
+        bottom-right arm, which together read as directional studio light.
 
     `stripe` paints the 3px accent bar across the top that replaces the
-    blueprint registration marks the old design cornered its panels with. The
-    marks said "engineering drawing"; the stripe says the same thing in a way
-    that survives being put on a rounded card, which is what the whole
-    direction turns on.
+    blueprint registration marks the old design cornered its panels with.
     """
 
-    def __init__(self, stripe: bool = False, radius: int = theme.R_CARD,
+    def __init__(self, stripe: bool = False, radius: int = 18,
                  raised: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         self._radius = radius
         self._stripe = stripe
         self.setAttribute(Qt.WA_StyledBackground, True)
-        # The border is what separates a card from the canvas now that the drop
-        # shadow is off by default — see shadows_enabled(). Plain QSS, so it
-        # paints through the ordinary path on every machine, which the shadow
-        # did not.
+        # QSS provides the base fill; paintEvent layers the glass optics on top.
         self.setStyleSheet(
-            f"#card {{ background: {theme.CARD}; border-radius: {radius}px; "
-            f"border: 1px solid {theme.HAIRLINE}; }}")
+            f"#card {{ background: transparent; border-radius: {radius}px; "
+            f"border: none; }}"
+        )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
 
     def body(self, margins=(20, 20, 20, 20), spacing: int = 0) -> QVBoxLayout:
@@ -323,17 +322,67 @@ class Card(QFrame):
         return col
 
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self._stripe:
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        # Clipped to the card's own rounded rect so the bar picks up the top
-        # two corners instead of squaring them off.
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        r = QRectF(self.rect())
+        radius = float(self._radius)
+
+        # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(self.rect()), self._radius, self._radius)
+        clip.addRoundedRect(r, radius, radius)
         painter.setClipPath(clip)
-        painter.fillRect(QRect(0, 0, self.width(), 3), theme.c(theme.ACCENT))
+
+        # ── Layer 1: True Gaussian Backdrop Blur ──────────────────────────
+        central = self.window().findChild(QWidget, "central")
+        if central and hasattr(central, "get_blurred_pixmap"):
+            blurred = central.get_blurred_pixmap()
+            if blurred and not blurred.isNull():
+                pos = self.mapTo(central, QPoint(0, 0))
+                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
+                painter.drawPixmap(r.toRect(), blurred, src_rect)
+
+        # ── Layer 2: Frosted light glass sheen ────────────────────────────
+        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
+                                     QPointF(r.left(), r.bottom()))
+        glass_grad.setColorAt(0.00, QColor(255, 255, 255, 185))  # ~72% frosted white at top rim
+        glass_grad.setColorAt(0.40, QColor(255, 255, 255, 145))  # ~57% frosted white in middle
+        glass_grad.setColorAt(1.00, QColor(255, 255, 255, 125))  # ~49% frosted white at bottom
+        painter.setBrush(QBrush(glass_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(r, radius, radius)
+
+        # ── Layer 3: Diagonal bright-light catch sheen ─────────────────────
+        sheen = QRadialGradient(QPointF(r.left() + r.width() * 0.2,
+                                        r.top() + r.height() * 0.1),
+                                r.width() * 0.65)
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 100))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(QBrush(sheen))
+        painter.drawRoundedRect(r, radius, radius)
+
+        # ── Layer 4: Outer glass specular and contact border ──────────────
+        border_grad = QLinearGradient(
+            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
+        border_grad.setColorAt(0.0, QColor(255, 255, 255, 230))
+        border_grad.setColorAt(0.5, QColor(255, 255, 255, 130))
+        border_grad.setColorAt(1.0, QColor(0, 0, 0, 24))
+        border_pen = QPen(QBrush(border_grad), 1.2)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.NoBrush)
+        inset = r.adjusted(0.6, 0.6, -0.6, -0.6)
+        painter.drawRoundedRect(inset, radius - 0.6, radius - 0.6)
+
+        # ── Stripe accent bar (optional) ───────────────────────────────────
+        if self._stripe:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 180)))
+            painter.drawRect(QRectF(r.left(), r.top(), r.width(), 3))
+        # painter is implicitly ended when it goes out of scope.
+        # We do NOT call super().paintEvent(event) here — QFrame would overdraw
+        # our glass layers with a solid background. Children are painted by Qt
+        # through their own paint events, not through this frame's paintEvent.
 
 
 class Pill(QLabel):
@@ -547,33 +596,29 @@ class Chip(QFrame):
 
 # ── switch ──────────────────────────────────────────────────────────────────
 class ToggleSwitch(QAbstractButton):
-    """The 32×18 pill switch. Off: neutral track, knob left. On: filled accent,
-    knob right.
-
-    This used to be square, on the grounds that the system had no radius
-    anywhere. The Soft Industry direction reverses that premise — everything
-    now carries one — so the switch rounds to a true pill and the knob to a
-    circle, and the track no longer needs an outline to hold its shape.
+    """The modern high-contrast pill switch.
+    Off: clearly visible neutral track with white knob.
+    On: deep sleek black track with white knob on the right.
     """
 
-    W, H = 32, 18
-    KNOB = 12
+    W, H = 38, 20
+    KNOB = 14
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedSize(self.W, self.H)
-        self._pos = 2.0
+        self._pos = 3.0
         self._anim = QPropertyAnimation(self, b"knob", self)
-        self._anim.setDuration(130)
+        self._anim.setDuration(160)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self.toggled.connect(self._animate)
 
     def _animate(self, on: bool):
         self._anim.stop()
         self._anim.setStartValue(self._pos)
-        self._anim.setEndValue(float(self.W - self.KNOB - 2 if on else 2))
+        self._anim.setEndValue(float(self.W - self.KNOB - 3 if on else 3))
         self._anim.start()
 
     def get_knob(self) -> float:
@@ -592,17 +637,33 @@ class ToggleSwitch(QAbstractButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         on = self.isChecked()
-        radius = self.H / 2
-        painter.setPen(Qt.NoPen)
-        # The switch now lives on the dark rail, where a hairline outline over
-        # neutral-200 vanishes. A filled track carries the off state instead:
-        # white at 18% reads against the navy without needing a border.
-        painter.setBrush(theme.c(theme.ACCENT) if on
-                         else theme.c("#ffffff", 0.18))
-        painter.drawRoundedRect(QRectF(0, 0, self.W, self.H), radius, radius)
-        painter.setBrush(theme.c("#ffffff"))
-        inset = (self.H - self.KNOB) / 2
-        painter.drawEllipse(QRectF(self._pos, inset, self.KNOB, self.KNOB))
+        radius = self.H / 2.0
+        rect = QRectF(0, 0, self.W, self.H)
+
+        if on:
+            # Active state: deep sleek black track with subtle border
+            painter.setPen(QPen(QColor(0, 0, 0, 70), 1.0))
+            painter.setBrush(QColor("#18181b"))
+            painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5)
+
+            # White knob with soft shadow
+            inset = (self.H - self.KNOB) / 2.0
+            knob_rect = QRectF(self._pos, inset, self.KNOB, self.KNOB)
+            painter.setPen(QPen(QColor(0, 0, 0, 40), 1.0))
+            painter.setBrush(QColor("#ffffff"))
+            painter.drawEllipse(knob_rect)
+        else:
+            # Inactive state: clearly visible modern light-grey track with crisp outline
+            painter.setPen(QPen(QColor(0, 0, 0, 40), 1.0))
+            painter.setBrush(QColor("#d1d5db"))
+            painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5)
+
+            # White knob with clean subtle boundary
+            inset = (self.H - self.KNOB) / 2.0
+            knob_rect = QRectF(self._pos, inset, self.KNOB, self.KNOB)
+            painter.setPen(QPen(QColor(0, 0, 0, 45), 1.0))
+            painter.setBrush(QColor("#ffffff"))
+            painter.drawEllipse(knob_rect)
 
 
 # ── step marker ─────────────────────────────────────────────────────────────

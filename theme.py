@@ -32,141 +32,75 @@ import paths
 # the two ramps exist: a value that is "a step" can be reasoned about, and a
 # value that is a one-off cannot.
 NEUTRAL = {
-    100: "#f5f5f8", 200: "#e7e7ea", 300: "#d4d4d7", 400: "#b7b7ba",
-    500: "#98989b", 600: "#7a7a7d", 700: "#5d5d60", 800: "#424244",
-    900: "#2b2b2d",
+    100: "#f5f5f7", 200: "#e5e5ea", 300: "#d1d1d6", 400: "#a1a1aa",
+    500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
+    900: "#09090b",
 }
 ACCENT_RAMP = {
-    100: "#eff6fe", 200: "#d8ebfd", 300: "#b6d9fc", 400: "#7ebcf9",
-    500: "#5e9eda", 600: "#457eb7", 700: "#306191", 800: "#1f456a",
-    900: "#142d46",
+    100: "rgba(0, 0, 0, 0.04)", 200: "rgba(0, 0, 0, 0.07)", 300: "rgba(0, 0, 0, 0.12)", 400: "#a1a1aa",
+    500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
+    900: "#09090b",
 }
 
 # ── core roles ──────────────────────────────────────────────────────────────
-TEXT = "#1d1f20"
-ACCENT = "#4480bb"
-ACCENT_2 = "#628fbb"
+TEXT = "#09090b"
+ACCENT = "#09090b"
+ACCENT_2 = "#27272a"
 
 # ── the six surfaces, one value each ────────────────────────────────────────
-# The census found seventeen distinct greys shipping in the stylesheet with no
-# rule about which meant what — three near-identical hairlines, two wells, two
-# page greys. A reader cannot tell a deliberate step from a typo when the two
-# look the same, so each of the six jobs below now has exactly one hex and
-# every other near-duplicate is an alias onto it.
-#
-# RAIL is ACCENT_RAMP[900] deliberately, not a separate navy. It has to keep
-# rotating with the role like everything else — a manager who switches profile
-# should see the rail change too, and hardcoding a navy here would leave one
-# permanently blue element in an otherwise green or amber copy.
-CANVAS = "#f4f5f6"             # page background — the workspace behind cards
-CARD = "#ffffff"               # card surface
-WELL = "#f7f8f9"               # inset well inside a card
-HAIRLINE = "#ececee"           # hairline: card borders, row separators
-DIVIDER = "#d0d0d1"            # divider: the heavier rule between regions
-BORDER = NEUTRAL[200]          # border: the drawn edge of a control
-RAIL = ACCENT_RAMP[900]
+CANVAS = "transparent"               # pure transparent canvas over dashboard wallpaper
+CARD = "rgba(255, 255, 255, 0.65)"   # light frosted glassmorphism card surface
+WELL = "rgba(0, 0, 0, 0.03)"         # inset subtle well inside a card
+HAIRLINE = "rgba(0, 0, 0, 0.07)"     # hairline: card borders, row separators
+DIVIDER = "rgba(0, 0, 0, 0.12)"      # divider: the heavier rule between regions
+BORDER = "rgba(0, 0, 0, 0.10)"       # border: the drawn edge of a control
+RAIL = "transparent"                 # transparent glass navbar
 
 # Retired duplicates, kept as names because other files import them.
-# BG was #f2f2f3 and SURFACE #e9e9ea — a second page grey two units off CANVAS
-# and a second border grey two units off NEUTRAL[200]. Neither difference was
-# visible; both were reachable by accident.
 BG = CANVAS
 SURFACE = NEUTRAL[200]
-CARD_LINE = HAIRLINE           # was #f0f0f1 — a third hairline, now the one
-NEUTRAL_350 = "#c2c2c5"        # keyboard hints, inactive step numerals
+CARD_LINE = HAIRLINE
+NEUTRAL_350 = "#9ca3af"
 
 # ── semantic roles ──────────────────────────────────────────────────────────
-# Deliberately outside the accent ramp: these must NOT rotate with the role.
-# "Won" has to stay green and "Lost" has to stay red in every profile, or the
-# register stops being readable at a glance — which is the one thing it is for.
-#
-# Every _INK/_BG pair below clears WCAG AA (4.5:1) against its own tint. Two
-# did not before this pass: WARN_INK #8a6d1f sat at 4.63 with no headroom, and
-# OK_INK #1a7a5e at 4.88 — both close enough to the line that any future nudge
-# to the tint would have pushed them under it without anyone noticing. They are
-# now 6.15 and 5.96. The hue is unchanged in both cases; only the value moved.
-OK = "#1DA487"
-OK_INK = "#186b53"             # 5.96:1 on OK_BG (was #1a7a5e, 4.88:1)
-OK_BG = "#eafaf3"
-WARN = "#c9971f"
-WARN_INK = "#755a14"           # 6.15:1 on WARN_BG (was #8a6d1f, 4.63:1)
-WARN_BG = "#fff8e8"
-ERR = "#8a2f2f"
-ERR_INK = ERR                  # 7.37:1 on ERR_BG — named for symmetry
-ERR_BG = "#fdeeee"
-ERR_LINE = "#eecccc"
+OK = "#16a34a"
+OK_INK = "#15803d"
+OK_BG = "rgba(22, 163, 74, 0.14)"
+WARN = "#ca8a04"
+WARN_INK = "#a16207"
+WARN_BG = "rgba(202, 138, 4, 0.14)"
+ERR = "#dc2626"
+ERR_INK = "#b91c1c"
+ERR_BG = "rgba(220, 38, 38, 0.14)"
+ERR_LINE = "rgba(220, 38, 38, 0.30)"
 
-# INFO is the fourth semantic, and the only one that DOES rotate: "this is
-# information" is the accent's own job, so it is three steps of the accent
-# ramp rather than a separate blue. Because all three are already ramp steps
-# they are already in _ACCENT_HEXES below and already rotate — no new hex has
-# been introduced, which is the safest possible way to add a rotating role.
-INFO = ACCENT_RAMP[600]
-INFO_INK = ACCENT_RAMP[800]    # 9.11:1 on INFO_BG
-INFO_BG = ACCENT_RAMP[100]
+INFO = "#0284c7"
+INFO_INK = "#0369a1"
+INFO_BG = "rgba(2, 132, 199, 0.14)"
 
-# The tag/pill tone table, as (background, ink). ONE table, because the census
-# found controls.Chip carrying its own Python colour dict alongside the #tagXxx
-# rules in style.qss and the two disagreeing for half the tones — a "warning"
-# chip rendered grey-on-amber and a "success" chip blue-on-green. Both the
-# painted path and the stylesheet now name these, so they cannot drift again.
-# The keys are the QSS object names; TONES in controls.Pill maps onto the same
-# values under its own shorter names.
 TAG_TONES = {
-    "tagAccent": (ACCENT_RAMP[100], ACCENT_RAMP[800]),
-    "tagOutline": (CARD, ACCENT_RAMP[700]),
-    "tagNeutral": (NEUTRAL[200], NEUTRAL[800]),
+    "tagAccent": ("rgba(0, 0, 0, 0.06)", "#09090b"),
+    "tagOutline": ("rgba(255, 255, 255, 0.85)", "#09090b"),
+    "tagNeutral": ("rgba(0, 0, 0, 0.05)", "#27272a"),
     "tagOk": (OK_BG, OK_INK),
     "tagWarn": (WARN_BG, WARN_INK),
     "tagErr": (ERR_BG, ERR_INK),
 }
 
 # ── execution states ────────────────────────────────────────────────────────
-# The single status vocabulary for the whole app: name -> (label, ink, bg,
-# dot). controls.StatusBadge is the only thing that should read it, and every
-# surface that shows a state should use that badge, so "running" looks the same
-# on the run screen, on Home and in History.
-#
-# WHAT IS DELIBERATELY ABSENT. The workbench audit enumerated which states the
-# engine can actually produce, and two of the seven rows in the design brief
-# cannot happen today:
-#
-#   paused            there is no pause primitive anywhere. AutomationWorker
-#                     has stop() and nothing else — a one-way threading.Event.
-#   waiting-for-user  every human gate is pre-run. Once automation.run() is on
-#                     its thread, on_event is fire-and-forget and no callback
-#                     can ask a question and block.
-#
-# Designing a badge for either would be inventing a state the product cannot
-# enter, so neither is here. Both need an engine change first.
-#
-# One row IS here that nothing emits yet: `streaming`. The data behind it
-# already exists — _smart_wait polls the response length every five seconds
-# and holds the character count — it is simply never emitted. It is defined
-# here so that when the one-line emit lands there is no second, differently
-# coloured "streaming" invented alongside it.
 STATUS = {
-    # name              label            ink            bg            dot
-    # The neutral states tint with NEUTRAL[200], not [100]. Step 100 is #f5f5f8
-    # and the canvas is #f4f5f6 — one unit apart, so a "Queued" badge sitting on
-    # the page rather than on a card had no visible fill at all. Step 200 reads
-    # as a tint on white and on the canvas both.
-    "idle":         ("IDLE",         NEUTRAL[700], NEUTRAL[200], "hollow"),
-    "queued":       ("QUEUED",       NEUTRAL[700], NEUTRAL[200], "hollow"),
-    "planning":     ("PLANNING",     INFO_INK,     INFO_BG,      "pulse"),
-    "running":      ("RUNNING",      INFO_INK,     INFO_BG,      "pulse"),
-    "streaming":    ("STREAMING",    INFO_INK,     INFO_BG,      "pulse"),
-    # Waiting is neutral and dashed, NOT accent — the audit's tenth defect is
-    # that "waiting" and "running" ship in the same colour with the same dot,
-    # so the one state meaning "Prism is doing nothing but counting" looks
-    # exactly like the state meaning "the tool is answering".
-    "waiting":      ("WAITING",      NEUTRAL[800], NEUTRAL[200], "dashed"),
-    "needs_review": ("NEEDS REVIEW", WARN_INK,     WARN_BG,      "solid"),
-    "retrying":     ("RETRYING",     WARN_INK,     WARN_BG,      "spinner"),
-    "completed":    ("COMPLETED",    OK_INK,       OK_BG,        "check"),
-    "failed":       ("FAILED",       ERR_INK,      ERR_BG,       "cross"),
-    "cancelled":    ("CANCELLED",    NEUTRAL[700], NEUTRAL[200], "square"),
-    "skipped":      ("SKIPPED",      NEUTRAL[700], NEUTRAL[200], "dash"),
+    "idle":         ("IDLE",         "#52525b", "rgba(0, 0, 0, 0.05)", "hollow"),
+    "queued":       ("QUEUED",       "#52525b", "rgba(0, 0, 0, 0.05)", "hollow"),
+    "planning":     ("PLANNING",     INFO_INK,  INFO_BG,               "pulse"),
+    "running":      ("RUNNING",      INFO_INK,  INFO_BG,               "pulse"),
+    "streaming":    ("STREAMING",    INFO_INK,  INFO_BG,               "pulse"),
+    "waiting":      ("WAITING",      "#3f3f46", "rgba(0, 0, 0, 0.05)", "dashed"),
+    "needs_review": ("NEEDS REVIEW", WARN_INK,  WARN_BG,               "solid"),
+    "retrying":     ("RETRYING",     WARN_INK,  WARN_BG,               "spinner"),
+    "completed":    ("COMPLETED",    OK_INK,    OK_BG,                 "check"),
+    "failed":       ("FAILED",       ERR_INK,   ERR_BG,                "cross"),
+    "cancelled":    ("CANCELLED",    "#71717a", "rgba(0, 0, 0, 0.05)", "square"),
+    "skipped":      ("SKIPPED",      "#71717a", "rgba(0, 0, 0, 0.05)", "dash"),
 }
 
 # The words the engine and the existing panels already use for these states.
@@ -221,11 +155,11 @@ def status_key(name: str) -> str:
 # A resting card in a grid gets no shadow: shadow on everything is what makes
 # every element look like it is hovering, and it is also the reason
 # shadows_enabled() defaults off.
-SHADOW_INK = "#141e28"
-SHADOW_CARD = (10, 1, 0.05)     # resting card
-SHADOW_RAISED = (44, 18, 0.16)  # hero card, modals
-SHADOW_HOVER = (24, 10, 0.18)   # stat card under the cursor
-SHADOW_ACCENT = (18, 8, 0.55)   # primary button glow, in the accent hue
+SHADOW_INK = "#09090b"
+SHADOW_CARD = (26, 8, 0.08)     # resting card
+SHADOW_RAISED = (48, 16, 0.12)  # hero card, modals
+SHADOW_HOVER = (32, 10, 0.14)   # stat card under the cursor
+SHADOW_ACCENT = (20, 8, 0.25)   # primary button glow, in monochrome tone
 
 # ── radii ───────────────────────────────────────────────────────────────────
 # Three values, not six. The census counted thirteen distinct radii painting
@@ -299,14 +233,14 @@ _FONT_DIR = paths.resource("assets", "fonts")
 # that already construct QFont(family, points).
 TYPE = {
     # level          family         px  weight  colour
-    "PAGE_TITLE": (FONT_HEADING,    24,   600,  TEXT),
-    "SECTION":    (FONT_HEADING,    18,   600,  TEXT),
-    "CARD_TITLE": (FONT_HEADING,    15,   600,  TEXT),
-    "BODY":       (FONT_BODY,       14,   400,  TEXT),
-    "SUPPORT":    (FONT_BODY,       13,   400,  NEUTRAL[700]),
-    "META":       (FONT_BODY,       12,   500,  NEUTRAL[600]),
-    "LABEL":      (FONT_HEADING,    11,   600,  ACCENT_RAMP[700]),
-    "MONO":       (FONT_MONO,       12,   500,  NEUTRAL[800]),
+    "PAGE_TITLE": (FONT_HEADING,    24,   600,  "#09090b"),
+    "SECTION":    (FONT_HEADING,    18,   600,  "#09090b"),
+    "CARD_TITLE": (FONT_HEADING,    15,   600,  "#09090b"),
+    "BODY":       (FONT_BODY,       14,   400,  "#18181b"),
+    "SUPPORT":    (FONT_BODY,       13,   400,  "#3f3f46"),
+    "META":       (FONT_BODY,       12,   500,  "#71717a"),
+    "LABEL":      (FONT_HEADING,    11,   600,  "#52525b"),
+    "MONO":       (FONT_MONO,       12,   500,  "#18181b"),
 }
 
 # The same eight as flat constants, for `from theme import T_BODY`.
@@ -439,76 +373,53 @@ def role_palette(hue: int) -> dict[str, str]:
 
 
 def apply_role(hue: int) -> None:
-    """Point this module's accent constants at the role's hue.
-
-    The painted widgets (toggle switch, tool chips, registration marks) read
-    ACCENT and ACCENT_RAMP directly, so they have to move with the stylesheet
-    or the seams show — which is the same reason this module exists at all.
-
-    Everything derived from the ramp at import time has to be re-derived here.
-    RAIL always was; INFO, the accent half of TAG_TONES, the STATUS rows in the
-    accent tone and the unnamed-tool badge cycle are all in the same position
-    and are rebuilt below. A derived constant that is not on this list is a
-    latent bug: it will keep Prism's blue in a role that moved everything else.
-    """
+    """Keep theme monochrome and consistent across all roles."""
     global ACCENT, ACCENT_2, ACCENT_RAMP, RAIL
     global INFO, INFO_INK, INFO_BG, TAG_TONES, STATUS, _BADGE_CYCLE
-    if hue == 210:                      # Prism's own blue: nothing to do
-        return
-    ACCENT = recolour("#4480bb", hue)
-    ACCENT_2 = recolour("#628fbb", hue)
-    ACCENT_RAMP = {step: recolour(value, hue)
-                   for step, value in _BASE_ACCENT.items()}
-    # Derived from the ramp at import time, so it has to be re-derived here or
-    # the rail stays Prism blue in a role that has moved everything else.
-    RAIL = ACCENT_RAMP[900]
-    INFO = ACCENT_RAMP[600]
-    INFO_INK = ACCENT_RAMP[800]
-    INFO_BG = ACCENT_RAMP[100]
+    ACCENT = "#09090b"
+    ACCENT_2 = "#27272a"
+    ACCENT_RAMP = {
+        100: "rgba(0, 0, 0, 0.04)", 200: "rgba(0, 0, 0, 0.07)", 300: "rgba(0, 0, 0, 0.12)", 400: "#a1a1aa",
+        500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
+        900: "#09090b",
+    }
+    RAIL = "#ffffff"
+    INFO = "#27272a"
+    INFO_INK = "#09090b"
+    INFO_BG = "rgba(0, 0, 0, 0.04)"
     TAG_TONES = dict(TAG_TONES)
-    TAG_TONES["tagAccent"] = (ACCENT_RAMP[100], ACCENT_RAMP[800])
-    TAG_TONES["tagOutline"] = (CARD, ACCENT_RAMP[700])
+    TAG_TONES["tagAccent"] = ("rgba(0, 0, 0, 0.05)", "#09090b")
+    TAG_TONES["tagOutline"] = (CARD, "#09090b")
     STATUS = dict(STATUS)
     for key in ("planning", "running", "streaming"):
         label, _ink, _bg, dot = STATUS[key]
         STATUS[key] = (label, INFO_INK, INFO_BG, dot)
-    _BADGE_CYCLE = [ACCENT_RAMP[800], NEUTRAL[700], ACCENT_RAMP[600],
-                    ACCENT_RAMP[700], NEUTRAL[800], "#486077"]
+    _BADGE_CYCLE = ["#18181b", "#27272a", "#3f3f46", "#52525b", "#71717a"]
 
 
 def tone(name: str) -> str:
-    """Resolve an add-on's tone TOKEN to a colour, at call time.
-
-    addons/manifest.py stores a token ("accent", "ok", "warn", "muted")
-    rather than a colour, and this is where it becomes one. The lateness is
-    the whole point.
-
-    widgets/sidebar.py used to hold theme.ACCENT/OK/WARN directly in its
-    ADDONS table, which freezes them at IMPORT time -- before apply_role()
-    has run. Because apply_role rebinds ACCENT but not OK or WARN, a frozen
-    accent stayed Prism blue in a role that had moved everything else while
-    the OK and WARN rows looked fine, so the staleness only ever affected
-    some of the shelf and was correspondingly hard to see.
-
-    Reading the module global here means the answer is whatever apply_role
-    last set, which is exactly what that function's own docstring asks for:
-    "A derived constant that is not on this list is a latent bug."
-    """
-    return {"accent": ACCENT, "ok": OK, "warn": WARN,
-            "muted": NEUTRAL[400]}.get(name, ACCENT)
+    """Resolve tone tokens in monochrome palette."""
+    return {"accent": ACCENT, "ok": "#18181b", "warn": "#27272a",
+            "muted": "#71717a"}.get(name, ACCENT)
 
 
 def role_stylesheet(qss: str, hue: int) -> str:
-    """Rewrite every accent hex in the stylesheet to the role's hue.
-
-    A blunt string swap rather than a QSS parser, and safe because these
-    eleven hexes are only ever used as the accent — the neutrals, the canvas
-    and the one error red are separate values and are left alone, so the app
-    keeps its identity and only the accent changes.
-    """
-    if hue == 210:
-        return qss
-    for original, replacement in role_palette(hue).items():
+    """Rewrite any blue or colored accent hexes in the stylesheet to monochrome water glass tokens."""
+    swaps = {
+        "#4480bb": "#09090b",
+        "#628fbb": "#27272a",
+        "#eff6fe": "rgba(0, 0, 0, 0.04)",
+        "#d8ebfd": "rgba(0, 0, 0, 0.08)",
+        "#b6d9fc": "rgba(0, 0, 0, 0.14)",
+        "#7ebcf9": "#a1a1aa",
+        "#5e9eda": "#71717a",
+        "#457eb7": "#52525b",
+        "#306191": "#27272a",
+        "#1f456a": "#18181b",
+        "#142d46": "#ffffff",
+        "#f4f5f6": "#ffffff",
+    }
+    for original, replacement in swaps.items():
         qss = qss.replace(original, replacement)
         qss = qss.replace(original.upper(), replacement)
     return qss
@@ -516,8 +427,7 @@ def role_stylesheet(qss: str, hue: int) -> str:
 
 # ── helpers for painted widgets ─────────────────────────────────────────────
 def c(hex_or_role: str, alpha: float = 1.0) -> QColor:
-    """QColor from a token, optionally at partial alpha (the QSS equivalent of
-    color-mix(… N%, transparent))."""
+    """QColor from a token, optionally at partial alpha."""
     col = QColor(hex_or_role)
     if alpha < 1.0:
         col.setAlphaF(alpha)
@@ -525,14 +435,7 @@ def c(hex_or_role: str, alpha: float = 1.0) -> QColor:
 
 
 def contrast(fg: str, bg: str) -> float:
-    """WCAG 2.1 contrast ratio between two opaque hexes.
-
-    Here rather than in a test because the status tones are the one part of
-    this palette a future change can quietly break: a tint nudged two steps
-    lighter still looks fine and its ink silently drops under 4.5:1. Anyone
-    adding a tone should print this for the pair before shipping it. Every
-    _INK/_BG pair in this module is >= 4.5.
-    """
+    """WCAG 2.1 contrast ratio between two opaque hexes."""
     def channel(value: str) -> float:
         value = value.lstrip("#")
         out = []
@@ -547,31 +450,18 @@ def contrast(fg: str, bg: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-# Tool badges. Each tool now wears its own brand colour rather than a swatch
-# off Prism's ramp. That is the point of the badge: on a run card showing four
-# stages, the colour is how you tell at a glance that research went to
-# Perplexity and the deck went to Gamma — which a row of near-identical blues
-# could never do. These are other companies' brand colours, so they sit
-# outside the accent ramp and do not rotate with the role.
-#
-# They are also, deliberately, 16-20px of the screen and never more: a tool's
-# brand may fill a badge and may not fill a card, a header, a button or a
-# border. The app belongs to Prism.
 _TOOL_BADGES = {
-    "perplexity": "#1FB8CD",
-    "chatgpt": "#10A37F",
-    "openai": "#10A37F",
-    "claude": "#D97757",
-    "anthropic": "#D97757",
-    "gamma": "#9333EA",
-    "apollo": "#2563EB",
-    "notebooklm": "#4285F4",
-    "gemini": "#4285F4",
+    "perplexity": "#18181b",
+    "chatgpt": "#18181b",
+    "openai": "#18181b",
+    "claude": "#27272a",
+    "anthropic": "#27272a",
+    "gamma": "#27272a",
+    "apollo": "#18181b",
+    "notebooklm": "#18181b",
+    "gemini": "#18181b",
 }
-# Anything unnamed is dealt a stable colour off the ramps, so a tool added
-# later never renders un-styled — and never collides with a brand colour.
-_BADGE_CYCLE = [ACCENT_RAMP[800], NEUTRAL[700], ACCENT_RAMP[600],
-                ACCENT_RAMP[700], NEUTRAL[800], "#486077"]
+_BADGE_CYCLE = ["#18181b", "#27272a", "#3f3f46", "#52525b", "#71717a"]
 
 
 def badge_color(tool: str) -> str:
@@ -586,20 +476,9 @@ def badge_initial(tool: str) -> str:
     return (tool or "?").strip()[:1].upper() or "?"
 
 
-def over(alpha: float, fg: str = "#ffffff", bg: str = None) -> str:
-    """`fg` at `alpha` composited onto `bg`, as a solid hex.
-
-    The rail's text and glyphs are all white at some fraction. QSS takes
-    rgba() happily, but the icons are rendered by handing a colour string to
-    QSvgRenderer, and rgba() there is not dependable across Qt's SVG backends —
-    a glyph that silently renders black on navy is invisible, which is the
-    worst possible failure for a nav icon. Flattening against the rail gives
-    the identical pixel with no renderer to trust.
-
-    Defaults to the current RAIL, so it follows the role's hue like everything
-    else. Callers wanting a fixed background pass one.
-    """
-    base = bg or RAIL
+def over(alpha: float, fg: str = "#09090b", bg: str = None) -> str:
+    """`fg` at `alpha` composited onto `bg`, as a solid hex."""
+    base = bg or "#f4f4f5"
     fv, bv = fg.lstrip("#"), base.lstrip("#")
     out = []
     for i in (0, 2, 4):

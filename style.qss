@@ -9,14 +9,14 @@
    two wells. Nobody could tell a deliberate step from a typo, so each job now
    has exactly one hex:
 
-     page background  #f4f5f6   CANVAS      card surface  #ffffff   CARD
-     inset well       #f7f8f9   WELL        hairline      #ececee   HAIRLINE
-     divider          #d0d0d1   DIVIDER     border        #e7e7ea   BORDER
+     page background  #ffffff   CANVAS      card surface  #ffffff   CARD
+     inset well       rgba(0, 0, 0, 0.02)   WELL        hairline      rgba(0, 0, 0, 0.06)   HAIRLINE
+     divider          #d0d0d1   DIVIDER     border        rgba(0, 0, 0, 0.10)   BORDER
 
-     rail     #142d46  (= accent ramp 900 — see below)
-     ink      #1d1f20
-     accent   #4480bb  ramp 100 #eff6fe · 200 #d8ebfd · 500 #5e9eda
-                            600 #457eb7 · 700 #306191 · 800 #1f456a · 900 #142d46
+     rail     #09090b  (= accent ramp 900 — see below)
+     ink      #09090b
+     accent   #09090b  ramp 100 rgba(0, 0, 0, 0.04) · 200 rgba(0, 0, 0, 0.08) · 500 #71717a
+                            600 #27272a · 700 #18181b · 800 #09090b · 900 #09090b
      neutral  400 #b7b7ba · 500 #98989b · 600 #7a7a7d · 700 #5d5d60 · 800 #424244
      semantic ok #186b53/#eafaf3 · warn #755a14/#fff8e8 · err #8a2f2f/#fdeeee
               info = the accent's own steps  (semantics never rotate; info does)
@@ -92,50 +92,53 @@
 * {
     font-family: "Barlow", "Inter", -apple-system, "Segoe UI", sans-serif;
     font-size: 14px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
-QMainWindow, QDialog {
-    background: #f4f5f6;
+QMainWindow, QDialog, QWidget#central, QWidget#columns, QWidget#centralWidget {
+    background: transparent;
 }
 
-/* Qt hands QDialogButtonBox platform icons — on GTK that's a red ✕ and a blue
-   download arrow, which is the one place the desktop theme leaks through this
-   one. Off everywhere; buttons in this system are text plus our own line
-   icons or nothing. */
+QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
+}
+
+/* Qt hands QDialogButtonBox platform icons */
 QDialogButtonBox {
     dialogbuttonbox-buttons-have-icons: 0;
 }
 
 QToolTip {
-    background: #1d1f20;
-    color: #f4f5f6;
-    border: 1px solid #1d1f20;
+    background: #09090b;
+    color: #ffffff;
+    border: 1px solid #27272a;
     border-radius: 6px;
     padding: 5px 8px;
     font-size: 13px;
 }
 
-/* ── the card ────────────────────────────────────────────────────────────
-   The surface this whole redesign is built out of. Painted by
-   widgets.controls.Card, which also draws the optional accent stripe and
-   attaches the drop shadow. */
+/* ── the card: transparent shell — Card.paintEvent paints all glass layers ── */
 #card {
-    background: #ffffff;
+    background: transparent;
+    border-radius: 18px;
+    border: none;
+}
+
+#card QLabel {
+    color: #09090b;
+}
+
+/* An inset well inside a card */
+#well, #card #well {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     border-radius: 12px;
 }
 
-/* An inset well inside a card: the tool pill on a plan row, the "Prism's
-   proposed change" strip on a reply. */
-#well {
-    background: #f7f8f9;
-    border-radius: 8px;
-}
-
-/* Hairline between rows inside a card. The same #ececee as a card's own
-   border: two greys two units apart were not telling anyone anything. */
+/* Hairline between rows inside a card. */
 #cardLine {
-    background: #ececee;
+    background: rgba(0, 0, 0, 0.06);
     max-height: 1px;
     min-height: 1px;
     border: none;
@@ -143,122 +146,167 @@ QToolTip {
 
 /* The vertical separator between the work column and the context rail. */
 #railLine {
-    background: #ececee;
+    background: rgba(0, 0, 0, 0.08);
     max-width: 1px;
     min-width: 1px;
     border: none;
 }
 
-/* ── sidebar ─────────────────────────────────────────────────────────────
-   Dark. Everything inside it has to name its own colour, because the `*`
-   rule above paints all text ink-on-light by default. */
+/* ── sidebar: floating rounded pure glassmorphic nav rail ───────── */
 #sidebar {
-    background: #142d46;
+    background: transparent;
     border: none;
+    border-radius: 20px;
 }
 
 #sidebarInner {
-    background: #142d46;
+    background: transparent;
+}
+
+#addonsHead, #helpHead, #settingsHead {
+    background: transparent;
+    border-radius: 8px;
+    padding: 2px 4px;
+}
+
+#addonsHead:hover, #helpHead:hover, #settingsHead:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+#addonsChevron, #helpChevron, #settingsChevron {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 0;
+}
+
+#addonsChevron:hover, #helpChevron:hover, #settingsChevron:hover {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+#railCollapseBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0;
+}
+
+#railCollapseBtn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+#railCollapseBtn:pressed {
+    background: rgba(0, 0, 0, 0.09);
+}
+
+#sidebar[collapsed="true"] #navItem,
+#sidebar[collapsed="true"] #navSub,
+#sidebar[collapsed="true"] #railPrimary {
+    text-align: center;
+    padding: 4px 0px;
+}
+
+#sidebar[collapsed="true"] #navItem[cur="true"],
+#sidebar[collapsed="true"] #navSub[cur="true"] {
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+}
+
+#sidebar[collapsed="true"] #railProfile {
+    border-top: none;
+    padding: 0;
 }
 
 #brand {
     font-family: "Barlow Condensed";
     font-size: 18px;
-    font-weight: 600;
-    color: #ffffff;
+    font-weight: 700;
+    color: #09090b;
 }
 
-/* .navitem — a sidebar destination. Flat until hovered; the current one is
-   lifted with a white wash rather than the accent tint it used to take, since
-   on a dark rail an accent fill and the accent-coloured New-task button
-   directly above it read as two primary actions. */
 #navItem {
     text-align: left;
     background: transparent;
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
     padding: 8px 11px;
     font-family: "Barlow";
     font-size: 13px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
+    color: #27272a;
 }
 
 #navItem:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: rgba(0, 0, 0, 0.05);
+    color: #09090b;
 }
 
 #navItem:pressed {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.08);
 }
 
-/* On the dark rail an accent ring is barely brighter than the navy behind it,
-   so the keyboard ring here is white. It is the same 2px, and the transparent
-   border above already reserves its space. */
 #navItem:focus, #navSub:focus, #railProfile:focus {
-    border-color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.35);
 }
 
 #navItem[cur="true"] {
-    background: rgba(255, 255, 255, 0.09);
-    color: #ffffff;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
+    font-weight: 700;
 }
 
-/* The secondary rows — add-ons and the MORE group — sit one weight and one
-   step of contrast below the primary destinations. */
 #navSub {
     text-align: left;
     background: transparent;
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
     padding: 6px 11px;
     font-family: "Barlow";
     font-size: 12px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.55);
+    color: #3f3f46;
 }
 
 #navSub:hover {
-    background: rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.05);
+    color: #09090b;
 }
 
 #navSub[cur="true"] {
-    background: rgba(255, 255, 255, 0.09);
-    color: #ffffff;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
+    font-weight: 700;
 }
 
-/* An add-on the licence doesn't cover. Quieter than a live item but NOT
-   disabled — it stays clickable and opens the pitch for that add-on, because
-   the click is the customer telling us what they want. A greyed-out control
-   sells nothing and looks broken. */
 #navItem[locked="true"], #navSub[locked="true"] {
-    color: rgba(255, 255, 255, 0.32);
+    color: rgba(255, 255, 255, 0.40);
 }
 
 #navItem[locked="true"]:hover, #navSub[locked="true"]:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.55);
+    background: rgba(0, 0, 0, 0.03);
+    color: rgba(0, 0, 0, 0.65);
 }
 
-/* Shipped but not built yet. This one IS disabled — there is nothing behind
-   the click — but it stays visible, because a shelf with a visible "next one"
-   reads as a product line and an empty gap reads as an oversight. */
 #navSub:disabled {
-    color: rgba(255, 255, 255, 0.22);
+    color: rgba(0, 0, 0, 0.25);
 }
 
 #navSection {
     font-family: "Barlow Condensed";
     font-size: 11px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.32);
+    font-weight: 700;
+    color: rgba(0, 0, 0, 0.45);
     padding: 2px 4px;
     background: transparent;
+    letter-spacing: 0.5px;
 }
 
 #railRule {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.06);
     max-height: 1px;
     min-height: 1px;
     border: none;
@@ -266,15 +314,14 @@ QToolTip {
 
 #railMuted {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(0, 0, 0, 0.45);
     background: transparent;
 }
 
-/* The New-task button: the rail's one filled control, and the only accent
-   fill on the dark surface. Its shadow is attached in Python. */
+/* The New-task button */
 #railPrimary {
-    background: #4480bb;
-    border: 2px solid #4480bb;
+    background: #09090b;
+    border: 1px solid #09090b;
     border-radius: 8px;
     color: #ffffff;
     font-family: "Barlow Condensed";
@@ -284,42 +331,42 @@ QToolTip {
     text-align: center;
 }
 
-#railPrimary:hover { background: #5e9eda; border-color: #5e9eda; }
-#railPrimary:pressed { background: #457eb7; border-color: #457eb7; }
-#railPrimary:focus { border-color: #ffffff; }
+#railPrimary:hover { background: #27272a; border-color: #27272a; }
+#railPrimary:pressed { background: #000000; }
+#railPrimary:focus { border-color: #09090b; }
 #railPrimary:disabled {
-    background: #306191;
-    border-color: #306191;
-    color: rgba(255, 255, 255, 0.45);
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.10);
+    color: #a1a1aa;
 }
 
-/* The profile row, hard against the bottom edge. */
+/* The profile row */
 #railProfile {
     background: transparent;
-    border: 2px solid transparent;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid transparent;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 0;
     text-align: left;
     padding: 8px 6px;
 }
 
-#railProfile:hover { background: rgba(255, 255, 255, 0.05); }
+#railProfile:hover { background: rgba(0, 0, 0, 0.04); }
 
 #railProfileName {
     font-size: 13px;
-    font-weight: 500;
-    color: #ffffff;
+    font-weight: 600;
+    color: #09090b;
     background: transparent;
 }
 
 #railProfileRole {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
+    color: #71717a;
     background: transparent;
 }
 
 #hr {
-    background: #d0d0d1;
+    background: rgba(0, 0, 0, 0.08);
     max-height: 1px;
     min-height: 1px;
     border: none;
@@ -336,22 +383,25 @@ QToolTip {
     font-family: "Barlow Condensed";
     font-size: 11px;
     font-weight: 600;
-    color: #306191;
+    color: #52525b;
 }
 
 #kickMuted {
     font-family: "Barlow Condensed";
     font-size: 11px;
     font-weight: 600;
-    color: #98989b;
+    color: #71717a;
 }
 
 /* PAGE_TITLE — one per screen. */
-#h1, #h2 { font-family: "Barlow Condensed"; font-size: 24px; font-weight: 600; }
+#h1, #h2 { font-family: "Barlow Condensed"; font-size: 24px; font-weight: 600; color: #09090b; }
+#card #h1, #card #h2 { color: #09090b; }
 /* SECTION — the heading above a group of cards. */
-#h3, #h4 { font-family: "Barlow Condensed"; font-size: 18px; font-weight: 600; }
+#h3, #h4 { font-family: "Barlow Condensed"; font-size: 18px; font-weight: 600; color: #09090b; }
+#card #h3, #card #h4 { color: #09090b; }
 /* CARD_TITLE — the name of a thing. */
-#h5, #h6 { font-family: "Barlow Condensed"; font-size: 15px; font-weight: 600; }
+#h5, #h6 { font-family: "Barlow Condensed"; font-size: 15px; font-weight: 600; color: #09090b; }
+#card #h5, #card #h6 { color: #09090b; }
 
 /* The dashboard's big condensed figure — "12", "₹8.4L", "58%". A metric is a
    page title in a card, so it takes the same two steps. */
@@ -359,21 +409,25 @@ QToolTip {
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 24px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
 #statSm {
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 18px;
-    color: #1d1f20;
+    color: #09090b;
+}
+
+#card #stat, #card #statSm {
+    color: #09090b;
 }
 
 /* META — timestamps, durations, counts. */
 #meta, #dim {
     font-size: 12px;
     font-weight: 500;
-    color: #7a7a7d;
+    color: #71717a;
 }
 
 /* The greyest step — "· this week", the suffix after a count. Was #b7b7ba,
@@ -413,7 +467,7 @@ QToolTip {
 
 /* dashed advisory box (the "Tip." card in the context rail) */
 #note {
-    border: 1px dashed #e7e7ea;
+    border: 1px dashed rgba(0, 0, 0, 0.10);
     border-radius: 12px;
     padding: 12px;
     font-size: 12px;
@@ -430,7 +484,7 @@ QToolTip {
     font-size: 13px;
     padding: 20px 16px;
     background: transparent;
-    border: 1px dashed #e7e7ea;
+    border: 1px dashed rgba(0, 0, 0, 0.10);
     border-radius: 12px;
 }
 
@@ -440,7 +494,7 @@ QToolTip {
     font-family: "Barlow Condensed";
     font-size: 18px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
@@ -472,7 +526,7 @@ QToolTip {
 /* SECONDARY — the default. Hairline box, rounded, ink label. */
 QPushButton {
     background: transparent;
-    border: 2px solid #e7e7ea;
+    border: 2px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
     padding: 6px 13px;
     min-height: 18px;
@@ -483,29 +537,29 @@ QPushButton {
 }
 
 QPushButton:hover {
-    background: #f7f8f9;
-    border-color: #d4d4d7;
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.18);
 }
 
 QPushButton:pressed {
-    background: #e7e7ea;
-    border-color: #d4d4d7;
+    background: rgba(0, 0, 0, 0.10);
+    border-color: rgba(0, 0, 0, 0.18);
 }
 
 QPushButton:focus {
-    border-color: #4480bb;
-    color: #1f456a;
+    border-color: #09090b;
+    color: #09090b;
 }
 
 QPushButton:disabled {
     color: #b7b7ba;
-    border-color: #ececee;
+    border-color: rgba(0, 0, 0, 0.06);
     background: transparent;
 }
 
 #secondaryBtn {
     background: transparent;
-    border: 2px solid #e7e7ea;
+    border: 2px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
     color: #424244;
 }
@@ -515,8 +569,8 @@ QPushButton:disabled {
    dating thing an interface can wear, and it also breaks the role swap, which
    rewrites flat hexes and cannot see into a qlineargradient's stops. */
 #primaryBtn, #primary {
-    background: #4480bb;
-    border: 2px solid #4480bb;
+    background: #09090b;
+    border: 2px solid #09090b;
     border-radius: 8px;
     color: #ffffff;
     padding: 8px 17px;
@@ -527,19 +581,19 @@ QPushButton:disabled {
 }
 
 #primaryBtn:hover, #primary:hover {
-    background: #457eb7;
-    border-color: #457eb7;
+    background: #27272a;
+    border-color: #27272a;
 }
 
 #primaryBtn:pressed, #primary:pressed {
-    background: #306191;
-    border-color: #306191;
+    background: #18181b;
+    border-color: #18181b;
 }
 
 /* The ring on a filled button has to be darker than the fill, not lighter —
    a white ring on accent disappears against the card behind it. */
 #primaryBtn:focus, #primary:focus {
-    border-color: #142d46;
+    border-color: #09090b;
 }
 
 /* Not greyed to a flat neutral: the button keeps its identity and simply
@@ -548,9 +602,9 @@ QPushButton:disabled {
    rotates with the role like the live one — it used to be a hardcoded
    #c7d3dc, which stayed blue in a green copy. */
 #primaryBtn:disabled, #primary:disabled {
-    background: #d8ebfd;
-    border-color: #d8ebfd;
-    color: #306191;
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #18181b;
 }
 
 /* TERTIARY — no box until you touch it. For in-place actions that must not
@@ -559,7 +613,7 @@ QPushButton:disabled {
     background: transparent;
     border: 2px solid transparent;
     border-radius: 8px;
-    color: #306191;
+    color: #18181b;
     padding: 5px 8px;
     min-height: 18px;
     font-family: "Barlow";
@@ -568,16 +622,16 @@ QPushButton:disabled {
 }
 
 #ghostBtn:hover, #tertiaryBtn:hover {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 #ghostBtn:pressed, #tertiaryBtn:pressed {
-    background: #d8ebfd;
+    background: rgba(0, 0, 0, 0.08);
 }
 
 #ghostBtn:focus, #tertiaryBtn:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 #ghostBtn:disabled, #tertiaryBtn:disabled {
@@ -591,7 +645,7 @@ QPushButton:disabled {
     background: transparent;
     border: 2px solid transparent;
     border-radius: 6px;
-    color: #306191;
+    color: #18181b;
     font-family: "Barlow";
     font-size: 12px;
     font-weight: 500;
@@ -601,12 +655,12 @@ QPushButton:disabled {
 }
 
 #linkBtn:hover {
-    color: #1f456a;
-    background: #eff6fe;
+    color: #09090b;
+    background: rgba(0, 0, 0, 0.04);
 }
 
-#linkBtn:pressed { background: #d8ebfd; }
-#linkBtn:focus { border-color: #4480bb; }
+#linkBtn:pressed { background: rgba(0, 0, 0, 0.08); }
+#linkBtn:focus { border-color: #09090b; }
 #linkBtn:disabled { color: #b7b7ba; background: transparent; }
 
 /* DESTRUCTIVE — outlined red, filled only once pressed. Deliberately not a
@@ -642,7 +696,7 @@ QPushButton:disabled {
 
 #dangerBtn:disabled, #destructiveBtn:disabled {
     color: #b7b7ba;
-    border-color: #ececee;
+    border-color: rgba(0, 0, 0, 0.06);
     background: transparent;
 }
 
@@ -661,8 +715,8 @@ QPushButton:disabled {
 /* SECONDARY, square, glyph only. 34px keeps it past the 28px minimum target
    with room for the ring. */
 #iconBtn {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
     border-radius: 8px;
     padding: 0;
     min-width: 34px;
@@ -672,7 +726,7 @@ QPushButton:disabled {
 }
 
 #iconBtn:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 /* .mic-lg — the composer's mic. Neutral until armed, then it goes red,
@@ -680,7 +734,7 @@ QPushButton:disabled {
    workshop and an accent-blue mic looks identical to every other control. */
 #micBtn {
     background: transparent;
-    border: 2px solid #e7e7ea;
+    border: 2px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
     padding: 6px 13px;
     min-height: 18px;
@@ -691,7 +745,7 @@ QPushButton:disabled {
 }
 
 #micBtn:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 #micBtn:checked {
@@ -707,48 +761,49 @@ QPushButton:disabled {
 /* SECONDARY in capsule form — the quick-start chips on the hero card, and the
    filter chips on History and AI tools. */
 #chipBtn {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 999px;
     padding: 5px 13px;
     min-height: 18px;
     font-family: "Barlow";
     font-size: 13px;
     font-weight: 500;
-    color: #424244;
+    color: #09090b;
 }
 
 #chipBtn:hover {
-    border-color: #4480bb;
-    color: #306191;
+    background: rgba(255, 255, 255, 0.90);
+    border-color: rgba(0, 0, 0, 0.20);
+    color: #09090b;
 }
 
 #chipBtn:pressed {
-    background: #eff6fe;
+    background: rgba(0, 0, 0, 0.08);
 }
 
 #chipBtn:focus {
-    border-color: #4480bb;
-    color: #1f456a;
+    border-color: #09090b;
+    color: #09090b;
 }
 
 /* A filter chip that is on. Filled tint rather than an outline, so a row of
    eight chips shows its one selection from across the screen. */
 #chipBtn:checked, #chipBtn[cur="true"] {
-    background: #eff6fe;
-    border-color: #4480bb;
-    color: #1f456a;
+    background: #09090b;
+    border-color: #09090b;
+    color: #ffffff;
 }
 
 #chipBtn:disabled {
     color: #b7b7ba;
-    border-color: #ececee;
+    border-color: rgba(0, 0, 0, 0.06);
 }
 
 /* The segmented tab strip on Inquiry Automation, and controls.Tabs. */
 #tabStrip {
-    background: #ffffff;
-    border: 1px solid #ececee;
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 12px;
 }
 
@@ -765,14 +820,14 @@ QPushButton:disabled {
     color: #5d5d60;
 }
 
-#tabBtn:hover { background: #f7f8f9; }
-#tabBtn:pressed { background: #e7e7ea; }
-#tabBtn:focus { border-color: #4480bb; }
+#tabBtn:hover { background: rgba(0, 0, 0, 0.02); }
+#tabBtn:pressed { background: rgba(0, 0, 0, 0.10); }
+#tabBtn:focus { border-color: #09090b; }
 #tabBtn:disabled { color: #b7b7ba; }
 
 #tabBtn[cur="true"], #tabBtn:checked {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 /* TERTIARY, full-width and left-aligned — the Settings section list. */
@@ -789,48 +844,48 @@ QPushButton:disabled {
     text-align: left;
 }
 
-#secBtn:hover { background: #f7f8f9; }
-#secBtn:pressed { background: #e7e7ea; }
-#secBtn:focus { border-color: #4480bb; }
+#secBtn:hover { background: rgba(0, 0, 0, 0.02); }
+#secBtn:pressed { background: rgba(0, 0, 0, 0.10); }
+#secBtn:focus { border-color: #09090b; }
 #secBtn:disabled { color: #b7b7ba; }
 
 #secBtn[cur="true"] {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 /* ── inputs ──────────────────────────────────────────────────────────────
    2px border at rest in the border grey, so the accent focus ring can replace
    the colour without changing the box. */
 QTextEdit, QLineEdit, QComboBox, QListWidget, QPlainTextEdit {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 8px;
     padding: 6px 11px;
-    color: #1d1f20;
-    selection-background-color: #4480bb;
+    color: #09090b;
+    selection-background-color: #09090b;
     selection-color: #ffffff;
 }
 
 QTextEdit:hover, QLineEdit:hover, QComboBox:hover {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.22);
 }
 
 QTextEdit:focus, QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QTextEdit:disabled, QLineEdit:disabled, QComboBox:disabled,
 QPlainTextEdit:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
-    color: #b7b7ba;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
+    color: #a1a1aa;
 }
 
 /* Lists don't take the accent focus ring on the box: a selected row already
    says where you are, and ringing the whole list reads as an error state. */
 QListWidget:focus {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.35);
 }
 
 /* The task card's own editor sits *inside* the composer card, so it drops the
@@ -848,11 +903,11 @@ QListWidget:focus {
     border-radius: 0;
     padding: 0;
     font-size: 15px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
 #taskEdit:focus {
-    border-bottom-color: #4480bb;
+    border-bottom-color: rgba(0, 0, 0, 0.40);
 }
 
 /* controls.SearchField — a QLineEdit with a leading glyph and a clear action.
@@ -861,7 +916,9 @@ QListWidget:focus {
 #searchField {
     border-radius: 999px;
     padding: 6px 14px;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
 }
 
 /* The clear button Qt inserts for setClearButtonEnabled(), and the leading
@@ -884,12 +941,13 @@ QComboBox::drop-down {
 }
 
 QComboBox QAbstractItemView {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(18, 20, 26, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.20);
     border-radius: 8px;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
+    selection-background-color: rgba(255, 255, 255, 0.20);
+    selection-color: #ffffff;
     padding: 3px;
+    color: #ffffff;
 }
 
 QListWidget {
@@ -903,12 +961,12 @@ QListWidget::item {
 }
 
 QListWidget::item:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 QListWidget::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 /* ── rows ────────────────────────────────────────────────────────────────
@@ -917,9 +975,19 @@ QListWidget::item:selected {
    R_CONTROL and the card around them R_CARD, so the card stays deliberately
    looser than its own contents. */
 #row {
-    background: #ffffff;
-    border: none;
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    color: #09090b;
+}
+
+#row:hover {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#row QLabel {
+    color: #09090b;
 }
 
 #rowFlat {
@@ -929,49 +997,59 @@ QListWidget::item:selected {
 }
 
 #rowFlat:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.04);
+}
+
+#rowFlat QLabel {
+    color: #09090b;
 }
 
 #rowMuted {
     background: transparent;
-    border: 1px solid #ececee;
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 8px;
 }
 
 /* controls.FileItem and controls.StepRow — a row that is its own hairline box
    on the canvas rather than a band inside a card. */
 #listRow {
-    background: #ffffff;
-    border: 1px solid #ececee;
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    color: #09090b;
 }
 
 #listRow:hover {
-    border-color: #d4d4d7;
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#listRow QLabel {
+    color: #09090b;
 }
 
 /* the step marker painted by controls.StepMark */
 #stepMark {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
     border: none;
     border-radius: 6px;
 }
 
 #stepMark[on="true"] {
-    background: #4480bb;
+    background: #09090b;
 }
 
 /* The 1 Describe → 2 Plan → 3 Run breadcrumb. */
 #stepCur {
     font-size: 12px;
     font-weight: 600;
-    color: #306191;
+    color: #ffffff;
 }
 
 #stepOff {
     font-size: 12px;
     font-weight: 600;
-    color: #c2c2c5;
+    color: rgba(255, 255, 255, 0.45);
 }
 
 /* ── headers and toolbars ────────────────────────────────────────────────
@@ -979,44 +1057,87 @@ QListWidget::item:selected {
    scrolls; SectionHeader sits above a group of cards inside the scroll. Both
    are drawn by widgets/controls.py so every screen gets the same one. */
 #pageHeader {
-    background: #f4f5f6;
+    background: transparent;
     border: none;
-    border-bottom: 1px solid #ececee;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 #pageTitle {
     font-family: "Barlow Condensed";
     font-size: 24px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
 #pageSubtitle {
     font-size: 13px;
-    color: #5d5d60;
+    color: #52525b;
     background: transparent;
+}
+
+#pageHeader QPushButton {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    color: #09090b;
+}
+
+#pageHeader QPushButton:hover {
+    background: rgba(255, 255, 255, 0.90);
+    border-color: rgba(0, 0, 0, 0.20);
 }
 
 #sectionTitle {
     font-family: "Barlow Condensed";
     font-size: 18px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
 #sectionSubtitle {
     font-size: 12px;
     font-weight: 500;
-    color: #7a7a7d;
+    color: #52525b;
     background: transparent;
+}
+
+#card #sectionTitle, #card #h1, #card #h2, #card #h3, #card #h4, #card #h5, #card #h6, #card #stat, #card #statSm {
+    color: #09090b;
+}
+
+#card #sectionSubtitle {
+    color: #52525b;
+}
+
+/* ── licence & update banner ─────────────────────────────────────────── */
+#licenceBanner {
+    background: rgba(18, 20, 26, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#licenceBanner QLabel {
+    color: #f1f5f9;
+}
+
+#licenceBanner QPushButton {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 4px 10px;
+}
+
+#licenceBanner QPushButton:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.45);
 }
 
 /* A sticky strip of search / filter / actions above a long list. */
 #toolbar {
-    background: #ffffff;
-    border: 1px solid #ececee;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 12px;
 }
 
@@ -1033,16 +1154,16 @@ QListWidget::item:selected {
     border-radius: 999px;
 }
 
-#tagAccent { background: #eff6fe; color: #1f456a; border: 1px solid #eff6fe; }
-#tagOutline { background: #ffffff; border: 1px solid #4480bb; color: #306191; }
-#tagNeutral { background: #e7e7ea; color: #424244; border: 1px solid #e7e7ea; }
+#tagAccent { background: rgba(0, 0, 0, 0.04); color: #09090b; border: 1px solid rgba(0, 0, 0, 0.04); }
+#tagOutline { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.35); color: #ffffff; }
+#tagNeutral { background: rgba(0, 0, 0, 0.10); color: #424244; border: 1px solid rgba(0, 0, 0, 0.10); }
 #tagOk { background: #eafaf3; color: #186b53; border: 1px solid #eafaf3; }
 #tagWarn { background: #fff8e8; color: #755a14; border: 1px solid #fff8e8; }
 #tagErr { background: #fdeeee; color: #8a2f2f; border: 1px solid #fdeeee; }
 
 /* ── output stage body ───────────────────────────────────────────────── */
 #stageBody {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
     border: none;
     border-radius: 8px;
     padding: 12px;
@@ -1052,31 +1173,31 @@ QListWidget::item:selected {
 
 /* ── checkbox ────────────────────────────────────────────────────────── */
 QCheckBox {
-    color: #1d1f20;
+    color: #09090b;
     spacing: 8px;
 }
 
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid #d4d4d7;
+    border: 1px solid rgba(255, 255, 255, 0.30);
     border-radius: 6px;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
 }
 
 QCheckBox::indicator:hover {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 /* The indicator is the only visible part of a checkbox, so the focus cue has
    to land on it — a ring around the label text would say nothing. */
 QCheckBox:focus::indicator, QRadioButton:focus::indicator {
-    border: 2px solid #4480bb;
+    border: 2px solid #09090b;
 }
 
 QCheckBox::indicator:checked {
-    background: #4480bb;
-    border: 1px solid #4480bb;
+    background: #09090b;
+    border: 1px solid #09090b;
     /* %ASSETS% is rewritten to an absolute path by main.py — a bare relative
        url() would resolve against the process's cwd, not the app. */
     image: url(%ASSETS%/check.svg);
@@ -1087,8 +1208,8 @@ QCheckBox:disabled {
 }
 
 QCheckBox::indicator:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.06);
 }
 
 /* ── tabs ────────────────────────────────────────────────────────────────
@@ -1101,14 +1222,14 @@ QCheckBox::indicator:disabled {
    Shaped like the segmented strip on Inquiry Automation, so a tab reads the
    same whether it is in a dialog or on a screen. */
 QTabWidget::pane {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     top: -1px;
 }
 
 QTabWidget > QWidget {
-    background: #ffffff;
+    background: transparent;
 }
 
 QTabBar {
@@ -1129,16 +1250,16 @@ QTabBar::tab {
 }
 
 QTabBar::tab:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 QTabBar::tab:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 QTabBar::tab:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QTabBar::tab:disabled {
@@ -1147,18 +1268,20 @@ QTabBar::tab:disabled {
 
 /* ── tables ──────────────────────────────────────────────────────────── */
 QTableWidget, QTableView {
-    background: #ffffff;
-    alternate-background-color: #f7f8f9;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.06);
+    alternate-background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
-    gridline-color: #ececee;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
+    gridline-color: rgba(255, 255, 255, 0.08);
+    selection-background-color: rgba(255, 255, 255, 0.20);
+    selection-color: #ffffff;
+    color: #ffffff;
 }
 
 QTableWidget::item, QTableView::item {
     padding: 7px 9px;
     border: none;
+    color: #ffffff;
 }
 
 QHeaderView {
@@ -1166,31 +1289,31 @@ QHeaderView {
 }
 
 QHeaderView::section {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.10);
     border: none;
-    border-bottom: 1px solid #ececee;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding: 9px;
     font-size: 11px;
     font-weight: 600;
-    color: #98989b;
+    color: #e2e8f0;
 }
 
 QTableCornerButton::section {
-    background: #ffffff;
+    background: transparent;
     border: none;
 }
 
 /* ── the rest of what Qt can paint ───────────────────────────────────── */
 QTextBrowser {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     padding: 10px 12px;
-    color: #1d1f20;
+    color: #ffffff;
 }
 
 QRadioButton {
-    color: #1d1f20;
+    color: #09090b;
     spacing: 8px;
     background: transparent;
 }
@@ -1198,44 +1321,42 @@ QRadioButton {
 QRadioButton::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid #d4d4d7;
+    border: 1px solid rgba(0, 0, 0, 0.25);
     border-radius: 8px;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.65);
 }
 
-QRadioButton::indicator:hover { border-color: #4480bb; }
+QRadioButton::indicator:hover { border-color: #09090b; }
 
-/* No image: a radio's dot is drawn as a thick accent ring, which needs no
-   asset and cannot go missing from a frozen build the way a url() can. */
 QRadioButton::indicator:checked {
-    border: 5px solid #4480bb;
+    border: 5px solid #09090b;
     background: #ffffff;
 }
 
-QRadioButton:disabled { color: #b7b7ba; }
+QRadioButton:disabled { color: #a1a1aa; }
 
 QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit, QDateTimeEdit {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 8px;
     padding: 5px 9px;
-    color: #1d1f20;
-    selection-background-color: #4480bb;
+    color: #09090b;
+    selection-background-color: #09090b;
     selection-color: #ffffff;
 }
 
 QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QDateEdit:hover, QDateTimeEdit:hover {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.18);
 }
 
 QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QDateEdit:focus, QDateTimeEdit:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QSpinBox:disabled, QDoubleSpinBox:disabled, QTimeEdit:disabled, QDateTimeEdit:disabled,
 QDateEdit:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.06);
     color: #b7b7ba;
 }
 
@@ -1270,7 +1391,7 @@ QTimeEdit::down-button, QDateEdit::down-button, QDateTimeEdit::down-button {
 
 QSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
 }
 
 QSpinBox::up-arrow, QSpinBox::down-arrow,
@@ -1280,7 +1401,7 @@ QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {
 }
 
 QProgressBar {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
     border: none;
     border-radius: 4px;
     height: 8px;
@@ -1291,7 +1412,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: #4480bb;
+    background: #09090b;
     border-radius: 4px;
 }
 
@@ -1303,9 +1424,9 @@ QToolButton {
     color: #424244;
 }
 
-QToolButton:hover { background: #f7f8f9; }
-QToolButton:pressed { background: #e7e7ea; }
-QToolButton:focus { border-color: #4480bb; }
+QToolButton:hover { background: rgba(0, 0, 0, 0.02); }
+QToolButton:pressed { background: rgba(0, 0, 0, 0.10); }
+QToolButton:focus { border-color: #09090b; }
 QToolButton:disabled { color: #b7b7ba; }
 
 /* Labels never paint a background of their own. Without this a QLabel on a
@@ -1323,7 +1444,7 @@ QLabel:disabled {
 /* ── groupbox (setup dialogs) ────────────────────────────────────────── */
 QGroupBox {
     background: transparent;
-    border: 1px solid #e7e7ea;
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 12px;
     margin-top: 14px;
     padding-top: 14px;
@@ -1336,7 +1457,7 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 11px;
     padding: 0 6px;
-    color: #306191;
+    color: #18181b;
 }
 
 /* ── scrollbars ──────────────────────────────────────────────────────── */
@@ -1356,7 +1477,7 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-    background: #d4d4d7;
+    background: rgba(0, 0, 0, 0.18);
     border-radius: 4px;
     min-height: 30px;
 }
@@ -1369,38 +1490,40 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QScrollBar:horizontal { height: 0; }
 
-QSplitter::handle { background: #ececee; }
+QSplitter::handle { background: rgba(0, 0, 0, 0.06); }
 
 /* ── chrome ──────────────────────────────────────────────────────────── */
 QStatusBar {
-    background: #f4f5f6;
-    color: #7a7a7d;
-    border-top: 1px solid #ececee;
+    background: rgba(15, 17, 23, 0.75);
+    color: #cbd5e1;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
     font-size: 12px;
 }
 
 QStatusBar::item { border: none; }
 
 QMenu {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(18, 20, 26, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.20);
     border-radius: 8px;
     padding: 4px;
+    color: #ffffff;
 }
 
 QMenu::item {
     padding: 7px 20px 7px 12px;
     border-radius: 6px;
+    color: #ffffff;
 }
 
 QMenu::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
 }
 
 QMenu::separator {
     height: 1px;
-    background: #ececee;
+    background: rgba(0, 0, 0, 0.06);
     margin: 4px 0;
 }
 
@@ -1414,25 +1537,25 @@ QTableView#registerTable {
     background: transparent;
     border: none;
     gridline-color: transparent;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
+    selection-background-color: rgba(0, 0, 0, 0.04);
+    selection-color: #09090b;
 }
 
 QTableView#registerTable::item {
     padding: 0 10px;
     border: none;
-    border-bottom: 1px solid #ececee;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 QTableView#registerTable::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 QTableView#registerTable QHeaderView::section:horizontal {
     background: transparent;
     border: none;
-    border-bottom: 1px solid #e7e7ea;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
     padding: 0 10px 8px 10px;
     font-family: 'Barlow Condensed';
     font-size: 11px;
@@ -1442,5 +1565,88 @@ QTableView#registerTable QHeaderView::section:horizontal {
 }
 
 QTableView#registerTable QHeaderView::section:horizontal:hover {
-    color: #306191;
+    color: #18181b;
+}
+
+/* ── sleek glassmorphic scrollbars ─────────────────────────────────────── */
+QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(0, 0, 0, 0.15);
+    min-height: 24px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+QScrollBar::sub-line:vertical {
+    height: 0px;
+    width: 0px;
+    subcontrol-position: top;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:vertical {
+    height: 0px;
+    width: 0px;
+    subcontrol-position: bottom;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+    width: 0px;
+    height: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 6px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(0, 0, 0, 0.15);
+    min-width: 24px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+    height: 0px;
+    subcontrol-position: left;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:horizontal {
+    width: 0px;
+    height: 0px;
+    subcontrol-position: right;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+    width: 0px;
+    height: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
 }

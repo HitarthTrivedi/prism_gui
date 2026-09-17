@@ -32,7 +32,7 @@ PRODUCTION: dict[str, str] = {
 # build that honoured it would ship a universal skeleton key for the whole
 # product. The exclusion is the only thing making it safe for this to exist.
 DEVELOPMENT: dict[str, str] = {
-    "dev1": "4d9841e8c8d8f133c6789f0afa1eab2b7eac395e94404d0a662c68622880dbb0",
+    "dev1": "5e69fb9db76f4c8661ca318af299bc2d91765f16919a7013f5513819f1c92afd",
 }
 
 

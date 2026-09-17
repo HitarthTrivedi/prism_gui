@@ -36,8 +36,11 @@ Two things here are Prism's and not the design's, and both are kept:
   sections of the Settings screen, which is where the rail sends you.
 """
 from __future__ import annotations
-from PySide6.QtCore import Qt, Signal, QSize, QEvent, QPoint, QTimer
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import Qt, Signal, QSize, QEvent, QPoint, QTimer, QRect, QRectF, QPointF
+from PySide6.QtGui import (
+    QFontMetrics, QPainter, QPainterPath, QLinearGradient, QBrush, QPen,
+    QColor,
+)
 from PySide6.QtWidgets import (
     QAbstractButton, QFrame, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPushButton, QHBoxLayout, QFileDialog, QSizePolicy, QWidget, QScrollArea,
@@ -115,12 +118,10 @@ SOON = "__soon__"
 # Everything that is neither WORK nor an add-on.
 #
 # No section header over it: one row does not need a group label, and the
-# hairline above it already says "this is a different kind of thing". Settings
-# is the branch that owns every configuring surface, including the three in
-# SECONDARY below — so when you are on one of those, Settings stays lit.
+# hairline above it already says "this is a different kind of thing".
 MORE = [
     ("config", "Settings", "sliders",
-     "Licence, agents, profile, language — and AI tools, the guide and help"),
+     "Licence, agents, profile, language and workspace"),
 ]
 
 # Lifted OUT of the rail and into the Settings screen's "More" section.
@@ -143,7 +144,13 @@ SECONDARY = [
      "you're signed in to it"),
     ("guide", "How to use Prism", "help",
      "What Prism can do and what to type"),
-    ("support", "Help & support", "bulb",
+    ("support", "Help & support", "help",
+     "Answers to the common questions, then our team"),
+]
+
+# Under HELP: ONLY Help & support
+HELP = [
+    ("support", "Help & support", "help",
      "Answers to the common questions, then our team"),
 ]
 
@@ -169,10 +176,8 @@ DIRECT = [
     ("chrome", "Chrome", "globe", "Pin or auto-detect your Chrome version"),
 ]
 
-# A screen you reach *through* a rail entry keeps that entry lit. Without this
-# the three SECONDARY screens leave the whole rail dark — the user is somewhere
-# Prism refuses to name, which is the same defect as highlighting nothing.
-OWNED_BY = {key: "config" for key, _label, _icon, _tip in SECONDARY}
+# Screens under direct settings mapping
+OWNED_BY = {}
 
 # How bright each rail ink is, as a fraction of white flattened onto the RAIL
 # by theme.over(). Named rather than sprinkled, because the contrast ratios
@@ -183,11 +188,11 @@ OWNED_BY = {key: "config" for key, _label, _icon, _tip in SECONDARY}
 # it, and it is why locked add-ons are no longer dimmed to 0.32 (2.8:1, which
 # fails AA outright — see AddonRow.set_locked).
 INK_CURRENT = 1.00
-INK_PRIMARY = 0.82      # a live add-on's name, the current row's glyph
-INK_ITEM = 0.55         # a resting nav row's glyph
-INK_HEADING = 0.50      # a group heading — 4.7:1, the floor
-INK_QUIET = 0.42        # the coming-soon row: an inactive component
-INK_CHROME = 0.45       # chevrons, the favourites +/- glyphs
+INK_PRIMARY = 0.88      # a live add-on's name, the current row's glyph
+INK_ITEM = 0.70         # a resting nav row's glyph
+INK_HEADING = 0.55      # a group heading
+INK_QUIET = 0.45        # the coming-soon row: an inactive component
+INK_CHROME = 0.60       # chevrons, the favourites +/- glyphs
 
 
 def _amp(text: str) -> str:
@@ -251,8 +256,7 @@ def nav_button(label: str, icon_name: str, small: bool = False,
     btn.setFlat(True)
     btn.setFocusPolicy(Qt.StrongFocus)
     size = 15 if small else 17
-    icons.button_icon(btn, icon_name, size,
-                      theme.over(INK_ITEM if small else INK_PRIMARY))
+    icons.button_icon(btn, icon_name, size, "#27272a")
     btn.setIconSize(QSize(size, size))
     btn.setProperty("cur", False)
     btn.setMinimumHeight(C.MIN_TARGET + 4)
@@ -262,6 +266,10 @@ def nav_button(label: str, icon_name: str, small: bool = False,
     if tip:
         btn.setToolTip(tip)
         btn.setAccessibleDescription(tip)
+    btn._raw_label = label
+    btn._raw_icon = icon_name
+    btn._raw_tip = tip
+    btn._is_small = small
     return btn
 
 
@@ -289,10 +297,12 @@ class AddonRow(QPushButton):
         self._icon_name = icon_name
         self._locked = False
         self._current = False
+        self._raw_label = label
 
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 0, 6, 0)
         row.setSpacing(theme.SPACE_2 + 2)
+        self._row_layout = row
         self._chip = QLabel()
         self._chip.setFixedSize(self.CHIP, self.CHIP)
         self._chip.setAlignment(Qt.AlignCenter)
@@ -310,6 +320,24 @@ class AddonRow(QPushButton):
         self.setMinimumHeight(34)
         self.setAccessibleName(label)
         self._repaint()
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        if collapsed:
+            self._label.setVisible(False)
+            self._lock.setVisible(False)
+            self._row_layout.setContentsMargins(0, 0, 0, 0)
+            self._row_layout.setAlignment(Qt.AlignCenter)
+            self.setFixedSize(48, 38)
+        else:
+            self._label.setVisible(True)
+            self._lock.setVisible(self._locked)
+            self._row_layout.setContentsMargins(6, 0, 6, 0)
+            self._row_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.setMinimumHeight(34)
+            self.setMaximumWidth(16777215)
+            self.setMinimumWidth(0)
+            self.setMaximumHeight(16777215)
 
     # ── state ─────────────────────────────────────────────────────────────
     def set_locked(self, locked: bool) -> None:
@@ -373,18 +401,35 @@ class SoonRow(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(6 + 2, 0, 6 + 2, 0)
         row.setSpacing(theme.SPACE_2 + 2)
-        chip = QLabel()
-        chip.setFixedSize(AddonRow.CHIP, AddonRow.CHIP)
-        chip.setAlignment(Qt.AlignCenter)
-        chip.setPixmap(icons.pixmap(icon_name, 14, theme.over(INK_QUIET)))
-        chip.setStyleSheet(f"background: {theme.tint('#ffffff', '0f')};"
+        self._row_layout = row
+        self.chip = QLabel()
+        self.chip.setFixedSize(AddonRow.CHIP, AddonRow.CHIP)
+        self.chip.setAlignment(Qt.AlignCenter)
+        self.chip.setPixmap(icons.pixmap(icon_name, 14, theme.over(INK_QUIET)))
+        self.chip.setStyleSheet(f"background: {theme.tint('#ffffff', '0f')};"
                            f" border-radius: {theme.R_CHIP + 1}px;")
-        row.addWidget(chip)
+        row.addWidget(self.chip)
         name = _Elided(label)
         name.setStyleSheet(theme.type_css("SUPPORT", theme.over(INK_QUIET))
                            + " font-weight: 500; background: transparent;")
         row.addWidget(name, stretch=1)
+        self.name = name
         self.setMinimumHeight(30)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self.name.setVisible(False)
+            self._row_layout.setContentsMargins(0, 0, 0, 0)
+            self._row_layout.setAlignment(Qt.AlignCenter)
+            self.setFixedSize(48, 38)
+        else:
+            self.name.setVisible(True)
+            self._row_layout.setContentsMargins(6 + 2, 0, 6 + 2, 0)
+            self._row_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.setMinimumHeight(30)
+            self.setMaximumWidth(16777215)
+            self.setMinimumWidth(0)
+            self.setMaximumHeight(16777215)
 
 
 class Sidebar(QFrame):
@@ -392,11 +437,14 @@ class Sidebar(QFrame):
     favorite_chosen = Signal(str)
     wakeword_toggled = Signal(bool)
     tour_requested = Signal()
+    collapsed_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setFixedWidth(240)
+        self._collapsed = False
+        self.setAttribute(Qt.WA_StyledBackground, False)
 
         # The rail fits inside 768px without scrolling — that is the budget the
         # twelve-control limit exists to hold. The scroll area stays as a floor
@@ -404,14 +452,43 @@ class Sidebar(QFrame):
         # a rail you can reach by scrolling is worth more than one Qt has
         # squeezed below its sizeHint and clipped.
         shell = QVBoxLayout(self)
-        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setContentsMargins(4, 4, 4, 4)
         shell.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { background: transparent; }")
-        scroll.setFocusPolicy(Qt.NoFocus)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 4px;
+                margin: 0px;
+                border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.20);
+                min-height: 20px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.40);
+            }
+            QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical {
+                height: 0px;
+                width: 0px;
+                background: transparent;
+                border: none;
+            }
+            QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+                width: 0px;
+                height: 0px;
+                background: transparent;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+        """)
         inner = QWidget()
         inner.setObjectName("sidebarInner")
         scroll.setWidget(inner)
@@ -423,18 +500,24 @@ class Sidebar(QFrame):
         root.setContentsMargins(theme.SPACE_3, theme.SPACE_5,
                                 theme.SPACE_3, theme.SPACE_3)
         root.setSpacing(theme.SPACE_1)
+        self._root_layout = root
 
-        root.addWidget(self._brand())
+        self._brand_widget = self._brand()
+        root.addWidget(self._brand_widget)
         root.addSpacing(theme.SPACE_3)
 
-        # -- WORK -------------------------------------------------------------
+        # ── WORK ─────────────────────────────────────────────────────────────
         # One heading over the three things a run is made of: start it, see
         # where it stands, read what happened.
         self._nav: dict[str, QWidget] = {}
         self._nav_glyph: dict[str, tuple[str, int, float]] = {}
         self._chain: list[QWidget] = []
 
-        root.addWidget(self._section("WORK"))
+        self._work_lbl = self._section("WORK")
+        root.addWidget(self._work_lbl)
+        self._work_collapsed_rule = self._rule()
+        self._work_collapsed_rule.setVisible(False)
+        root.addWidget(self._work_collapsed_rule)
 
         # The rail's one filled control, and the only accent fill on the dark
         # surface.
@@ -445,7 +528,7 @@ class Sidebar(QFrame):
         self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, theme.over(1.0))
+        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
         elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
@@ -466,9 +549,39 @@ class Sidebar(QFrame):
             root.addWidget(btn)
         self._current = "home"
 
-        # -- the add-on shelf -------------------------------------------------
+        # ── the add-on shelf: collapsible with dropdown arrow ─────────────
         root.addSpacing(theme.SPACE_2)
-        root.addWidget(self._section("ADD-ONS"))
+
+        addons_head = QWidget()
+        addons_head.setObjectName("addonsHead")
+        addons_head.setCursor(Qt.PointingHandCursor)
+        addons_hlayout = QHBoxLayout(addons_head)
+        addons_hlayout.setContentsMargins(4, 2, 4, 2)
+        addons_hlayout.setSpacing(theme.SPACE_1)
+
+        addons_lbl = self._section("ADD-ONS")
+        addons_hlayout.addWidget(addons_lbl, stretch=1)
+
+        self._addons_toggle_btn = QPushButton()
+        self._addons_toggle_btn.setObjectName("addonsChevron")
+        self._addons_toggle_btn.setFlat(True)
+        self._addons_toggle_btn.setFixedSize(22, 22)
+        self._addons_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._addons_toggle_btn.setToolTip(i18n.t("Collapse / expand Add-ons"))
+        self._addons_open = True
+        icons.button_icon(self._addons_toggle_btn, "chevron-down", 11, theme.over(INK_CHROME))
+        addons_hlayout.addWidget(self._addons_toggle_btn)
+
+        addons_head.mousePressEvent = lambda e: self._toggle_addons()
+        self._addons_toggle_btn.clicked.connect(lambda: self._toggle_addons())
+
+        root.addWidget(addons_head)
+        self._addons_head = addons_head
+        self._addons_collapsed_rule = self._rule()
+        self._addons_collapsed_rule.setVisible(False)
+        root.addWidget(self._addons_collapsed_rule)
+
+        self._addon_rows: list[QWidget] = []
         self._gated: dict[str, tuple[AddonRow, str, str, str]] = {}
         # Straight off the registry rather than off ADDONS above, because the
         # manifest carries `status` -- which ADDONS' six positional fields
@@ -485,6 +598,7 @@ class Sidebar(QFrame):
                     addon=i18n.t(addon.label))
                 row = SoonRow(text, addon.icon)
                 row.setToolTip(i18n.t(addon.tip))
+                self._addon_rows.append(row)
                 root.addWidget(row)
                 continue
             row = AddonRow(i18n.t(addon.label), addon.icon,
@@ -497,7 +611,52 @@ class Sidebar(QFrame):
                 self._gated[addon.key] = (row, addon.label, addon.icon,
                                           addon.feature)
             self._register(addon.key, row)
+            self._addon_rows.append(row)
             root.addWidget(row)
+
+        # ── the HELP section: collapsible with dropdown arrow ────────────────
+        root.addSpacing(theme.SPACE_2)
+
+        help_head = QWidget()
+        help_head.setObjectName("helpHead")
+        help_head.setCursor(Qt.PointingHandCursor)
+        help_hlayout = QHBoxLayout(help_head)
+        help_hlayout.setContentsMargins(4, 2, 4, 2)
+        help_hlayout.setSpacing(theme.SPACE_1)
+
+        help_lbl = self._section("HELP")
+        help_hlayout.addWidget(help_lbl, stretch=1)
+
+        self._help_toggle_btn = QPushButton()
+        self._help_toggle_btn.setObjectName("helpChevron")
+        self._help_toggle_btn.setFlat(True)
+        self._help_toggle_btn.setFixedSize(22, 22)
+        self._help_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._help_toggle_btn.setToolTip(i18n.t("Collapse / expand Help"))
+        self._help_open = True
+        icons.button_icon(self._help_toggle_btn, "chevron-down", 11, theme.over(INK_CHROME))
+        help_hlayout.addWidget(self._help_toggle_btn)
+
+        help_head.mousePressEvent = lambda e: self._toggle_help()
+        self._help_toggle_btn.clicked.connect(lambda: self._toggle_help())
+
+        root.addWidget(help_head)
+        self._help_head = help_head
+        self._help_collapsed_rule = self._rule()
+        self._help_collapsed_rule.setVisible(False)
+        root.addWidget(self._help_collapsed_rule)
+
+        self._help_rows: list[QWidget] = []
+        for key, label, icon_name, tip in HELP:
+            btn = nav_button(i18n.t(label), icon_name, small=True, tip=i18n.t(tip))
+            if key == "tour":
+                btn.clicked.connect(lambda: self.tour_requested.emit())
+            else:
+                btn.clicked.connect(lambda _=False, k=key: self._go(k))
+            self._nav_glyph[key] = (icon_name, 15, INK_ITEM)
+            self._register(key, btn)
+            self._help_rows.append(btn)
+            root.addWidget(btn)
 
         # -- Settings ---------------------------------------------------------
         # Under a hairline rather than under a third heading: it is the one
@@ -522,6 +681,11 @@ class Sidebar(QFrame):
         # used to leave as a navy void now separates "where you go" from "your
         # own things", which is a distinction worth drawing.
         root.addStretch(1)
+        fav_wrap = QWidget()
+        fav_col = QVBoxLayout(fav_wrap)
+        fav_col.setContentsMargins(0, 0, 0, 0)
+        fav_col.setSpacing(theme.SPACE_1 // 2)
+
         fav_head = QHBoxLayout()
         fav_head.setSpacing(theme.SPACE_1 // 2)
         self.fav_toggle = QPushButton(i18n.t("Favourites"))
@@ -543,7 +707,7 @@ class Sidebar(QFrame):
                                    self._remove_favorite)
         fav_head.addWidget(self._fav_add)
         fav_head.addWidget(self._fav_del)
-        root.addLayout(fav_head)
+        fav_col.addLayout(fav_head)
         self._chain.append(self.fav_toggle)
         self._chain.append(self._fav_add)
         self._chain.append(self._fav_del)
@@ -560,9 +724,9 @@ class Sidebar(QFrame):
             f" {theme.type_css('META', theme.over(INK_ITEM))} }}"
             "QListWidget::item { padding: 6px 6px;"
             f" border-radius: {theme.R_CHIP + 1}px; }}"
-            f"QListWidget::item:hover {{ background: {theme.tint('#ffffff', '12')};"
+            f"QListWidget::item:hover {{ background: rgba(0, 0, 0, 0.04);"
             f" color: {theme.over(1.0)}; }}"
-            f"QListWidget::item:selected {{ background: {theme.tint('#ffffff', '1a')};"
+            f"QListWidget::item:selected {{ background: rgba(0, 0, 0, 0.07);"
             f" color: {theme.over(1.0)}; }}")
         self.fav_list.setToolTip(i18n.t("Double-click to attach"))
         self.fav_list.setIconSize(QSize(15, 15))
@@ -572,7 +736,9 @@ class Sidebar(QFrame):
         # content is already taller than the viewport — so Qt collapsed it to
         # its minimum and the favourites vanished entirely.
         self.fav_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        root.addWidget(self.fav_list)
+        fav_col.addWidget(self.fav_list)
+        root.addWidget(fav_wrap)
+        self._fav_wrap = fav_wrap
 
         # -- foot -------------------------------------------------------------
         # Pinned below the scroll area rather than inside it. The design keeps
@@ -590,6 +756,7 @@ class Sidebar(QFrame):
         foot_col.setSpacing(theme.SPACE_1)
         foot_col.addWidget(self._rule())
         foot_col.addSpacing(theme.SPACE_1)
+        self._foot_col = foot_col
 
         # The wake word lives down here rather than above the add-on shelf: it
         # is a standing preference, not a destination, and it was occupying the
@@ -609,8 +776,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet(
-            f"background: {theme.over(0.95)}; border-radius: 2px;")
+        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -620,6 +786,48 @@ class Sidebar(QFrame):
         self.reload_favorites()
         self._toggle_favorites(False)
         self._refresh_nav()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        r = QRectF(self.rect())
+        radius = 20.0
+
+        clip = QPainterPath()
+        clip.addRoundedRect(r, radius, radius)
+        painter.setClipPath(clip)
+
+        central = self.window().findChild(QWidget, "central")
+        if central and hasattr(central, "get_blurred_pixmap"):
+            blurred = central.get_blurred_pixmap()
+            if blurred and not blurred.isNull():
+                pos = self.mapTo(central, QPoint(0, 0))
+                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
+                painter.drawPixmap(r.toRect(), blurred, src_rect)
+
+        # Frosted light glass sheen
+        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
+                                     QPointF(r.left(), r.bottom()))
+        glass_grad.setColorAt(0.00, QColor(255, 255, 255, 185))
+        glass_grad.setColorAt(0.50, QColor(255, 255, 255, 150))
+        glass_grad.setColorAt(1.00, QColor(255, 255, 255, 130))
+        painter.setBrush(QBrush(glass_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(r, radius, radius)
+
+        # Crisp glass outer border
+        border_grad = QLinearGradient(
+            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
+        border_grad.setColorAt(0.0, QColor(255, 255, 255, 230))
+        border_grad.setColorAt(0.5, QColor(255, 255, 255, 130))
+        border_grad.setColorAt(1.0, QColor(0, 0, 0, 24))
+        border_pen = QPen(QBrush(border_grad), 1.2)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.NoBrush)
+        inset = r.adjusted(0.6, 0.6, -0.6, -0.6)
+        painter.drawRoundedRect(inset, radius - 0.6, radius - 0.6)
 
     # ── registration ──────────────────────────────────────────────────────
     def _register(self, key: str, widget: QWidget) -> None:
@@ -638,13 +846,20 @@ class Sidebar(QFrame):
     # ── chrome ────────────────────────────────────────────────────────────
     def _brand(self) -> QWidget:
         wrap = QWidget()
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(2, 0, 0, 0)
-        row.setSpacing(theme.SPACE_2)
+        wrap.setObjectName("brandWrap")
+        main_layout = QVBoxLayout(wrap)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # ── 1. Expanded brand row ─────────────────────────────────────────────
+        expanded_w = QWidget()
+        expanded_row = QHBoxLayout(expanded_w)
+        expanded_row.setContentsMargins(2, 0, 0, 0)
+        expanded_row.setSpacing(theme.SPACE_2)
         mark = QLabel()
         mark.setPixmap(icons.logo_pixmap(26))
         mark.setAccessibleName("Prism")
-        row.addWidget(mark)
+        expanded_row.addWidget(mark)
         name = QLabel("PRISM")
         name.setObjectName("brand")
         # Stacked under the wordmark when this copy belongs to a company
@@ -664,9 +879,50 @@ class Sidebar(QFrame):
             member.setToolTip("This copy of Prism is set up for this person. "
                               "Change it in Settings → Your role.")
             stack.addWidget(member)
-            row.addLayout(stack, stretch=1)
+            expanded_row.addLayout(stack, stretch=1)
         else:
-            row.addWidget(track(name, 0.14), stretch=1)
+            expanded_row.addWidget(track(name, 0.14), stretch=1)
+
+        self._collapse_btn = QPushButton()
+        self._collapse_btn.setObjectName("railCollapseBtn")
+        self._collapse_btn.setFixedSize(28, 28)
+        self._collapse_btn.setCursor(Qt.PointingHandCursor)
+        self._collapse_btn.setToolTip(i18n.t("Collapse navigation"))
+        icons.button_icon(self._collapse_btn, "chevron-left", 14, theme.over(INK_CHROME))
+        self._collapse_btn.clicked.connect(lambda: self.toggle_collapsed(True))
+        expanded_row.addWidget(self._collapse_btn)
+
+        main_layout.addWidget(expanded_w)
+        self._brand_expanded = expanded_w
+
+        # ── 2. Collapsed brand row ────────────────────────────────────────────
+        collapsed_w = QWidget()
+        collapsed_col = QVBoxLayout(collapsed_w)
+        collapsed_col.setContentsMargins(0, 0, 0, 0)
+        collapsed_col.setSpacing(6)
+        collapsed_col.setAlignment(Qt.AlignCenter)
+
+        mark_c = QLabel()
+        mark_c.setPixmap(icons.logo_pixmap(26))
+        mark_c.setAccessibleName("Prism")
+        mark_c.setCursor(Qt.PointingHandCursor)
+        mark_c.setToolTip(i18n.t("Expand navigation"))
+        mark_c.mousePressEvent = lambda e: self.toggle_collapsed(False)
+        collapsed_col.addWidget(mark_c, alignment=Qt.AlignCenter)
+
+        self._expand_btn = QPushButton()
+        self._expand_btn.setObjectName("railCollapseBtn")
+        self._expand_btn.setFixedSize(28, 28)
+        self._expand_btn.setCursor(Qt.PointingHandCursor)
+        self._expand_btn.setToolTip(i18n.t("Expand navigation"))
+        icons.button_icon(self._expand_btn, "chevron-right", 14, theme.over(INK_CHROME))
+        self._expand_btn.clicked.connect(lambda: self.toggle_collapsed(False))
+        collapsed_col.addWidget(self._expand_btn, alignment=Qt.AlignCenter)
+
+        collapsed_w.setVisible(False)
+        main_layout.addWidget(collapsed_w)
+        self._brand_collapsed = collapsed_w
+
         return wrap
 
     @staticmethod
@@ -692,6 +948,7 @@ class Sidebar(QFrame):
         line = QFrame()
         line.setObjectName("railRule")
         line.setFixedHeight(1)
+        line.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         return line
 
     def _wake_row(self) -> QWidget:
@@ -714,10 +971,22 @@ class Sidebar(QFrame):
         row_btn.setFlat(True)
         row_btn.setCursor(Qt.PointingHandCursor)
         row_btn.setFocusPolicy(Qt.StrongFocus)
-        row_btn.setMinimumHeight(C.MIN_TARGET + 4)
+        row_btn.setMinimumHeight(C.MIN_TARGET + 6)
+        row_btn.setStyleSheet("""
+            QPushButton#navSub {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 8px;
+            }
+            QPushButton#navSub:hover {
+                background: rgba(0, 0, 0, 0.04);
+            }
+        """)
         wake_row = QHBoxLayout(row_btn)
-        wake_row.setContentsMargins(theme.SPACE_2, 0, theme.SPACE_2, 0)
-        wake_row.setSpacing(theme.SPACE_2 + 2)
+        wake_row.setContentsMargins(theme.SPACE_2 + 2, 4, theme.SPACE_2 + 2, 4)
+        wake_row.setSpacing(theme.SPACE_3)
+        self._wake_row_layout = wake_row
 
         self.wake_switch = ToggleSwitch()
         self.wake_switch.setEnabled(False)
@@ -729,10 +998,18 @@ class Sidebar(QFrame):
         wake_label = QLabel(i18n.t('Listen for "Prism"'))
         wake_label.setObjectName("railMuted")
         wake_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        wake_label.setStyleSheet(theme.type_css("SUPPORT",
-                                                theme.over(INK_ITEM))
-                                 + " background: transparent;")
+        wake_label.setStyleSheet("color: #27272a; font-size: 13px; font-weight: 500; background: transparent;")
         wake_row.addWidget(wake_label, stretch=1)
+        self._wake_label = wake_label
+
+        self._wake_symbol = QLabel()
+        self._wake_symbol.setFixedSize(22, 22)
+        self._wake_symbol.setAlignment(Qt.AlignCenter)
+        self._wake_symbol.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._wake_symbol.setVisible(False)
+        wake_row.addWidget(self._wake_symbol)
+        self.wake_switch.toggled.connect(lambda on: self._update_wake_symbol(on))
+        self._update_wake_symbol(self.wake_switch.isChecked())
 
         # The literal stays inside the setToolTip call: devtools/
         # extract_strings.py reads the source, and a sentence assembled into a
@@ -770,6 +1047,7 @@ class Sidebar(QFrame):
         row = QHBoxLayout(btn)
         row.setContentsMargins(6, 6, 6, 6)
         row.setSpacing(theme.SPACE_2 + 1)
+        self._profile_btn_layout = row
 
         self._avatar_slot = QHBoxLayout()
         self._avatar_slot.setContentsMargins(0, 0, 0, 0)
@@ -797,6 +1075,7 @@ class Sidebar(QFrame):
                                        theme.over(INK_CHROME)))
         chevron.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         row.addWidget(chevron)
+        self._profile_chevron = chevron
         self._profile_btn = btn
         self._chain.append(btn)
         self.set_profile("")
@@ -876,7 +1155,7 @@ class Sidebar(QFrame):
             "QPushButton { background: transparent;"
             " border: 2px solid transparent;"
             f" border-radius: {theme.R_CHIP}px; padding: 0; }}"
-            f"QPushButton:hover {{ background: {theme.tint('#ffffff', '17')}; }}"
+            f"QPushButton:hover {{ background: rgba(0, 0, 0, 0.05); }}"
             f"QPushButton:focus {{ border-color: {theme.over(0.85)}; }}")
         icons.button_icon(btn, icon_name, 14, theme.over(INK_CHROME))
         btn.clicked.connect(slot)
@@ -910,13 +1189,15 @@ class Sidebar(QFrame):
         return self._current
 
     def _refresh_nav(self):
+        c = getattr(self, "_collapsed", False)
         for key, widget in self._nav.items():
             cur = key == self._current
             widget.setProperty("cur", cur)
             glyph = self._nav_glyph.get(key)
             if glyph:
                 name, size, ink = glyph
-                icons.button_icon(widget, name, size,
+                actual_size = 18 if c else size
+                icons.button_icon(widget, name, actual_size,
                                   theme.over(INK_CURRENT if cur else ink))
             if isinstance(widget, AddonRow):
                 widget.set_current(cur)
@@ -932,8 +1213,10 @@ class Sidebar(QFrame):
             return
         top = widget.mapTo(self._inner, QPoint(0, 0)).y()
         height = max(14, min(22, widget.height() - 10))
-        self._pip.setGeometry(0, top + (widget.height() - height) // 2,
-                              4, height)
+        c = getattr(self, "_collapsed", False)
+        self._pip.setGeometry(2 if c else 0,
+                              top + (widget.height() - height) // 2,
+                              3 if c else 4, height)
         self._pip.show()
         self._pip.raise_()
 
@@ -1034,6 +1317,227 @@ class Sidebar(QFrame):
             self.wake_switch.blockSignals(True)
             self.wake_switch.setChecked(on)
             self.wake_switch.blockSignals(False)
+        self._update_wake_symbol(on)
+
+    def _update_wake_symbol(self, on: bool = False) -> None:
+        if hasattr(self, "_wake_symbol"):
+            hue = theme.ACCENT if on else theme.over(INK_CHROME)
+            self._wake_symbol.setPixmap(icons.pixmap("mic", 18, hue))
+
+    def is_collapsed(self) -> bool:
+        return getattr(self, "_collapsed", False)
+
+    def toggle_collapsed(self, collapsed: bool | None = None) -> None:
+        """Toggle sidebar between expanded (240px) and collapsed rail (68px) symbols mode."""
+        if collapsed is None:
+            self._collapsed = not getattr(self, "_collapsed", False)
+        else:
+            self._collapsed = collapsed
+
+        c = self._collapsed
+        self.setFixedWidth(72 if c else 240)
+        self.setProperty("collapsed", c)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        # Inner margins
+        if hasattr(self, "_root_layout"):
+            self._root_layout.setContentsMargins(
+                8 if c else theme.SPACE_3,
+                theme.SPACE_5,
+                8 if c else theme.SPACE_3,
+                theme.SPACE_3,
+            )
+        if hasattr(self, "_foot_col"):
+            self._foot_col.setContentsMargins(
+                8 if c else theme.SPACE_3,
+                0,
+                8 if c else theme.SPACE_3,
+                theme.SPACE_3,
+            )
+
+        # Brand header
+        if hasattr(self, "_brand_expanded"):
+            self._brand_expanded.setVisible(not c)
+        if hasattr(self, "_brand_collapsed"):
+            self._brand_collapsed.setVisible(c)
+
+        # Section WORK
+        if hasattr(self, "_work_lbl"):
+            self._work_lbl.setVisible(not c)
+        if hasattr(self, "_work_collapsed_rule"):
+            self._work_collapsed_rule.setVisible(c)
+
+        # New task button
+        if c:
+            self.new_task_btn.setText("")
+            self.new_task_btn.setFixedSize(48, 38)
+            self.new_task_btn.setToolTip(i18n.t("New task"))
+            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
+        else:
+            self.new_task_btn.setText(f"  {i18n.t('New task')}")
+            self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
+            self.new_task_btn.setMaximumWidth(16777215)
+            self.new_task_btn.setMinimumWidth(0)
+            self.new_task_btn.setMaximumHeight(16777215)
+            self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
+            icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
+
+        # Primary nav buttons
+        for key, label, icon_name, tip in PRIMARY:
+            btn = self._nav.get(key)
+            if btn:
+                if c:
+                    btn.setText("")
+                    btn.setFixedSize(48, 38)
+                    btn.setToolTip(i18n.t(label))
+                else:
+                    btn.setText(f"  {_amp(i18n.t(label))}")
+                    btn.setMinimumHeight(C.MIN_TARGET + 4)
+                    btn.setMaximumWidth(16777215)
+                    btn.setMinimumWidth(0)
+                    btn.setMaximumHeight(16777215)
+                    btn.setToolTip(i18n.t(tip))
+
+        # ADD-ONS
+        if hasattr(self, "_addons_head"):
+            self._addons_head.setVisible(not c)
+        if hasattr(self, "_addons_collapsed_rule"):
+            self._addons_collapsed_rule.setVisible(c)
+        for row in getattr(self, "_addon_rows", []):
+            if hasattr(row, "set_collapsed"):
+                row.set_collapsed(c)
+            if c:
+                row.setVisible(True)
+            else:
+                row.setVisible(getattr(self, "_addons_open", True))
+
+        # HELP
+        if hasattr(self, "_help_head"):
+            self._help_head.setVisible(not c)
+        if hasattr(self, "_help_collapsed_rule"):
+            self._help_collapsed_rule.setVisible(c)
+        for btn in getattr(self, "_help_rows", []):
+            if c:
+                btn.setText("")
+                btn.setFixedSize(48, 38)
+                btn.setToolTip(i18n.t("Help & support"))
+                btn.setVisible(True)
+            else:
+                btn.setText(f"  {_amp(i18n.t('Help & support'))}")
+                btn.setMinimumHeight(C.MIN_TARGET + 4)
+                btn.setMaximumWidth(16777215)
+                btn.setMinimumWidth(0)
+                btn.setMaximumHeight(16777215)
+                btn.setVisible(getattr(self, "_help_open", True))
+
+        # Settings (MORE)
+        for key, label, icon_name, tip in MORE:
+            btn = self._nav.get(key)
+            if btn:
+                if c:
+                    btn.setText("")
+                    btn.setFixedSize(48, 38)
+                    btn.setToolTip(i18n.t(label))
+                else:
+                    btn.setText(f"  {_amp(i18n.t(label))}")
+                    btn.setMinimumHeight(C.MIN_TARGET + 4)
+                    btn.setMaximumWidth(16777215)
+                    btn.setMinimumWidth(0)
+                    btn.setMaximumHeight(16777215)
+                    btn.setToolTip(i18n.t(tip))
+
+        # Favourites
+        if hasattr(self, "_fav_wrap"):
+            self._fav_wrap.setVisible(not c)
+        if c:
+            self.fav_list.setVisible(False)
+        else:
+            self.fav_list.setVisible(self.fav_toggle.isChecked())
+
+        # Foot: Wake row
+        if hasattr(self, "wake_row"):
+            if c:
+                self.wake_switch.setVisible(False)
+                self._wake_label.setVisible(False)
+                self._wake_symbol.setVisible(True)
+                self.wake_row.setFixedSize(48, 38)
+                self.wake_row.setToolTip(i18n.t('Wake word: Listen for "Prism"'))
+                self._wake_row_layout.setContentsMargins(0, 0, 0, 0)
+                self._wake_row_layout.setAlignment(Qt.AlignCenter)
+            else:
+                self.wake_switch.setVisible(True)
+                self._wake_label.setVisible(True)
+                self._wake_symbol.setVisible(False)
+                self.wake_row.setMinimumHeight(C.MIN_TARGET + 6)
+                self.wake_row.setMaximumWidth(16777215)
+                self.wake_row.setMinimumWidth(0)
+                self.wake_row.setMaximumHeight(16777215)
+                self.wake_row.setToolTip(
+                    "Best-effort wake word: polls the mic every ~2s and checks Groq "
+                    "Whisper for the word 'Prism'. Not instant like a real wake-word "
+                    "engine — see wakeword.py for details.")
+                self._wake_row_layout.setContentsMargins(theme.SPACE_2 + 2, 4, theme.SPACE_2 + 2, 4)
+                self._wake_row_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self._update_wake_symbol(self.wake_switch.isChecked())
+
+        # Foot: Profile row
+        if hasattr(self, "_profile_btn"):
+            if c:
+                self._profile_name.setVisible(False)
+                self._profile_sub.setVisible(False)
+                self._profile_chevron.setVisible(False)
+                self._profile_btn.setFixedSize(48, 48)
+                self._profile_btn_layout.setContentsMargins(0, 0, 0, 0)
+                self._profile_btn_layout.setAlignment(Qt.AlignCenter)
+                self._profile_btn.setToolTip(
+                    f"{self._profile_name.full_text()} — {self._profile_sub.full_text()}")
+            else:
+                self._profile_name.setVisible(True)
+                self._profile_sub.setVisible(True)
+                self._profile_chevron.setVisible(True)
+                self._profile_btn.setMinimumHeight(48)
+                self._profile_btn.setMaximumWidth(16777215)
+                self._profile_btn.setMinimumWidth(0)
+                self._profile_btn.setMaximumHeight(16777215)
+                self._profile_btn_layout.setContentsMargins(6, 6, 6, 6)
+                self._profile_btn_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                self._profile_btn.setToolTip(i18n.t("Your profile, licence and workspace"))
+
+        self._refresh_nav()
+        self._place_pip()
+        self.collapsed_toggled.emit(c)
+
+    def _toggle_addons(self, open_: bool | None = None) -> None:
+        """Collapse or expand the add-on shelf."""
+        if open_ is None:
+            self._addons_open = not getattr(self, "_addons_open", True)
+        else:
+            self._addons_open = open_
+
+        icons.button_icon(self._addons_toggle_btn,
+                          "chevron-down" if self._addons_open else "chevron-right",
+                          11, theme.over(INK_CHROME))
+        if not getattr(self, "_collapsed", False):
+            for row in getattr(self, "_addon_rows", []):
+                row.setVisible(self._addons_open)
+        self._place_pip()
+
+    def _toggle_help(self, open_: bool | None = None) -> None:
+        """Collapse or expand the help section."""
+        if open_ is None:
+            self._help_open = not getattr(self, "_help_open", True)
+        else:
+            self._help_open = open_
+
+        icons.button_icon(self._help_toggle_btn,
+                          "chevron-down" if self._help_open else "chevron-right",
+                          11, theme.over(INK_CHROME))
+        if not getattr(self, "_collapsed", False):
+            for row in getattr(self, "_help_rows", []):
+                row.setVisible(self._help_open)
+        self._place_pip()
+
 
     # ── favorites ─────────────────────────────────────────────────────────
     _FAV_ROW = 30

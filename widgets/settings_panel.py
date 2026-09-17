@@ -113,6 +113,12 @@ SECTIONS = [
     ("more", "Help & more", "Support",
      "The screens that used to have a rail row each, and the way to reach "
      "us."),
+    ("guide", "How to use Prism", "Resources",
+     "What Prism can do, and what to type."),
+    ("catalog", "AI tools directory", "Resources",
+     "Every tool Prism can drive, and whether you're signed in to it."),
+    ("tour", "Product tour", "Resources",
+     "Interactive walkthrough of the workspace."),
 ]
 
 # How each licence status reads to a customer. Named STATUS_COPY because that
@@ -237,6 +243,9 @@ class SettingsPanel(QWidget):
             "status": self._connections,
             "privacy": self._privacy,
             "diagnostics": self._diagnostics,
+            "guide": self._guide_page,
+            "catalog": self._catalog_page,
+            "tour": self._tour_page,
             "more": self._more,
         }[self._section]
         label, blurb = next((l, b) for k, l, _g, b in SECTIONS
@@ -1673,6 +1682,67 @@ class SettingsPanel(QWidget):
                      on_click=lambda: self._open_legal(
                          i18n.t("Privacy Policy"), "PRIVACY_POLICY.md")),
         ]))
+
+    # ── resources (shifted into settings) ─────────────────────────────────
+    def _guide_page(self, col):
+        card = Card()
+        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACE_3)
+        head.addWidget(C.IconPad("book", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        head_text = QVBoxLayout()
+        head_text.addWidget(C.label(i18n.t("How to use Prism"), level="CARD_TITLE"))
+        head_text.addWidget(C.label(i18n.t("Comprehensive handbook and prompt engineering guide"), level="META"))
+        head.addLayout(head_text, stretch=1)
+        c.addLayout(head)
+        c.addWidget(C.label(
+            i18n.t("Learn how to orchestrate automated workflows, write effective prompts, inspect plans, "
+                   "and review generated output."),
+            level="SUPPORT", wrap=True))
+        c.addWidget(self._buttons([
+            C.button(i18n.t("Open Full User Guide"), "primary",
+                     on_click=lambda: self.navigate.emit("guide"))]))
+        col.addWidget(card)
+
+    def _catalog_page(self, col):
+        card = Card()
+        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACE_3)
+        head.addWidget(C.IconPad("grid", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        head_text = QVBoxLayout()
+        head_text.addWidget(C.label(i18n.t("AI tools directory"), level="CARD_TITLE"))
+        head_text.addWidget(C.label(i18n.t("Directory of all 24+ tools Prism integrates with"), level="META"))
+        head.addLayout(head_text, stretch=1)
+        c.addLayout(head)
+        c.addWidget(C.label(
+            i18n.t("See every supported browser and terminal tool, check whether you are logged in, "
+                   "and launch tool sessions directly."),
+            level="SUPPORT", wrap=True))
+        c.addWidget(self._buttons([
+            C.button(i18n.t("Open AI Tools Directory"), "primary",
+                     on_click=lambda: self.navigate.emit("catalog"))]))
+        col.addWidget(card)
+
+    def _tour_page(self, col):
+        card = Card()
+        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
+        head = QHBoxLayout()
+        head.setSpacing(theme.SPACE_3)
+        head.addWidget(C.IconPad("present", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        head_text = QVBoxLayout()
+        head_text.addWidget(C.label(i18n.t("Product tour"), level="CARD_TITLE"))
+        head_text.addWidget(C.label(i18n.t("Interactive six-step workspace walkthrough"), level="META"))
+        head.addLayout(head_text, stretch=1)
+        c.addLayout(head)
+        c.addWidget(C.label(
+            i18n.t("Take an interactive six-step tour highlighting the main features of the PRISM dashboard, "
+                   "including the workbench, add-on shelf, history, and status bar."),
+            level="SUPPORT", wrap=True))
+        c.addWidget(self._buttons([
+            C.button(i18n.t("Start Product Tour"), "primary",
+                     on_click=self.tour_requested.emit)]))
+        col.addWidget(card)
 
     def _open_legal(self, title: str, resource_name: str):
         # Local import, same convention support_panel.py's _open_contact()

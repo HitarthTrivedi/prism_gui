@@ -454,7 +454,7 @@ class HomePanel(QWidget):
         """
         who = (identity.display_name(self.cfg) or "").split(" ")[0]
         self._header.title.setText(
-            f"{_greeting()}, {who} 👋" if who else _greeting())
+            f"{_greeting()}, {who}" if who else _greeting())
         whole = identity.describe()
         self._avatar.setText((whole or "?").strip()[:1].upper())
         self._avatar.setToolTip(whole)
