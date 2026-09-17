@@ -1,0 +1,295 @@
+<!doctype html><html><head><meta charset='utf-8'><style>
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  width: 1080px; height: 1920px;
+  overflow: hidden;
+  background: var(--bg, #ffffff);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+#stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+/* A scene is a full-frame layer. Only the ones in play are painted, so an
+   off-screen scene can never leak a stray pixel into the frame. */
+#stage > .scene { position: absolute; inset: 0; visibility: hidden; }
+#stage > .scene.on { visibility: visible; }
+#stage > .scene.on .scene, #stage > .scene.on * { visibility: visible; }
+/* The safe area is advisory for the designer and enforced by the checker. */
+:root { --safe-x: 90px; --safe-y: 130px; --W: 1080px; --H: 1920px; }
+.safe { position: absolute; inset: var(--safe-y) var(--safe-x); }
+/* Default cut, overridable: whatever the design says about .leaving and
+   .entering wins, because these are the weakest possible rules. */
+#stage > .scene.leaving { opacity: calc(1 - var(--x, 0)); }
+#stage > .scene.entering { opacity: var(--e, 1); }
+img, svg, video { max-width: 100%; }
+
+/* ── the cut library ──────────────────────────────────────────────────────
+   Named transitions the design can ask for by class instead of inventing
+   motion from nothing. Adapted from HyperFrames' transition catalogue
+   (github.com/heygen-com/hyperframes, Apache 2.0) — see NOTICE.
+
+   Translated, not copied. Theirs are GSAP timelines; these are pure
+   functions of --x and --e, which the seeker sets afresh on every frame.
+   That difference matters more than it looks: an @keyframes transition is
+   placed on the SCENE's clock and has to have its duration matched to the
+   cut by hand, while these are correct at any frame by construction and
+   cannot drift out of the cut window.
+
+   --x runs 0->1 as a scene leaves, --e runs 0->1 as one arrives. The eased
+   forms below are smoothstep (3t^2 - 2t^3) — close enough to power3.inOut
+   for a half-second cut, and expressible in plain calc. */
+.scene.leaving  { --ease: calc(var(--x, 0) * var(--x, 0) * (3 - 2 * var(--x, 0))); }
+.scene.entering { --ease: calc(var(--e, 1) * var(--e, 1) * (3 - 2 * var(--e, 1))); }
+
+/* PUSH — the workhorse. Both scenes travel together, the new one pushing the
+   old off. Neutral forward progress; use it for ordinary beats. */
+.cut-push.leaving  { transform: translateX(calc(var(--ease) * -100%)); opacity: 1; }
+.cut-push.entering { transform: translateX(calc((1 - var(--ease)) * 100%)); opacity: 1; }
+.cut-push-up.leaving  { transform: translateY(calc(var(--ease) * -100%)); opacity: 1; }
+.cut-push-up.entering { transform: translateY(calc((1 - var(--ease)) * 100%)); opacity: 1; }
+
+/* SQUEEZE — the old frame compresses to its left edge, the new one opens out
+   from its right. Mechanical and precise; suits industrial subjects. */
+.cut-squeeze.leaving {
+  transform: scaleX(calc(1 - var(--ease))); transform-origin: left center;
+  opacity: 1; }
+.cut-squeeze.entering {
+  transform: scaleX(var(--ease)); transform-origin: right center;
+  opacity: 1; }
+
+/* ZOOM THROUGH — the old frame rushes past the camera and blurs out while the
+   new one rises from behind it. Reserve it: it reads as pushing deeper into
+   the same thought, so spending it on an ordinary beat wastes it. */
+.cut-zoom.leaving {
+  transform: scale(calc(1 + var(--ease) * 1.5));
+  filter: blur(calc(var(--ease) * 8px));
+  opacity: calc(1 - var(--ease)); }
+.cut-zoom.entering {
+  transform: scale(calc(0.5 + var(--ease) * 0.5));
+  filter: blur(calc((1 - var(--ease)) * 8px));
+  opacity: var(--ease); }
+</style><style>:root{}</style><style></style><style>#s0 .hook{position:absolute;inset:0;background:#07131d;overflow:hidden}#s0 .hero-photo{position:absolute;inset:0;z-index:20;width:100%;height:100%;object-fit:cover;object-position:50% 48%;animation:s0-photoPush 4500ms var(--glide) both}#s0 .shade{position:absolute;inset:0;z-index:30;background:linear-gradient(90deg,rgba(4,16,24,.94) 0%,rgba(4,16,24,.78) 34%,rgba(4,16,24,.18) 66%,rgba(4,16,24,.02) 100%),linear-gradient(0deg,rgba(4,16,24,.58) 0%,transparent 38%)}#s0 .content{position:absolute;left:136px;top:252px;width:760px;z-index:50}#s0 .kicker{margin:0 0 34px 0;font-family:var(--display);font-size:40px;font-weight:600;line-height:1.08;letter-spacing:.01em;color:#f3f7f8;opacity:0;transform:translateY(28px);animation:s0-riseKicker 700ms var(--settle) 180ms both}#s0 .headline{margin:0;width:760px;font-family:var(--display);font-size:104px;font-weight:700;line-height:.93;letter-spacing:-.052em;color:#fff;opacity:0;transform:translateY(44px);animation:s0-riseHeadline 900ms var(--settle) 300ms both}#s0 .accent-line{position:absolute;z-index:40;left:76px;top:1035px;width:560px;height:4px;background:var(--accent);transform-origin:left center;transform:rotate(-61deg) scaleX(0);opacity:0;animation:s0-drawCut 900ms var(--firm) 40ms both}#s0 .parallel-line{position:absolute;z-index:40;left:145px;top:1044px;width:420px;height:2px;background:rgba(200,211,215,.42);transform-origin:left center;transform:rotate(-61deg) scaleX(0);opacity:0;animation:s0-drawParallel 900ms var(--firm) 140ms both}#s0 .edge-label{position:absolute;z-index:60;right:136px;bottom:190px;font-family:var(--body);font-size:32px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:rgba(243,247,248,.78);opacity:0;animation:s0-labelIn 650ms var(--snap) 520ms both}@keyframes s0-photoPush{from{transform:scale(1)}to{transform:scale(1.015)}}@keyframes s0-riseKicker{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:translateY(0)}}@keyframes s0-riseHeadline{from{opacity:0;transform:translateY(44px)}to{opacity:1;transform:translateY(0)}}@keyframes s0-drawCut{from{opacity:0;transform:rotate(-61deg) scaleX(0)}to{opacity:.92;transform:rotate(-61deg) scaleX(1)}}@keyframes s0-drawParallel{from{opacity:0;transform:rotate(-61deg) scaleX(0)}to{opacity:1;transform:rotate(-61deg) scaleX(1)}}@keyframes s0-labelIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:translateX(0)}}#s1 .roughing{position:absolute;inset:0;overflow:hidden;background:linear-gradient(135deg,#061019 0%,#0a1b27 62%,#0d2b3a 100%)}#s1 .photo-plate{position:absolute;left:552px;top:180px;width:398px;height:1330px;z-index:20;overflow:hidden;border-top:2px solid rgba(200,211,215,.55);border-bottom:2px solid rgba(200,211,215,.55);transform:translateX(470px);animation:s1-plateIn 1050ms var(--firm) 0ms both}#s1 .photo-plate img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 50%}#s1 .photo-shade{position:absolute;inset:0;z-index:30;background:linear-gradient(90deg,rgba(4,16,24,.28),transparent 48%),linear-gradient(0deg,rgba(4,16,24,.22),transparent 42%)}#s1 .content{position:absolute;left:136px;top:294px;width:430px;z-index:50}#s1 .kicker{margin:0 0 38px;font-family:var(--display);font-size:40px;font-weight:600;line-height:1.05;letter-spacing:.01em;color:#f3f7f8;opacity:0;transform:translateY(24px);animation:s1-kickerIn 620ms var(--snap) 260ms both}#s1 .headline{margin:0;width:430px;font-family:var(--display);font-size:92px;font-weight:700;line-height:.94;letter-spacing:-.05em;color:#fff;opacity:0;transform:translateY(38px);animation:s1-headlineIn 820ms var(--settle) 360ms both}#s1 .support{margin:42px 0 0;width:420px;font-family:var(--body);font-size:46px;font-weight:500;line-height:1.16;letter-spacing:-.025em;color:#c8d3d7;opacity:0;transform:translateY(28px);animation:s1-supportIn 720ms var(--firm) 480ms both}#s1 .cut-line{position:absolute;left:425px;top:1188px;width:205px;height:2px;z-index:40;background:rgba(200,211,215,.62);transform-origin:left center;transform:rotate(-18deg) scaleX(0);opacity:0;animation:s1-ruleDraw 760ms var(--firm) 120ms both}#s1 .cut-line.accent{left:464px;top:1214px;width:150px;height:4px;background:var(--accent);transform:rotate(-18deg) scaleX(0);animation:s1-accentDraw 760ms var(--firm) 220ms both}#s1 .counter{position:absolute;right:136px;bottom:188px;z-index:60;font-family:var(--body);font-size:32px;font-weight:600;letter-spacing:.12em;color:rgba(243,247,248,.76);opacity:0;transform:translateX(16px);animation:s1-counterIn 600ms var(--snap) 650ms both}@keyframes s1-plateIn{from{opacity:0;transform:translateX(470px)}to{opacity:1;transform:translateX(0)}}@keyframes s1-kickerIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}@keyframes s1-headlineIn{from{opacity:0;transform:translateY(38px)}to{opacity:1;transform:translateY(0)}}@keyframes s1-supportIn{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:translateY(0)}}@keyframes s1-ruleDraw{from{opacity:0;transform:rotate(-18deg) scaleX(0)}to{opacity:.62;transform:rotate(-18deg) scaleX(1)}}@keyframes s1-accentDraw{from{opacity:0;transform:rotate(-18deg) scaleX(0)}to{opacity:.9;transform:rotate(-18deg) scaleX(1)}}@keyframes s1-counterIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}#s2 .finishing{position:absolute;inset:0;overflow:hidden;background:radial-gradient(circle at 76% 46%,rgba(40,169,224,.16) 0%,rgba(40,169,224,.05) 24%,transparent 48%),linear-gradient(145deg,#061019 0%,#0a1d29 58%,#07131d 100%)}#s2 .hero{position:absolute;right:112px;top:330px;width:500px;height:1160px;z-index:20;display:flex;align-items:center;justify-content:center;opacity:0;transform:translateY(32px);animation:s2-assetRise 900ms var(--firm) 80ms both}#s2 .hero img{display:block;width:100%;height:100%;object-fit:contain}#s2 .content{position:absolute;left:136px;top:286px;width:650px;z-index:50}#s2 .kicker{margin:0 0 38px;font-family:var(--display);font-size:40px;font-weight:600;line-height:1.05;letter-spacing:.01em;color:#f3f7f8;opacity:0;transform:translateY(22px);animation:s2-kickerIn 650ms var(--snap) 180ms both}#s2 .headline{margin:0;width:650px;font-family:var(--display);font-size:100px;font-weight:700;line-height:.94;letter-spacing:-.052em;color:#fff;opacity:0;transform:translateY(36px);animation:s2-headlineIn 850ms var(--settle) 360ms both}#s2 .support{margin:44px 0 0;width:590px;font-family:var(--body);font-size:46px;font-weight:500;line-height:1.16;letter-spacing:-.025em;color:#c8d3d7;opacity:0;transform:translateY(26px);animation:s2-supportIn 750ms var(--firm) 460ms both}#s2 .measure-line{position:absolute;left:136px;top:826px;width:360px;height:2px;z-index:40;background:rgba(200,211,215,.58);transform-origin:left center;opacity:0;transform:scaleX(0);animation:s2-lineDraw 800ms var(--firm) 620ms both}#s2 .measure-line:after{content:'';position:absolute;left:0;top:-1px;width:86px;height:4px;background:var(--accent)}#s2 .glide-line{position:absolute;left:390px;top:1120px;width:330px;height:2px;z-index:40;background:rgba(200,211,215,.2);transform-origin:left center;transform:rotate(-58deg);opacity:0;animation:s2-lineGlide 1800ms var(--glide) 900ms both}#s2 .counter{position:absolute;right:136px;bottom:188px;z-index:60;font-family:var(--body);font-size:32px;font-weight:600;letter-spacing:.12em;color:rgba(243,247,248,.76);opacity:0;transform:translateX(16px);animation:s2-counterIn 600ms var(--snap) 700ms both}@keyframes s2-assetRise{from{opacity:0;transform:translateY(32px)}to{opacity:1;transform:translateY(0)}}@keyframes s2-kickerIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}@keyframes s2-headlineIn{from{opacity:0;transform:translateY(36px)}to{opacity:1;transform:translateY(0)}}@keyframes s2-supportIn{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:translateY(0)}}@keyframes s2-lineDraw{from{opacity:0;transform:scaleX(0)}to{opacity:1;transform:scaleX(1)}}@keyframes s2-lineGlide{from{opacity:0;transform:rotate(-58deg) translateX(-8px)}to{opacity:.8;transform:rotate(-58deg) translateX(8px)}}@keyframes s2-counterIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}#s3 .process{position:absolute;inset:0;overflow:hidden;background:radial-gradient(circle at 78% 48%,rgba(40,169,224,.12) 0%,rgba(40,169,224,.035) 30%,transparent 52%),linear-gradient(145deg,#071018 0%,#0a1b27 56%,#07131d 100%)}#s3 .content{position:absolute;left:136px;top:226px;width:650px;z-index:50}#s3 .kicker{margin:0 0 28px;font-family:var(--display);font-size:40px;font-weight:600;line-height:1.05;letter-spacing:.01em;color:#dce7ea;opacity:0;transform:translateY(18px);animation:s3-kickerIn 650ms cubic-bezier(.16,1,.3,1) 100ms both}#s3 .headline{margin:0;width:650px;font-family:var(--display);font-size:92px;font-weight:700;line-height:.94;letter-spacing:-.052em;color:#fff;opacity:0;transform:translateY(34px);animation:s3-headlineIn 820ms cubic-bezier(.16,1,.3,1) 220ms both}#s3 .stages{position:absolute;left:136px;top:690px;width:590px;z-index:50}#s3 .stage{position:relative;height:154px;opacity:0;transform:translateY(22px);animation:s3-stageIn 650ms cubic-bezier(.16,1,.3,1) var(--delay) both}#s3 .stage-label{position:absolute;left:34px;top:0;font-family:var(--body);font-size:48px;font-weight:600;line-height:1.05;letter-spacing:-.025em;color:#f1f5f6;white-space:nowrap}#s3 .stroke{position:absolute;left:0;top:58px;width:0;height:4px;background:var(--accent);transform-origin:left center;animation:s3-strokeDraw 600ms cubic-bezier(.22,1,.36,1) var(--stroke-delay) both}#s3 .stage:nth-child(1){--delay:520ms;--stroke-delay:570ms}#s3 .stage:nth-child(2){--delay:620ms;--stroke-delay:670ms}#s3 .stage:nth-child(3){--delay:720ms;--stroke-delay:770ms}#s3 .stage:nth-child(1) .stroke{width:112px}#s3 .stage:nth-child(2) .stroke{width:178px}#s3 .stage:nth-child(3) .stroke{width:248px}#s3 .trajectory{position:absolute;left:178px;top:749px;width:500px;height:4px;z-index:40;pointer-events:none;background:rgba(190,211,218,.16);transform:rotate(-17deg);transform-origin:left center;clip-path:polygon(0 0,100% 0,100% 100%,0 100%);opacity:0;animation:s3-trajectoryIn 1000ms cubic-bezier(.37,0,.63,1) 620ms both}#s3 .hero{position:absolute;right:36px;top:350px;width:570px;height:1260px;z-index:20;display:flex;align-items:center;justify-content:center;opacity:0;transform:rotate(-7deg) scale(1.045);animation:s3-heroSettle 1050ms cubic-bezier(.22,1,.36,1) 520ms both}#s3 .hero img{display:block;width:100%;height:100%;object-fit:contain}#s3 .counter{position:absolute;right:136px;bottom:188px;z-index:60;font-family:var(--body);font-size:32px;font-weight:600;letter-spacing:.12em;color:rgba(243,247,248,.76);opacity:0;transform:translateX(16px);animation:s3-counterIn 600ms cubic-bezier(.34,1.56,.64,1) 900ms both}@keyframes s3-kickerIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}@keyframes s3-headlineIn{from{opacity:0;transform:translateY(34px)}to{opacity:1;transform:translateY(0)}}@keyframes s3-stageIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}@keyframes s3-strokeDraw{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}@keyframes s3-trajectoryIn{from{opacity:0;transform:rotate(-17deg) translateX(-18px) scaleX(.82)}to{opacity:.8;transform:rotate(-17deg) translateX(0) scaleX(1)}}@keyframes s3-heroSettle{from{opacity:0;transform:rotate(-7deg) scale(1.045)}to{opacity:1;transform:rotate(-7deg) scale(1)}}@keyframes s3-counterIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}#s4 .endcard{position:absolute;inset:0;overflow:hidden;background:#071019}#s4 .photo{position:absolute;inset:0;width:100%;height:100%;z-index:20;object-fit:cover;object-position:58% 50%;transform:scale(1.02);animation:s4-photoSettle 1400ms cubic-bezier(.37,0,.63,1) both}#s4 .overlay{position:absolute;inset:0;z-index:30;background:linear-gradient(90deg,rgba(4,11,17,.9) 0%,rgba(5,13,20,.72) 43%,rgba(5,12,18,.42) 72%,rgba(5,12,18,.58) 100%),linear-gradient(180deg,rgba(4,10,15,.3) 0%,rgba(4,10,15,.12) 48%,rgba(4,10,15,.58) 100%)}#s4 .content{position:absolute;left:136px;top:540px;width:814px;z-index:50}#s4 .headline{margin:0;font-family:var(--display);font-size:96px;font-weight:700;line-height:.96;letter-spacing:-.05em;color:#fff;opacity:0;transform:translateY(28px);animation:s4-headlineIn 850ms cubic-bezier(.16,1,.3,1) 620ms both}#s4 .product{margin:34px 0 0;font-family:var(--body);font-size:50px;font-weight:500;line-height:1.08;letter-spacing:-.025em;color:#d5e0e4;opacity:0;transform:translateY(22px);animation:s4-productIn 700ms cubic-bezier(.22,1,.36,1) 1080ms both}#s4 .accent-line{width:310px;height:4px;margin-top:28px;background:var(--accent);transform-origin:left center;transform:scaleX(0);opacity:0;animation:s4-lineDraw 700ms cubic-bezier(.22,1,.36,1) 400ms both}#s4 .contact{margin:38px 0 0;font-family:var(--body);font-size:44px;font-weight:500;line-height:1.05;letter-spacing:.01em;color:#eef3f4;opacity:0;transform:translateY(18px);animation:s4-contactIn 650ms cubic-bezier(.22,1,.36,1) 1360ms both}#s4 .counter{position:absolute;right:136px;bottom:188px;z-index:60;font-family:var(--body);font-size:32px;font-weight:600;letter-spacing:.12em;color:rgba(243,247,248,.76);opacity:0;transform:translateX(16px);animation:s4-counterIn 600ms cubic-bezier(.34,1.56,.64,1) 1550ms both}@keyframes s4-photoSettle{from{transform:scale(1.02)}to{transform:scale(1)}}@keyframes s4-lineDraw{from{opacity:0;transform:scaleX(0)}to{opacity:1;transform:scaleX(1)}}@keyframes s4-headlineIn{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:translateY(0)}}@keyframes s4-productIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}@keyframes s4-contactIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}@keyframes s4-counterIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}</style><style>#stage > .scene{position:absolute!important;inset:0!important;width:1080px!important;height:1920px!important;overflow:hidden!important;}</style></head><body><div id='stage'><section class="scene cut-push" id="s0" data-type="hook" data-prism-scene="scene-1"><div class='hook' data-prism-id="el-1-1"><div class='shade' data-prism-id="el-1-3"></div><div class='accent-line' data-prism-id="el-1-4"></div><div class='parallel-line' data-prism-id="el-1-5"></div><div class='content' data-prism-id="el-1-6"><div class='kicker' data-prism-id="el-1-7">Rougher X Finish End Mill</div><h1 class='headline' data-prism-id="el-1-8">From material removal to a smooth finish</h1></div><div class='edge-label' data-prism-id="el-1-9">1 / 5</div></div></section><section class="scene cut-squeeze" id="s1" data-type="statement" data-prism-scene="scene-2"><div class='roughing' data-prism-id="el-2-1"><div class='photo-plate' data-prism-id="el-2-2"><div class='photo-shade' data-prism-id="el-2-4"></div></div><div class='cut-line' data-prism-id="el-2-5"></div><div class='cut-line accent' data-prism-id="el-2-6"></div><div class='content' data-prism-id="el-2-7"><div class='kicker' data-prism-id="el-2-8">Roughing</div><h1 class='headline' data-prism-id="el-2-9">Remove material efficiently</h1><div class='support' data-prism-id="el-1-10">Roughing focuses on fast, controlled material removal.</div></div><div class='counter' data-prism-id="el-1-11">2 / 5</div></div></section><section class="scene cut-push-up" id="s2" data-type="statement" data-prism-scene="scene-3"><div class='finishing' data-prism-id="el-3-1"><img class='hero' src='art3' alt='' data-prism-id="el-3-2"><div class='glide-line' data-prism-id="el-3-3"></div><div class='measure-line' data-prism-id="el-3-4"></div><div class='content' data-prism-id="el-3-5"><div class='kicker' data-prism-id="el-3-6">Finishing</div><h1 class='headline' data-prism-id="el-3-7">Then refine the surface</h1><div class='support' data-prism-id="el-3-8">Finishing focuses on achieving a smoother final surface.</div></div><div class='counter' data-prism-id="el-3-9">3 / 5</div></div></section><section class="scene cut-zoom" id="s3" data-type="list" data-prism-scene="scene-4"><div class='process' data-prism-id="el-4-1"><div class='content' data-prism-id="el-4-2"><div class='kicker' data-prism-id="el-4-3">One machining process</div><h1 class='headline' data-prism-id="el-4-4">Roughing to finishing</h1></div><div class='stages' data-prism-id="el-4-5"><div class='stage' data-prism-id="el-4-6"><div class='stroke' data-prism-id="el-4-7"></div><div class='stage-label' data-prism-id="el-4-8">Material removal</div></div><div class='stage' data-prism-id="el-4-9"><div class='stroke' data-prism-id="el-4-10"></div><div class='stage-label' data-prism-id="el-4-11">Shape creation</div></div><div class='stage' data-prism-id="el-1-12"><div class='stroke' data-prism-id="el-1-13"></div><div class='stage-label' data-prism-id="el-1-14">Surface refinement</div></div></div><div class='trajectory' data-prism-id="el-1-15"></div><div class='hero' data-prism-id="el-1-16"></div><div class='counter' data-prism-id="el-1-18">4 / 5</div></div></section><section class="scene cut-push" id="s4" data-type="endcard" data-prism-scene="scene-5"><div class='endcard' data-prism-id="el-5-1"><img class='photo' src='art5' alt='' data-prism-id="el-5-2"><div class='overlay' data-prism-id="el-5-3"></div><div class='content' data-prism-id="el-5-4"><div class='accent-line' data-prism-id="el-5-5"></div><h1 class='headline' data-prism-id="el-5-6">Manish Grinding Tools</h1><div class='product' data-prism-id="el-5-7">Rougher X Finish End Mill</div><div class='contact' data-prism-id="el-5-8">Vadodara</div></div><div class='counter' data-prism-id="el-5-9">5 / 5</div></div></section></div><script>
+window.__SCENES__ = [{"start": 0, "dur": 4500, "outFrom": 4080, "outLen": 420, "inLen": 420}, {"start": 4080, "dur": 5000, "outFrom": 4580, "outLen": 420, "inLen": 420}, {"start": 8660, "dur": 5500, "outFrom": 5080, "outLen": 420, "inLen": 420}, {"start": 13740, "dur": 6000, "outFrom": 5580, "outLen": 420, "inLen": 420}, {"start": 19320, "dur": 4000, "outFrom": null, "outLen": 0, "inLen": 420}];
+window.__ready = false;
+
+window.__seek = function (t) {
+  const S = window.__SCENES__;
+  for (let i = 0; i < S.length; i++) {
+    const s = S[i];
+    const el = document.getElementById('s' + i);
+    if (!el) continue;
+    const on = t >= s.start && t < s.start + s.dur;
+    el.classList.toggle('on', on);
+    el.classList.remove('leaving', 'entering');
+    if (!on) continue;
+
+    const local = t - s.start;
+    el.style.setProperty('--p', (local / s.dur).toFixed(5));
+    el.style.setProperty('--ms', Math.round(local));
+
+    // Overlap windows: the outgoing scene is 'leaving' with --x running 0->1,
+    // the incoming one is 'entering' with --e running 0->1.
+    if (s.outFrom != null && local >= s.outFrom) {
+      el.classList.add('leaving');
+      el.style.setProperty('--x',
+        Math.min(1, (local - s.outFrom) / Math.max(1, s.outLen)).toFixed(5));
+    }
+    if (s.inLen && local < s.inLen) {
+      el.classList.add('entering');
+      el.style.setProperty('--e', Math.min(1, local / s.inLen).toFixed(5));
+    }
+
+    // Deterministic frames: pause every animation and place it by hand.
+    //
+    // Two clocks, and conflating them was a real bug. Everything INSIDE the
+    // scene runs on scene time — an element that rises 200ms in should be
+    // 200ms into its rise. But an animation on the scene ELEMENT while it is
+    // leaving is the transition, and the transition starts at outFrom, not at
+    // the top of the scene.
+    //
+    // Given scene time, a 900ms exit animation seeked to 2500ms is long past
+    // its end, so `.leaving{animation:slideOut 900ms both}` snapped straight
+    // to its final frame the instant the class landed. Every exit in every
+    // reel was a hard pop, and it looked like a design problem.
+    let own = [];
+    try { own = el.getAnimations(); } catch (e) {}
+    const ownSet = new Set(own);
+    const leaving = s.outFrom != null && local >= s.outFrom;
+    for (const a of own) {
+      try {
+        a.pause();
+        a.currentTime = leaving ? Math.max(0, local - s.outFrom) : local;
+      } catch (e) {}
+    }
+    let anims = [];
+    try { anims = el.getAnimations({ subtree: true }); } catch (e) {}
+    for (const a of anims) {
+      if (ownSet.has(a)) continue;      // already placed on the other clock
+      try { a.pause(); a.currentTime = local; } catch (e) {}
+    }
+  }
+  return true;
+};
+
+// Legibility check, run on the page rather than guessed at from Python: the
+// browser is the only thing that knows where the text actually landed.
+window.__check = function () {
+  const out = [];
+  const seen = new Set();
+  const scenes = document.querySelectorAll('.scene.on');
+  for (const scene of scenes) {
+    let visibleContent = 0;
+    const texts = [];
+    for (const el of scene.querySelectorAll('*')) {
+      const txt = (el.textContent || '').trim();
+      if (!txt || el.children.length) continue;      // leaf text nodes only
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+      // Faded out by an ancestor is faded out: a label inside a panel that
+      // has not arrived yet is not on screen, whatever its own opacity says.
+      let faded = false;
+      for (let p = el.parentElement; p && p !== scene; p = p.parentElement) {
+        const pc = getComputedStyle(p);
+        if (pc.display === 'none' || pc.visibility === 'hidden' ||
+            parseFloat(pc.opacity) < 0.05) { faded = true; break; }
+      }
+      if (faded) continue;
+      visibleContent++;
+      const label = txt.slice(0, 34);
+      const key = label + '|';
+      texts.push({ el: el, r: r, label: label });
+      if (r.left < 20 || r.right > 1080 - 20 || r.top < 20 || r.bottom > 1920 - 20) {
+        if (!seen.has(key + 'box')) {
+          seen.add(key + 'box');
+          out.push('"' + label + '" is outside the frame');
+        }
+      }
+      const fs = parseFloat(cs.fontSize);
+      if (fs < 32 && !seen.has(key + 'sz')) {
+        seen.add(key + 'sz');
+        out.push('"' + label + '" is ' + Math.round(fs) +
+                 'px — under the 32px minimum for video');
+      }
+
+      // A box can be inside the frame and still be unusable: a later opaque
+      // panel, image or decorative layer may be painted on top of it. Sample
+      // a 3x3 grid; two samples landing on a sibling painted above the text
+      // is a panel across it, not a hairline. Five samples and "all five"
+      // was the old rule — the two white blocks that hid half a page
+      // counter on the 2026-09-07 reel covered two of five and passed.
+      // Text over text is left to the overlap pass below, which names both.
+      const pts = [];
+      for (const fx of [.15, .5, .85]) {
+        for (const fy of [.25, .5, .75]) {
+          pts.push([r.left + r.width * fx, r.top + r.height * fy]);
+        }
+      }
+      let covered = 0, by = null;
+      for (const [x, y] of pts) {
+        const top = document.elementFromPoint(x, y);
+        if (!top || top === el || el.contains(top) || top.contains(el)) continue;
+        if (!top.children.length && (top.textContent || '').trim()) continue;
+        const tc = getComputedStyle(top);
+        if (tc.visibility !== 'hidden' && parseFloat(tc.opacity) >= .08) {
+          covered++;
+          by = by || top;
+        }
+      }
+      if (covered >= 2 && !seen.has(key + 'occluded')) {
+        seen.add(key + 'occluded');
+        const cls = (by.className && typeof by.className === 'string')
+          ? ' class="' + by.className.split(' ')[0] + '"' : '';
+        out.push('"' + label + '" is ' +
+                 (covered === pts.length ? 'covered' : 'partly covered') +
+                 ' by a higher layer (<' + by.tagName.toLowerCase() + cls +
+                 '>) — nothing may sit across copy; move it, or raise the text z-index');
+      }
+    }
+
+    // Two texts printed over each other. The commonest fault on a real reel
+    // and, until now, the one this check could not see at all: each text
+    // was inside the frame, large enough, and (mostly) on top of whatever
+    // was under it. A running header colliding with a date, a footer under
+    // a caption, a vertical label through a headline — every one passed.
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = i + 1; j < texts.length; j++) {
+        const a = texts[i].r, b = texts[j].r;
+        const ix = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const iy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (ix <= 3 || iy <= 3) continue;
+        const small = Math.min(a.width * a.height, b.width * b.height);
+        if (ix * iy < 0.06 * small) continue;     // a kiss between neighbours
+        const k2 = 'ovl|' + texts[i].label + '|' + texts[j].label;
+        if (seen.has(k2)) continue;
+        seen.add(k2);
+        out.push('"' + texts[i].label + '" and "' + texts[j].label +
+                 '" overlap — two texts printed over each other; give each its own space');
+      }
+    }
+
+    // Images are checked too: a logo half off the frame is exactly as broken
+    // as a headline half off it, and only the browser knows where it landed.
+    for (const el of scene.querySelectorAll('img, svg, picture')) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.05) continue;
+      visibleContent++;
+      if (el.tagName.toLowerCase() === 'img' && el.complete && el.naturalWidth === 0) {
+        const key = 'broken|' + (el.getAttribute('alt') || 'image');
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push('an image failed to load — replace the missing asset or remove the image slot');
+        }
+      }
+      if (r.left < -2 || r.right > 1080 + 2 || r.top < -2 || r.bottom > 1920 + 2) {
+        const what = el.getAttribute('alt') || el.tagName.toLowerCase();
+        const key = 'img|' + what + Math.round(r.left);
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push('an image (' + what + ', ' + Math.round(r.width) + 'x' +
+                   Math.round(r.height) + ') runs off the frame');
+        }
+      }
+    }
+
+    // CSS animations are the motion contract. A missing fill mode causes a
+    // visible snap at scene boundaries when the renderer seeks frame by
+    // frame; transitions and JS timers are not filmable either.
+    for (const el of scene.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+      if (cs.visibility !== 'hidden' && parseFloat(cs.opacity) >= .05 &&
+          (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ||
+           cs.borderTopStyle !== 'none' || cs.borderRightStyle !== 'none' ||
+           cs.borderBottomStyle !== 'none' || cs.borderLeftStyle !== 'none')) {
+        visibleContent++;
+      }
+      const names = cs.animationName.split(',').map(x => x.trim());
+      const fills = cs.animationFillMode.split(',').map(x => x.trim());
+      if (names.some((name, i) => name !== 'none' &&
+          fills[i % fills.length] !== 'both')) {
+        const key = 'anim|' + cs.animationName;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push('animation ' + cs.animationName + ' is missing fill-mode: both — motion may snap');
+        }
+      }
+    }
+    if (visibleContent === 0) {
+      const key = 'empty|' + (scene.id || 'scene');
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push('scene ' + (scene.id || '') + ' has no visible content');
+      }
+    }
+  }
+  const d = document.documentElement;
+  if (d.scrollWidth > 1080 || d.scrollHeight > 1920) {
+    out.push('the page is bigger than the frame (' + d.scrollWidth + 'x' +
+             d.scrollHeight + ') — something is overflowing');
+  }
+  return out;
+};
+</script></body></html>
