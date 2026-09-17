@@ -551,12 +551,27 @@ class ReelWorker(_Worker):
         self.studio = studio
 
     def run(self):
+        engine = CB.get_studio() if self.studio else CB.get_reel()
+        if self.studio and hasattr(engine, "ensure_accent_applied"):
+            try:
+                self.spec = engine.ensure_accent_applied(self.spec)
+            except Exception:
+                pass
         try:
-            engine = CB.get_studio() if self.studio else CB.get_reel()
             engine.render(self.spec, self.out_path,
                           on_progress=lambda d, t: self.progress.emit(d, t))
             self.done.emit(self.out_path)
         except Exception as e:
+            if self.studio and hasattr(engine, "ensure_accent_applied"):
+                try:
+                    self.spec = engine.ensure_accent_applied(self.spec)
+                    engine.render(self.spec, self.out_path,
+                                  on_progress=lambda d, t: self.progress.emit(d, t))
+                    self.done.emit(self.out_path)
+                    return
+                except Exception as retry_e:
+                    self.failed.emit(str(retry_e))
+                    return
             self.failed.emit(str(e))
 
 

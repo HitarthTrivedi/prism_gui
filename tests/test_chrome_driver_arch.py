@@ -123,6 +123,18 @@ class TheCleanupAndTheRetry(unittest.TestCase):
         self.profile = tempfile.mkdtemp(prefix="prism-profile-")
         self.driver = os.path.join(self.cache, "undetected_chromedriver")
 
+    def test_closed_initial_tab_is_not_a_healthy_browser(self):
+        class ClosedDriver:
+            window_handles = []
+
+        self.assertFalse(AU._driver_has_live_tab(ClosedDriver()))
+
+    def test_lightweight_driver_double_remains_compatible(self):
+        class MinimalDriver:
+            current_url = "about:blank"
+
+        self.assertTrue(AU._driver_has_live_tab(MinimalDriver()))
+
     def _put(self, data: bytes):
         with open(self.driver, "wb") as f:
             f.write(data)
