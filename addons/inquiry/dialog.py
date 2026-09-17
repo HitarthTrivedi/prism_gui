@@ -3046,7 +3046,7 @@ class InquiryDialog(QWidget):
             QMessageBox.information(
                 self, i18n.t("Reminder"),
                 i18n.t("Sending needs your outgoing account set up — open the "
-                       "Email add-on once and enter it."))
+                       "Email spamming add-on once and enter it."))
             return
 
         settings = self._settings()
@@ -3419,7 +3419,7 @@ class InquiryDialog(QWidget):
             QMessageBox.information(
                 self, i18n.t("Win this back"),
                 i18n.t("Sending needs your outgoing account set up — open the "
-                       "Email add-on once and enter it."))
+                       "Email spamming add-on once and enter it."))
             return
         self._send_worker = SendWorker(
             email_config.cfg_for_sender(self.cfg, dialog.sender()),

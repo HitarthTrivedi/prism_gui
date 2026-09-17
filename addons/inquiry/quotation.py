@@ -793,8 +793,9 @@ class QuotationDialog(PrismDialog):
                 QMessageBox.information(
                     self, i18n.t("Quotation"),
                     i18n.t("Sending needs your outgoing account set up — "
-                           "open the Email add-on once and enter it. Reading "
-                           "and sending are separate accounts on purpose."))
+                           "open the Email spamming add-on once and enter it. "
+                           "Reading and sending are separate accounts on "
+                           "purpose."))
                 return
             self.send_btn.setEnabled(False)
             self._send_worker = SendWorker(
