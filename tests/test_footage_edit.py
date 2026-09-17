@@ -301,6 +301,8 @@ def test_narrated_render_never_reads_camera_audio(monkeypatch):
     graph = command[command.index("-filter_complex") + 1]
     assert "[0:a]" not in graph
     assert "[2:a]" in graph
+    assert "eval=frame" in graph
+    assert "140*pow" in graph
     assert command[command.index("-map") + 1] == "[outv]"
     audio_map = command.index("[outa]")
     assert command[audio_map - 1] == "-map"
@@ -573,6 +575,44 @@ def test_upload_files_succeeds_when_dom_verifies_attachments(monkeypatch):
     attachments = [{"path": "/fake/path/clip.mp4", "name": "clip.mp4", "size": 1024}]
     res = automation._upload_files(driver, agent_cfg, attachments, agent_name="ChatGPT")
     assert res == 1
+
+
+def test_join_clips_with_transitions_builds_xfade_chain(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        target = cmd[-1]
+        with open(target, "wb") as f:
+            f.write(b"x" * 2048)
+
+        class Res:
+            returncode = 0
+            stderr = ""
+        return Res()
+
+    monkeypatch.setattr(footage.subprocess, "run", fake_run)
+    monkeypatch.setattr(footage.reel, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(footage.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(footage.os.path, "getsize", lambda p: 2048)
+
+    joined, _ = footage._join_clips_with_transitions(
+        ["/tmp/c1.mp4", "/tmp/c2.mp4", "/tmp/c3.mp4"],
+        durations=[3.0, 3.0, 3.0],
+        transitions=["smoothleft", "zoomin"],
+        trans_dur=0.22,
+        out_path="/tmp/output.mp4"
+    )
+    assert len(calls) == 1
+    cmd = calls[0]
+    filter_graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade=transition=smoothleft:duration=0.220:offset=2.780" in filter_graph
+    assert "xfade=transition=zoomin:duration=0.220:offset=5.560" in filter_graph
+    if os.path.exists(joined):
+        try:
+            os.unlink(joined)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
