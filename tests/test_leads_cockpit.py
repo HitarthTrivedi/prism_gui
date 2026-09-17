@@ -648,7 +648,7 @@ class WorkbenchAndPanel(_Workbench):
         self.assertIsNone(p._workbench)                 # nothing built at rest
         p._build()                                       # what showEvent triggers
         self.assertIsNotNone(p._workbench)
-        self.assertEqual(p.header.actions_row.count(), 3)  # AI tools, Export, Send all
+        self.assertEqual(p.header.actions_row.count(), 4)  # ?, AI tools, Export, Send all
         self.assertTrue(all(hasattr(p, s)
                             for s in ("opened", "navigate", "open_run", "refresh")))
 
@@ -670,6 +670,7 @@ class _FakeSourceWorker:
     def __init__(self, *args, **kwargs):
         self.args, self.kwargs, self.started = args, kwargs, False
         self.progress, self.done, self.failed = _FakeSignal(), _FakeSignal(), _FakeSignal()
+        self.blocked = _FakeSignal()        # Apollo's plan/scope refusal
         _FakeSourceWorker.made.append(self)
 
     def start(self):
@@ -698,7 +699,9 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertEqual(len(spec.industries.include), 10)
         self.assertEqual(spec.location_label(), "Anywhere")
         self.assertTrue(wb._prepare.isEnabled())
-        self.assertTrue(wb._setup_line().startswith("Find people · 6 titles"))
+        # The folded line names the database the run will ask — with no Apollo
+        # key that is Exa.
+        self.assertTrue(wb._setup_line().startswith("Exa · 6 titles"))
 
     def test_place_suggestions_lead_with_places_and_fall_back_to_the_starters(self):
         from unittest import mock
@@ -747,11 +750,64 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertEqual(worker.args[0], ["Tyre", "Steel Manufacturing"])
         self.assertEqual(worker.args[1], ["Plant Head", "Head of Manufacturing"])
         self.assertEqual(worker.kwargs["location"], "Anywhere except India")
+        # The primary button is the cheap run: the people, and nothing else.
+        self.assertEqual((worker.kwargs["emails"], worker.kwargs["leads_only"]),
+                         ("later", True))
         params = wb._next_params
-        self.assertEqual(params["mode"], "icp")
+        self.assertEqual(params["mode"], "icp_leads_only")
         self.assertEqual(params["filters"], spec.to_dict())
         self.assertEqual(params["location"], "Anywhere except India")
         self.assertEqual(wb._jobs, 1)
+
+    def test_the_two_run_buttons_are_the_cheap_run_and_the_whole_pipeline(self):
+        """"Find people" costs its searches and stops; "Find and prepare" is
+        today's run — addresses, Groq, drafts — in one press."""
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        try:
+            wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+            self.assertEqual(wb._prepare.text(), "Find people")
+            self.assertEqual(wb._prepare_all.text(), "Find and prepare")
+            wb._prepare.click()
+            wb._jobs = 0                                  # the run "finished"
+            wb._set_running(False)
+            wb._prepare_all.click()
+        finally:
+            self._WB.SourceWorker = orig
+        cheap, whole = _FakeSourceWorker.made
+        self.assertEqual((cheap.kwargs["emails"], cheap.kwargs["leads_only"]),
+                         ("later", True))
+        self.assertEqual((whole.kwargs["emails"], whole.kwargs["leads_only"]),
+                         ("now", False))
+        self.assertEqual(wb._next_params["mode"], "icp")
+
+    def test_a_sheet_is_loaded_without_groq_and_never_cut_as_already_pulled(self):
+        """The sheet the owner brings back is usually the one Prism exported
+        last run, so "Net new only" — a rule about a SEARCH not re-finding
+        people — must not empty it. The switch is not even shown here."""
+        made = []
+
+        class _FakeProspectorWorker(_FakeSourceWorker):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                made.append(self)
+
+        orig = self._WB.ProspectorWorker
+        self._WB.ProspectorWorker = _FakeProspectorWorker
+        try:
+            wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+            wb._set_mode("sheet")
+            self.assertEqual(wb._prepare.text(), "Load the sheet")
+            self.assertTrue(wb._skip_seen.isHidden())
+            wb._path = os.path.join(self._tmp, "Prism leads.xlsx")
+            wb._refresh_prepare()
+            wb._prepare.click()
+        finally:
+            self._WB.ProspectorWorker = orig
+        self.assertEqual(len(made), 1)
+        self.assertEqual(made[0].kwargs["limit"], 0)      # read and rank only
+        self.assertNotIn("sessions_dir", made[0].kwargs)  # no seen-index at all
 
     def test_the_run_summary_says_who_the_filters_left_out(self):
         wb = self._WB.LeadsWorkbench({})
@@ -816,7 +872,7 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertEqual(wb._mode, "icp")
         self.assertIs(wb._cockpit._stack.currentWidget(), wb._cockpit.leads)
         self.assertEqual(wb._active_search_id, record["id"])
-        self.assertIn("Prepare outreach", wb._status.text())
+        self.assertIn("Find people", wb._status.text())
 
     def test_use_search_waits_while_a_job_runs(self):
         from addons.leads import saved_searches
@@ -864,6 +920,286 @@ class LeadFiltersInTheWorkbench(_Workbench):
         wb._on_prepared(res, [])
         self.assertEqual(saved_searches.get(self._searches, record["id"])["runs"], 1)
 
+
+
+class ApolloIsTheOtherDatabase(_Workbench):
+    """The same filters, asked of Apollo instead of Exa: the key is entered
+    once and saved on Prepare, the switch picks the source (Exa by default even
+    with an Apollo key — Apollo's search is not in its free plan), the run
+    setting says what that source charges, and what a run cost in credits is on
+    the summary."""
+
+    def _spec(self):
+        from prospector.filters import SearchSpec
+        return SearchSpec.from_dict({
+            "job_titles": {"include": ["Plant Head"]},
+            "seniority": {"include": ["owner"]}})
+
+    def _prepared(self, wb):
+        """Press Prepare with the worker stubbed out; return it, or None."""
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        try:
+            wb._on_prepare()
+        finally:
+            self._WB.SourceWorker = orig
+        return _FakeSourceWorker.made[0] if _FakeSourceWorker.made else None
+
+    def test_exa_is_the_default_even_when_an_apollo_key_is_set(self):
+        """Apollo's people search is not in its FREE plan (its own API Keys
+        page), so leading with it sends most owners into a 403. It is there to
+        be picked, with a tooltip saying what it needs."""
+        plain = self._WB.LeadsWorkbench({})
+        self.assertEqual(plain._source, "exa")
+        self.assertTrue(plain._src_exa.isChecked())
+        self.assertFalse(plain._keys_box.isHidden())        # no key at all: open
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k"})
+        self.assertEqual(wb._source, "exa")
+        self.assertTrue(wb._src_exa.isChecked())
+        self.assertFalse(wb._src_apollo.isChecked())
+        self.assertTrue(wb._src_apollo.isEnabled())
+        self.assertIn("PAID Apollo plan", wb._src_apollo.toolTip())
+        self.assertTrue(wb._keys_box.isHidden())            # either key folds it
+        self.assertTrue(wb._setup_line().startswith("Exa · 6 titles"))
+        wb._src_apollo.click()
+        self.assertEqual(wb._source, "apollo")
+
+    def test_the_apollo_key_is_saved_and_nothing_else_in_the_config_is(self):
+        """The rail saves the key it was given by loading the config fresh and
+        writing back only that key — self.cfg can predate an account saved
+        elsewhere, and the real config is never touched by a test."""
+        from unittest import mock
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "exa-k"})
+        wb._apollo.setText("ap-secret")
+        saved = []
+        with mock.patch("core_bridge.config.load",
+                        return_value={"api_key": "gsk_kept"}), \
+                mock.patch("core_bridge.config.save", side_effect=saved.append):
+            worker = self._prepared(wb)
+        self.assertIsNotNone(worker)
+        self.assertEqual(saved, [{"api_key": "gsk_kept",
+                                  "apollo_api_key": "ap-secret"}])
+        self.assertEqual(wb.cfg["apollo_api_key"], "ap-secret")
+
+    def test_an_apollo_run_hands_the_worker_the_source_and_the_filters(self):
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k"})
+        wb._src_apollo.click()                          # Exa is the default now
+        spec = self._spec()
+        wb._filters.set_spec(spec)
+        worker = self._prepared(wb)
+        self.assertTrue(worker.started)
+        self.assertEqual(worker.kwargs["source"], "apollo")
+        self.assertEqual(worker.kwargs["spec"], spec.to_dict())
+        self.assertEqual(wb._next_params["source"], "apollo")
+        self.assertEqual(wb._jobs, 1)
+
+    def test_either_source_can_be_picked_and_the_session_brings_it_back(self):
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k",
+                                      "exa_api_key": "exa-k"})
+        wb._src_exa.click()
+        self.assertEqual(self._prepared(wb).kwargs["source"], "exa")
+        wb._restore_inputs({"mode": "icp", "source": "apollo", "target": 400})
+        self.assertEqual(wb._source, "apollo")
+        self.assertTrue(wb._src_apollo.isChecked())
+
+    def test_a_session_that_names_no_source_reopens_on_exa(self):
+        """Every session saved before Prism could ask Apollo — and every sheet
+        run — carries no source, so it can only have been an Exa run; reopening
+        one must not re-point it at the database that bills per person."""
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k",
+                                      "exa_api_key": "exa-k"})
+        wb._src_apollo.click()                           # pick Apollo, then reopen
+        self.assertEqual(wb._source, "apollo")
+        wb._restore_inputs({"mode": "icp", "target": 400})
+        self.assertEqual(wb._source, "exa")
+        self.assertTrue(wb._src_exa.isChecked())
+        self.assertEqual(wb._target_row.name.text(), "Source up to")
+        self.assertEqual(self._prepared(wb).kwargs["source"], "exa")
+
+    def test_prepare_says_which_key_is_missing(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "exa-k"})
+        wb._src_apollo.click()
+        self.assertIsNone(self._prepared(wb))
+        self.assertIn("Apollo API key", wb._status.text())
+        self.assertFalse(wb._keys_box.isHidden())    # opened at the missing key
+        self.assertEqual(wb._jobs, 0)
+        wb._src_exa.click()
+        self.assertIsNotNone(self._prepared(wb))
+
+    def test_the_run_setting_says_what_the_source_charges(self):
+        wb = self._WB.LeadsWorkbench({})
+        self.assertEqual(wb._target_row.name.text(), "Source up to")
+        wb._src_apollo.click()
+        self.assertEqual(wb._source, "apollo")
+        self.assertEqual(wb._target_row.name.text(), "Reveal up to")
+        self.assertIn("one Apollo credit", wb._target.toolTip())
+        wb._src_exa.click()
+        self.assertEqual(wb._target_row.name.text(), "Source up to")
+
+    def test_the_summary_counts_what_the_run_cost_in_credits(self):
+        wb = self._WB.LeadsWorkbench({})
+        res, drafts = self._run()
+        res.apollo_stats = {"searched": 240, "revealed": 25, "reveal_calls": 3}
+        self.assertIn("Apollo: 240 found · 25 revealed (about 25 credits)",
+                      wb._run_summary(res, drafts))
+        res.apollo_stats = {}                       # an Exa run says nothing
+        self.assertNotIn("Apollo", wb._run_summary(res, drafts))
+
+
+def _apollo_module():
+    """prospector.apollo — the Apollo client the worker calls — or a stand-in
+    registered under that name while it is being written beside these tests.
+    Either way the tests patch the same two functions on the same module, so
+    they say the same thing about the worker once the real client lands."""
+    import types
+
+    import prospector
+    try:
+        from prospector import apollo
+        return apollo
+    except ImportError:
+        apollo = types.ModuleType("prospector.apollo")
+
+        class ApolloError(Exception):
+            pass
+
+        apollo.ApolloError = ApolloError
+        apollo.api_key = lambda cfg: (cfg.get("apollo_api_key") or "").strip()
+        apollo.search_people = lambda spec, key, **kw: []
+        apollo.find_email = lambda lead, key: ("", "")
+        sys.modules["prospector.apollo"] = apollo
+        prospector.apollo = apollo
+        return apollo
+
+
+class SourceWorkerSearchesApollo(unittest.TestCase):
+    """SourceWorker.run() with source="apollo", called inline (no thread, no
+    network): the filters go to Apollo and never to Exa, only the people Apollo
+    had no address for are enriched, what the run cost rides home on the
+    result, and an ApolloError is what the failure says."""
+
+    def _worker(self, cfg=None, **kw):
+        from addons.leads.workers import SourceWorker
+        from prospector.filters import SearchSpec
+        spec = SearchSpec.from_dict({"seniority": {"include": ["owner"]},
+                                     "functions": {"include": ["operations"]}})
+        w = SourceWorker([], [], "Line retrofits",
+                         {"apollo_api_key": "ap-test"} if cfg is None else cfg,
+                         source="apollo", target=25, verify_limit=0,
+                         spec=spec.to_dict(), **kw)
+        got = {"done": [], "failed": [], "progress": []}
+        w.progress.connect(got["progress"].append)
+        w.done.connect(lambda res, drafts: got["done"].append((res, drafts)))
+        w.failed.connect(got["failed"].append)
+        return w, spec, got
+
+    def _people(self):
+        """What Apollo hands back: one person it had an address for, one it
+        did not."""
+        known = Lead(name="Ana Ruiz", company="Acme", title="Owner",
+                     email="ana@acme.com")
+        known.extra = {"apollo_id": "a1", "email_check": "valid"}
+        unknown = Lead(name="Bo Lund", company="Globex", title="Owner")
+        unknown.extra = {"apollo_id": "a2"}
+        return known, unknown
+
+    def _patched(self, search, enriched=None):
+        """Every seam the Apollo path touches, stubbed. prospector.source is
+        stubbed to raise: asking Exa on an Apollo run would be the bug."""
+        from unittest import mock
+        from prospector.engine import RunResult
+        apollo = _apollo_module()
+
+        def fake_run_leads(leads, offer, cfg, **kw):
+            return RunResult(dossiers=[Dossier(lead=l) for l in leads],
+                             total_in_sheet=len(leads), signal_source="",
+                             all_leads=list(leads))
+
+        return [
+            mock.patch.object(apollo, "api_key", return_value="ap-test"),
+            mock.patch.object(apollo, "search_people", side_effect=search),
+            mock.patch("prospector.source.source",
+                       side_effect=AssertionError("Exa must not be asked")),
+            mock.patch("prospector.signals.exa_key", return_value=""),
+            mock.patch("prospector.signals.make_provider", return_value=None),
+            mock.patch("prospector.enrich.enrich",
+                       side_effect=lambda leads, key="", **kw: (
+                           enriched.append(list(leads)) if enriched is not None
+                           else None)),
+            mock.patch("prospector.engine.run_leads", side_effect=fake_run_leads),
+            mock.patch("prospector.verify.collect_keys", return_value={}),
+            mock.patch("prospector.reach.draft_batch", return_value=[]),
+        ]
+
+    @staticmethod
+    def _run(worker, patches):
+        for patch in patches:
+            patch.start()
+        try:
+            worker.run()
+        finally:
+            for patch in patches:
+                patch.stop()
+
+    def test_the_filters_go_to_apollo_and_the_credits_come_back(self):
+        from prospector.filters import SearchSpec
+        known, unknown = self._people()
+        calls, enriched = {}, []
+
+        def fake_search(spec, key, **kw):
+            calls.update(spec=spec, key=key, **kw)
+            kw["stats"].update(searched=240, revealed=2, reveal_calls=1,
+                               filtered={"location": 40}, skipped_seen=3)
+            kw["on_progress"]("search", 3, 0, 240)
+            kw["on_progress"]("reveal", 12, 25, 0)
+            return [known, unknown]
+
+        w, spec, got = self._worker()
+        self._run(w, self._patched(fake_search, enriched))
+        self.assertEqual(got["failed"], [])
+        self.assertIsInstance(calls["spec"], SearchSpec)
+        self.assertEqual(calls["spec"], spec)
+        self.assertEqual((calls["key"], calls["target"]), ("ap-test", 25))
+        self.assertIsNone(calls["skip"])                 # no sessions folder
+        # Only the person Apollo had no address for is guessed an address.
+        self.assertEqual(enriched, [[unknown]])
+        res, _drafts = got["done"][0]
+        self.assertEqual(res.apollo_stats["revealed"], 2)
+        self.assertEqual(res.filtered_out, {"location": 40})
+        self.assertEqual(res.skipped_seen, 3)
+        self.assertIn("Searching Apollo — page 3 · 240 found", got["progress"])
+        self.assertIn("Revealing 12 of 25 (Apollo credits)", got["progress"])
+
+    def test_an_apollo_error_is_what_the_failure_says(self):
+        apollo = _apollo_module()
+
+        def boom(spec, key, **kw):
+            raise apollo.ApolloError("Apollo refused that key (401).")
+
+        w, _spec, got = self._worker()
+        self._run(w, self._patched(boom))
+        self.assertEqual(got["done"], [])
+        self.assertEqual(got["failed"], ["Apollo refused that key (401)."])
+
+    def test_nobody_left_names_apollo(self):
+        from addons.leads.workers import _nobody_left
+        w, _spec, got = self._worker()
+        self._run(w, self._patched(lambda spec, key, **kw: []))
+        self.assertEqual(got["done"], [])
+        self.assertIn("Apollo", got["failed"][0])
+        self.assertIn("Exa balance", _nobody_left(0, {}))     # unchanged for Exa
+
+    def test_without_a_key_apollo_is_never_asked(self):
+        from unittest import mock
+        apollo = _apollo_module()
+        w, _spec, got = self._worker(cfg={})
+        asked = []
+        patches = self._patched(lambda spec, key, **kw: asked.append(kw) or [])
+        patches[0] = mock.patch.object(apollo, "api_key", return_value="")
+        self._run(w, patches)
+        self.assertEqual(asked, [])
+        self.assertIn("Apollo API key", got["failed"][0])
 
 
 class SourceWorkerHandsOnTheFilters(unittest.TestCase):
@@ -1236,6 +1572,815 @@ class QualifySelected(_Workbench):
         self.assertIsNone(kw.get("skip"))            # they belong to this session
         self.assertEqual(kw["roles"], ["Plant Head"])
         self.assertEqual(len(done[0][0].dossiers), 3)
+
+
+class _FakeEmailWorker(_FakeSourceWorker):
+    """Stands in for LeadsEmailWorker: records the leads it was handed."""
+    made: list = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _FakeEmailWorker.made.append(self)
+
+
+class FindEmailsOnTheRowsYouPick(_Workbench):
+    """The other half of "find people first": the bulk bar's Find e-mails. It
+    arms for rows without a confirmed address, hands the worker exactly those
+    leads, and what comes back re-renders the rows and is saved."""
+
+    def _people(self, wb, n=3, email=""):
+        """A finished Find-people run: n people, none with an address."""
+        from prospector.engine import RunResult
+        leads = [Lead(name=f"P{i} Singh", title="Plant Head", company=f"Co {i}",
+                      email=email, fit_score=60 + i) for i in range(n)]
+        res = RunResult(dossiers=[], total_in_sheet=n, signal_source="",
+                        all_leads=leads)
+        wb._start_export = lambda *a, **k: None
+        wb._next_mode = "icp_leads_only"
+        wb._next_params = {"mode": "icp_leads_only", "offer": "Automation"}
+        wb._jobs = 1
+        wb._on_prepared(res, [])
+        return leads
+
+    def _tick(self, cockpit, leads):
+        for r in range(cockpit._table.rowCount()):
+            if cockpit._dossier_at(r).lead in leads:
+                cockpit._table.item(r, 0).setCheckState(Qt.Checked)
+
+    def _patched_worker(self):
+        _FakeEmailWorker.made = []
+        orig = self._WB.LeadsEmailWorker
+        self._WB.LeadsEmailWorker = _FakeEmailWorker
+        self.addCleanup(setattr, self._WB, "LeadsEmailWorker", orig)
+
+    def _status_at(self, cockpit, lead) -> str:
+        for r in range(cockpit._table.rowCount()):
+            if cockpit._dossier_at(r).lead is lead:
+                return cockpit._table.item(r, CK._C_STATUS).text()
+        return ""
+
+    def test_the_bulk_bar_arms_for_rows_without_a_confirmed_address(self):
+        c = CK.LeadsCockpit()
+        good = _dos("Kunyi", 96, "k@x.com", "valid")
+        guess = _dos("Vaibhav", 80, "v@x.com", "")
+        none = _dos("NoMail", 60, "")
+        c.set_dossiers([good, guess, none])
+        self.assertFalse(c._b_emails.isHidden())
+        self._tick(c, [good.lead])
+        self.assertFalse(c._b_emails.isEnabled())         # already verified
+        self._tick(c, [guess.lead, none.lead])
+        self.assertTrue(c._b_emails.isEnabled())
+        got = []
+        c.emailsRequested.connect(got.append)
+        c._b_emails.click()
+        self.assertEqual({d.lead.name for d in got[0]},
+                         {"Kunyi", "Vaibhav", "NoMail"})
+
+    def test_the_button_goes_away_once_every_address_is_confirmed(self):
+        c = CK.LeadsCockpit()
+        c.set_dossiers([_dos("Kunyi", 96, "k@x.com", "valid")])
+        self.assertTrue(c._b_emails.isHidden())
+
+    def test_the_workspace_re_exposes_the_signal(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        w = CK.LeadsWorkspace(leads_folder=folder.name)
+        d = _dos("Kunyi", 96, "", "")
+        w.set_dossiers([d], [])
+        got = []
+        w.emailsRequested.connect(got.append)
+        w.leads._table.item(0, 0).setCheckState(Qt.Checked)
+        w.leads._b_emails.click()
+        self.assertEqual(got, [[d]])
+
+    def test_exactly_the_ticked_leads_go_to_the_worker(self):
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb)
+        wb._confirm_emails = lambda n: True
+        self._patched_worker()
+        self._tick(wb._cockpit.leads, leads[:2])
+        wb._find_emails(wb._cockpit.leads.selected())
+        self.assertEqual(len(_FakeEmailWorker.made), 1)
+        worker = _FakeEmailWorker.made[0]
+        self.assertTrue(worker.started)
+        self.assertEqual([l.name for l in worker.args[0]], ["P0 Singh", "P1 Singh"])
+        self.assertEqual(wb._jobs, 1)
+
+    def test_the_rails_verify_setting_does_not_cap_this_action(self):
+        """Verify is a budget for a RUN, whose top slice the run picks. These
+        rows were ticked by hand, so none of them is left as an unchecked
+        guess — not even with the rail wound down to nobody."""
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb)
+        wb._verify_limit.setValue(0)
+        wb._confirm_emails = lambda n: True
+        self._patched_worker()
+        self._tick(wb._cockpit.leads, leads)
+        wb._find_emails(wb._cockpit.leads.selected())
+        worker = _FakeEmailWorker.made[0]
+        self.assertNotIn("verify_limit", worker.kwargs)
+        self.assertEqual(len(worker.args[0]), 3)
+
+    def test_what_comes_back_re_renders_the_rows_and_is_saved(self):
+        from addons.leads import sessions
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb)
+        cockpit = wb._cockpit.leads
+        self.assertEqual(self._status_at(cockpit, leads[0]), "No email")
+        # What the worker does on its thread: an address each, one confirmed.
+        leads[0].email, leads[1].email = "p0@co0.com", "p1@co1.com"
+        leads[0].extra["email_check"] = "valid"
+        wb._jobs = 1
+        wb._on_emails_found(2, 1)
+        self.assertEqual(self._status_at(cockpit, leads[0]), "Verified")
+        self.assertEqual(self._status_at(cockpit, leads[1]), "Guessed")
+        self.assertEqual(self._status_at(cockpit, leads[2]), "No email")
+        self.assertIn("2 new address", wb._status.text())
+        self.assertIn("1 verified", wb._status.text())
+        self.assertEqual(wb._jobs, 0)
+        loaded = sessions.load(self._sessions, wb._session_id)
+        self.assertEqual([l.email for l in loaded["all_leads"]][:2],
+                         ["p0@co0.com", "p1@co1.com"])
+
+    def test_a_second_one_cannot_start_while_a_job_runs(self):
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb)
+        wb._confirm_emails = lambda n: True
+        self._patched_worker()
+        self._tick(wb._cockpit.leads, leads)
+        picked = wb._cockpit.leads.selected()
+        wb._find_emails(picked)
+        wb._find_emails(picked)                      # the job counter holds it
+        self.assertEqual(len(_FakeEmailWorker.made), 1)
+        self.assertEqual(wb._jobs, 1)
+
+    def test_a_big_batch_asks_first_and_a_no_starts_nothing(self):
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb, n=12)
+        wb._confirm_emails = lambda n: False
+        self._patched_worker()
+        self._tick(wb._cockpit.leads, leads)
+        wb._find_emails(wb._cockpit.leads.selected())
+        self.assertEqual(_FakeEmailWorker.made, [])
+        self.assertEqual(wb._jobs, 0)
+
+    def test_leads_that_are_already_verified_are_left_alone(self):
+        wb = self._WB.LeadsWorkbench({})
+        leads = self._people(wb, n=2, email="p@x.com")
+        for lead in leads:
+            lead.extra["email_check"] = "valid"
+        self._patched_worker()
+        wb._cockpit.set_dossiers([], [], leads)      # re-render with the statuses
+        self._tick(wb._cockpit.leads, leads)
+        wb._find_emails(wb._cockpit.leads.selected())
+        self.assertEqual(_FakeEmailWorker.made, [])
+        self.assertIn("already have a verified address", wb._status.text())
+
+    def test_an_imported_sheet_can_have_its_emails_found_too(self):
+        """The sheet the owner exported from Prism comes back with names and
+        no addresses — the whole point of bringing it back is to find them."""
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("sheet")
+        leads = self._people(wb)
+        wb._session_mode = "sheet"
+        wb._run_params = {"mode": "sheet", "sheet_path": "Prism leads.xlsx"}
+        wb._confirm_emails = lambda n: True
+        self._patched_worker()
+        self._tick(wb._cockpit.leads, leads)
+        wb._find_emails(wb._cockpit.leads.selected())
+        self.assertEqual([l.name for l in _FakeEmailWorker.made[0].args[0]],
+                         [l.name for l in leads])
+
+
+class ApolloIsNotOfferedOnceItsPlanRefuses(_Workbench):
+    """Apollo's search endpoints are not in its free plan, so a 403 is the end
+    of Apollo for this key: the rail goes back to Exa, the switch is off with
+    Apollo's own words on it, and the config remembers — a flag, never a key."""
+
+    def _refusal(self) -> str:
+        from prospector import apollo
+        return apollo.SCOPED_KEY.format(path="/mixed_people/api_search")
+
+    def _blocked(self, wb, saved=None):
+        from unittest import mock
+        with mock.patch("core_bridge.config.load",
+                        return_value={"apollo_api_key": "ap-k"}), \
+                mock.patch("core_bridge.config.save",
+                           side_effect=(saved if saved is not None else []).append):
+            wb._jobs = 1
+            wb._on_source_blocked(self._refusal())
+
+    def test_a_403_run_disables_apollo_and_flips_the_source_to_exa(self):
+        saved = []
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k",
+                                      "exa_api_key": "exa-k"})
+        wb._src_apollo.click()
+        self.assertEqual(wb._source, "apollo")
+        self._blocked(wb, saved)
+        self.assertEqual(wb._source, "exa")
+        self.assertTrue(wb._src_exa.isChecked())
+        self.assertFalse(wb._src_apollo.isEnabled())
+        self.assertIn("Apollo would not let this key", wb._src_apollo.toolTip())
+        self.assertIn("paid Apollo plan", wb._status.text())
+        self.assertEqual(wb._jobs, 0)
+        # The flag is a flag: a switch the next launch reads, not the key.
+        self.assertIs(saved[-1]["apollo_api_blocked"], True)
+        self.assertIs(wb.cfg["apollo_api_blocked"], True)
+        # And it cannot be picked again by a click or by an old session.
+        wb._src_apollo.click()
+        wb._restore_inputs({"mode": "icp", "source": "apollo"})
+        self.assertEqual(wb._source, "exa")
+
+    def test_the_next_launch_does_not_offer_it_at_all(self):
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k",
+                                      "exa_api_key": "exa-k",
+                                      "apollo_api_blocked": True})
+        self.assertEqual(wb._source, "exa")
+        self.assertFalse(wb._src_apollo.isEnabled())
+        self.assertIn("free Apollo plan", wb._src_apollo.toolTip())
+        wb._set_running(True)                    # a run, then the run finishing
+        wb._set_running(False)
+        self.assertFalse(wb._src_apollo.isEnabled())
+
+    def test_a_different_key_lifts_the_block(self):
+        from unittest import mock
+        saved = []
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k"})
+        self._blocked(wb)
+        with mock.patch("core_bridge.config.load",
+                        return_value={"apollo_api_key": "ap-k"}), \
+                mock.patch("core_bridge.config.save", side_effect=saved.append):
+            wb._apollo.setText("ap-new")
+            wb._apollo.textEdited.emit("ap-new")      # what typing one does
+        self.assertTrue(wb._src_apollo.isEnabled())
+        self.assertIn("PAID Apollo plan", wb._src_apollo.toolTip())
+        self.assertIs(saved[-1]["apollo_api_blocked"], False)
+        wb._src_apollo.click()
+        self.assertEqual(wb._source, "apollo")
+
+    def test_only_a_plan_refusal_counts_as_blocked(self):
+        from prospector import apollo
+        from addons.leads.workers import _plan_refusal
+        self.assertEqual(_plan_refusal(apollo.ApolloError(self._refusal()), apollo),
+                         self._refusal())
+        self.assertEqual(
+            _plan_refusal(apollo.ApolloError(apollo.BAD_KEY), apollo), "")
+        self.assertEqual(
+            _plan_refusal(apollo.ApolloError(apollo.RATE_LIMITED), apollo), "")
+
+
+class ExportsStayHonestWithoutAddresses(_Workbench):
+    """A lead with no address exports as a BLANK e-mail — never the guess the
+    old flow used to make on the way past."""
+
+    def test_the_sheet_and_the_csv_leave_a_missing_address_empty(self):
+        import csv as _csv
+        from prospector import exports
+        lead = Lead(name="Ana Ruiz", company="Acme", title="Owner")
+        self.assertEqual(exports.build_email_checks([lead]), {})   # nothing to look up
+        self.assertEqual(exports.check_of(lead, {}), "no-domain")
+        wb = self._WB.LeadsWorkbench({})
+        path = os.path.join(self._tmp, "selected.csv")
+        wb._write_leads_csv(CK.unqualified_rows([], [lead]), path)
+        with open(path, encoding="utf-8-sig") as f:
+            rows = list(_csv.DictReader(f))
+        self.assertEqual(rows[0]["email"], "")
+        self.assertEqual(rows[0]["status"], "No email")
+
+    def test_the_whole_run_sheet_is_written_for_a_run_with_no_addresses(self):
+        """"Export sheets" writes the leads sheet and the hot list. With no
+        addresses there is nothing to look up (no network) and the E-mail
+        column stays empty — never the guess the old flow made on the way."""
+        import openpyxl
+        from prospector import exports
+        leads = [Lead(name=f"P{i} Singh", company=f"Co {i}", title="Plant Head",
+                      industry="Steel") for i in range(3)]
+        path = exports.leads_xlsx(leads, os.path.join(self._tmp, "Prism leads.xlsx"))
+        ws = openpyxl.load_workbook(path).worksheets[0]
+        head = [c.value for c in ws[1]]
+        col = head.index("E-mail") + 1
+        self.assertEqual([ws.cell(r, col).value for r in range(2, 5)],
+                         [None, None, None])
+        self.assertEqual({ws.cell(r, head.index("Email check") + 1).value
+                          for r in range(2, 5)}, {"no-domain"})
+        exports.hotlist_xlsx([], os.path.join(self._tmp, "Prism hot list.xlsx"))
+
+
+class FindPeopleFirstEmailsLater(unittest.TestCase):
+    """SourceWorker with emails="later", called inline (no thread, no network):
+    a run finds the PEOPLE and spends nothing on their addresses — no domain
+    lookups, no verifier — and still lists everyone it found."""
+
+    def _worker(self, emails="later", **kw):
+        from addons.leads.workers import SourceWorker
+        from prospector.filters import SearchSpec
+        spec = SearchSpec.from_dict({"seniority": {"include": ["head"]},
+                                     "functions": {"include": ["operations"]}})
+        w = SourceWorker([], [], "Line retrofits", {}, leads_only=True,
+                         spec=spec.to_dict(), emails=emails, **kw)
+        got = {"done": [], "failed": [], "progress": []}
+        w.progress.connect(got["progress"].append)
+        w.done.connect(lambda res, drafts: got["done"].append((res, drafts)))
+        w.failed.connect(got["failed"].append)
+        return w, got
+
+    @staticmethod
+    def _people(n=3):
+        return [Lead(name=f"P{i} Singh", company=f"Co {i}", title="Head Operations")
+                for i in range(n)]
+
+    def test_a_find_people_run_never_looks_up_an_address(self):
+        from unittest import mock
+        people = self._people()
+        w, got = self._worker()
+        with mock.patch("prospector.signals.exa_key", return_value="exa-test"), \
+                mock.patch("prospector.source.source",
+                           side_effect=lambda i, r, k, **kw: list(people)), \
+                mock.patch("prospector.enrich.enrich") as enriched, \
+                mock.patch("prospector.verify.collect_keys") as keys, \
+                mock.patch("prospector.verify.find_and_verify") as checked:
+            w.run()
+        self.assertEqual(got["failed"], [])
+        enriched.assert_not_called()
+        keys.assert_not_called()
+        checked.assert_not_called()
+        res, drafts = got["done"][0]
+        self.assertEqual(len(res.all_leads), 3)          # everyone is listed
+        self.assertEqual(drafts, [])
+        self.assertTrue(all(not l.email for l in res.all_leads))
+        self.assertTrue(any("left for later" in p for p in got["progress"]))
+
+    def test_emails_now_is_still_the_old_run(self):
+        from unittest import mock
+        people = self._people()
+        w, got = self._worker(emails="now")
+        with mock.patch("prospector.signals.exa_key", return_value="exa-test"), \
+                mock.patch("prospector.source.source",
+                           side_effect=lambda i, r, k, **kw: list(people)), \
+                mock.patch("prospector.enrich.enrich") as enriched:
+            w.run()
+        self.assertEqual(got["failed"], [])
+        self.assertEqual(list(enriched.call_args[0][0]), people)
+
+
+class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
+    """LeadsEmailWorker, called inline: blank addresses are enriched once,
+    every lead goes through the free-first waterfall, and what came back is
+    counted — found, and of those confirmed."""
+
+    def _worker(self, leads, cfg=None):
+        from addons.leads.workers import LeadsEmailWorker
+        w = LeadsEmailWorker(leads, cfg or {})
+        got = {"done": [], "failed": [], "progress": []}
+        w.progress.connect(lambda i, n, l: got["progress"].append((i, n, l)))
+        w.done.connect(lambda f, v: got["done"].append((f, v)))
+        w.failed.connect(got["failed"].append)
+        return w, got
+
+    def test_blanks_are_enriched_then_everyone_is_verified(self):
+        from unittest import mock
+        blank = Lead(name="Ana Ruiz", company="Acme", title="Owner")
+        held = Lead(name="Bo Lund", company="Globex", title="Owner",
+                    email="bo@globex.com")
+        seen = []
+
+        def fake_enrich(leads, key="", **kw):
+            for l in leads:
+                l.email = f"{l.name.split()[0].lower()}@acme.com"
+
+        def fake_verify(lead, keys=None):
+            seen.append((lead, dict(keys or {})))
+            lead.extra["email_check"] = "valid" if "@acme" in lead.email else "catch-all"
+
+        w, got = self._worker([blank, held], cfg={"reoon_api_key": "r"})
+        with mock.patch("prospector.signals.exa_key", return_value="exa-k"), \
+                mock.patch("prospector.enrich.enrich", side_effect=fake_enrich), \
+                mock.patch("prospector.verify.find_and_verify", side_effect=fake_verify):
+            w.run()
+        self.assertEqual(got["failed"], [])
+        self.assertEqual(blank.email, "ana@acme.com")
+        self.assertEqual([l for l, _k in seen], [blank, held])
+        self.assertEqual(got["done"], [(1, 1)])          # one found, one verified
+        self.assertEqual(seen[0][1], {"reoon_api_key": "r"})
+
+    def test_a_refused_apollo_plan_is_not_asked_to_find_either(self):
+        from unittest import mock
+        lead = Lead(name="Ana Ruiz", company="Acme", title="Owner",
+                    email="ana@acme.com")
+        keys = []
+        w, _got = self._worker([lead], cfg={"apollo_api_key": "ap-k",
+                                            "reoon_api_key": "r",
+                                            "apollo_api_blocked": True})
+        with mock.patch("prospector.signals.exa_key", return_value=""), \
+                mock.patch("prospector.enrich.enrich"), \
+                mock.patch("prospector.verify.find_and_verify",
+                           side_effect=lambda l, k=None: keys.append(dict(k or {}))):
+            w.run()
+        self.assertNotIn("apollo_api_key", keys[0])
+        self.assertIn("reoon_api_key", keys[0])
+
+    def test_everyone_it_guessed_an_address_for_is_also_checked(self):
+        """The regression: enrich wrote a pattern address for every blank lead
+        while the verifier saw only the first `verify_limit` of them, so the
+        rest reached the table and the exported sheet as guesses that read like
+        findings. A guessed address only verifies safe about one time in twenty
+        — an unchecked one is the expensive half of this button."""
+        from unittest import mock
+        leads = [Lead(name=f"P{i} Singh", company="Acme", title="Owner")
+                 for i in range(30)]
+        checked = []
+        w, got = self._worker(leads)
+        with mock.patch("prospector.signals.exa_key", return_value="exa-k"), \
+                mock.patch("prospector.enrich.enrich",
+                           side_effect=lambda ls, key="", **kw: [
+                               setattr(l, "email", f"p{i}@acme.com")
+                               for i, l in enumerate(ls)]), \
+                mock.patch("prospector.verify.find_and_verify",
+                           side_effect=lambda l, k=None: checked.append(l)):
+            w.run()
+        self.assertEqual(got["failed"], [])
+        self.assertEqual(len(checked), len(leads))
+        self.assertEqual(got["done"], [(30, 0)])
+
+
+class TriageScoresThePersonNotTheFlow(unittest.TestCase):
+    """An e-mail is worth points only where having one says something about the
+    LEAD. A run that has not fetched addresses yet leaves everyone blank, so
+    the old +15 (and "no email" on all of them) scored the flow."""
+
+    def _lead(self, name, email=""):
+        return Lead(name=name, title="Plant Head", company="Acme",
+                    industry="Steel Manufacturing", email=email)
+
+    def test_an_address_less_batch_is_not_marked_down_for_it(self):
+        from prospector import triage
+        leads = [self._lead("A"), self._lead("B")]
+        triage.rank(leads, "steel plant automation", ["Plant Head"])
+        self.assertTrue(all("no email" not in l.fit_reason for l in leads))
+        with_email = self._lead("C")
+        scored, _why = triage.score_lead(with_email, "steel plant automation",
+                                         ["Plant Head"], False)
+        self.assertEqual(leads[0].fit_score, scored)
+
+    def test_a_batch_that_carries_addresses_still_scores_them(self):
+        from prospector import triage
+        has, hasnt = self._lead("A", "a@acme.com"), self._lead("B")
+        triage.rank([has, hasnt], "steel plant automation", ["Plant Head"])
+        self.assertEqual(has.fit_score - hasnt.fit_score, 15)
+        self.assertIn("no email", hasnt.fit_reason)
+
+
+# Every key the "?" walkthrough asks this screen for. Spelled out so renaming a
+# widget the tour points at fails here rather than on the owner's screen.
+_COCKPIT_KEYS = ("hide_filters", "toolbar_count", "view_toggle", "sort",
+                 "refine_search", "refine_fit", "refine_qualified_only",
+                 "refine_deliverability", "table", "select_all", "col_lead",
+                 "col_focus", "col_fit", "col_status", "col_signal")
+_BULK_KEYS = ("bulk_bar", "bulk_verify", "bulk_emails", "bulk_save",
+              "bulk_export", "bulk_qualify", "bulk_sequence")
+_TAB_KEYS = ("tab_leads", "tab_sessions", "tab_lists", "tab_saved",
+             "tab_sequences", "tab_analytics")
+_SEARCH_KEYS = ("source_switch", "mode_switch", "run_target", "run_qualify",
+                "run_verify", "offer", "net_new", "btn_find", "btn_prepare",
+                "keys_box")
+
+
+def _descends(widget, root) -> bool:
+    while widget is not None:
+        if widget is root:
+            return True
+        widget = widget.parentWidget()
+    return False
+
+
+class PointAtMeCockpit(unittest.TestCase):
+    """The guided walkthrough asks the cockpit where each part IS
+    (help_targets) and to make it reachable (help_reveal). Every key answers
+    with a real widget of this screen — or a region of one, for a column the
+    header paints itself — and a reveal never ticks a row, never touches a
+    filter and never starts anything."""
+
+    def setUp(self):
+        self.d1 = _dos("Kunyi", 96, "k@x.com", "valid")
+        self.d2 = _dos("Vaibhav", 80, "v@x.com", "")
+        self.c = CK.LeadsCockpit()
+        self.c.set_dossiers([self.d1, self.d2])
+
+    def test_every_key_points_at_something_on_this_screen(self):
+        targets = self.c.help_targets()
+        # No row is ticked and no lead open, so the bulk bar and the drawer are
+        # not on screen to be pointed at.
+        self.assertEqual(sorted(targets), sorted(_COCKPIT_KEYS))
+        for key, target in targets.items():
+            widget, rect = target if isinstance(target, tuple) else (target, None)
+            self.assertTrue(_descends(widget, self.c), key)
+            if rect is not None:
+                self.assertFalse(rect.isEmpty(), key)
+
+    def test_the_targets_are_the_real_controls(self):
+        t = self.c.help_targets()
+        self.assertIs(t["hide_filters"], self.c._filters_btn)
+        self.assertIs(t["toolbar_count"], self.c._count_lbl)
+        self.assertIs(t["view_toggle"], self.c._seg)
+        self.assertIs(t["sort"], self.c._sort)
+        self.assertIs(t["refine_search"], self.c._search)
+        self.assertIs(t["refine_fit"], self.c._fit_min)
+        self.assertIs(t["refine_qualified_only"], self.c._only_qualified)
+        self.assertIs(t["table"], self.c._table)
+        host, rect = t["refine_deliverability"]
+        for box in self.c._status_boxes.values():
+            self.assertIs(box.parentWidget(), host)
+            self.assertTrue(rect.contains(box.geometry()))
+
+    def test_a_column_key_rings_its_own_header_section(self):
+        head = self.c._head
+        cols = (("select_all", 0), ("col_lead", 1), ("col_focus", 2),
+                ("col_fit", 3), ("col_status", 4), ("col_signal", 5))
+        for key, col in cols:
+            widget, rect = self.c.help_targets()[key]
+            self.assertIs(widget, head)
+            at = head.viewport().mapTo(head, QPoint(head.sectionViewportPosition(col), 0))
+            self.assertEqual((rect.x(), rect.y()), (at.x(), at.y()), key)
+            self.assertEqual(rect.width(), head.sectionSize(col), key)
+            self.assertEqual(rect.height(), head.viewport().height(), key)
+
+    def test_the_bulk_keys_arrive_with_the_first_tick(self):
+        for key in _BULK_KEYS:
+            self.assertNotIn(key, self.c.help_targets())
+        for key in _BULK_KEYS:
+            self.c.help_reveal(key)                 # must not tick a row to show off
+        self.assertEqual(self.c.selected(), [])
+        self.assertNotIn("bulk_bar", self.c.help_targets())
+        self.c._table.item(0, 0).setCheckState(Qt.Checked)
+        t = self.c.help_targets()
+        self.assertIs(t["bulk_bar"], self.c._bulk_bar_w)
+        self.assertIs(t["bulk_verify"], self.c._b_verify)
+        self.assertIs(t["bulk_emails"], self.c._b_emails)
+        self.assertIs(t["bulk_save"], self.c._b_save)
+        self.assertIs(t["bulk_export"], self.c._b_export)
+        self.assertIs(t["bulk_sequence"], self.c._b_seq)
+
+    def test_qualify_is_there_while_someone_is_still_unqualified(self):
+        # It leaves the bar once every lead is qualified, so the step goes too.
+        self.c._table.item(0, 0).setCheckState(Qt.Checked)
+        self.assertNotIn("bulk_qualify", self.c.help_targets())
+        raw = Lead(name="Sourced", title="Head", company="Acme", fit_score=50)
+        self.c.set_dossiers([self.d1], all_leads=[self.d1.lead, raw])
+        self.c._table.item(0, 0).setCheckState(Qt.Checked)
+        self.assertIs(self.c.help_targets()["bulk_qualify"], self.c._b_qualify)
+
+    def test_a_folded_rail_comes_back_for_a_refine_step(self):
+        self.c.set_filters_shown(False)
+        self.assertNotIn("refine_fit", self.c.help_targets())
+        self.c.help_reveal("refine_fit")
+        self.assertFalse(self.c._rail.isHidden())
+        self.assertIs(self.c.help_targets()["refine_fit"], self.c._fit_min)
+
+    def test_the_drawer_step_opens_it_on_a_lead_and_ticks_nobody(self):
+        self.assertNotIn("drawer", self.c.help_targets())
+        self.c.help_reveal("drawer")
+        self.assertIs(self.c.help_targets()["drawer"], self.c._drawer_panel)
+        self.assertEqual(self.c._table.currentRow(), 0)
+        self.assertEqual(self.c.selected(), [])
+
+    def test_no_reveal_ticks_filters_or_starts_anything(self):
+        fired = []
+        for signal in (self.c.verifyRequested, self.c.emailsRequested,
+                       self.c.exportRequested, self.c.saveListRequested,
+                       self.c.sequenceRequested, self.c.qualifyRequested):
+            signal.connect(fired.append)
+
+        def state():
+            return (self.c._search.text(), self.c._fit_min.value(),
+                    self.c._only_qualified.isChecked(), self.c._sort.currentIndex(),
+                    {n: b.isChecked() for n, b in self.c._status_boxes.items()},
+                    self.c._view, sorted(self.c._checked), sorted(self.c._hidden))
+
+        before = state()
+        for key in _COCKPIT_KEYS + _BULK_KEYS + ("drawer", "nonsense"):
+            self.c.help_reveal(key)
+        self.assertEqual(state(), before)
+        self.assertEqual(fired, [])
+        self.assertEqual(self.c.selected(), [])
+
+    def test_deliverability_scrolls_the_whole_grid_into_the_rail(self):
+        """Aimed at the first box alone, the rail stopped with Invalid, No
+        email and Mailed below its bottom edge, and the ring ran off the rail.
+        The last box is brought into view first, then the first box."""
+        asked = []
+        self.c._rail.ensureWidgetVisible = lambda w, *a: asked.append(w)
+        self.c.help_reveal("refine_deliverability")
+        boxes = self.c._status_boxes
+        self.assertEqual(asked, [boxes["Mailed"], boxes["Verified"]])
+
+    def test_the_snapshot_puts_back_what_the_reveals_moved(self):
+        """The walk unfolds the rail, opens the drawer on the first lead and
+        scrolls the table; closing it must leave the screen as the owner had
+        it — and must not untick, filter or reopen anything doing so."""
+        c = self.c
+        c._table.item(1, 0).setCheckState(Qt.Checked)
+        c.set_filters_shown(False)
+        snap = c.help_snapshot()
+        for key in ("refine_fit", "refine_deliverability", "col_signal", "drawer"):
+            c.help_reveal(key)
+        self.assertFalse(c._rail.isHidden())
+        self.assertFalse(c._drawer_w.isHidden())
+        self.assertEqual(c._table.currentRow(), 0)
+        for _ in (0, 1):                            # the walk restores twice
+            c.help_restore(snap)
+        self.assertTrue(c._rail.isHidden())
+        self.assertTrue(c._drawer_w.isHidden())
+        self.assertEqual(c._table.currentRow(), -1)
+        self.assertEqual(c._table.selectedItems(), [])
+        self.assertEqual(sorted(c._checked), [1])
+
+    def test_a_drawer_the_owner_had_open_stays_open_on_his_lead(self):
+        c = self.c
+        c._table.setCurrentCell(1, CK._C_LEAD)
+        snap = c.help_snapshot()
+        c.help_reveal("refine_search")
+        c._table.setCurrentCell(0, CK._C_LEAD)     # anything that moved the row
+        c.help_restore(snap)
+        self.assertEqual(c._table.currentRow(), 1)
+        self.assertFalse(c._drawer_w.isHidden())
+
+    def test_an_empty_screen_offers_only_what_is_on_it(self):
+        empty = CK.LeadsCockpit()
+        targets = empty.help_targets()
+        for gone in ("table", "select_all", "col_lead", "toolbar_count",
+                     "hide_filters", "drawer"):
+            self.assertNotIn(gone, targets)
+        self.assertIn("refine_search", targets)     # the rail is still there
+
+
+class PointAtMeWorkspace(unittest.TestCase):
+    """The tab strip's keys are the workspace's own; everything else it lends
+    from the Leads tab, and revealing one comes back to that tab first."""
+
+    def setUp(self):
+        self.ws = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
+        self.ws.set_dossiers([_dos("Kunyi", 96, "k@x.com", "valid")])
+
+    def test_the_tabs_are_its_own_keys_and_the_cockpit_lends_the_rest(self):
+        t = self.ws.help_targets()
+        for i, key in enumerate(_TAB_KEYS):
+            self.assertIs(t[key], self.ws._tabs[i])
+        self.assertIs(t["table"], self.ws.leads._table)
+        self.assertIs(t["col_fit"][0], self.ws.leads._head)
+        self.assertEqual(sorted(t), sorted(_COCKPIT_KEYS + _TAB_KEYS))
+
+    def test_reveal_switches_the_tab_and_comes_back_for_the_leads(self):
+        self.ws.help_reveal("tab_sessions")
+        self.assertIs(self.ws._stack.currentWidget(), self.ws._sessions)
+        self.ws.help_reveal("refine_search")
+        self.assertIs(self.ws._stack.currentWidget(), self.ws.leads)
+        self.assertFalse(self.ws.leads._rail.isHidden())
+
+    def test_an_unknown_key_moves_nothing(self):
+        self.ws.help_reveal("tab_analytics")
+        self.ws.help_reveal("nonsense")
+        self.assertIs(self.ws._stack.currentWidget(), self.ws._analytics)
+
+    def test_the_snapshot_brings_back_the_tab_the_walk_started_on(self):
+        # Not always Leads: an owner who pressed "?" on Sessions ends there.
+        self.ws.help_reveal("tab_sessions")
+        snap = self.ws.help_snapshot()
+        self.ws.help_reveal("refine_search")
+        self.ws.help_reveal("tab_saved")
+        self.ws.help_restore(snap)
+        self.assertIs(self.ws._stack.currentWidget(), self.ws._sessions)
+
+
+class PointAtMeWorkbench(_Workbench):
+    """The search half of the walkthrough: the widgets in the rail, unfolded
+    and scrolled to, without a run being started or a setting moved."""
+
+    def test_every_key_is_a_widget_of_the_search(self):
+        wb = self._WB.LeadsWorkbench({})
+        targets = wb.help_targets()
+        # The notice line has nothing to say until a run does.
+        self.assertEqual(sorted(targets), sorted(_SEARCH_KEYS))
+        for key, widget in targets.items():
+            self.assertTrue(_descends(widget, wb), key)
+        self.assertIs(targets["run_target"], wb._target_row)
+        self.assertIs(targets["run_qualify"], wb._qualify_row)
+        self.assertIs(targets["run_verify"], wb._verify_row)
+        self.assertIs(targets["mode_switch"], wb._mode_seg)
+        self.assertIs(targets["source_switch"], wb._source_row)
+        self.assertIs(targets["offer"], wb._offer)
+        self.assertIs(targets["net_new"], wb._skip_seen)
+        self.assertIs(targets["btn_find"], wb._prepare)
+        self.assertIs(targets["btn_prepare"], wb._prepare_all)
+
+    def test_the_notice_joins_once_it_says_something(self):
+        wb = self._WB.LeadsWorkbench({})
+        self.assertNotIn("notice", wb.help_targets())
+        wb._status.setText("Qualifying 3 of 25…")
+        self.assertIs(wb.help_targets()["notice"], wb._notice)
+
+    def test_importing_a_sheet_has_no_source_switch_to_point_at(self):
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("sheet")
+        targets = wb.help_targets()
+        for gone in ("source_switch", "run_target", "net_new"):
+            self.assertNotIn(gone, targets)
+        self.assertIn("mode_switch", targets)
+        wb.help_reveal("source_switch")             # never switches the mode back
+        self.assertEqual(wb._mode, "sheet")
+
+    def test_reveal_unfolds_the_search_and_opens_the_keys(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "already-set"})
+        self.assertTrue(wb._keys_box.isHidden())
+        self.assertIs(wb.help_targets()["keys_box"], wb._keys_toggle)
+        wb._fold_setup(False)                       # as a finished run leaves it
+        self.assertEqual(wb.help_targets(), {})
+        wb.help_reveal("keys_box")
+        self.assertFalse(wb._setup_details.isHidden())
+        self.assertIs(wb.help_targets()["keys_box"], wb._keys_box)
+
+    def test_a_hidden_rail_comes_back_for_every_step_inside_it(self):
+        """Hide filters folded the rail away, and only the refine steps brought
+        it back — so every facet, run setting and run button was skipped and
+        the walk opened on the run line. The filter panel's keys are unfolded
+        here too, because the filter panel cannot reach the rail."""
+        from addons.leads import tour as T
+        wb = self._WB.LeadsWorkbench({})
+        rail = wb._cockpit.leads._rail
+        for key, target in (("facet_locations", lambda: wb._filters.help_targets()["facet_locations"]),
+                            ("similar_titles", lambda: wb._filters._similar),
+                            ("btn_find", lambda: wb._prepare)):
+            wb._cockpit.leads.set_filters_shown(False)
+            self.assertFalse(T._drawn(target()), key)
+            wb.help_reveal(key)
+            wb._filters.help_reveal(key)
+            self.assertFalse(rail.isHidden(), key)
+            self.assertTrue(T._drawn(target()), key)
+        wb._cockpit.leads.set_filters_shown(False)
+        wb.help_reveal("notice")                     # not in the rail: left folded
+        self.assertTrue(rail.isHidden())
+
+    def test_the_whole_walk_leaves_the_screen_as_it_found_it(self):
+        """Hide filters on, the Sessions tab up, two facets open, the setup
+        folded over a run: walked to the end, or left with Esc halfway, the
+        tour gives every one of those back, and the facets were still walked."""
+        from addons.leads import tour as T
+        wb = self._WB.LeadsWorkbench({})
+        self._finished(wb)
+        ws, ck, fp = wb._cockpit, wb._cockpit.leads, wb._filters
+
+        def state():
+            return (ws._stack.currentIndex(), ck._rail.isHidden(),
+                    ck._table.currentRow(), ck._drawer_w.isHidden(),
+                    sorted(n for n, s in fp._sections.items() if s.is_open()),
+                    wb._setup_details.isHidden(), wb._keys_box.isHidden(),
+                    fp.spec().to_dict(), wb._mode, sorted(ck._checked))
+
+        ck.set_filters_shown(False)
+        ws._select(1)
+        before = state()
+        walk = T.Tour(T.Guide(wb), wb)
+        walk.start()
+        seen = []
+        while walk.is_open() and len(seen) < 80:
+            seen.append(walk.key())
+            walk.next_step()
+        self.assertIn("facet_locations", seen)
+        self.assertEqual(seen[0], "mode_switch")
+        self.assertEqual(state(), before)
+
+        walk.start()
+        for _ in range(80):
+            if walk.key() == "tab_saved" or not walk.is_open():
+                break
+            walk.next_step()
+        self.assertEqual((walk.key(), walk.is_open()), ("tab_saved", True))
+        walk.leave()
+        self.assertEqual(state(), before)
+
+    def test_the_snapshot_folds_the_setup_and_the_keys_back(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "already-set"})
+        wb._fold_setup(False)
+        snap = wb.help_snapshot()
+        wb.help_reveal("keys_box")
+        self.assertFalse(wb._keys_box.isHidden())
+        wb.help_restore(snap)
+        self.assertTrue(wb._setup_details.isHidden())
+        self.assertTrue(wb._keys_box.isHidden())
+
+    def test_no_reveal_starts_a_run_or_moves_a_setting(self):
+        wb = self._WB.LeadsWorkbench({})
+
+        def state():
+            return (wb._filters.spec().to_dict(), wb._mode, wb._source,
+                    wb._target.value(), wb._limit.value(), wb._verify_limit.value(),
+                    wb._offer.toPlainText(), wb._skip_seen.isChecked(), dict(wb.cfg))
+
+        before = state()
+        for key in _SEARCH_KEYS + ("notice", "nonsense"):
+            wb.help_reveal(key)
+        self.assertEqual(state(), before)
+        self.assertIsNone(wb._worker)
+        self.assertEqual(wb._jobs, 0)
 
 
 if __name__ == "__main__":

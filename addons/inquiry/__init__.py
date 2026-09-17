@@ -1,4 +1,4 @@
-"""The Email automation add-on.
+"""The Email inquiry automation add-on.
 
 A regular package, not a namespace package: PyInstaller resolves
 regular packages reliably and namespace packages notoriously badly,

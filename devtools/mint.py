@@ -81,7 +81,7 @@ def parse_features(raw: str) -> list[str]:
         one add-on, and main_window._open_bom() calls _authorized_then("boq",
         …). So `--features core,bom` names a key the app never checks, and
         BOM stays padlocked.
-      · **Email automation is gated on `inbox`.** `email` is a DIFFERENT
+      · **Email inquiry automation is gated on `inbox`.** `email` is a DIFFERENT
         row — the draft-and-send screen. Minting `email` and expecting the
         automation screen to open gets a padlock.
 
@@ -99,7 +99,7 @@ def parse_features(raw: str) -> list[str]:
         if "bom" in unknown:
             hint += "\n  BOQ & BOM is one add-on: use 'boq'. There is no 'bom' feature."
         if "email" in unknown:      # defensive: 'email' is real, but pair it
-            hint += "\n  Email automation needs 'inbox'; 'email' is the draft screen."
+            hint += "\n  Email inquiry automation needs 'inbox'; 'email' is the draft screen."
         raise SystemExit(
             f"unknown feature(s): {', '.join(unknown)}\n"
             f"  known features: {known}{hint}")

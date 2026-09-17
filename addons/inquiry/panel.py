@@ -1,4 +1,4 @@
-"""Email automation, the screen: what needs you today, in words.
+"""Email inquiry automation, the screen: what needs you today, in words.
 
 This used to be a second working surface — six figures and four tabs named
 almost exactly like the working window's, showing different things under
@@ -36,7 +36,7 @@ from widgets.controls import Card, IconPad, Pill
 
 # The one primary on the populated screen. Named here so the tests and the
 # door both read it from one place.
-OPEN_LABEL = "Open Email automation"
+OPEN_LABEL = "Open Email inquiry automation"
 
 
 class _FrontDoor(C.EmptyState):
@@ -97,7 +97,7 @@ class InquiryPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        self._header = C.PageHeader(i18n.t("Email automation"))
+        self._header = C.PageHeader(i18n.t("Email inquiry automation"))
         root.addWidget(self._header)
 
         # widgetResizable, so a short window scrolls the page instead of
@@ -337,7 +337,7 @@ class InquiryPanel(QWidget):
 
         A mailbox can be fully set up and tested and still have an empty
         register — nobody has pressed Check yet, or the first check has not
-        run. Offering "Set up Email automation" here as the ONLY way forward
+        run. Offering "Set up Email inquiry automation" here as the ONLY way forward
         sent a working setup back into the setup sheet in a loop: that button
         reopens Setup, Setup saves and returns here, the register is still
         empty because nothing has actually gone and read the inbox, so the
@@ -360,7 +360,7 @@ class InquiryPanel(QWidget):
             "inbox", i18n.t("Point Prism at a mailbox to begin"),
             i18n.t("Once it can read the inbox, every inquiry gets a number, "
                    "a quote and a chase — and shows up here."),
-            i18n.t("Set up Email automation"))
+            i18n.t("Set up Email inquiry automation"))
         door.clicked.connect(self.set_up.emit)
         return door
 

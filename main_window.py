@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.wizard_panel)          # WIZARD
         self.artifacts_panel = ArtifactsPanel(self.cfg)
         self.screens.addWidget(self.artifacts_panel)        # ARTIFACTS
-        # The Email automation working screen — drilled into from the
+        # The Email inquiry automation working screen — drilled into from the
         # launcher panel (INQUIRY), never a rail entry of its own. Used to be
         # constructed fresh and .exec()'d as a modal every time it opened;
         # now it is built once, like every other screen, and .enter() is
@@ -530,7 +530,7 @@ class MainWindow(QMainWindow):
 
     def _show_screen(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
-        # Leaving the Email automation working screen: stop its auto-check
+        # Leaving the Email inquiry automation working screen: stop its auto-check
         # timer (see InquiryDialog.on_leave) and pick up whatever it wrote —
         # it saves its own settings and reading bookmark, works the register
         # (new inquiries, sent quotes, logged replies), so both the in-memory
@@ -1363,7 +1363,7 @@ class MainWindow(QMainWindow):
         """Straight into setup from the screen's empty state.
 
         It used to route through the working dialog, which then opened setup
-        itself — so "Set up Email automation" put three stacked windows on
+        itself — so "Set up Email inquiry automation" put three stacked windows on
         screen (the app, the inbox screen, and the setup sheet on top). The
         empty state's whole point is that there is nothing to work on yet, so
         the working screen in the middle has nothing to show.

@@ -9,7 +9,7 @@ one of the two modules -- which is exactly what the add-ons migration does.
   1. dashboard_data.py -- a root DATA module, the one that feeds the Home
      screen -- imported what was then dialogs/inquiry_setup_dialog.py to ask
      whether a mailbox was configured. Home therefore depended on a
-     1,100-line Qt dialog, and Email automation could not be extracted into
+     1,100-line Qt dialog, and Email inquiry automation could not be extracted into
      an add-on without dragging Home along with it.
 
   2. what was then widgets/inquiry_panel.py imported

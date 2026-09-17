@@ -38,9 +38,11 @@ def outside_filters(filtered, top: int = 3) -> tuple:
     return sum(counts.values()), words
 
 
-def _nobody_left(skipped: int, filtered) -> str:
+def _nobody_left(skipped: int, filtered, source: str = "exa") -> str:
     """Why a search ended with nobody, naming what the owner can change: the
-    filters that turned people away, the Net-new switch, or the search width."""
+    filters that turned people away, the Net-new switch, or the search width.
+    The last line names the database that was asked, because "check your
+    balance" is only actionable when it says whose."""
     total, words = outside_filters(filtered)
     already = (f" {skipped} more were already pulled in an earlier session — turn "
                "off “Net new only” to include them." if skipped else "")
@@ -50,7 +52,21 @@ def _nobody_left(skipped: int, filtered) -> str:
     if skipped:
         return (f"Everyone this search found ({skipped}) was already pulled in an "
                 "earlier session. Widen the filters, or turn off “Net new only”.")
+    if source == "apollo":
+        return ("No people came back from Apollo — widen the filters, or check "
+                "your Apollo plan.")
     return "No people came back — widen the filters, or check your Exa balance."
+
+
+def _plan_refusal(exc, apollo) -> str:
+    """Apollo's 403 — a FREE plan (its search and match endpoints are not in
+    one, and a master key does not help) or a key scoped to other endpoints —
+    told apart from every other ApolloError by the message apollo itself writes
+    for it. Matched on the halves around the endpoint it names, so the wording
+    can be improved there without this going blind. "" = a different refusal."""
+    text = str(exc)
+    head, _sep, tail = apollo.SCOPED_KEY.partition("{path}")
+    return text if head and text.startswith(head) and text.endswith(tail) else ""
 
 
 def _filter_new(leads: list, skip):
@@ -71,7 +87,14 @@ class ProspectorWorker(_Worker):
     Groq is called once per lead to qualify and once per reachable lead to
     draft — minutes for a real list — so like the other engine workers this
     cannot run inline. `progress` carries a line per lead so the window has a
-    live count instead of a frozen dialog.
+    live count instead of a frozen dialog. `limit=0` reads the sheet and ranks
+    it and stops there: no Groq, no drafts — the cheap "load the sheet" half of
+    the two Prepare buttons.
+
+    A sheet is NEVER cut against earlier sessions. The owner picked this file,
+    row by row; the commonest sheet there is now is one Prism itself exported
+    from the run before, and a seen-index would hand that back empty. "Net new
+    only" is about a SEARCH not re-finding people, and says so on the rail.
     """
     progress = Signal(str)
     done = Signal(object, list)      # RunResult, list[reach.Draft]
@@ -80,33 +103,28 @@ class ProspectorWorker(_Worker):
     def __init__(self, path: str, offer: str, cfg: dict, *, sheet: str = None,
                  limit: int = 25, verify_limit: int = 25, focus: str = "",
                  sender: str = "", claims: list = None,
-                 exclude_domains: list = None, sessions_dir: str = "",
-                 include_earlier: bool = False):
+                 exclude_domains: list = None):
         super().__init__()
         self.path, self.offer, self.cfg = path, offer, cfg
         self.sheet, self.limit, self.focus = sheet, limit, focus
         self.verify_limit = verify_limit
         self.sender, self.claims = sender, claims or []
         self.exclude_domains = exclude_domains or []
-        self.sessions_dir, self.include_earlier = sessions_dir, include_earlier
 
     def run(self):
         try:
             from prospector import engine, reach, signals, verify
-            skip = _seen_index(self.sessions_dir, self.include_earlier)
             provider = signals.make_provider(self.cfg, self.focus,
                                              exclude_domains=self.exclude_domains)
             res = engine.run(
                 self.path, self.offer, self.cfg, sheet_name=self.sheet,
                 limit=self.limit, focus=self.focus, provider=provider,
-                skip=skip, stats={},
+                skip=None, stats={},
                 on_progress=lambda i, n, l: self.progress.emit(
                     f"Qualifying {i} of {n}: {l.display()}"))
-            if not res.all_leads and getattr(res, "skipped_seen", 0):
-                self.failed.emit(
-                    f"All {res.skipped_seen} people in this sheet were already "
-                    "worked in an earlier session. Turn off “Net new only” to go "
-                    "through them again.")
+            if not res.dossiers:
+                # limit=0 — the sheet is on screen, nothing was spent on it.
+                self.done.emit(res, [])
                 return
             vkeys = verify.collect_keys(self.cfg)
             if vkeys and self.verify_limit:
@@ -210,6 +228,65 @@ class LeadsVerifyWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class LeadsEmailWorker(_Worker):
+    """Find the SELECTED leads' e-mail addresses, off the UI thread — the
+    cockpit's "Find e-mails".
+
+    A Find-people run deliberately brings back no addresses (finding people is
+    free; finding their addresses costs a lookup and a credit each), so this is
+    where that money is spent, on the people the owner ticked — or on the rows
+    of a sheet they exported and brought back.
+
+    Two stages, in the order that costs least:
+      1) `enrich` — ONE Exa lookup per unique company for its real domain, then
+         the working-pattern address. Blank addresses only; a sheet that came
+         in with real ones keeps them.
+      2) `verify.find_and_verify` per lead — the free verifier waterfall first,
+         and a paid finder (Tomba, Apollo, Hunter) only where its key is set and
+         only when the free pass could not confirm the address.
+    NEITHER stage is capped by the rail's Verify setting. That number is a
+    budget for a RUN, which verifies whatever its top slice happens to be —
+    this action is the owner naming people, row by row, and the workbench asks
+    before a batch past ten. Capping stage 2 and not stage 1 was worse than
+    either: it wrote a guessed address for everyone and confirmed the first
+    twenty-five, so the rest reached the exported sheet as unchecked guesses
+    that read like findings."""
+    progress = Signal(int, int, object)     # i, total, lead
+    done = Signal(int, int)                 # addresses found, of them verified
+    failed = Signal(str)
+
+    def __init__(self, leads: list, cfg: dict):
+        super().__init__()
+        self.leads, self.cfg = list(leads or []), cfg
+
+    def run(self):
+        try:
+            from prospector import enrich, signals, verify
+            keys = verify.collect_keys(self.cfg)
+            # Apollo's people/match is not in a free Apollo plan either, and the
+            # workbench has already learnt that from a refused run — so don't
+            # spend a lead's turn on a finder that answers 403.
+            if self.cfg.get("apollo_api_blocked"):
+                keys.pop("apollo_api_key", None)
+            blank = [l for l in self.leads if not (l.email or "").strip()]
+            if blank:
+                self.progress.emit(0, len(self.leads), blank[0])
+                enrich.enrich(blank, signals.exa_key(self.cfg))
+            for i, lead in enumerate(self.leads, 1):
+                self.progress.emit(i, len(self.leads), lead)
+                lead.extra = lead.extra or {}
+                verify.find_and_verify(lead, keys)
+            # "Found" is people who had NO address and have one now — the thing
+            # this action was pressed for. Confirming one they already had is
+            # counted as a verification, not as a find.
+            found = sum(1 for l in blank if (l.email or "").strip())
+            ok = sum(1 for l in self.leads
+                     if (l.extra or {}).get("email_check") == "valid")
+            self.done.emit(found, ok)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class LeadsQualifyWorker(_Worker):
     """Qualify and draft the leads the user ticked, off the UI thread — the
     cockpit's "Qualify & draft". A leads-sheet-only run, or everyone past a full
@@ -288,11 +365,21 @@ class LeadsSessionLoadWorker(_Worker):
 
 class SourceWorker(_Worker):
     """The full from-scratch pipeline off the UI thread: find people who match
-    the lead FILTERS (Exa people-search, every person checked against the
-    filters before they take a slot), enrich them with real-domain e-mails,
-    then qualify and draft. Emits the SAME (RunResult, drafts) as
-    ProspectorWorker, so the dialog treats the sheet path and the search path
-    identically.
+    the lead FILTERS (every person checked against the filters before they take
+    a slot), enrich them with real-domain e-mails, then qualify and draft.
+    Emits the SAME (RunResult, drafts) as ProspectorWorker, so the dialog
+    treats the sheet path and the search path identically.
+
+    Two databases answer the same filters. `source="exa"` pages a web people
+    search, free per person; `source="apollo"` asks Apollo's own index, free to
+    search and about a credit for each person it reveals — so that path spends
+    nothing on anyone the filters or an earlier session would drop, and the run
+    carries its credit count back as `res.apollo_stats`.
+
+    `emails="later"` finds the PEOPLE and stops: no domain lookups, no verifier,
+    no finder — so a run costs only its searches, and the owner spends on
+    addresses afterwards, for the rows they tick (or a sheet they export and
+    bring back). `emails="now"` is the whole pipeline, as before.
 
     `spec` is the filter panel's SearchSpec dict. The industries / roles /
     location arguments are derived from it by the caller; with a spec they
@@ -300,15 +387,23 @@ class SourceWorker(_Worker):
     progress = Signal(str)
     done = Signal(object, list)             # RunResult, list[reach.Draft]
     failed = Signal(str)
+    # Apollo refused the run on its PLAN or the key's scope (its own 403).
+    # Separate from `failed` because the owner must not be able to spend
+    # another run finding the same wall: the workbench switches back to Exa
+    # and puts Apollo's reason on the switch it disables.
+    blocked = Signal(str)
 
     def __init__(self, industries: list, roles: list, offer: str, cfg: dict, *,
                  location: str = "India", target: int = 300, limit: int = 25,
                  verify_limit: int = 25, focus: str = "", sender: str = "",
                  claims: list = None, exclude_domains: list = None,
                  leads_only: bool = False, sessions_dir: str = "",
-                 include_earlier: bool = False, spec: dict | None = None):
+                 include_earlier: bool = False, spec: dict | None = None,
+                 source: str = "exa", emails: str = "now"):
         super().__init__()
         self.spec = spec
+        self.source = "apollo" if source == "apollo" else "exa"
+        self.emails = "later" if emails == "later" else "now"
         self.industries, self.roles = industries, roles
         self.offer, self.cfg = offer, cfg
         self.location, self.target, self.limit = location, target, limit
@@ -319,58 +414,129 @@ class SourceWorker(_Worker):
         self.leads_only = leads_only
         self.sessions_dir, self.include_earlier = sessions_dir, include_earlier
 
+    def _apollo_progress(self, stage, done, total, found):
+        """Apollo's two phases, said in what each costs: paging its index is
+        free, so that line counts pages and people; revealing is billed, so
+        that line counts credits against the target."""
+        if stage == "reveal":
+            self.progress.emit(
+                f"Revealing {done} of {total or self.target} (Apollo credits)")
+        else:
+            self.progress.emit(f"Searching Apollo — page {done} · {found} found")
+
     def run(self):
         try:
-            from prospector import source, enrich, engine, reach, signals, verify
+            from prospector import enrich, engine, reach, signals, verify
             from prospector.filters import SearchSpec
-            key = signals.exa_key(self.cfg)
-            if not key:
-                self.failed.emit("Finding people needs an Exa API key — add it "
-                                 "under Keys & claims and try again.")
-                return
             spec = SearchSpec.from_dict(self.spec) if isinstance(self.spec, dict) else None
             # The roles triage and qualification read: the job titles, or the
             # seniority x function the filters ask for when there are none.
             roles = (spec.role_terms() if spec is not None else None) or self.roles
             skip = _seen_index(self.sessions_dir, self.include_earlier)
             stats: dict = {}
-            self.progress.emit("Finding people who match your filters…"
-                               if skip is None else
-                               "Finding new people — skipping anyone already pulled…")
-            # Only a spec'd run passes spec=, so an engine without filters still
-            # takes the call.
-            extra = {"spec": spec} if spec is not None else {}
-            leads = source.source(
-                self.industries, roles, key, location=self.location,
-                target=self.target, skip=skip, stats=stats,
-                on_progress=lambda qi, n, ind, got: self.progress.emit(
-                    f"Sourcing {ind} — {got} found ({qi}/{n} searches)"), **extra)
+            apollo_run = self.source == "apollo"
+            exa_key = signals.exa_key(self.cfg)
+            if apollo_run:
+                # Lazy, like every engine import here: the Exa path must not
+                # pay for a module it never calls.
+                from prospector import apollo
+                key = apollo.api_key(self.cfg)
+                if not key:
+                    self.failed.emit("Searching Apollo needs an Apollo API key — "
+                                     "add it under Keys & claims and try again.")
+                    return
+                self.progress.emit("Searching Apollo for people who match your filters…"
+                                   if skip is None else
+                                   "Searching Apollo — skipping anyone already pulled…")
+                # An ApolloError (a bad key, a plan that cannot search, a rate
+                # limit that outlasted its retries) is already written for the
+                # owner; run()'s own handler emits it as the failure. The one
+                # it does NOT emit as a failure is the plan/scope refusal:
+                # that wall is there for every later run too, so it goes out
+                # as `blocked` and the rail stops offering Apollo.
+                try:
+                    leads = apollo.search_people(
+                        spec if spec is not None else (self.spec or {}), key,
+                        target=self.target, skip=skip, stats=stats,
+                        on_progress=self._apollo_progress)
+                except apollo.ApolloError as exc:
+                    why = _plan_refusal(exc, apollo)
+                    if not why:
+                        raise
+                    self.blocked.emit(why)
+                    return
+            else:
+                # `as people_search`: self.source is the name of the database,
+                # the module is the Exa people search itself.
+                from prospector import source as people_search
+                key = exa_key
+                if not key:
+                    self.failed.emit("Finding people needs an Exa API key — add it "
+                                     "under Keys & claims and try again.")
+                    return
+                self.progress.emit("Finding people who match your filters…"
+                                   if skip is None else
+                                   "Finding new people — skipping anyone already pulled…")
+                # Only a spec'd run passes spec=, so an engine without filters
+                # still takes the call.
+                extra = {"spec": spec} if spec is not None else {}
+                leads = people_search.source(
+                    self.industries, roles, key, location=self.location,
+                    target=self.target, skip=skip, stats=stats,
+                    on_progress=lambda qi, n, ind, got: self.progress.emit(
+                        f"Sourcing {ind} — {got} found ({qi}/{n} searches)"), **extra)
             skipped, dups = stats.get("skipped_seen", 0), stats.get("duplicates", 0)
             filtered = dict(stats.get("filtered") or {})
             unverified = int(stats.get("company_unverified") or 0)
             if not leads:
-                self.failed.emit(_nobody_left(skipped, filtered))
+                self.failed.emit(_nobody_left(skipped, filtered, self.source))
                 return
-            self.progress.emit(f"Found {len(leads)} new people. Finding real e-mail domains…")
-            enrich.enrich(leads, key)
+            if self.emails == "later":
+                # Finding PEOPLE is cheap — the searches are all it costs.
+                # Finding their ADDRESSES is not: a domain lookup per company,
+                # then a verifier or finder credit a head. So this run stops
+                # here, and "Find e-mails" spends that on the rows the owner
+                # ticks. (Apollo hands over the addresses it already revealed;
+                # they are kept, nothing is guessed on top.)
+                self.progress.emit(f"Found {len(leads)} new people — e-mails left "
+                                   f"for later.")
+            elif apollo_run:
+                # Apollo hands over the address it holds; only the people it had
+                # none for need a domain looked up and a pattern address guessed.
+                need = [lead for lead in leads if not (lead.email or "").strip()]
+                if need:
+                    self.progress.emit(f"Found {len(leads)} new people. Finding "
+                                       f"real e-mail domains for {len(need)}…")
+                    enrich.enrich(need, exa_key)
+                else:
+                    self.progress.emit(f"Found {len(leads)} new people, every one "
+                                       f"with an address.")
+            else:
+                self.progress.emit(f"Found {len(leads)} new people. Finding real e-mail domains…")
+                enrich.enrich(leads, key)
             # Someone first pulled from a SHEET is on file only by e-mail; now that
             # enrich has guessed addresses, look once more before spending Groq.
+            # (An e-mails-later run learns no new keys here — it only pays the
+            # in-run dedupe, which is free.)
             leads, late_skipped, late_dups = _filter_new(leads, skip)
             skipped += late_skipped
             dups += late_dups
             if not leads:
-                self.failed.emit(_nobody_left(skipped, filtered))
+                self.failed.emit(_nobody_left(skipped, filtered, self.source))
                 return
             if self.leads_only:
-                # The cheap deliverable: a ranked, enriched leads sheet with NO
-                # Groq at all (qualify + draft skipped) — so a rate-limited or
-                # exhausted Groq key never blocks the list the user actually wants.
+                # The cheap deliverable: a ranked leads sheet with NO Groq at all
+                # (qualify + draft skipped) — so a rate-limited or exhausted Groq
+                # key never blocks the list the user actually wants. With
+                # emails="later" it is cheaper still: the searches, and nothing else.
                 from prospector import triage
                 ranked = triage.rank(leads, self.offer, roles)
                 res = engine.RunResult(dossiers=[], total_in_sheet=len(ranked),
                                        signal_source="", all_leads=ranked)
                 res.skipped_seen, res.duplicates = skipped, dups
                 res.filtered_out, res.company_unverified = filtered, unverified
+                if apollo_run:
+                    res.apollo_stats = stats    # what the run cost, in credits
                 self.done.emit(res, [])
                 return
             provider = signals.make_provider(self.cfg, self.focus,
@@ -383,6 +549,8 @@ class SourceWorker(_Worker):
             res.skipped_seen = skipped
             res.duplicates = dups + (getattr(res, "duplicates", 0) or 0)
             res.filtered_out, res.company_unverified = filtered, unverified
+            if apollo_run:
+                res.apollo_stats = stats        # what the run cost, in credits
             vkeys = verify.collect_keys(self.cfg)
             if vkeys and self.verify_limit:
                 self.progress.emit("Verifying the hot/warm emails…")

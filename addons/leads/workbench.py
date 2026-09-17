@@ -36,11 +36,13 @@ import theme
 from widgets import controls as C
 from prospector.filters import SearchSpec
 from addons.leads import saved_searches
-from addons.leads.filter_panel import FilterPanel, static_suggest
-from addons.leads.workers import (LeadsExportWorker, LeadsQualifyWorker,
-                                  LeadsSendWorker, LeadsSessionLoadWorker,
-                                  LeadsVerifyWorker, ProspectorWorker,
-                                  SourceWorker, outside_filters)
+from addons.leads.filter_panel import (
+    HELP_KEYS as _FILTER_HELP_KEYS, FilterPanel, reveal_in_scroll, static_suggest,
+)
+from addons.leads.workers import (LeadsEmailWorker, LeadsExportWorker,
+                                  LeadsQualifyWorker, LeadsSendWorker,
+                                  LeadsSessionLoadWorker, LeadsVerifyWorker,
+                                  ProspectorWorker, SourceWorker, outside_filters)
 from addons.leads.cockpit import LeadsWorkspace
 
 try:
@@ -61,6 +63,32 @@ _DEFAULT_ROLES = (
     "Business Excellence & Continuous Improvement\n"
     "Plant Head / Head of Manufacturing\n"
     "Supply Chain / Warehouse / Materials Head")
+
+
+# The Apollo half of the source switch, in two states. Apollo's own API Keys
+# page says its search and match endpoints "aren't included in your Free plan
+# and won't be accessible even with a master key" — so the tooltip says it
+# before a run spends a thread finding out. Functions, not constants: the
+# translation must be looked up when the tooltip is set, not at import.
+# What the "?" walkthrough calls the search's own parts (addons/leads/help.py).
+# Kept as a set so a key meant for the filters or the cockpit is not answered
+# here by accident.
+_HELP_KEYS = frozenset({
+    "source_switch", "mode_switch", "run_target", "run_qualify", "run_verify",
+    "offer", "net_new", "btn_find", "btn_prepare", "keys_box", "notice",
+})
+
+
+def _apollo_tip() -> str:
+    return i18n.t("Searching Apollo needs a PAID Apollo plan — the free plan "
+                  "has no API access. Exa needs only its own key.")
+
+
+def _apollo_blocked_text() -> str:
+    """What the disabled switch says when Apollo refused without words of its
+    own — normally it carries Apollo's actual 403 message instead."""
+    return i18n.t("Apollo's API refused this key. Its people search is not in "
+                  "the free Apollo plan; Exa is doing the finding.")
 
 
 def _default_spec() -> SearchSpec:
@@ -121,10 +149,12 @@ def _field(text: str) -> QLabel:
     return lab
 
 
-def _setting(text: str, spin: QSpinBox) -> QWidget:
-    """One run setting as a row — its name, and a compact spin box on the right —
+def _setting(text: str, control: QWidget) -> QWidget:
+    """One run setting as a row — its name, and a compact control on the right —
     the way the refine rail's "Minimum fit" reads, so a narrow rail never has to
-    split two spin boxes into slivers."""
+    split two spin boxes into slivers. The label is kept on the row (`.name`)
+    because a setting can be renamed by what it now costs: "Source up to"
+    becomes "Reveal up to" when the source charges per person."""
     row = QWidget()
     h = QHBoxLayout(row)
     h.setContentsMargins(0, 0, 0, 0)
@@ -133,9 +163,34 @@ def _setting(text: str, spin: QSpinBox) -> QWidget:
     lab.setStyleSheet(f"color:{theme.NEUTRAL[800]};font-size:13px;font-weight:500;"
                       f"background:transparent;")
     h.addWidget(lab, 1)
-    spin.setFixedWidth(104)
-    h.addWidget(spin)
+    if isinstance(control, QSpinBox):
+        control.setFixedWidth(104)
+    h.addWidget(control)
+    row.name = lab
     return row
+
+
+def _segment(name: str) -> QFrame:
+    """A segmented switch — a well with the chosen half lifted onto a card,
+    its QHBoxLayout ready for the buttons. Scoped by object name on purpose:
+    unscoped, the global style.qss would make each half a 34px-tall button and
+    the pair would dwarf the rail it sits in."""
+    seg = QFrame()
+    seg.setObjectName(name)
+    seg.setAttribute(Qt.WA_StyledBackground, True)
+    seg.setStyleSheet(
+        f"QFrame#{name}{{background:{theme.WELL};border:1px solid {theme.HAIRLINE};"
+        f"border-radius:{theme.R_CONTROL}px;}}"
+        f"QFrame#{name} QPushButton{{background:transparent;border:none;"
+        f"color:{theme.NEUTRAL[600]};padding:5px 8px;min-height:22px;"
+        f"font-size:13px;font-weight:600;border-radius:{theme.R_CHIP}px;}}"
+        f"QFrame#{name} QPushButton:checked{{background:{theme.CARD};"
+        f"color:{theme.TEXT};}}"
+        f"QFrame#{name} QPushButton:disabled{{color:{theme.NEUTRAL[400]};}}")
+    lay = QHBoxLayout(seg)
+    lay.setContentsMargins(3, 3, 3, 3)
+    lay.setSpacing(2)
+    return seg
 
 
 class _Line(QLabel):
@@ -170,6 +225,7 @@ class LeadsWorkbench(QWidget):
         super().__init__(parent)
         self.cfg = cfg or {}
         self._mode = "sheet"
+        self._source = "exa"                # _build_inputs picks by the keys set
         self._path = ""
         self._claims_path = ""
         self._drafts = []
@@ -179,7 +235,13 @@ class LeadsWorkbench(QWidget):
         self._send_worker = None
         self._export_worker = None
         self._verify_worker = None
+        self._email_worker = None
         self._qualify_worker = None
+        # Apollo's own words when its API refused this plan or key scope, and
+        # the key it refused (held in memory only — the config keeps a flag,
+        # never a key). Empty = Apollo is on offer.
+        self._apollo_blocked = ""
+        self._blocked_key = ""
         self._announce_export = False
         self._opened_autosave = False
         # How many background jobs (prepare / verify / send / export) are running.
@@ -259,21 +321,8 @@ class LeadsWorkbench(QWidget):
         # people with the lead filters (Exa people-search → checked against
         # every filter → real-domain e-mails → qualify → draft), or a sheet
         # you already have.
-        seg = QFrame()
-        seg.setObjectName("modeSeg")
-        seg.setAttribute(Qt.WA_StyledBackground, True)
-        seg.setStyleSheet(
-            f"QFrame#modeSeg{{background:{theme.WELL};border:1px solid {theme.HAIRLINE};"
-            f"border-radius:{theme.R_CONTROL}px;}}"
-            f"QFrame#modeSeg QPushButton{{background:transparent;border:none;"
-            f"color:{theme.NEUTRAL[600]};padding:5px 8px;min-height:22px;"
-            f"font-size:13px;font-weight:600;border-radius:{theme.R_CHIP}px;}}"
-            f"QFrame#modeSeg QPushButton:checked{{background:{theme.CARD};"
-            f"color:{theme.TEXT};}}"
-            f"QFrame#modeSeg QPushButton:disabled{{color:{theme.NEUTRAL[400]};}}")
-        sl = QHBoxLayout(seg)
-        sl.setContentsMargins(3, 3, 3, 3)
-        sl.setSpacing(2)
+        seg = self._mode_seg = _segment("modeSeg")
+        sl = seg.layout()
         self._mode_icp = QPushButton(i18n.t("Find people"))
         self._mode_sheet = QPushButton(i18n.t("Import a sheet"))
         for b, mode in ((self._mode_icp, "icp"), (self._mode_sheet, "sheet")):
@@ -296,11 +345,29 @@ class LeadsWorkbench(QWidget):
         sb.addWidget(self._file_lbl)
         body.addWidget(self._sheet_box)
 
-        # -- find people: the lead filters --------------------------------------
+        # -- find people: where to search, then the lead filters -----------------
         self._icp_box = QWidget()
         ib = QVBoxLayout(self._icp_box)
         ib.setContentsMargins(0, theme.SPACE_1, 0, 0)
         ib.setSpacing(0)
+        # The same filters, asked of two databases: Exa's web search (an Exa
+        # call per industry) or Apollo's own people index (free to search,
+        # about a credit per person revealed). Exa is the default and the
+        # fallback: Apollo's search endpoints are not in its FREE plan, so an
+        # owner who has only pasted a key would meet a 403, not a list.
+        src = _segment("sourceSeg")
+        self._src_apollo = QPushButton(i18n.t("Apollo"))
+        self._src_exa = QPushButton(i18n.t("Exa"))
+        for b, name in ((self._src_apollo, "apollo"), (self._src_exa, "exa")):
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, s=name: self._set_source(s))
+            src.layout().addWidget(b, 1)
+        # The rows are kept, not just their controls: the walkthrough points at
+        # a whole setting — its name and its control — the way it is read.
+        self._source_row = _setting(i18n.t("Search with"), src)
+        ib.addWidget(self._source_row)
+        ib.addSpacing(theme.SPACE_2)
         self._filters = FilterPanel(suggest=_suggest)
         self._filters.set_spec(_default_spec())
         self._filters.changed.connect(self._refresh_prepare)
@@ -317,23 +384,23 @@ class LeadsWorkbench(QWidget):
         self._target = QSpinBox()
         self._target.setRange(20, 2000)
         self._target.setValue(300)
-        self._target.setToolTip(i18n.t(
-            "How many people to find before qualifying. Everyone outside your "
-            "filters is left out and does not count."))
+        # Its name and tooltip belong to the source — _set_source writes both.
         self._target_row = _setting(i18n.t("Source up to"), self._target)
         rows.addWidget(self._target_row)
         self._limit = QSpinBox()
         self._limit.setRange(1, 500)
         self._limit.setValue(25)
         self._limit.setToolTip(i18n.t("How many leads to qualify this run."))
-        rows.addWidget(_setting(i18n.t("Qualify"), self._limit))
+        self._qualify_row = _setting(i18n.t("Qualify"), self._limit)
+        rows.addWidget(self._qualify_row)
         self._verify_limit = QSpinBox()
         self._verify_limit.setRange(0, 200)
         self._verify_limit.setValue(25)
         self._verify_limit.setToolTip(i18n.t(
             "How many hot/warm addresses to check with Hunter. Its free tier is "
             "~50 credits a month, so keep this modest — 0 skips verification."))
-        rows.addWidget(_setting(i18n.t("Verify (Hunter)"), self._verify_limit))
+        self._verify_row = _setting(i18n.t("Verify (Hunter)"), self._verify_limit)
+        rows.addWidget(self._verify_row)
         body.addLayout(rows)
 
         offer = QVBoxLayout()
@@ -370,16 +437,30 @@ class LeadsWorkbench(QWidget):
         body.addLayout(net)
 
         body.addSpacing(theme.SPACE_1)
-        self._prepare = C.button(i18n.t("Prepare outreach"), "primary",
-                                 icon_name="play", on_click=self._on_prepare)
+        # Two runs, cheapest first. The primary finds the PEOPLE and stops:
+        # no e-mail lookups, no Groq — so it costs only its searches, and
+        # "Find e-mails" spends on the rows the owner picks afterwards. The
+        # secondary is the whole pipeline, for when they want it in one press.
+        # (This primary replaced "Leads sheet only (no Groq)", which did the
+        # same thing minus the saving.)
+        # Both wired through a lambda: clicked(bool) would otherwise hand its
+        # "checked" False to the first argument and turn the cheap run into
+        # the expensive one.
+        self._prepare = C.button(
+            i18n.t("Find people"), "primary", icon_name="play",
+            on_click=lambda: self._on_prepare(leads_only=True, emails="later"))
+        self._prepare.setToolTip(i18n.t(
+            "Find the people who match your filters and list them. No e-mail "
+            "lookups and no Groq — tick rows and press “Find e-mails” when you "
+            "want addresses."))
         body.addWidget(self._prepare)
-        self._leads_only = C.button(
-            i18n.t("Leads sheet only (no Groq)"), "tertiary", icon_name="file",
-            on_click=lambda: self._on_prepare(leads_only=True))
-        self._leads_only.setToolTip(i18n.t(
-            "Source and enrich a leads sheet only — no qualification, no emails, "
-            "no Groq. Uses Exa alone, so a rate-limited Groq key can't block it."))
-        body.addWidget(self._leads_only)
+        self._prepare_all = C.button(
+            i18n.t("Find and prepare"), "secondary", icon_name="mail",
+            on_click=lambda: self._on_prepare(leads_only=False, emails="now"))
+        self._prepare_all.setToolTip(i18n.t(
+            "The whole pipeline in one run: find the people, look up their "
+            "e-mails, qualify the top ones with Groq and draft a message each."))
+        body.addWidget(self._prepare_all)
 
         # Keys & claims are set once — folded away unless the Exa key is missing.
         # "&&": a lone & in a button label is eaten as a keyboard mnemonic.
@@ -396,6 +477,14 @@ class LeadsWorkbench(QWidget):
         self._exa.setEchoMode(QLineEdit.PasswordEchoOnEdit)   # never on screen at rest
         self._exa.setPlaceholderText(i18n.t("Needed to find people — saved once"))
         kb.addWidget(self._exa)
+        kb.addSpacing(theme.SPACE_1)
+        kb.addWidget(_field(i18n.t("Apollo API key · searches Apollo's own database")))
+        self._apollo = QLineEdit()
+        self._apollo.setText(self.cfg.get("apollo_api_key") or "")
+        self._apollo.setEchoMode(QLineEdit.PasswordEchoOnEdit)
+        self._apollo.setPlaceholderText(i18n.t(
+            "Search Apollo's database and reveal verified emails — saved once"))
+        kb.addWidget(self._apollo)
         kb.addSpacing(theme.SPACE_2)
         self._claims = C.button(i18n.t("Approved claims file…"), "secondary",
                                 icon_name="file", on_click=self._choose_claims)
@@ -409,9 +498,94 @@ class LeadsWorkbench(QWidget):
             "Agents — free tiers first, so most checks cost nothing."),
             level="META", wrap=True))
         body.addWidget(self._keys_box)
-        self._keys_box.setVisible(not (self.cfg.get("exa_api_key") or "").strip())
+        # A different Apollo key is a different Apollo plan, so typing one lifts
+        # a block this key earned.
+        self._apollo.textEdited.connect(self._on_apollo_key_typed)
+        # Either key is enough to run a search, so either folds the box away.
+        self._keys_box.setVisible(not (self._key("exa_api_key")
+                                       or self._key("apollo_api_key")))
+        # Exa is the default even where an Apollo key is set: Apollo's people
+        # search is not in its FREE plan (its API Keys page says so outright),
+        # so offering it first sends most owners into a 403. A run that already
+        # hit that wall is remembered, and Apollo is not offered at all.
+        if self.cfg.get("apollo_api_blocked"):
+            self._blocked_key = self._key("apollo_api_key")
+            self._apollo_blocked = _apollo_blocked_text()
+        self._set_source("exa")
 
         col.addWidget(self._setup_details)
+
+    def _key(self, name: str) -> str:
+        return (self.cfg.get(name) or "").strip()
+
+    # How many people a run may fetch, per source: Exa pages a web search and
+    # nothing is charged per person, Apollo charges about a credit for each one
+    # it reveals — so the same spin box is a budget under one and a ceiling
+    # under the other, and has to say which.
+    _TARGET_LABEL = {"apollo": "Reveal up to", "exa": "Source up to"}
+    _TARGET_TIP = {
+        "apollo": "Searching Apollo is free; revealing a person's name and "
+                  "e-mail costs about one Apollo credit each — and a run "
+                  "stops at this many, even when your filters leave it short.",
+        "exa": "How many people to find before qualifying. Everyone outside "
+               "your filters is left out and does not count.",
+    }
+
+    def _set_source(self, source: str):
+        """Which database a Find-people run asks. Either can be picked with or
+        without its key — Prepare says which one is missing rather than a dead
+        button leaving the owner to guess. Apollo, once its API has refused
+        this plan, cannot be picked at all: not by a click, and not by a
+        session that was run on it before the refusal."""
+        self._source = "apollo" if source == "apollo" else "exa"
+        if self._source == "apollo" and self._apollo_blocked:
+            self._source = "exa"
+        self._src_apollo.setChecked(self._source == "apollo")
+        self._src_exa.setChecked(self._source == "exa")
+        self._sync_apollo()
+        self._target_row.name.setText(i18n.t(self._TARGET_LABEL[self._source]))
+        tip = i18n.t(self._TARGET_TIP[self._source])
+        self._target_row.setToolTip(tip)
+        self._target.setToolTip(tip)
+
+    def _source_name(self) -> str:
+        return i18n.t("Apollo") if self._source == "apollo" else i18n.t("Exa")
+
+    def _sync_apollo(self):
+        """The Apollo half of the switch: on offer with a tooltip saying what
+        it needs, or off with Apollo's own refusal on it. Called wherever the
+        switch is (re)armed — _set_running re-enables every control, and would
+        otherwise hand back a button that only leads to another 403."""
+        self._src_apollo.setToolTip(self._apollo_blocked or _apollo_tip())
+        if self._apollo_blocked:
+            self._src_apollo.setEnabled(False)
+
+    def _on_apollo_key_typed(self, text: str):
+        """A new Apollo key is a new Apollo plan, so it lifts the block the old
+        key earned — the config forgets too, and the switch comes back."""
+        if not self._apollo_blocked:
+            return
+        if (text or "").strip() and (text or "").strip() != self._blocked_key:
+            self._apollo_blocked = self._blocked_key = ""
+            self._save_cfg("apollo_api_blocked", False)
+            self._src_apollo.setEnabled(not self._jobs)
+            self._sync_apollo()
+
+    def _on_source_blocked(self, why: str):
+        """Apollo turned the run down on its PLAN or the key's scope. One
+        refusal is enough: the rail goes back to Exa, the Apollo half is
+        switched off carrying Apollo's own words, and the config remembers — a
+        flag, never the key — so the next launch does not offer the same wall."""
+        if self._job_done():
+            self._set_running(False)
+        self._apollo_blocked = why or _apollo_blocked_text()
+        self._blocked_key = self._key("apollo_api_key")
+        self._src_apollo.setEnabled(False)
+        self._set_source("exa")
+        self._save_cfg("apollo_api_blocked", True)
+        self._status.setText(i18n.t(
+            "Apollo refused this key — its people search needs a paid Apollo "
+            "plan. Switched to Exa; hover Apollo for what it said."))
 
     def _set_mode(self, mode: str):
         self._mode = mode
@@ -420,7 +594,20 @@ class LeadsWorkbench(QWidget):
         self._sheet_box.setVisible(mode == "sheet")
         self._icp_box.setVisible(mode == "icp")
         self._target_row.setVisible(mode == "icp")   # a sheet brings its own people
-        self._leads_only.setVisible(mode == "icp")   # search-only cheap deliverable
+        # "Net new only" is about a SEARCH not re-finding people. A sheet is
+        # never cut against it (the file is the owner's own choice, row by row),
+        # so the switch would be a lie sitting there in sheet mode.
+        for w in (self._skip_seen, self._skip_meta):
+            w.setVisible(mode == "icp")
+        # The same two runs either way — list people cheaply, or spend on them —
+        # but a sheet is not "found", it is loaded, and an owner who just picked
+        # a file should not be told Prism is off to find people.
+        if mode == "sheet":
+            self._prepare.setText(i18n.t("Load the sheet"))
+            self._prepare_all.setText(i18n.t("Load and prepare"))
+        else:
+            self._prepare.setText(i18n.t("Find people"))
+            self._prepare_all.setText(i18n.t("Find and prepare"))
         self._refresh_prepare()
 
     # ── fold the setup away once a list is on screen ─────────────────────────
@@ -448,7 +635,10 @@ class LeadsWorkbench(QWidget):
     def _setup_line(self) -> str:
         """The current setup in a few words, for the folded header."""
         if self._mode == "icp":
-            return i18n.t("Find people · {filters} · qualify {q}").format(
+            # Which database the run asked matters as much as the filters —
+            # the same filters cost nothing on Exa and credits on Apollo.
+            return i18n.t("{source} · {filters} · qualify {q}").format(
+                source=self._source_name(),
                 filters=self._filters.spec().summary(), q=self._limit.value())
         name = os.path.basename(self._path) if self._path else i18n.t("No sheet chosen")
         return i18n.t("{name} · qualify {q} · verify {v}").format(
@@ -462,7 +652,69 @@ class LeadsWorkbench(QWidget):
         else:
             ok = bool(self._path)
         self._prepare.setEnabled(ok)
-        self._leads_only.setEnabled(ok and self._mode == "icp")
+        self._prepare_all.setEnabled(ok)
+
+    # ── the guided walkthrough points at these ────────────────────────────────
+    def help_targets(self) -> dict:
+        """The search's parts the "?" tour can ring, by the key it asks for:
+        the widgets already in the rail, never a copy of them. A part that is
+        not on screen right now — the source switch while a sheet is being
+        imported, the notice line before a run has said anything — is left out,
+        and the tour skips that step. The lead filters answer for themselves
+        (FilterPanel.help_targets), and so does the cockpit."""
+        out = {
+            "source_switch": self._source_row,
+            "mode_switch": self._mode_seg,
+            "run_target": self._target_row,
+            "run_qualify": self._qualify_row,
+            "run_verify": self._verify_row,
+            "offer": self._offer,
+            "net_new": self._skip_seen,
+            "btn_find": self._prepare,
+            "btn_prepare": self._prepare_all,
+            # Folded away once a key is set, so point at what opens it instead.
+            "keys_box": (self._keys_box if not self._keys_box.isHidden()
+                         else self._keys_toggle),
+            "notice": self._notice,
+        }
+        return {k: w for k, w in out.items() if w is not None and w.isVisibleTo(self)}
+
+    def help_reveal(self, key: str) -> None:
+        """Make one part reachable: the Leads tab, the rail unfolded, the setup
+        unfolded, the keys box open, the rail scrolled to it. It starts no run,
+        changes no filter and writes no config — an owner who walks the tour
+        comes back to exactly the search they had.
+
+        The lead filters' keys are answered here too, for the unfolding only.
+        They sit in this search, in the cockpit's rail, and the filter panel
+        can neither see that rail nor bring it back: with Hide filters on, every
+        facet step was skipped and the walk opened on the run line."""
+        if key not in _HELP_KEYS and key not in _FILTER_HELP_KEYS:
+            return
+        self._cockpit.help_reveal("tab_leads")      # the rail is in the Leads tab
+        if key == "notice":
+            return                                  # over the tabs, not in the rail
+        self._cockpit.leads.set_filters_shown(True)  # Hide filters folds it away
+        if self._setup_details.isHidden():
+            self._fold_setup(True)                  # it was folded to one line
+        if key == "keys_box" and self._keys_box.isHidden():
+            self._keys_box.setVisible(True)         # what "Keys & claims" opens
+        widget = self.help_targets().get(key)
+        if widget is not None:
+            reveal_in_scroll(widget)
+
+    def help_snapshot(self) -> dict:
+        """The two folds a reveal opens: the setup and the keys box."""
+        return {"setup_hidden": self._setup_details.isHidden(),
+                "keys_hidden": self._keys_box.isHidden()}
+
+    def help_restore(self, snap: dict) -> None:
+        if not isinstance(snap, dict):
+            return
+        if snap.get("setup_hidden") != self._setup_details.isHidden():
+            self._fold_setup(not snap.get("setup_hidden"))
+        if snap.get("keys_hidden") != self._keys_box.isHidden():
+            self._keys_box.setVisible(not snap.get("keys_hidden"))
 
     # ── the tabbed cockpit ────────────────────────────────────────────────────
     def _build_results(self):
@@ -497,6 +749,7 @@ class LeadsWorkbench(QWidget):
         self._cockpit.useSavedSearchRequested.connect(self.use_saved_search)
         self._cockpit.deleteSavedSearchRequested.connect(self._delete_saved_search)
         self._cockpit.verifyRequested.connect(self._verify_selected)
+        self._cockpit.emailsRequested.connect(self._find_emails)
         self._cockpit.saveListRequested.connect(self._save_list)
         self._cockpit.exportRequested.connect(self._export_selected)
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
@@ -540,22 +793,25 @@ class LeadsWorkbench(QWidget):
         self._claims_lbl.setText(os.path.basename(path))
 
     # ── prepare ──────────────────────────────────────────────────────────────
-    def _on_prepare(self, leads_only: bool = False):
+    def _on_prepare(self, leads_only: bool = True, emails: str = "later"):
+        """Start a run. The defaults are the primary button's: find the people,
+        leave the e-mails and Groq for the actions on the rows that come back.
+        "Find and prepare" passes leads_only=False, emails="now"."""
         if self._jobs:
             return
         from prospector import reach
-        # Persist the Exa key once, to config, so every run after picks it up.
-        # Read the config FRESH and change only that key: self.cfg can predate an
-        # account or key saved elsewhere, and saving it whole would wipe them.
-        exa = self._exa.text().strip()
-        if exa != (self.cfg.get("exa_api_key") or ""):
-            try:
-                fresh = CB.config.load()
-                fresh["exa_api_key"] = exa
-                CB.config.save(fresh)
-            except Exception:                               # noqa: BLE001
-                pass
-        self.cfg["exa_api_key"] = exa
+        # Persist the search keys once, to config, so every run after picks them
+        # up. Read the config FRESH and change only those keys: self.cfg can
+        # predate an account or key saved elsewhere, and saving it whole would
+        # wipe them.
+        self._save_search_key("exa_api_key", self._exa.text().strip())
+        self._save_search_key("apollo_api_key", self._apollo.text().strip())
+        if self._mode == "icp":
+            missing = self._missing_key()
+            if missing:
+                self._keys_box.setVisible(True)
+                self._status.setText(missing)
+                return
         claims = reach.load_claims(self._claims_path)
         offer = self._offer.toPlainText().strip() or DEFAULT_OFFER
         include_earlier = not self._skip_seen.isChecked()
@@ -572,14 +828,14 @@ class LeadsWorkbench(QWidget):
                            if self._mode == "icp" else "sheet")
         self._next_params = {
             "mode": self._next_mode, "sheet_path": self._path,
-            **legacy, "filters": spec.to_dict(),
+            **legacy, "filters": spec.to_dict(), "source": self._source,
             "target": self._target.value(), "offer": offer,
             "limit": self._limit.value(), "verify_limit": self._verify_limit.value(),
             "claims_path": self._claims_path, "include_earlier": include_earlier,
         }
         if self._mode == "icp":
             self._set_running(True)
-            self._status.setText(i18n.t("Finding people (no Groq)…")
+            self._status.setText(i18n.t("Finding people (no e-mails, no Groq)…")
                                  if leads_only else i18n.t("Finding people…"))
             self._worker = SourceWorker(
                 legacy["industries"], legacy["roles"], offer, self.cfg,
@@ -589,21 +845,56 @@ class LeadsWorkbench(QWidget):
                 sender=self._sender(), claims=claims,
                 exclude_domains=self._seller_domains(), leads_only=leads_only,
                 sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
-                spec=spec.to_dict())
+                spec=spec.to_dict(), source=self._source, emails=emails)
+            self._worker.blocked.connect(self._on_source_blocked)
         else:
             self._set_running(True)
             self._status.setText(i18n.t("Reading the sheet…"))
+            # limit=0 for the primary: read the sheet, rank it, list it —
+            # nothing spent. A sheet is never cut against earlier sessions
+            # (workers.ProspectorWorker says why), so the export of the run
+            # before comes back whole.
             self._worker = ProspectorWorker(
-                self._path, offer, self.cfg, limit=self._limit.value(),
+                self._path, offer, self.cfg,
+                limit=0 if leads_only else self._limit.value(),
                 verify_limit=self._verify_limit.value(),
                 sender=self._sender(), claims=claims,
-                exclude_domains=self._seller_domains(),
-                sessions_dir=self._sessions_dir(), include_earlier=include_earlier)
+                exclude_domains=self._seller_domains())
         self._worker.progress.connect(self._status.setText)
         self._worker.done.connect(self._on_prepared)
         self._worker.failed.connect(self._on_failed)
         self._job_started()
         self._worker.start()
+
+    def _save_search_key(self, name: str, value: str):
+        """Keep one search key in the config, and in this window's cfg."""
+        if value != (self.cfg.get(name) or ""):
+            self._save_cfg(name, value)
+        self.cfg[name] = value
+
+    def _save_cfg(self, name: str, value):
+        """Write ONE setting to the config, and to this window's cfg. Only that
+        one: the fresh config can hold an account or a key saved elsewhere since
+        this screen opened, and saving self.cfg whole would write them back as
+        they were when it opened."""
+        try:
+            fresh = CB.config.load()
+            fresh[name] = value
+            CB.config.save(fresh)
+        except Exception:                                   # noqa: BLE001
+            pass
+        self.cfg[name] = value
+
+    def _missing_key(self) -> str:
+        """Why this search cannot start, naming the key the chosen source
+        needs — said before a worker spends a thread finding out."""
+        if self._source == "apollo" and not self._key("apollo_api_key"):
+            return i18n.t("Searching Apollo needs an Apollo API key — add it "
+                          "under Keys & claims, or search with Exa instead.")
+        if self._source == "exa" and not self._key("exa_api_key"):
+            return i18n.t("Searching with Exa needs an Exa API key — add it "
+                          "under Keys & claims, or search with Apollo instead.")
+        return ""
 
     def _seller_domains(self) -> list:
         """The seller's own site(s), pulled from the offer text and the claims
@@ -654,8 +945,8 @@ class LeadsWorkbench(QWidget):
             self._cockpit.set_empty_text(
                 i18n.t("{n} leads sourced — not qualified").format(
                     n=len(res.all_leads)),
-                i18n.t("Their sheet is saved — open it under Lists. To qualify and "
-                       "draft, press New search, then Prepare outreach."))
+                i18n.t("Their sheet is saved — open it under Lists. Tick rows to "
+                       "find their e-mails, or to qualify and draft."))
         else:
             self._cockpit.set_empty_text()
         self._cockpit.set_dossiers(res.dossiers, self._drafts,
@@ -665,13 +956,23 @@ class LeadsWorkbench(QWidget):
         self._fold_setup(False)
         skipped = getattr(res, "skipped_seen", 0) or 0
         if leads_only:
-            text = i18n.t("Sourced {n} new leads · enriched · sheet saved "
-                          "(no Groq used).").format(n=len(res.all_leads))
+            # What it found and what it did NOT spend — the whole point of the
+            # cheap run, said where the owner reads the result. A list that HAS
+            # addresses (an older run, or a sheet that came with them) must not
+            # claim nothing was looked up.
+            blank = not any((l.email or "").strip() for l in res.all_leads)
+            text = (i18n.t("Found {n} people · sheet saved · no e-mail lookups, "
+                           "no Groq.") if blank else
+                    i18n.t("Found {n} people · sheet saved · no Groq used.")
+                    ).format(n=len(res.all_leads))
             if skipped:
                 text += "   ·   " + i18n.t("{n} already pulled, skipped").format(n=skipped)
             outside = self._outside_bit(res)
             if outside:
                 text += "   ·   " + outside
+            apollo = self._apollo_bit(res)
+            if apollo:
+                text += "   ·   " + apollo
             self._summary.setText(text)
         else:
             self._summary.setText(self._run_summary(res, self._drafts))
@@ -721,6 +1022,88 @@ class LeadsWorkbench(QWidget):
                                            getattr(self._res, "all_leads", None))
         self._save_session()                # verify changed each lead's e-mail status
         self._status.setText(i18n.t("Verification done — statuses updated."))
+        # Same deal as Find e-mails: the sheet already on disk is the
+        # deliverable, so a status a verify pass just confirmed belongs in it
+        # too, not only on screen.
+        if self._res is not None and (self._res.dossiers
+                                      or getattr(self._res, "all_leads", None)):
+            self._start_export(self._autosave_dir(), announce=False)
+
+    def _find_emails(self, dossiers):
+        """"Find e-mails" — get the checked people an address and check it.
+
+        A Find-people run brings back nobody's address on purpose: finding
+        people costs only the searches, finding their addresses costs a lookup
+        per company and a credit a head. So this is where that is spent, on the
+        rows the owner picked (or on a sheet they exported and brought back)."""
+        if not dossiers or self._jobs:
+            return
+        from addons.leads.cockpit import needs_email
+        # A confirmed address has nothing left to find; asking again only
+        # spends credits on an answer we already have.
+        leads = [d.lead for d in dossiers if needs_email(d)]
+        if not leads:
+            self._status.setText(i18n.t(
+                "Those leads already have a verified address."))
+            return
+        if not self._confirm_emails(len(leads)):
+            return
+        self._set_running(True)
+        self._status.setText(i18n.t("Finding e-mails for {n} selected…").format(
+            n=len(leads)))
+        # No verify_limit: the rail's Verify is a budget for a RUN, which picks
+        # its own top slice. These rows were ticked by hand, so every one of
+        # them is checked — a guessed address nobody confirmed is worse in the
+        # sheet than no address at all.
+        self._email_worker = LeadsEmailWorker(leads, self.cfg)
+        self._email_worker.progress.connect(lambda i, n, l: self._status.setText(
+            i18n.t("Finding e-mail domains…") if not i else
+            i18n.t("Checking {i} of {n}: {who}").format(i=i, n=n, who=l.display())))
+        self._email_worker.done.connect(self._on_emails_found)
+        self._email_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._email_worker.start()
+
+    def _confirm_emails(self, n: int) -> bool:
+        """Each lead costs an Exa domain lookup and, where the free verifiers
+        can't confirm it, a finder credit — and every ticked row is checked,
+        nothing is sampled — so a batch past ten asks first, and names whose
+        credits. This question is the only cap on the spend. Tests patch this."""
+        if n <= 10:
+            return True
+        who = i18n.t("verifier credits")
+        if self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked"):
+            who = i18n.t("verifier credits, and Apollo credits where Apollo is "
+                         "the finder")
+        answer = QMessageBox.question(
+            self, i18n.t("Find e-mails"),
+            i18n.t("Find and check e-mails for {n} leads? Prism looks up each "
+                   "company's real domain, then confirms every one of the {n} "
+                   "addresses — free verifiers first, then {who}.").format(
+                       n=n, who=who))
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _on_emails_found(self, found: int, verified: int):
+        """Fold the addresses in: the rows re-render with their new Status
+        (Verified / Guessed / Catch-all / No email) and the session keeps them,
+        so the next thing the owner does starts from what this cost."""
+        idle = self._job_done()
+        if self._res is not None:
+            self._cockpit.set_dossiers(self._res.dossiers, self._drafts,
+                                       getattr(self._res, "all_leads", None))
+        self._save_session()                # the addresses are the run's value now
+        if idle:
+            self._set_running(False)
+        self._status.setText(i18n.t(
+            "Found {n} new address(es) — {v} verified.").format(
+                n=found, v=verified))
+        # The sheet already sitting in the autosave folder is the deliverable —
+        # rewrite it with the addresses this run just found, the same way a
+        # finished run writes it the first time, so the owner never has to
+        # press Export sheets just to see what Find e-mails cost.
+        if self._res is not None and (self._res.dossiers
+                                      or getattr(self._res, "all_leads", None)):
+            self._start_export(self._autosave_dir(), announce=False)
 
     def _qualify_selected(self, dossiers):
         """Qualify & draft the checked people the run sourced but never
@@ -920,6 +1303,9 @@ class LeadsWorkbench(QWidget):
         outside = self._outside_bit(res)
         if outside:
             bits.append(outside)
+        apollo = self._apollo_bit(res)
+        if apollo:
+            bits.append(apollo)
         no_email = c(lambda d: d.status == "ok" and not (d.lead.email or "").strip())
         if no_email:
             bits.append(i18n.t("{n} no-email").format(n=no_email))
@@ -933,6 +1319,22 @@ class LeadsWorkbench(QWidget):
             cov += i18n.t(" ({n} source-errors)").format(n=sig_err)
         bits.append(cov)
         return "   ·   ".join(bits)
+
+    @staticmethod
+    def _apollo_bit(res) -> str:
+        """"Apollo: 240 found · 25 revealed (about 25 credits)" — what the run
+        cost, in the only unit Apollo bills in. Searching is free; a revealed
+        person is a credit, so the owner can read the bill off the summary
+        instead of the Apollo dashboard. "" for a run that was not Apollo's."""
+        stats = getattr(res, "apollo_stats", None)
+        if not isinstance(stats, dict):
+            return ""
+        found = int(stats.get("searched") or 0)
+        revealed = int(stats.get("revealed") or 0)
+        if not (found or revealed):
+            return ""
+        return i18n.t("Apollo: {n} found · {m} revealed (about {m} credits)").format(
+            n=found, m=revealed)
 
     @staticmethod
     def _outside_bit(res) -> str:
@@ -1078,11 +1480,16 @@ class LeadsWorkbench(QWidget):
 
     def _set_running(self, running: bool, sending: bool = False):
         for w in (self._pick, self._offer, self._claims, self._limit,
-                  self._verify_limit, self._prepare, self._leads_only,
+                  self._verify_limit, self._prepare, self._prepare_all,
                   self._send_btn, self._export_btn, self._mode_sheet,
                   self._mode_icp, self._filters, self._target, self._exa,
+                  self._apollo, self._src_apollo, self._src_exa,
                   self._skip_seen):
             w.setEnabled(not running)
+        # …except a source Apollo has already refused: re-enabling it here would
+        # hand the owner a button that only leads to the same 403.
+        if self._apollo_blocked:
+            self._src_apollo.setEnabled(False)
         # The cockpit's bulk bar starts sends and verifies too. Disabling the bar
         # itself holds its buttons off even when _refresh_bulk re-arms them.
         cockpit = getattr(self, "_cockpit", None)
@@ -1213,6 +1620,13 @@ class LeadsWorkbench(QWidget):
         excluding India."""
         mode = params.get("mode") or "sheet"
         self._set_mode("sheet" if mode == "sheet" else "icp")
+        # Always the source that run asked — a session saved before Prism could
+        # ask Apollo carries none, and can only have been an Exa run. Leaving
+        # the rail on its own default (Apollo, whenever that key is set) would
+        # re-point a search the owner reopened to repeat at a database that
+        # bills per person.
+        self._set_source(params["source"]
+                         if params.get("source") in ("apollo", "exa") else "exa")
         if params.get("sheet_path"):
             self._path = params["sheet_path"]
             self._file_lbl.setText(os.path.basename(self._path))
@@ -1291,7 +1705,7 @@ class LeadsWorkbench(QWidget):
 
     def use_saved_search(self, search_id: str):
         """"Use search" on the Saved searches tab: its filters and settings go
-        back in the rail, ready for Prepare outreach — never run on their own."""
+        back in the rail, ready for Find people — never run on their own."""
         if self._jobs:
             self._status.setText(i18n.t(
                 "Wait for the current job to finish, then use the search."))
@@ -1318,7 +1732,7 @@ class LeadsWorkbench(QWidget):
         self._active_search_id = record["id"]
         self._active_search_filters = record["filters"]
         self._status.setText(i18n.t(
-            "Loaded “{name}” — press Prepare outreach to run it.").format(
+            "Loaded “{name}” — press Find people to run it.").format(
                 name=record["name"]))
 
     def _delete_saved_search(self, search_id: str):

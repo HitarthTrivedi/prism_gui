@@ -10,6 +10,328 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 36 — "Email automation" is named "Email inquiry automation"
+
+The owner's ask, plain: rename it. "Email automation" was the add-on's
+label since it shipped (`addons/inquiry/addon.py`) — read the mailboxes,
+register inquiries, quote, chase. The name never said what it automates,
+and the app also has a separate "Email" add-on (the draft-and-send
+screen), so the two sat one word apart in every list that shows both.
+
+Only the label moved. The add-on's key (`inquiry`) and its licence feature
+(`inbox`) are unchanged, per the same rule the label's own comment already
+stated: "the SKU and the wiring did not move, only the name on the shelf."
+61 occurrences across 20 files — the rail, Home, the working screen's own
+header and dialogs, the setup wizard, the guided tour, the support
+articles, `--features` mint hints, and the golden-string assertions in
+`tests/test_inquiry_screen.py` and `tests/test_email_automation.py`.
+
+`devtools/extract_strings.py` re-run: 7 phrases removed, the same 7 added
+back under the new name — a clean swap, nothing else touched.
+
+---
+
+# Round 35 — a BOQ/BOM from an attached file is a guardrail again, not a second skills module
+
+Round 31's own small "Prism skills" loader was dropped on the 12 Sep pull
+in favour of the far more complete house-standards system a teammate
+landed the same day under the same module name (`core/skills.py`,
+`skills/boq-writeup/`, `skills/bom-parts/`) — the right call, and it stayed
+that way. But the thing the owner had actually asked for was gone with it:
+the owner's report of 11 Sep, that the same BOQ-from-a-drawing request
+typed to Claude by hand got the document in a fraction of the tokens a
+routed Prism run spent, because the routed run also answered with
+Think-it-through and Sum-it-up. The teammate's skills answer a different
+question — how a BOQ is *written* (measurement traceability, IS 1200
+rounding, unit rules) — and are flagged `stages: []`, so they were never
+wired to prune a plan's *stages* in the first place. Nothing there was
+going to fix this.
+
+**Rebuilt as a router guardrail instead of a second skills module**
+(`apply_boq_file_guardrail`, the same deterministic, no-LLM-judgement
+mechanism `apply_make_guardrail` and `apply_studio_guardrail` already use).
+With an attachment present and a BOQ/BOM word in the request, it turns off
+brains, leads, visual, summary, development, presentation, media, audio,
+design and artwork, and turns CONTENT into the one document step —
+kind `file`, briefed with the attached file's name and the requested
+format (default .docx). RESEARCH is left exactly as the planner decided,
+so "and research the company too" in the same breath still gets its
+research. Wired into `route()` right before the skills pass, so a skill is
+only ever offered a stage that is actually going to run — and on the
+owner's exact request the two now compose cleanly: the guardrail prunes to
+research + content, and the teammate's own skills system attaches
+`research-report` and `pdf-document` to those two, unchanged and untouched.
+
+This cannot collide the way Round 31's did: it touches no file under
+`skills/`, and `core/skills.py` is byte-identical to what the teammate
+shipped, verified by diff before and after this change.
+
+Tests: `tests/test_boq_file_guardrail.py` (14, new).
+
+---
+
+# Round 34 — a settling entrance animation is not the same as a broken layout
+
+The accent-colour bug in Round 33 was real and is fixed; the very next
+render hit a different wall — "an image (img, 719x1937) runs off the
+frame", no MP4 written, on a reel that had passed every per-scene check
+clean. Loaded straight into a real browser (the saved
+`~/.prism/runs/reel_*.json` — see the new memory on that), the truth
+settled it in one measurement: scene 1's photo sits in
+`.s1-photo{...;overflow:hidden}` at exactly `(367, 0, 713, 1920)` — dead
+inside the 1080x1920 frame. The `<img>` inside it carries a slow scale-in
+entrance (1.06 → 1.0 over the scene). Measured at the check's own point
+(75% into the scene), the animation had not quite settled —
+`transform: matrix(1.00868, …)`, 0.868% still oversized — giving the
+element's own unclipped box as `(364, -8, 719, 1937)`: a few pixels past
+every edge. Nothing the viewer ever actually sees leaves the frame; the
+wrapper clips it. `window.__check()`'s image-boundary test measured the
+image directly and never asked whether anything contained it.
+
+**Now**: before flagging an image, the check walks from it up to the
+scene root; if any ancestor clips overflow (`overflow: hidden` or `clip`,
+on either axis), the ANCESTOR's own box is judged instead — the box that
+actually decides what paints, and one that a moving child never changes.
+An image with no such wrapper, or one whose wrapper is itself off frame,
+is still caught exactly as before; `overflow: visible` or `auto` still
+does not count, since neither actually hides anything.
+
+Tests: `tests/test_offframe_clip_check.py` (8, real-browser, gated behind
+`PRISM_RUN_RENDER_TESTS=1` the way `test_studio_v2.py` already is) —
+reproduces the owner's exact scene geometry (copy and picture replaced by
+placeholders; the client's words do not belong in this repository),
+confirms the animation genuinely still overshoots at the check point
+(so the passing test isn't passing by accident), and confirms a
+no-wrapper or wrapper-itself-off-frame image is still caught.
+
+---
+
+# Round 33 — the accent-colour rule is actually checked before filming, not just after
+
+The owner's run of 14 Sep 2026: a routed Studio reel wrote and filmed every
+scene, then failed on export — "the client's accent colour #3a713a appears
+nowhere in the design — use var(--accent) for the element the eye goes to
+first in each scene, or the reel is not in their colours" — with no MP4
+written. Minutes of writing and filming, thrown away at the last step.
+It happened again the next day with a different reel and #4ab50a, which is
+what turned up the second, deeper cause below.
+
+**First cause: the per-scene correction loop never checked the rule at
+all.** The design's turn-one prompt tells the model the rule and says "the
+design is checked for this before it is filmed" (`brand_block`) — but
+nothing ever had. `build_spec()` already catches and sends back layout
+faults and missing assets one scene at a time, cheaply, while the model is
+still on that scene — but its check-spec was
+`{"design": design, "scenes": [sc], "_assets": …}`, with no `"brand"` key.
+`brand_faults()` reads `spec.get("brand")`; with nothing there it always
+saw an empty accent and returned `[]`. The rule was checked for the first
+time at `render()`'s own gate, by which point every scene had already been
+written and the whole reel already filmed — and that gate does not
+correct, it refuses to publish a flawed MP4.
+
+*Fixed:* `build_spec()` takes the client's measured `brand` and, once the
+LAST scene is written, checks `brand_faults()` cumulatively over the shared
+stylesheet and every scene written so far — cumulative, not per-scene,
+because the rule only needs the colour to appear *somewhere* in the reel
+(the same thing `render()`'s own gate requires), so an early scene that
+legitimately carries no accent element (a full-bleed picture, a
+kicker-only card) is never wrongly flagged. When it is still missing, it
+goes through the exact same one-shot "send it back, keep whichever answer
+is better" correction every other layout fault already gets.
+
+**Second cause, found the next day on a different reel: the colour was not
+known yet at design time at all.** `#4ab50a` was real and the fix above
+was wired in — yet the same failure happened again. The saved spec proved
+it: none of the five filmed scenes, and no rule in the shared stylesheet,
+ever mentioned it. `studio_brand` — the value threaded into `build_spec()`
+above — is seeded once, early in `run()`, from a sample of the user's own
+raw attachment alone. On this run that attachment (a screenshot) sampled to
+nothing usable, and the pipeline had no research step to fall back to
+— so `studio_brand` stayed `{}` for the entire design conversation, and
+Round 33's own new check ran the whole time against an empty brand. The
+colour was only ever discovered by `_run_studio()`'s OWN render-time
+fallback, which samples `attachments + pipeline_files` — and by render
+time, `pipeline_files` already held the two pictures the Artwork stage had
+generated (Artwork runs before Design in this pipeline shape), and one of
+THOSE is what actually sampled to `#4ab50a`. The design conversation was
+never told; it was never even offered the images that made the colour
+found-able.
+
+*Fixed:* the same sample `_run_studio()` already falls back to at render
+time is now tried once more, earlier — right before the design prompt is
+built, if nothing has supplied a brand yet — over the SAME set
+(`attachments + pipeline_files`), which by then already includes whatever
+the Artwork stage has made. Extracted as one shared function
+(`_brand_from_images`) so both call sites — the new early one and
+`_run_studio()`'s existing render-time backstop — sample the same way, and
+so it doesn't just feed the check silently: it also fills `brand_block()`,
+so the design conversation is told the real colour from turn one, not only
+corrected against it on the last scene. Research still wins when it has an
+answer — a client's own published colours over a heuristic photo-sample —
+this fallback only runs when nothing else, research included, has supplied
+one yet.
+
+`render()`'s hard gate is unchanged and stays as the backstop either way: a
+correction that does not take, or a colour that genuinely can't be
+sampled from anything on hand, still stops a flawed MP4 from shipping.
+
+Not fixed in either pass, and said plainly rather than left quiet: the Reel
+add-on's own dialog (`addons/reel/dialog.py`) lets a person type a brand
+colour by hand; that value is applied to the spec only after `build_spec()`
+has already run, so a hand-typed colour with no attachment or research
+behind it still is not caught until the final gate. Both routed-pipeline
+runs this bug was reported from are now fully covered — one by the measured
+brand reaching the check, the other by the check itself existing.
+
+Tests: `tests/test_scene_by_scene.py` (7, `TheAccentColourIsCheckedBeforeTheReelIsFilmed`), `tests/test_studio_brand_timing.py` (8, new).
+
+---
+
+# Round 32 — NotebookLM makes the video from the run's own material
+
+The owner's run of 13 Sep 2026: "summarize this all in one ideation and
+generate me a google notebook lm video", nine documents attached. Prism
+opened NotebookLM, created an empty notebook, typed nothing, and reported
+"couldn't find the 'Add source → Copied text' option". Two causes: the
+runner looked for "Copied text" without ever pressing "Add source", so it
+searched a dialog that was not open; and NotebookLM was not offered for
+the Video & Reels step at all, so it had been put on the Voice & Audio
+step with a "voice-over" line for a request that said "video".
+
+Read live that day by attaching Playwright to Prism's own signed-in Chrome
+(the run's Chrome keeps a debugging port open): notebooklm.google.com now
+redirects to notebook.google.com ("Gemini Notebook"); the Add-sources
+dialog has "Upload files" (the OS picker — no `<input type=file>` exists on
+the page, which is why the generic upload said "no file-upload field"),
+"Websites", "Drive" and "Copied text" (a "Pasted text" box and "Insert");
+the chat is `textarea[aria-label='Query box']`; each Studio card ("Video
+Overview", "Audio Overview", …) carries a pencil that opens "Customize":
+Video = Format {Short, Explainer} + a focus box; Audio = Format {Deep Dive,
+Brief, Critique, Debate} + Length {Short, Default, Long} + a focus box;
+both end in "Generate now". The full notes sit above `_run_notebooklm`.
+
+**Now** (`core/automation.py`, `core/agents.py`):
+
+* NotebookLM is a choice for **Video & Reels** as well as Voice & Audio,
+  and a maker (`_MAKES`), so the planner briefs it to build the overview.
+* The runner: a fresh notebook; every earlier step's **full** answer and
+  every readable attachment pasted in as a "Copied text" source (a source
+  tool wants the material, not the four-line hand-off — `_nb_sources`);
+  wait for the sources to be read; then the card's Customize dialog —
+  **the person's words decide video vs audio over the step** (`_nb_wants`),
+  long-form is the default (an Explainer video; a Long audio when the words
+  say so — `_nb_format`), the focus box gets the person's words and the
+  step's line (`_nb_focus`); "Generate now"; wait up to 25 minutes
+  (`generate_wait`, Stop honoured) for the render; then the item's menu →
+  Download, captured through the same scratch-folder path every
+  click-to-download file uses (`_capture_download`, factored out of
+  `_harvest_via_download`), saved to the run's artifacts and handed to the
+  next step. An ordinary step asks the notebook's chat instead.
+* Attachments with no readable text (pictures) are named in the log as not
+  sent; the page has no upload field to give them to.
+* The registry entry says `upload_selector=""`, which `_upload_files` now
+  reads as "this tool takes files another way" — no more "9 attachment(s)
+  were NOT sent; it will answer blind" on every NotebookLM step.
+
+Unverified, and said so in the code: what a finished overview looks like in
+the Studio list and where its Download control sits (nothing was generated
+during the probe — a Video Overview spends the account's daily allowance).
+The wait ends when "generating" gives way to a listed item, or a new
+menu/download control appears; if the download is not found the answer
+names the notebook so the person can fetch it by hand.
+
+Tests: `tests/test_notebooklm.py` (18).
+
+---
+
+# Round 31 — the tool gets the words, one line, and four lines from before
+
+The owner's strict instruction (11 Sep 2026). The same PDF and the same
+target — a BOQ for K J Pharmatech — put to Claude by hand as one line with
+the file attached came back in a fraction of the tokens. Put through Prism,
+the message Claude received was a banner ("WHAT THE PERSON ACTUALLY ASKED
+FOR"), a paragraph on why the words above win, the extracted PDF text, the
+whole Perplexity research report (up to 8,000 characters of it), a 250-word
+"Act as a senior technical writer" prompt with role, deliverable spec,
+quality bar and non-goals, and a hand-off rule sheet — and the chat ran out
+of tokens before the document existed. "AIs now are very understanding; they
+don't need complex prompts, they need simple prompts."
+
+**The message a tool gets now** (`core/automation.py`):
+
+* the person's own words, bare — no banner, no dashes, no paragraph about
+  summaries (`_intent_block` returns the text and a blank line);
+* the attachment line as before (a file that went up is pointed at, not
+  pasted);
+* `From the earlier step (Look things up):` and at most **four lines** —
+  the lines under the earlier answer's `HANDOFF FOR <tool>` heading
+  (`_handoff_of`; last heading wins; an answer with no heading falls back
+  to a tail capped at 1,200 characters, down from 8,000). A tool with its
+  own filter block (Apollo) keeps every line of it; the Sum-it-up step gets
+  each earlier step's four lines rather than the last step's alone;
+* the step's one line from the planner;
+* one closing sentence: what to hand back (`contract.deliverable_line`,
+  unchanged) and, for a step that is not the last, *"At the end add a
+  section headed 'HANDOFF FOR X': at most 4 lines with the facts and
+  decisions X needs — only those lines go forward. No questions back."*
+  The last step gets *"Give me the finished result — no questions back."*
+  Self-directing tools (Perplexity-style) are asked the same in two
+  sentences that still invite depth.
+
+The person still receives every step's full answer in the run's output;
+only what travels to the **next tool** is cut to the hand-off.
+
+**The planner writes one line per step** (`core/router.py`): "ONE line of
+at most 25 words, in plain language, saying what this step does towards the
+person's request" — on the first plan and on the rewrite for a confirmed
+plan, which until now still carried the old ROLE / CONTEXT / DELIVERABLE
+SPEC / QUALITY BAR / NON-GOALS, 120–250 words rule and the HAND-OFF rule.
+The floor under a step nobody wrote a prompt for is one line too:
+`For this step: write it up — <the request>`. The plain step names
+(`STEP_NAMES`) moved to `core/agents.py` so the router can use them.
+
+Measured on the owner's BOQ request with Perplexity's real hand-off: the
+message to Claude is under 1,000 characters where it was over 9,000.
+
+Tests: `tests/test_one_line_prompts.py` (15) pins the shape; the six tests
+that pinned the old wording were changed in the same commit.
+
+**Prism skills** (`core/skills.py`, new; `docs/PRISM_SKILLS.md`). The
+owner asked for the BOQ prompt formation as a skill *for Prism* — not one
+of Claude's. A skill is one Markdown file with `name:` and `when:` front
+matter and a body that says which steps run and the one line each gets.
+Read from `~/.prism/skills/` (yours, first) and `prism_terminal/skills/`
+(shipped); a skill applies on a whole-word trigger in the person's own
+request and its body goes to the planner on the first plan and on the
+confirmed-plan rewrite. The first one ships:
+`skills/boq-from-a-file.md` — a BOQ/BOM from any file the person drops in is one
+document step (kind = file) with an optional four-line research hand-off
+in front, and no brains, summary or picture step. Bodies are capped at
+1,500 characters and a broken file is skipped, so a skill can neither
+become a rule sheet nor stop a plan. Tests: `tests/test_prism_skills.py`.
+
+The first run against it (owner, 11 Sep) came back with a Think-it-through
+and a Sum-it-up step the skill's body had said not to run — the planner
+reads advice as advice. So a skill's `steps:` line is now **binding**
+(`skills.apply`, called in `router.route` after the guardrails): a stage not
+listed is switched off, a stage marked `?` is left to the planner, a stage
+without the mark is switched on, and `kinds:` fixes what a step must
+produce. The BOQ skill says `steps: research?, content` and
+`kinds: content=file`.
+
+**Only this task's files go up** (`_clear_staged_attachments`). The same
+run sent Claude the shoe-rack PDF *and* a deck outline from a reel run days
+earlier. Prism never uploaded the deck — the writing step sends only the
+person's own files — but claude.ai keeps an unsent draft, attachment chips
+included, and shows it again on the next new chat; a run that staged a file
+and stopped before sending left the chip for the next run to send. Every
+stage now presses the remove control on every chip in the composer before
+its own upload, and the log says how many it cleared. Generic by design
+(the control's accessible name says remove/delete/dismiss; the send button
+is excluded), so it does not depend on either tool's class names.
+
+---
+
 # 1.5.8 — skills: house standards for each kind of job, and a check on the answer
 
 **Prism carries skills** (`core/skills.py`, `prism_terminal/skills/`). A skill

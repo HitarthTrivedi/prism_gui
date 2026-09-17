@@ -1,4 +1,4 @@
-"""Email automation — the working screen.
+"""Email inquiry automation — the working screen.
 
 The three phases the customer described, in the order they happen and visibly
 separated, because the difference between them is the difference between
@@ -234,7 +234,7 @@ class _TableOrEmpty(QStackedWidget):
     All five tabs of this screen open empty and stay empty until a mail check
     runs, and an empty QTableWidget is a column header over several hundred
     pixels of blank white. That is the screen a customer meets the first time
-    they open Email automation, and it says nothing about what will appear
+    they open Email inquiry automation, and it says nothing about what will appear
     there or how to make it appear.
 
     Driven off the model's own signals rather than by editing the five places
@@ -866,7 +866,7 @@ class InquiryDialog(QWidget):
         # No subtitle: the sentence at the top of each tab says what THAT
         # list is for, which is the only sentence the owner needs, and the
         # header band's 20px are worth more as table rows.
-        self.header = C.PageHeader(i18n.t("Email automation"), "")
+        self.header = C.PageHeader(i18n.t("Email inquiry automation"), "")
         root.addWidget(self.header)
 
         self.body = QVBoxLayout()
@@ -987,7 +987,7 @@ class InquiryDialog(QWidget):
         # switch screens, the same convention every other embedded panel's
         # `navigate` signal already uses.
         footer_row.addWidget(self.button(
-            i18n.t("Back to Email automation"), "secondary",
+            i18n.t("Back to Email inquiry automation"), "secondary",
             on_click=lambda: self.navigate.emit("inquiry")))
         root.addLayout(footer_row)
 
@@ -1470,7 +1470,7 @@ class InquiryDialog(QWidget):
         item = self._selected_reply()
         if item is None:
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Pick a reply from the list first."))
             return
         # Two replies on the same inquiry can both be waiting here at once —
@@ -1500,7 +1500,7 @@ class InquiryDialog(QWidget):
                                (item.row or {}).get("Inquiry no", ""))
         if target is None:
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("That inquiry is no longer in the register."))
             return
         register.mark_reply(target, intent)
@@ -1853,7 +1853,7 @@ class InquiryDialog(QWidget):
             return
         if not is_ready(self.cfg):
             answer = QMessageBox.question(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("This needs your mailbox set up first — it takes about "
                        "two minutes and only happens once.\n\nSet it up now?"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
@@ -2177,7 +2177,7 @@ class InquiryDialog(QWidget):
             from dialogs.problem_dialog import show_problem
             show_problem(self, message)
         except Exception:
-            QMessageBox.warning(self, i18n.t("Email automation"), message)
+            QMessageBox.warning(self, i18n.t("Email inquiry automation"), message)
 
     def _checked(self, result, remember: bool = True):
         """Render one result — a single mailbox's, or the whole walk's merge.
@@ -2670,7 +2670,7 @@ class InquiryDialog(QWidget):
         row = self._current_row()
         if row is None:
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Pick an inquiry from the list first."))
         return row
 
@@ -2986,7 +2986,7 @@ class InquiryDialog(QWidget):
         row already present is recognised and skipped."""
         if not self._root():
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Set up a mailbox and a folder first."))
             return
         path, _ = QFileDialog.getOpenFileName(

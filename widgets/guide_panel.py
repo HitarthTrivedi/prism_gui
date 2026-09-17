@@ -44,7 +44,7 @@ class GuidePanel(Page):
          "Every stage is shown as a plain-English step. Drop any you don't "
          "want, or send a step to a different tool."),
         ("grid", "The add-ons are purpose-built",
-         "Email automation, BOQ and Email are dedicated tools for recurring "
+         "Email inquiry automation, BOQ and Email are dedicated tools for recurring "
          "jobs — they don't need a plan, just your files."),
         ("globe", "Prism's own language, and the AI's, are separate",
          "Set them independently in Settings — a Gujarati-speaking owner may "
@@ -69,7 +69,7 @@ class GuidePanel(Page):
          "Every tool Prism can drive, and which stage each one runs."),
         ("runs", "clock", "History",
          "Everything you have run, and what came back."),
-        ("inquiry", "inbox", "Email automation",
+        ("inquiry", "inbox", "Email inquiry automation",
          "Inquiries logged, quoted and followed up."),
         ("boq", "file", "BOQ",
          "Quantities off a drawing or a written spec."),

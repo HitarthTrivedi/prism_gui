@@ -22,12 +22,12 @@ wrap (widgets.controls.FlowLayout) instead of clipping.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractAnimation, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractAnimation, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QStyle, QStyleOption, QToolButton, QVBoxLayout,
-    QWidget,
+    QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOption, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 import i18n
@@ -75,6 +75,30 @@ _STATIC = {
 _PLACE_FACETS = frozenset({"locations", "company_hq"})
 _MAX_ROWS = 6
 _MAX_LEN = 120           # filters.py keeps a value to this; so does the input
+# What the "?" walkthrough calls each facet (addons/leads/help.py). A key, not
+# the facet name, because the tour's script must survive a facet being renamed
+# in prospector.filters — and because "facet_years" reads better in a script
+# than "years_in_role".
+_HELP_FACETS = {
+    "facet_locations": "locations",
+    "facet_job_titles": "job_titles",
+    "facet_seniority": "seniority",
+    "facet_functions": "functions",
+    "facet_industries": "industries",
+    "facet_headcount": "headcount",
+    "facet_revenue": "revenue",
+    "facet_companies": "companies",
+    "facet_company_hq": "company_hq",
+    "facet_years": "years_in_role",
+    "facet_keywords": "keywords",
+}
+# Every key help_targets() can answer. Public because the rail these live in is
+# not this panel's to unfold — the workbench does that for them (help_reveal).
+HELP_KEYS = frozenset(_HELP_FACETS) | {
+    "filters_head", "count_badge", "clear_all", "save_search",
+    "similar_titles", "facet_changed_jobs",
+}
+_REVEAL_PAD = 24         # a revealed target is scrolled this clear of the edge
 # The width a chip elides against before it has been laid out: the rail's
 # content width with its scrollbar showing (cockpit._RAIL_W 320 - 9 - 2 x 16).
 _RAIL_CONTENT = 279
@@ -101,6 +125,37 @@ def static_suggest(facet: str, text: str) -> list:
     first = [s for s in pool if s.casefold().startswith(fold)]
     then = [s for s in pool if fold in s.casefold() and not s.casefold().startswith(fold)]
     return first + then
+
+
+def reveal_in_scroll(widget) -> None:
+    """Scroll whatever scroll area a widget sits in until it can be seen.
+
+    Neither this panel nor the workbench owns the rail that scrolls them — the
+    cockpit does — so a target is found by walking up from the widget instead
+    of by holding a reference to somebody else's scroll area."""
+    parent = widget.parentWidget() if widget is not None else None
+    while parent is not None:
+        if isinstance(parent, QScrollArea):
+            parent.ensureWidgetVisible(widget, 0, _REVEAL_PAD)
+            return
+        parent = parent.parentWidget()
+
+
+def _on_screen(target, root) -> bool:
+    """Whether a help target is really there to point at: nothing in the chain
+    up to `root` is hidden, and a region target has a box. A target that is not
+    on screen is left out of help_targets() — the tour then skips that step
+    rather than ringing a stale rectangle."""
+    widget, rect = target if isinstance(target, tuple) else (target, None)
+    if widget is None:
+        return False
+    # `root` answering for a region of ITSELF is on screen by definition — the
+    # tour is asking this widget where its own parts are, and whoever hosts it
+    # decides whether it is showing. (No widget is its own ancestor, so
+    # isVisibleTo would walk past it to a window that is hidden until shown.)
+    if widget is not root and not widget.isVisibleTo(root):
+        return False
+    return rect is None or not rect.isEmpty()
 
 
 def _sheet() -> str:
@@ -804,6 +859,68 @@ class FilterPanel(QWidget):
         for name in self._sections:
             self._refresh_rows(name)
 
+    # ── the guided walkthrough points at these ────────────────────────────────
+    def help_targets(self) -> dict:
+        """The parts the "?" tour can ring, by the key it asks for: a real
+        widget already on screen, or (widget, QRect) where the target is a
+        region of one. Nothing is built here — a step is drawn around the
+        control the owner is looking at, not a copy of it."""
+        out = {
+            "filters_head": (self, self._head_rect()),
+            "count_badge": self._badge,
+            "clear_all": self._clear_btn,
+            "save_search": self._save_btn,
+            "similar_titles": self._similar,
+            "facet_changed_jobs": self._jobs,
+        }
+        for key, facet in _HELP_FACETS.items():
+            out[key] = self._sections[facet]
+        # The badge and Clear all appear only once a filter is set, and the
+        # similar-titles box only while Job titles is open.
+        return {k: t for k, t in out.items() if _on_screen(t, self)}
+
+    def help_reveal(self, key: str) -> None:
+        """Make one target reachable: open the facet the step is about and
+        scroll the rail to it. Opening a section shows what is already chosen —
+        it never edits the spec, and the section is left open afterwards, the
+        way it would be if the owner had clicked the header themselves."""
+        facet = _HELP_FACETS.get(key)
+        if key == "similar_titles":
+            facet = "job_titles"            # the box lives in that facet's editor
+        section = self._sections.get(facet)
+        if section is not None and not section.is_open():
+            section.set_open(True)
+        # The header is a region, so the rail is scrolled to the widget at its
+        # left instead: asked for the whole panel, a scroll area centres it and
+        # the header ends up above the rail's top edge.
+        target = (self._head_kick if key == "filters_head"
+                  else self.help_targets().get(key))
+        if isinstance(target, QWidget):
+            reveal_in_scroll(target)
+
+    def help_snapshot(self) -> frozenset:
+        """The facets that are open. A walk opens all eleven, one step at a
+        time, and an owner who kept two open should get two back."""
+        return frozenset(name for name, section in self._sections.items()
+                         if section.is_open())
+
+    def help_restore(self, open_names) -> None:
+        if open_names is None:
+            return
+        for name, section in self._sections.items():
+            want = name in open_names
+            if section.is_open() != want:
+                section.set_open(want)
+
+    def _head_rect(self) -> QRect:
+        """The header row as a box in the panel's own coordinates. It is a
+        LAYOUT, not a widget, so the box is drawn from what it holds."""
+        rect = QRect()
+        for widget in (self._head_kick, self._badge, self._clear_btn, self._save_btn):
+            if not widget.isHidden():
+                rect = rect.united(widget.geometry())
+        return rect
+
     # ── building ──────────────────────────────────────────────────────────────
     def _build_header(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -811,6 +928,9 @@ class FilterPanel(QWidget):
         row.setSpacing(theme.SPACE_2 - 2)
         kick = QLabel(i18n.t("Lead filters").upper(), self)
         kick.setObjectName("fkick")
+        # Kept: the header is a layout, so the walkthrough draws its box from
+        # what it holds (_head_rect).
+        self._head_kick = kick
         row.addWidget(kick, 0, Qt.AlignVCenter)
         self._badge = _count_badge("fcount", self)
         row.addWidget(self._badge, 0, Qt.AlignVCenter)

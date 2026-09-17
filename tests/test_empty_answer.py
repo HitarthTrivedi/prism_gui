@@ -180,13 +180,13 @@ class TheCanvaEntryMatchesTheLivePage(unittest.TestCase):
 
 class TheHeaderIsShorterAndStillSaysWhatMatters(unittest.TestCase):
 
-    def test_the_rules_survive_the_trim(self):
+    def test_nothing_but_the_words_survives_the_trim(self):
         header = AU._intent_block("make a poster")
         if not header:
             self.skipTest("header builder is named differently")
-        self.assertIn("the words above win", header)
-        self.assertIn("must survive", header)
-        self.assertLess(len(header) - len("make a poster"), 420)
+        self.assertTrue(header.startswith("make a poster"))
+        # Round 31: no rules at all around the person's words.
+        self.assertLess(len(header) - len("make a poster"), 4)
 
 
 if __name__ == "__main__":

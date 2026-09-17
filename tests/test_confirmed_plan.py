@@ -155,7 +155,8 @@ class RewritingForTheConfirmedPlan(unittest.TestCase):
             out = R.brief_confirmed_plan("draw a poster of a spring", CFG, steps, ROUTING)
         for stage, tool, qs in out:
             self.assertEqual(len(qs), 1)
-            self.assertTrue(qs[0].startswith("Your ONLY task is:"))
+            self.assertTrue(qs[0].startswith("For this step:"))
+            self.assertLessEqual(len(qs[0].splitlines()), 1)
             self.assertIn("draw a poster of a spring", qs[0])
 
     def test_no_key_means_the_floor_without_a_call(self):

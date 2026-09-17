@@ -4,7 +4,7 @@ Pure functions over a plain dict. No Qt, no engine, no widgets -- the same
 shape, and for the same reason, as `inquiry_config.py` next door.
 
 Why this is a root module rather than something inside `addons/email/`:
-Email automation sends from these accounts too -- the quotation, the
+Email inquiry automation sends from these accounts too -- the quotation, the
 reminder, the win-back -- and no add-on may import another. Putting the
 readers in the Email add-on's package would make the Inquiry add-on depend
 on the Email add-on, which is the exact coupling the add-on split removes.
@@ -134,7 +134,7 @@ def account_block(cfg: dict, accounts: list[dict]) -> dict:
 def cfg_for_sender(cfg: dict, account: dict) -> dict:
     """A copy of `cfg` that sends as `account`.
 
-    The same overlay Email automation already uses to read several mailboxes
+    The same overlay Email inquiry automation already uses to read several mailboxes
     with a single-mailbox engine (`addons/inquiry/dialog.py:_check_account`,
     which sets `engine_cfg["inbox"]`). The engine keeps its one account per
     call and knows nothing about lists; the app fans out.

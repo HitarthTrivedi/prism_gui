@@ -119,7 +119,7 @@ class NoRegisterYet(unittest.TestCase):
     def test_a_configured_mailbox_offers_check_not_setup_again(self):
         """The real bug this class exists to describe, finally covered: a
         mailbox that connects and saves still has an empty register until
-        somebody actually checks it. Offering only "Set up Email automation"
+        somebody actually checks it. Offering only "Set up Email inquiry automation"
         here sent a working setup back into the setup sheet forever — Setup
         saves, returns to this same empty screen, nothing has read the
         inbox, the screen greets it again. The way out of THIS empty state
@@ -131,7 +131,7 @@ class NoRegisterYet(unittest.TestCase):
         buttons = [w for w in card.findChildren(QPushButton)]
         labels = [b.text() for b in buttons]
         self.assertIn("Check my mail now", labels)
-        self.assertNotIn("Set up Email automation", labels)
+        self.assertNotIn("Set up Email inquiry automation", labels)
         check_btn = next(b for b in buttons if b.text() == "Check my mail now")
         fired = []
         # "Check my mail now" fires check_requested, not open_dialog — the
@@ -146,7 +146,7 @@ class NoRegisterYet(unittest.TestCase):
         panel = InquiryPanel({})
         card = panel._not_set_up()
         labels = [b.text() for b in card.findChildren(QPushButton)]
-        self.assertIn("Set up Email automation", labels)
+        self.assertIn("Set up Email inquiry automation", labels)
         self.assertNotIn("Check my mail now", labels)
 
 
@@ -268,7 +268,7 @@ class ThePopulatedScreenAlwaysOffersTheWorkingDialog(unittest.TestCase):
         from addons.inquiry.panel import OPEN_LABEL
         panel = InquiryPanel(self.cfg)
         fired = []
-        # OPEN_LABEL ("Open Email automation") hands off with no check
+        # OPEN_LABEL ("Open Email inquiry automation") hands off with no check
         # implied — see InquiryPanel.check_requested for the one button
         # that's different (the front door's "Check my mail now").
         panel.open_dialog.connect(lambda tab: fired.append(tab))

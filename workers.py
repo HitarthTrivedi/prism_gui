@@ -620,7 +620,7 @@ class MotionWorker(_Worker):
             self.failed.emit(str(e))
 
 
-# ── Email automation ──────────────────────────────────────────────────────────
+# ── Email inquiry automation ──────────────────────────────────────────────────────────
 
 class InboxVerifyWorker(_Worker):
     """Find the mail server and check the password, off the UI thread.

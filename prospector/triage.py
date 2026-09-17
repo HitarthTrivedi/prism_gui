@@ -42,8 +42,12 @@ def _seniority(title: str) -> tuple[int, str]:
     return best, word
 
 
-def score_lead(lead, offer: str, roles: list | None = None) -> tuple[float, str]:
-    """0-100 fit score + a one-line reason. Higher = worth the expensive pass."""
+def score_lead(lead, offer: str, roles: list | None = None,
+               emails: bool = True) -> tuple[float, str]:
+    """0-100 fit score + a one-line reason. Higher = worth the expensive pass.
+
+    `emails=False` for a batch that has not been given addresses yet (a
+    Find-people run leaves them for later): see the reachability block."""
     reasons, score = [], 0.0
 
     # 1) Authority — does the title read like a budget owner? (max ~30)
@@ -63,10 +67,14 @@ def score_lead(lead, offer: str, roles: list | None = None) -> tuple[float, str]
             reasons.append("matches " + ", ".join(sorted(overlap)[:3]))
 
     # 3) Reachability / completeness (max ~25)
-    if (lead.email or "").strip():
-        score += 15
-    else:
-        reasons.append("no email")
+    # Only where an address is a FACT about the person. A run that has not
+    # fetched addresses yet leaves every lead blank, so these points (and the
+    # "no email" note on all of them) would score the flow, not the lead.
+    if emails:
+        if (lead.email or "").strip():
+            score += 15
+        else:
+            reasons.append("no email")
     if (lead.company or "").strip():
         score += 6
     if (lead.extra or {}).get("location"):
@@ -77,7 +85,13 @@ def score_lead(lead, offer: str, roles: list | None = None) -> tuple[float, str]
 
 def rank(leads: list, offer: str, roles: list | None = None) -> list:
     """Score every lead in place (fit_score + fit_reason) and return them
-    sorted best-first, so the caller can deep-qualify just the top slice."""
+    sorted best-first, so the caller can deep-qualify just the top slice.
+
+    Reachability is scored only when SOMEBODY in the batch has an address: a
+    sheet carries them, and an Apollo search reveals some — but a Find-people
+    run fetches none, and there "has an e-mail" would rank by an accident of
+    the flow (and print "no email" against all 300 people)."""
+    emails = any((getattr(lead, "email", "") or "").strip() for lead in leads)
     for lead in leads:
-        lead.fit_score, lead.fit_reason = score_lead(lead, offer, roles)
+        lead.fit_score, lead.fit_reason = score_lead(lead, offer, roles, emails)
     return sorted(leads, key=lambda l: l.fit_score, reverse=True)

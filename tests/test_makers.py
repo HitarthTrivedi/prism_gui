@@ -33,15 +33,17 @@ from core import router as R  # noqa: E402
 class TheRegistrySaysWhatEachToolBuilds(unittest.TestCase):
 
     def test_deck_image_video_and_app_tools_are_makers(self):
+        # NotebookLM joined on 13 Sep 2026 (Round 32): it renders a Video or
+        # Audio Overview from its sources, which is a thing built, not text.
         for name in ("Canva", "Gamma.app", "Tome", "Midjourney", "Runway",
-                     "ElevenLabs", "v0.dev"):
+                     "ElevenLabs", "v0.dev", "NotebookLM"):
             with self.subTest(tool=name):
                 self.assertTrue(A.is_maker(A.AGENT_REGISTRY[name]), name)
                 self.assertTrue(A.AGENT_REGISTRY[name]["makes"].strip())
 
     def test_chat_and_search_tools_are_not(self):
         for name in ("ChatGPT", "Claude", "Perplexity", "Kimi 2.6", "Apollo",
-                     "Prism Reel", "NotebookLM"):
+                     "Prism Reel"):
             with self.subTest(tool=name):
                 self.assertFalse(A.is_maker(A.AGENT_REGISTRY[name]), name)
 
@@ -89,7 +91,7 @@ class TheEngineOpensAMakersStageWithABrief(unittest.TestCase):
             "Here's what I've got so far"))
         self.assertIn("With that in mind", AU._context_footer(canva))
         chatgpt = A.AGENT_REGISTRY["ChatGPT"]
-        self.assertIn("Context from the previous pipeline stage",
+        self.assertIn("From the earlier step (Write it up)",
                       AU._context_header(chatgpt, "content"))
 
     def test_a_maker_is_never_asked_for_a_handoff_section(self):

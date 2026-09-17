@@ -384,6 +384,111 @@ class EachSceneIsLaidOutWhileItIsStillTheSubject(unittest.TestCase):
         self.assertIn("logo", seen[0]["_assets"])
 
 
+class TheAccentColourIsCheckedBeforeTheReelIsFilmed(unittest.TestCase):
+    """The owner's run of 14 Sep 2026: a routed Studio reel finished all its
+    scenes, was filmed, and only THEN failed — "the client's accent colour
+    #3a713a appears nowhere in the design" — because the per-scene
+    correction loop never carried the brand at all: its check-spec was
+    {"design": design, "scenes": [sc], "_assets": ...}, with no "brand" key,
+    so brand_faults() always saw accent="" and returned []. The rule was
+    told to the model in turn one ("the design is checked for this before
+    it is filmed") and then never actually checked until render() — after
+    every scene had been written, a false promise.
+
+    Fixed by passing `brand` into build_spec() and folding a cumulative
+    brand_faults() check into the LAST scene's correction pass -- cumulative
+    because the rule only needs the colour to appear somewhere in the reel,
+    the same thing render()'s own gate requires, so an early scene that
+    legitimately carries no accent element is never wrongly flagged.
+    """
+
+    BRAND = {"accent": "#3a713a"}
+
+    def test_the_last_scene_is_corrected_when_no_scene_used_the_accent(self):
+        ask = Recorder([
+            scene_reply(html="<p class='t'>1</p>", css=".t{color:#111}"),
+            scene_reply(html="<p class='t'>2</p>", css=".t{color:#111}"),
+            scene_reply(html="<p class='t'>3</p>", css=".t{color:#111}"),
+            scene_reply(html="<h1 class='t'>3</h1>",
+                       css=".t{color:var(--accent)}"),
+        ])
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=self.BRAND)
+        self.assertIn("var(--accent)", spec["scenes"][2]["css"])
+        # scenes 1 and 2 were never sent back -- only the last one, and only
+        # once it was clear the colour had not appeared anywhere yet.
+        self.assertEqual(len(ask.asked), 4)
+        self.assertIn("accent colour", ask.asked[3].lower())
+
+    def test_an_earlier_scene_using_it_clears_every_later_one(self):
+        """The rule is "somewhere in the reel", not "every scene" -- a scene
+        that carries no headline of its own must not be nagged for a colour
+        another scene already supplied."""
+        ask = Recorder([
+            scene_reply(html="<b class='t'>kicker</b>",
+                       css=".t{color:var(--accent)}"),
+            scene_reply(), scene_reply(),
+        ])
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=self.BRAND)
+        self.assertEqual(len(ask.asked), 3, "no scene was sent back")
+        self.assertIn("var(--accent)", spec["scenes"][0]["css"])
+
+    def test_the_literal_hex_counts_the_same_as_the_css_variable(self):
+        ask = Recorder([scene_reply(), scene_reply(),
+                        scene_reply(css=".t{color:#3A713A}")])
+        RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=self.BRAND)
+        self.assertEqual(len(ask.asked), 3)
+
+    def test_no_brand_means_no_such_check_at_all(self):
+        """Unbranded work (no client colours known) must not be nagged for
+        one -- the same behaviour as before this change."""
+        ask = Recorder([scene_reply(), scene_reply(), scene_reply()])
+        RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=None)
+        self.assertEqual(len(ask.asked), 3)
+
+    def test_a_correction_that_still_misses_is_not_forced_through(self):
+        """The same "keep the better one" rule as every other fault: a
+        second miss must not be preferred just for having been asked for."""
+        ask = Recorder([
+            scene_reply(html="<p class='t'>1</p>"),
+            scene_reply(html="<p class='t'>2</p>"),
+            scene_reply(html="<p class='t'>3, still no accent</p>"),
+            scene_reply(html="<p class='t'>3, still no accent, retried</p>"),
+        ])
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=self.BRAND)
+        self.assertEqual(len(spec["scenes"]), 3)
+        # Both attempts lacked the accent colour equally -- no worse, no
+        # better -- so the correction round still ran once, but did not
+        # loop forever chasing a fix the model never supplied.
+        self.assertEqual(len(ask.asked), 4)
+
+    def test_the_final_render_gate_still_catches_what_slips_through(self):
+        """This is a correction attempt, not a guarantee -- render()'s own
+        brand_faults() stays the backstop. A model that ignores the
+        correction too must still fail the export rather than ship silently
+        off-brand."""
+        ask = Recorder([scene_reply(), scene_reply(), scene_reply()])
+        spec = RW.build_spec(TURN_ONE, ask, script=SCRIPT, brand=self.BRAND)
+        # build_spec() itself never stamps "brand" onto its own return value
+        # -- _run_studio() does that, the same way it always has, right
+        # before render(). Reproduced here rather than assumed.
+        spec["brand"] = dict(self.BRAND)
+        self.assertEqual(RW.brand_faults(spec), [
+            "the client's accent colour #3a713a appears nowhere in the "
+            "design — use var(--accent) for the element the eye goes to "
+            "first in each scene, or the reel is not in their colours"])
+
+    def test_wired_into_the_routed_pipeline_call(self):
+        """automation.run() has to actually pass the client's measured
+        colours through, or this whole fix does nothing for the pipeline
+        that reported the bug."""
+        import inspect
+        from core import automation as AU
+        src = inspect.getsource(AU.run)
+        i = src.index("spec = _web.build_spec(")
+        call = src[i:i + 400]
+        self.assertIn("brand=studio_brand", call)
+
+
 class NobodyEverLookedAtTheClientsOwnPictures(unittest.TestCase):
     """What a customer types is "make a reel, here are two screenshots" — and
     that has to be enough, because a product that needs a 400-word brief is a

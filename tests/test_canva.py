@@ -246,8 +246,9 @@ class SelfDirectingTools(unittest.TestCase):
         from core.automation import _context_header
         lazy = A.AGENT_REGISTRY["LAZYCOOK"]
         claude = A.AGENT_REGISTRY["Claude"]
-        self.assertNotIn("pipeline stage", _context_header(lazy, "research"))
-        self.assertIn("pipeline stage", _context_header(claude, "research"))
+        self.assertNotIn("earlier step", _context_header(lazy, "research"))
+        self.assertIn("From the earlier step (Look things up)",
+                      _context_header(claude, "research"))
 
     def test_the_router_is_told_to_stop_over_specifying(self):
         from core import router as R

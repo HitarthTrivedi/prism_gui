@@ -156,6 +156,14 @@ def _tomba_find(lead, key: str):
         return "", ""
 
 
+def _apollo_find(lead, key: str):
+    """Apollo's people/match FINDER (the profile link or the Apollo id when the
+    lead carries one, else name + domain -> the real address). One credit, and
+    only when Apollo finds the person. Returns (email, verification_status)."""
+    from .apollo import find_email          # lazily: apollo pulls in the filters
+    return find_email(lead, key)
+
+
 def _hunter_find(lead, key: str):
     """Hunter Email FINDER only (name + domain -> the real address). NO verify
     call — so ALL of Hunter's ~50 monthly credits go to finding, and the free
@@ -180,9 +188,13 @@ def _hunter_find(lead, key: str):
 # Dedicated FINDERS (name + domain -> the real address, replacing a pattern
 # guess), tried BEFORE verification, free-first. Hunter is a FINDER ONLY now —
 # every credit goes to finding; confirmation is left to the free verifiers.
+# Apollo is here too because a list SOURCED from Apollo already carries each
+# person's Apollo id, which finds them outright — and because a seller who
+# brought an Apollo key has credits of their own to spend on recovery.
 _FINDERS = [
-    ("tomba_key",      "Tomba",  _tomba_find),          # ~25/mo free
-    ("hunter_api_key", "Hunter", _hunter_find),         # ~50/mo, FIND only
+    ("tomba_key",       "Tomba",  _tomba_find),         # ~25/mo free
+    ("apollo_api_key",  "Apollo", _apollo_find),        # 1 credit per person FOUND
+    ("hunter_api_key",  "Hunter", _hunter_find),        # ~50/mo, FIND only
 ]
 # Every finder/verifier config key — collected from config/env by collect_keys.
 VERIFIER_KEYS = [k for k, _, _ in _FINDERS] + [k for k, _, _ in _VERIFIERS]
@@ -199,24 +211,36 @@ def collect_keys(cfg: dict | None = None) -> dict:
     return out
 
 
+_STATUS_RANK = {"valid": 3, "invalid": 2, "catch-all": 1, "unknown": 0}
+
+
 def verify_email(email: str, keys: dict | None = None) -> str:
     """Verify a plain address through the free-first verifier waterfall (no
     finding step) — for checking a ready-made list before a send. Returns
-    valid / invalid / catch-all / unknown, or '' when no key is set or none is
-    confident. A verifier asks the mail server directly, so it catches the
-    'live domain but the mailbox doesn't exist' guesses that hard-bounce (550)."""
+    valid / invalid / catch-all / unknown, or '' when no key is set or none
+    answered. A verifier asks the mail server directly, so it catches the
+    'live domain but the mailbox doesn't exist' guesses that hard-bounce (550).
+
+    'valid' stops the waterfall — nothing more to learn, no point spending the
+    next verifier's credit. Anything less sure (invalid / catch-all / unknown,
+    or a blank reply because a key is out of credit) keeps going: a different
+    verifier's probe can land where the last one couldn't decide, so the best
+    answer any of them gave wins rather than the first one to say anything."""
     keys = keys or {}
     email = (email or "").strip()
     if not email:
         return ""
+    best = ""
     for cfg_key, _name, fn in _VERIFIERS:
         k = keys.get(cfg_key)
         if not k:
             continue
         s = fn(email, k)
-        if s:
+        if s == "valid":
             return s
-    return ""
+        if s and _STATUS_RANK.get(s, -1) > _STATUS_RANK.get(best, -1):
+            best = s
+    return best
 
 
 def find_and_verify(lead, keys: dict | None = None) -> None:
@@ -224,27 +248,24 @@ def find_and_verify(lead, keys: dict | None = None) -> None:
       1) VERIFIERS (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox) —
          confirm the address we ALREADY have (a pattern guess), most-free-first.
          A guess that comes back 'valid' is deliverable and costs nothing.
-      2) FINDERS (Tomba, Hunter) — ONLY when there's no address, or the free
-         check couldn't confirm it (invalid/unknown) — fetch the person's REAL
-         address, then verify that too. A confirmed or catch-all guess never
-         triggers a finder, so a paid credit is spent only where it can help.
+      2) FINDERS (Tomba, Apollo, Hunter) — ONLY when there's no address, or the
+         free check couldn't confirm it (invalid/unknown) — fetch the person's
+         REAL address, then verify that too. A confirmed or catch-all guess
+         never triggers a finder, so a paid credit is spent only where it can
+         help — and neither does the finder that SOLD us the address we hold
+         (extra["email_source"]), which would charge again for the same answer.
     Hunter is FIND-ONLY throughout, so its ~50 credits go purely to recovery.
     BYO-key; a missing key is skipped, errors are ignored."""
     keys = keys or {}
 
     def _verify(addr: str) -> str:
-        """Run the free verifier waterfall over one address; record and return
-        the resulting status ('valid' short-circuits)."""
-        for cfg_key, _name, fn in _VERIFIERS:
-            k = keys.get(cfg_key)
-            if not k:
-                continue
-            status = fn(addr, k)
-            if status:
-                lead.extra["email_check"] = status
-                if status == "valid":
-                    return "valid"
-        return (lead.extra or {}).get("email_check", "")
+        """Run the free verifier waterfall over one address and record the
+        result — delegates to verify_email so every caller agrees on which
+        verifier's answer wins when more than one responds."""
+        status = verify_email(addr, keys)
+        if status:
+            lead.extra["email_check"] = status
+        return status
 
     # 1) VERIFY the address we already have — FREE. A confirmed guess is done.
     email = (lead.email or "").strip()
@@ -254,14 +275,24 @@ def find_and_verify(lead, keys: dict | None = None) -> None:
     #    finder credit), then verify what came back. 'catch-all' can't be
     #    confirmed either way, so we don't spend a credit chasing it.
     check = (lead.extra or {}).get("email_check", "")
+    source = (lead.extra or {}).get("email_source", "")
     if (lead.name or "") and _domain_of(lead) and check not in ("valid", "catch-all"):
-        for cfg_key, _name, fn in _FINDERS:
+        for cfg_key, name, fn in _FINDERS:
             k = keys.get(cfg_key)
             if not k:
+                continue
+            # The finder that supplied the address we are holding has nothing
+            # left to sell: asked again it looks the same person up and returns
+            # the same address, for another credit.
+            if email and source == name.lower():
                 continue
             found, _status = fn(lead, k)
             if found and found.strip().lower() != email.lower():
                 lead.email = found
+                # Whoever supplied the address is who must not be asked for it
+                # again — by this run's verify, or by a later one reopening the
+                # session this lead is saved in.
+                lead.extra["email_source"] = name.lower()
                 _verify(found)          # confirm the freshly found address, free
                 break
 

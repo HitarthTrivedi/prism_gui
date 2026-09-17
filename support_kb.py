@@ -804,13 +804,13 @@ _FILES = Topic(
 # ════════════════════════════════════════════════════════════════════════════
 _ADDONS = Topic(
     "addons", "grid", "The add-ons",
-    "Email automation, BOQ, Email and Reel / Studio",
+    "Email inquiry automation, BOQ, Email and Reel / Studio",
     (
         Question(
             "which-addons",
             "What add-ons are there, and which ones do I have?",
             Answer(
-                "Email automation reads your mailboxes and keeps your "
+                "Email inquiry automation reads your mailboxes and keeps your "
                 "inquiry register. BOQ measures a drawing. Email writes and "
                 "sends from your own account. Reel / Studio makes a short "
                 "video. Whichever ones your licence covers are in the "
@@ -827,14 +827,14 @@ _ADDONS = Topic(
 
         Question(
             "inquiry-safe",
-            "Will Email automation change anything in my mailbox?",
+            "Will Email inquiry automation change anything in my mailbox?",
             Answer(
                 "No. It reads and never writes. Nothing is marked as read, "
                 "moved, replied to or deleted, and mail stays exactly as you "
                 "left it — so whoever owns the mailbox can carry on using "
                 "Outlook on the same account and never notice Prism is "
                 "there.",
-                ("Open Email automation and add the mailbox details it "
+                ("Open Email inquiry automation and add the mailbox details it "
                  "asks for.",
                  "Watch the What arrived tab fill up without your mailbox "
                  "changing.",
@@ -854,7 +854,7 @@ _ADDONS = Topic(
                 "work, and every one of them feeds the same register, so "
                 "nothing has to be forwarded or copied between inboxes any "
                 "more.",
-                ("Open Email automation and press Setup.",
+                ("Open Email inquiry automation and press Setup.",
                  "Press Add another mailbox on the first step and enter each "
                  "address and its password.",
                  "Press Check my mail now — the register fills from all of "
@@ -877,7 +877,7 @@ _ADDONS = Topic(
                 "folder you chose at setup. Put that folder on your shared "
                 "drive and the whole office opens the same sheet, in Prism "
                 "or in Excel, exactly like the one you keep by hand today.",
-                ("Open Email automation, press Setup, and go to 2 · Files.",
+                ("Open Email inquiry automation, press Setup, and go to 2 · Files.",
                  "Choose a folder on the shared drive everyone can reach — "
                  "or press Use the team folder if your Prism workspace is "
                  "set up.",

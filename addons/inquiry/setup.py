@@ -1,4 +1,4 @@
-"""Email automation — the settings that stay the same every day.
+"""Email inquiry automation — the settings that stay the same every day.
 
 Asked once, at the start, and then never again. Everything here is a constant
 of the business rather than of a particular inquiry: which mailboxes, which
@@ -61,7 +61,7 @@ from workers import InboxVerifyWorker
 # eight times between them, every one a deferred import inside a function
 # because a module-level one would have been an obvious cycle.
 #
-# It also blocked the add-on split: Email automation could not move without
+# It also blocked the add-on split: Email inquiry automation could not move without
 # taking Home with it.
 from inquiry_config import (            # noqa: F401
     DEFAULT_FOLDER, accounts_of, active_accounts_of, is_active, is_complete,
@@ -132,7 +132,7 @@ def _group(title: str) -> tuple[QWidget, QFormLayout]:
     nothing to say that GST belongs with the quotation and "check every N
     minutes" does not. Grouping is the whole difference between a form you
     read and a form you survey. It was a bare QGroupBox before this pass —
-    the one screen in Email automation not built from the shared Card, so it
+    the one screen in Email inquiry automation not built from the shared Card, so it
     read as a generic native form bolted onto an otherwise designed app.
     """
     card = C.Card()
@@ -200,12 +200,12 @@ class InquirySetupDialog(PrismDialog):
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(
-            i18n.t("Email automation — setup"),
+            i18n.t("Email inquiry automation — setup"),
             i18n.t("Set this up once. Prism then reads your inbox, sorts it, "
                    "and keeps your inquiry register without being asked "
                    "again."),
             icon="inbox", parent=parent, closable=False)
-        self.setWindowTitle(i18n.t("Email automation — setup"))
+        self.setWindowTitle(i18n.t("Email inquiry automation — setup"))
         self.resize(760, 680)
         self.setMinimumSize(620, 520)
         self.cfg = dict(cfg)
@@ -563,7 +563,7 @@ class InquirySetupDialog(PrismDialog):
         address = account.get("address", "").strip()
         if address:
             answer = QMessageBox.question(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Stop reading {who}?\n\nPrism simply stops checking "
                        "that mailbox. Nothing already in the register is "
                        "touched.").replace("{who}", address),
@@ -1097,7 +1097,7 @@ class InquirySetupDialog(PrismDialog):
         if not accounts or incomplete is not None:
             who = (incomplete or {}).get("address", "")
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Prism needs the email address and password of every "
                        "mailbox to read. Nothing else can start without "
                        "them.") + (f"\n\n{who}" if who else ""))
@@ -1105,14 +1105,14 @@ class InquirySetupDialog(PrismDialog):
             return
         if not any(is_active(a) for a in accounts):
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("At least one mailbox has to be read, or there is "
                        "nothing for Prism to check."))
             self.tabs.setCurrentIndex(0)
             return
         if not folder:
             QMessageBox.information(
-                self, i18n.t("Email automation"),
+                self, i18n.t("Email inquiry automation"),
                 i18n.t("Choose a folder for the inquiry register and the "
                        "files that come with each inquiry."))
             self.tabs.setCurrentIndex(1)
@@ -1120,7 +1120,7 @@ class InquirySetupDialog(PrismDialog):
         try:
             os.makedirs(folder, exist_ok=True)
         except OSError as e:
-            QMessageBox.warning(self, i18n.t("Email automation"), str(e))
+            QMessageBox.warning(self, i18n.t("Email inquiry automation"), str(e))
             self.tabs.setCurrentIndex(1)
             return
 
