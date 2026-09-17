@@ -952,6 +952,46 @@ class InquirySetupDialog(PrismDialog):
             "reminders say, then turn it on once you trust them."),
             role="meta", wrap=True)
         layout.addWidget(chase_note)
+
+        # ── introducing yourself to somebody new ─────────────────────────
+        reach_card, reach_form = _group(
+            i18n.t("When Prism introduces you to somebody new"))
+        self.outreach_pitch = QLineEdit(saved.get("outreach_pitch", ""))
+        self.outreach_pitch.setPlaceholderText(
+            i18n.t("precision machined components for the auto industry"))
+        self.outreach_pitch.setToolTip(i18n.t(
+            "One line, in your own words. It goes into the opening message."))
+        reach_form.addRow(i18n.t("What you make:"), self.outreach_pitch)
+
+        self.outreach_days = QSpinBox()
+        self.outreach_days.setRange(1, 60)
+        self.outreach_days.setValue(int(saved.get("outreach_days", 3) or 3))
+        self.outreach_days.setSuffix(" " + i18n.t("days"))
+        reach_form.addRow(i18n.t("Follow up after:"), self.outreach_days)
+
+        self.max_touches = QSpinBox()
+        self.max_touches.setRange(0, 5)
+        self.max_touches.setValue(int(saved.get("max_touches", 2) or 2))
+        reach_form.addRow(i18n.t("Then stop after:"), self.max_touches)
+        layout.addWidget(reach_card)
+
+        self.auto_outreach = QCheckBox(i18n.t(
+            "Write to new rows in the register, and follow them up, on its own"))
+        self.auto_outreach.setChecked(bool(saved.get("auto_outreach", False)))
+        layout.addWidget(self.auto_outreach)
+
+        reach_note = C.label(i18n.t(
+            "Anyone the Leads screen mails is written into your register. You "
+            "can add somebody yourself by typing their address into a blank "
+            "row of the sheet — nothing else is needed. With this ticked, "
+            "Prism sends them an opening message and follows it up on the "
+            "schedule above, and stops the moment they reply.\n\n"
+            "To stop Prism writing to one particular person, put anything at "
+            "all in that row's “Do not email” column.\n\n"
+            "It is off to begin with, for the same reason the reminders are: "
+            "these are letters going out in your name."),
+            role="meta", wrap=True)
+        layout.addWidget(reach_note)
         layout.addStretch(1)
         return page
 
@@ -1161,6 +1201,10 @@ class InquirySetupDialog(PrismDialog):
             "max_reminders": self.max_reminders.value(),
             "auto_minutes": self.auto_minutes.value(),
             "auto_followup": self.auto_followup.isChecked(),
+            "outreach_pitch": self.outreach_pitch.text().strip(),
+            "outreach_days": self.outreach_days.value(),
+            "max_touches": self.max_touches.value(),
+            "auto_outreach": self.auto_outreach.isChecked(),
             "local_only": self.local_only.isChecked(),
             "knowledge": {"own_domains": self._lines(self.own),
                           "customers": self._lines(self.customers),

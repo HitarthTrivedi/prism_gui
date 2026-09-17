@@ -30,7 +30,7 @@ Rules this module keeps:
     next to `cfg`, which holds the Groq and Exa keys; params are copied key by
     key from PARAM_KEYS and everything else is dropped.
   · Writes are atomic (temp file in the same folder → fsync → os.replace), the
-    precedent addons/email/sent_log.py set, so a crash mid-save leaves the
+    precedent sent_log.py set, so a crash mid-save leaves the
     previous file whole, never half of one.
   · Readers forgive, writers refuse. A damaged index is rebuilt from the
     session files; a damaged session is reported when it is opened

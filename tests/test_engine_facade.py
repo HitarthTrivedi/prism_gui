@@ -26,8 +26,15 @@ import os
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ".claude" holds git worktrees -- whole second checkouts of this same repo,
+# often at an older revision. Walking one means auditing a copy of the tree
+# rather than the tree, and reporting its core_bridge.py as a violation of a
+# rule core_bridge.py is the sole exception to. tests/test_worker_mandate.py
+# and devtools/extract_strings.py already skip it for the same reason; this
+# list had simply not been told.
 SKIP_DIRS = {".git", "__pycache__", "build", "dist", "release", "prism_terminal",
-             ".venv", "node_modules", "tests", "devtools", "examples", "videos"}
+             ".venv", "node_modules", "tests", "devtools", "examples", "videos",
+             ".claude"}
 
 # Relative paths allowed to import the engine directly.
 ALLOWED = {"core_bridge.py"}

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import email_config
 import i18n
-from addons.email import sent_log
+import sent_log
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C

@@ -320,28 +320,37 @@ def write_outreach(drafts: list[Draft], path: str) -> str:
 
 # ── suppression: never contact the same person twice; honour opt-outs ─────────
 
-def _suppression_path() -> str:
-    return os.path.join(os.path.expanduser("~"), ".prism", "outreach_suppressed.txt")
+def _suppression_path(folder: str = "") -> str:
+    """Where the do-not-contact list lives.
+
+    `folder` is an argument rather than a constant so a test can point it at
+    a temp directory. It used to resolve the real home unconditionally, and
+    conftest's guard does not fingerprint this file — so a test that called
+    send() wrote the developer's own suppression list and nothing caught it.
+    """
+    folder = folder or os.path.join(os.path.expanduser("~"), ".prism")
+    return os.path.join(folder, "outreach_suppressed.txt")
 
 
-def load_suppression() -> set:
+def load_suppression(folder: str = "") -> set:
     """Addresses we must not (re-)contact: previously emailed, hard-bounced, or
     opted out. A plain text file the owner can also edit by hand — the send
     checks it before every message."""
     try:
-        with open(_suppression_path(), encoding="utf-8") as f:
+        with open(_suppression_path(folder), encoding="utf-8") as f:
             return {ln.strip().lower() for ln in f
                     if ln.strip() and not ln.startswith("#")}
     except Exception:                                       # noqa: BLE001
         return set()
 
 
-def _suppress(emails) -> None:
-    new = {e.strip().lower() for e in emails if e and e.strip()} - load_suppression()
+def _suppress(emails, folder: str = "") -> None:
+    new = ({e.strip().lower() for e in emails if e and e.strip()}
+           - load_suppression(folder))
     if not new:
         return
     try:
-        path = _suppression_path()
+        path = _suppression_path(folder)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             for e in sorted(new):
@@ -369,7 +378,8 @@ def _is_bounce(err: str) -> bool:
 
 # ── sending — separate, gated, human-pressed ──────────────────────────────────
 
-def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
+def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None,
+         suppression_dir: str = ""):
     """Send the prepared drafts through the owner's own account. Deliberately a
     SECOND call, never folded into drafting: this is the step that costs money
     and goodwill, so it must be pressed on purpose.
@@ -383,7 +393,24 @@ def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
     if not CB.mailer.is_configured(cfg):
         raise RuntimeError("No sending account is set up yet "
                            "(Email → Set up the sending account).")
-    suppressed = load_suppression()
+    # Pace and ledger come from the Email screen's own settings, through a
+    # root module, so the two halves of the product cannot each believe they
+    # are under the daily limit while together they are well over it. That
+    # is how a sending domain's reputation gets burned.
+    import email_config
+    import sent_log
+    sender = email_config.default_sender(cfg)
+    addr = (sender.get("address") or "").strip()
+    scfg = email_config.cfg_for_sender(cfg, sender) if sender else cfg
+    policy = email_config.send_policy(cfg)
+    allowed, limits = email_config.plan_send(
+        policy, len(drafts), sent_log.sent_today(cfg, addr))
+    # Anything over the cap stays a draft rather than becoming "skipped":
+    # skipped reads as dealt with, and these are simply next in the queue.
+    held = drafts[allowed:] if allowed < len(drafts) else []
+    drafts = drafts[:allowed]
+
+    suppressed = load_suppression(suppression_dir)
     sent, failed = [], []
     total = len(drafts)
     for i, d in enumerate(drafts, 1):
@@ -399,19 +426,43 @@ def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
             if on_progress:
                 on_progress(i, total, d)
             continue
-        s, f = CB.mailer.send_bulk(cfg, [d.recipient], d.subject,
+        s, f = CB.mailer.send_bulk(scfg, [d.recipient], d.subject,
                                    _with_optout(d.body), files=[])
         if s:
             d.status = "sent"
             sent.append(d.recipient["email"])
-            _suppress([email])                     # don't re-contact on a re-run
+            _suppress([email], suppression_dir)    # don't re-contact on a re-run
             suppressed.add(email)                  # …nor later in this same batch
         else:
             d.status, d.error = "failed", (f[0][1] if f else "unknown error")
             failed.append((d.recipient["email"], d.error))
             if _is_bounce(d.error):
-                _suppress([email])                 # a hard bounce → never retry
+                _suppress([email], suppression_dir)  # a hard bounce → never retry
                 suppressed.add(email)              # …not even a repeat in this batch
+        # Logged per message, not per batch: sent_today() counts what the
+        # ledger holds, so a run killed half way through must already have
+        # its sends counted or the daily cap is walked straight past. A log
+        # that cannot be written never kills a send that has already gone.
+        try:
+            sent_log.record(scfg, to=[d.recipient], subject=d.subject,
+                            body=d.body, sent=s, failed=f, attachments=[],
+                            list_name="Leads outreach", sender=addr)
+        except Exception:                                   # noqa: BLE001
+            pass
         if on_progress:
             on_progress(i, total, d)
+        # The gap between two messages. send_bulk() has its own pause loop,
+        # but it runs `if i < len(recipients)` and we hand it exactly one
+        # recipient every time -- so until now outreach went out with no gap
+        # at all, one fresh SMTP connection after another.
+        if i < total:
+            pause = CB.mailer.pause_after_send(policy["gap_seconds"],
+                                               policy["jitter_seconds"])
+            waited = 0.0
+            while waited < pause and not (should_stop and should_stop()):
+                time.sleep(min(0.25, pause - waited))
+                waited += 0.25
+    for d in held:
+        d.note = (d.note + " " if d.note else "") + (
+            limits[0] if limits else "held for the next run")
     return sent, failed

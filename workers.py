@@ -668,6 +668,18 @@ class InboxCheckWorker(_Worker):
         self.max_reminders = max_reminders
 
     def run(self):
+        # check() loads the register, fetches IMAP, and writes the register
+        # back when that finishes -- seconds or minutes later. Anything
+        # appended to the file inside that window is erased by the write at
+        # the end of it, with no error and nothing left to find.
+        #
+        # The engine cannot take outreach.LOCK (it is a submodule shared
+        # with the CLI and may not import the GUI), and holding the lock
+        # across a mail fetch would block every save on the UI thread. So
+        # the fetch raises a flag instead and the leads push stands aside
+        # while it is up. See outreach.begin_check().
+        import outreach
+        outreach.begin_check()
         try:
             mailflow = CB.get_mailflow()
             result = mailflow.check(
@@ -678,6 +690,8 @@ class InboxCheckWorker(_Worker):
             self.done.emit(result)
         except Exception as e:
             self.failed.emit(str(e))
+        finally:
+            outreach.end_check()
 
 
 class POReadWorker(_Worker):

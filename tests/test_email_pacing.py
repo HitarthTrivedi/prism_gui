@@ -10,7 +10,7 @@ provider can hear. What is pinned here:
     during the wait and sends nothing;
   · the policy (email_config): defaults that reproduce the old behaviour,
     sane clamping, the plan arithmetic, and that a save keeps the numbers;
-  · the log (addons/email/sent_log): who a send left from, and how many
+  · the log (sent_log): who a send left from, and how many
     left today -- with an old entry that names nobody counting against
     everybody;
   · the window (addons/email/dialog): the numbers reach the worker, the
@@ -42,7 +42,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 import core_bridge as CB  # noqa: E402
 import email_config  # noqa: E402
 from addons.email import dialog as ED  # noqa: E402
-from addons.email import sent_log  # noqa: E402
+import sent_log  # noqa: E402
 from test_email_compose import _FakeSendWorker, _cfg, _csv, _dialog  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import i18n
+import outreach
 import theme
 from widgets import controls as C
 from prospector.filters import SearchSpec
@@ -1397,10 +1398,76 @@ class LeadsWorkbench(QWidget):
         self._save_session()
         self._status.setText(i18n.t("Sent {s}, failed {f}.").format(
             s=len(sent), f=len(failed)))
+        note = self._file_in_the_book(sent)
         QMessageBox.information(
             self, i18n.t("Leads & Outreach"),
             i18n.t("Sent {s} email(s). {f} failed.").format(
-                s=len(sent), f=len(failed)))
+                s=len(sent), f=len(failed)) + note)
+
+    def _file_in_the_book(self, sent: list) -> str:
+        """Write the people we just mailed into the shared inquiry register.
+
+        Once for the batch, not once per message: the register is a file the
+        sales team has open in Excel, and re-writing it after every send
+        would be both slow and a lock waiting to happen.
+
+        Everything about WHERE the book is and WHAT a row looks like lives in
+        `outreach.py`, a root module -- this add-on must never import the
+        Inquiry add-on, and the register's shape is not its business.
+
+        Best effort by design. The mail has already gone; a book that could
+        not be written is worth a sentence on the screen, never an exception
+        over a send that succeeded.
+        """
+        if not sent:
+            return ""
+        if not outreach.register_path(self.cfg):
+            # No Email inquiry automation set up: nothing to file into, and
+            # inventing a folder in somebody's home is not our business.
+            return ""
+        by_email = {}
+        for draft in self._drafts or []:
+            if getattr(draft, "status", "") != "sent":
+                continue
+            lead = getattr(getattr(draft, "dossier", None), "lead", None)
+            if lead is None:
+                continue
+            by_email[(lead.email or "").strip().lower()] = {
+                "company": lead.company, "name": lead.name,
+                "email": lead.email, "product": self._offer_line(),
+            }
+        leads = [by_email[e] for e in
+                 ((a or "").strip().lower() for a in sent) if e in by_email]
+        if not leads:
+            return ""
+        try:
+            added, skipped = outreach.push_leads(self.cfg, leads)
+        except Exception as e:                              # noqa: BLE001
+            # RegisterLocked says the useful thing already ("close it in
+            # Excel"); anything else is shown as it stands rather than
+            # swallowed. Pressing Send again is safe -- push_leads skips
+            # anybody already on the book.
+            return "\n\n" + i18n.t(
+                "They could not be added to your inquiry register yet: "
+                "{why}").format(why=e)
+        if outreach.check_in_flight():
+            return "\n\n" + i18n.t(
+                "Your mail is being checked right now, so they have not been "
+                "added to the inquiry register yet. Press Send again in a "
+                "moment — nobody is written to twice.")
+        outreach.write_sheet_guide(self.cfg)
+        if not added:
+            return ""
+        return "\n\n" + i18n.t(
+            "{n} added to your inquiry register. They move to “To "
+            "quote” the moment they answer.").format(n=added)
+
+    def _offer_line(self) -> str:
+        """What we approached them about, for the register's own column."""
+        try:
+            return (self._offer.toPlainText() or "").strip()[:80]
+        except Exception:                                   # noqa: BLE001
+            return ""
 
     # ── shared ───────────────────────────────────────────────────────────────
     def _autosave_dir(self) -> str:

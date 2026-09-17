@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 
 import core_bridge as CB
 import email_config
+import outreach
 import i18n
 import theme
 from dialogs.base import PrismDialog
@@ -1319,7 +1320,8 @@ class InquiryDialog(QWidget):
         self.register_filter = page.filter
         self.register_chips = C.FilterChips(
             [("all", i18n.t("All")), ("open", i18n.t("Open")),
-             ("won", i18n.t("Won")), ("lost", i18n.t("Lost"))], current="all")
+             ("won", i18n.t("Won")), ("lost", i18n.t("Lost")),
+             ("outreach", i18n.t("Cold leads"))], current="all")
         self.register_chips.changed.connect(lambda *_: self._render_register())
         page.add_tool(self.register_chips)
         # The one rare thing on this screen, kept out of the daily tabs.
@@ -1397,12 +1399,52 @@ class InquiryDialog(QWidget):
         """Bank whatever this check found into the worklist file, then draw
         the tab from THAT — never straight from `result`, which only ever
         holds what this one check happened to see. See _render_replies()."""
-        entries = [_worklist_entry(item)
-                  for item in list(getattr(result, "replies", None) or [])]
+        replies = list(getattr(result, "replies", None) or [])
+        self._hand_over_outreach(replies)
+        entries = [_worklist_entry(item) for item in replies]
         folder = self._root()
         if folder and entries:
             CB.get_worklist().append(folder, "replies", entries)
         self._render_replies()
+
+    def _hand_over_outreach(self, replies: list) -> None:
+        """A cold lead answered, so the row becomes an ordinary inquiry.
+
+        `register.find_by_thread()` has already matched the reply to the
+        outreach row -- by address, across the open statuses, which is why
+        an outreach row is written as "New". All that is left is to move the
+        stage on, and from that moment every path that already exists takes
+        it: the row appears in "1 - To quote", a person quotes it, and the
+        chaser picks it up because a quotation finally exists.
+
+        Done HERE, before `_apply_reply` ever runs, and deliberately: that
+        path maps the reply's intent through `REPLY_STATUS`, and a cold lead
+        writing "yes, send me your rates" reads as `accepted` -- which in
+        this register means a customer accepted a quotation we sent them.
+        That is a false sale, and the kind that survives into a month-end
+        number.
+        """
+        moved = 0
+        for item in replies:
+            row = getattr(item, "row", None)
+            if isinstance(row, dict) and outreach.is_pending(row):
+                outreach.mark_replied(row)
+                if not (row.get("Product asked") or "").strip():
+                    message = getattr(item, "message", None)
+                    if message is not None:
+                        try:
+                            row["Product asked"] =                                 CB.get_register().product_summary(message)
+                        except Exception:                   # noqa: BLE001
+                            pass
+                moved += 1
+        if not moved:
+            return
+        try:
+            merged, _ = outreach.save_merging(self._register_rows,
+                                              self._paths().register_csv)
+            self._register_rows = merged
+        except Exception as e:                              # noqa: BLE001
+            self._explain(str(e))
 
     def _render_replies(self):
         """Redraw from the worklist file, not from memory — a reply from
@@ -2228,6 +2270,7 @@ class InquiryDialog(QWidget):
         # never go out to somebody whose reply arrived in this same check and
         # has not been filed yet.
         self._chase_automatically()
+        self._touch_outreach()
         self._auto_quote(result)
 
     # ── quoting by code, without a person ────────────────────────────────
@@ -2459,6 +2502,16 @@ class InquiryDialog(QWidget):
         make switching the filter cost what a real mail check costs."""
         register = CB.get_register()
         rows = self._rows()
+        # Somebody typed an address into a blank row in Excel. Give it a
+        # number and a stage now, so it can never collide with another blank
+        # row from the same address (register._merge_key falls back to
+        # (email, date, product) when there is no number) and so the sheet
+        # shows "To email" before anything is sent.
+        if rows and outreach.adopt_hand_rows(rows):
+            try:
+                register.save(rows, self._paths().register_csv)
+            except Exception:                               # noqa: BLE001
+                pass            # open in Excel; it will be stamped next time
         self._register_rows = rows
         settings = self._settings()
         due = register.awaiting_followup(
@@ -2531,12 +2584,20 @@ class InquiryDialog(QWidget):
         register = CB.get_register()
         chip = (self.register_chips.current()
                 if hasattr(self, "register_chips") else "all") or "all"
+        # "Cold leads" is about the outreach stage, not the status, so it
+        # is its own branch rather than another entry in the status map.
+        # "All" deliberately still means all: a book that hides rows from a
+        # filter called All is a book nobody trusts again.
         wanted = {"all": None, "open": set(register.OPEN_STATUSES),
                   "won": {register.CONVERTED},
-                  "lost": {register.NOT_CONVERTED}}[chip]
-        rows = [r for r in self._filtered("register", self._register_rows or [])
-                if wanted is None
-                or ((r.get("Status") or "").strip() or register.NEW) in wanted]
+                  "lost": {register.NOT_CONVERTED}}.get(chip)
+        visible = self._filtered("register", self._register_rows or [])
+        if chip == "outreach":
+            rows = [r for r in visible if outreach.is_pending(r)]
+        else:
+            rows = [r for r in visible
+                    if wanted is None
+                    or ((r.get("Status") or "").strip() or register.NEW) in wanted]
         self._visible_rows = rows
         self.register_table.setRowCount(0)
         for row in rows:
@@ -2554,7 +2615,10 @@ class InquiryDialog(QWidget):
         register = CB.get_register()
         rows = [r for r in self._filtered("to_quote", self._register_rows or [])
                 if ((r.get("Status") or "").strip() or register.NEW)
-                == register.NEW]
+                == register.NEW
+                # A cold approach nobody has answered is not work waiting to
+                # be quoted. It arrives here the moment they reply.
+                and not outreach.is_pending(r)]
         self._to_quote_rows = rows
         self.to_quote_table.setRowCount(0)
         for row in rows:
@@ -2867,13 +2931,16 @@ class InquiryDialog(QWidget):
                        "\"Other\" from now on and never register it.")
                 .replace("{who}", address),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-        register = CB.get_register()
-        self._register_rows = [r for r in self._register_rows if r is not row]
+        # Deleting is the one write that must NOT merge from the disk:
+        # the row is still in the file, and a merge would read it straight
+        # back in. outreach.drop_row re-reads, filters by number, and saves.
         try:
-            register.save(self._register_rows, self._paths().register_csv)
-        except Exception as e:
+            outreach.drop_row(self._paths().register_csv,
+                              row.get("Inquiry no", ""))
+        except Exception as e:                              # noqa: BLE001
             self._explain(str(e))
             return
+        self._register_rows = [r for r in self._register_rows if r is not row]
         if block:
             self._learn_sender(address, "other")
         self._focus_row = None
@@ -3092,7 +3159,9 @@ class InquiryDialog(QWidget):
                                row.get("Inquiry no", "")) or row
         register.note_reminder(target)
         try:
-            register.save(self._register_rows, self._paths().register_csv)
+            merged, _ = outreach.save_merging(self._register_rows,
+                                              self._paths().register_csv)
+            self._register_rows = merged
         except Exception as e:
             self._explain(str(e))
             return
@@ -3107,6 +3176,7 @@ class InquiryDialog(QWidget):
         "quotation": "Quotation sent",
         "revised": "Revised quotation sent",
         "reminder": "Reminder sent",
+        "outreach": "Introduction sent",
         "winback": "Win-back mail sent",
     }
 
@@ -3186,6 +3256,140 @@ class InquiryDialog(QWidget):
             self._reminder_sent(row, sent, failed, subject=s))
         self._send_worker.failed.connect(self._reminder_failed)
         self._send_worker.start()
+
+    # -- introducing yourself to somebody who has not written to you -------
+    def _touch_outreach(self):
+        """Send the one outreach message that is due, unattended.
+
+        The same conservative shape as _chase_automatically() next door, for
+        the same reason -- these are letters going out in somebody's name --
+        and the register is the schedule in exactly the same way:
+
+          - **One per check, never a batch.** Twenty introductions leaving in
+            one second is a machine; spread across the day's checks it reads
+            as somebody working through a list.
+          - **Two kinds of message, one queue.** A row sales typed gets the
+            introduction; a row already contacted gets the nudge. Both come
+            off the same two columns, Touches and Last contact.
+          - **Counted only when the send succeeds.**
+          - **Off unless they turned it on.**
+
+        The copy is a template, not a drafted one. A two-line nudge does not
+        need a model, and reaching for the prospector here would make Email
+        inquiry automation depend on the Leads engine -- so a customer who
+        bought this and not Leads would lose a feature that has nothing to
+        do with Leads.
+        """
+        settings = self._settings()
+        if not settings.get("auto_outreach"):
+            return
+        if self._send_worker is not None and self._send_worker.isRunning():
+            return
+        if not email_config.can_send(self.cfg):
+            return
+        rows = self._register_rows or []
+        due = outreach.queued(rows) or outreach.due_touches(
+            rows,
+            after_days=int(settings.get("outreach_days", 3) or 3),
+            max_touches=int(settings.get("max_touches", 2) or 2))
+        if not due:
+            return
+
+        row = due[0]
+        subject, body = self._outreach_words(row)
+        self.status.setText(
+            i18n.t("Writing to {who}...").replace("{who}", row.get("Email", "")))
+        self._send_worker = SendWorker(
+            email_config.cfg_for_sender(
+                self.cfg, email_config.default_sender(self.cfg)),
+            [{"email": row.get("Email", ""),
+              "name": row.get("Contact person", "")}],
+            subject, body, [])
+        self._send_worker.done.connect(
+            lambda sent, failed, r=row, sub=subject:
+            self._outreach_sent(r, sent, failed, subject=sub))
+        self._send_worker.failed.connect(self._reminder_failed)
+        self._send_worker.start()
+
+    def _outreach_words(self, row: dict) -> tuple[str, str]:
+        """The introduction, or the nudge that follows it.
+
+        Deliberately plain, and deliberately safe to receive from a supplier
+        you already know: a row typed into the sheet might be somebody who
+        telephoned this morning, so this never opens on "I noticed you..."
+        the way a researched cold email would.
+        """
+        settings = self._settings()
+        company = settings.get("company", "") or ""
+        signature = settings.get("signature", "") or company
+        pitch = (settings.get("outreach_pitch", "") or "").strip()
+        who = (row.get("Contact person", "") or "").strip()
+        greeting = (i18n.t("Dear {name},").replace("{name}", who) if who
+                    else i18n.t("Dear Sir,"))
+        touches = outreach.touches_of(row)
+
+        if outreach.stage_of(row) == outreach.TO_EMAIL or touches == 0:
+            subject = (i18n.t("An introduction from {company}")
+                       .replace("{company}", company))
+            middle = (i18n.t("I am writing from {company}. We make {what}, "
+                             "and I thought there might be something here "
+                             "worth a conversation.")
+                      .replace("{company}", company)
+                      .replace("{what}", pitch or i18n.t("what you need"))
+                      if pitch else
+                      i18n.t("I am writing from {company}, and I thought "
+                             "there might be something here worth a "
+                             "conversation.").replace("{company}", company))
+            closing = i18n.t("If it would help, I can send you our range and "
+                             "our usual terms. Just reply and tell me what "
+                             "you are looking for.")
+        elif touches == 1:
+            subject = (i18n.t("Following up - {company}")
+                       .replace("{company}", company))
+            middle = i18n.t("I wrote to you a few days ago and thought I "
+                            "would follow up once, in case it reached you at "
+                            "a busy moment.")
+            closing = i18n.t("If there is nothing needed at the moment, do "
+                             "say so and I will not write again.")
+        else:
+            subject = (i18n.t("Last note from {company}")
+                       .replace("{company}", company))
+            middle = i18n.t("This is my last note. I would rather not clutter "
+                            "your inbox.")
+            closing = i18n.t("If anything comes up later, you have my "
+                             "address and you would be very welcome to use "
+                             "it.")
+        body = (i18n.t("{greeting}\n\n{middle}\n\n{closing}"
+                       "\n\n{signature}")
+                .replace("{greeting}", greeting)
+                .replace("{middle}", middle)
+                .replace("{closing}", closing)
+                .replace("{signature}", signature))
+        return subject, body
+
+    def _outreach_sent(self, row, sent, failed, subject=""):
+        """Count the touch, but only if it actually left the building."""
+        self._send_worker = None
+        if not sent:
+            self.status.setText(i18n.t("That message did not go out."))
+            return
+        number = row.get("Inquiry no", "")
+
+        def _advance(target):
+            if outreach.stage_of(target) == outreach.TO_EMAIL:
+                outreach.mark_emailed(target)
+            else:
+                outreach.note_touch(target)
+
+        try:
+            outreach.apply_to_row(self.cfg, number, _advance)
+        except Exception as e:                              # noqa: BLE001
+            self._explain(str(e))
+            return
+        self._log_sent("outreach", row, subject, body="")
+        self.status.setText(
+            i18n.t("Wrote to {who}.").replace("{who}", row.get("Email", "")))
+        self._refresh_register()
 
     def _reminder_words(self, row: dict) -> tuple[str, str]:
         """Subject and body for the next reminder on this row.

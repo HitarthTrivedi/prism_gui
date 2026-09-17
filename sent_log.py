@@ -6,6 +6,13 @@ when, to whom, the subject, who got it and who did not, what was attached.
 The Email screen reads it back as a table, so "did that go?" is answered by
 looking, not by remembering.
 
+Why this is a root module rather than something inside `addons/email/`:
+the Email screen writes here, Email inquiry automation's reminders do, and
+so does Leads outreach — and no add-on may import another. Putting it in
+the Email add-on's package would couple the other two to it, the exact
+coupling the add-on split removes. Same shape, and the same reason, as
+`email_config.py` next door.
+
 It is a file in a folder the owner can open, on purpose — the same rule the
 inquiry register follows. A History run record is still written as well
 (that is what the History screen reads); this one is the owner's copy, in
