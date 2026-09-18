@@ -24,7 +24,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -506,8 +507,13 @@ class _RunRow(QFrame):
     """
 
     activated = Signal()
+    # Opt-in, both off unless the screen asks. This row is shared -- the
+    # add-on front doors draw it too -- and none of them wants a checkbox.
+    picked = Signal(bool)                       # tick state changed
+    removed = Signal()                          # the row's own delete
 
-    def __init__(self, run: dict, state: str, parent=None):
+    def __init__(self, run: dict, state: str, parent=None, *,
+                 selectable: bool = False, deletable: bool = False):
         super().__init__(parent)
         self.setObjectName("rowFlat")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -521,6 +527,16 @@ class _RunRow(QFrame):
         row.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
                                theme.SPACE_4, theme.SPACE_3)
         row.setSpacing(theme.SPACE_3)
+
+        self.tick = None
+        if selectable:
+            self.tick = QCheckBox()
+            self.tick.setAccessibleName(i18n.t("Select this run"))
+            # The box is its own control: clicking it must tick, not open
+            # the run, so it swallows the press rather than letting the
+            # row's mousePressEvent see it.
+            self.tick.toggled.connect(self.picked.emit)
+            row.addWidget(self.tick)
 
         kind = _kind_of(run.get("title", ""))
         title = _plain_title(run.get("title", ""))
@@ -552,10 +568,22 @@ class _RunRow(QFrame):
         detail = i18n.t("never ran") if state == "cancelled" else ""
         row.addWidget(C.StatusBadge(state, detail, focusable=False))
 
+        if deletable:
+            binw = C.icon_button("trash", i18n.t("Delete this run"),
+                                 self.removed.emit)
+            row.addWidget(binw)
+
         self.setAccessibleName(f"{title}. {run.get('when', '')}")
         self.setToolTip(run.get("title", "") or title)
 
     def mousePressEvent(self, event):
+        # A press that landed on the tick box or the bin belongs to them.
+        # Without this, ticking a row also opened it.
+        child = self.childAt(event.position().toPoint())
+        while child is not None and child is not self:
+            if isinstance(child, (QCheckBox, QPushButton)):
+                return super().mousePressEvent(event)
+            child = child.parentWidget()
         self.activated.emit()
         super().mousePressEvent(event)
 

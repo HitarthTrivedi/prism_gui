@@ -1,9 +1,10 @@
 """The History screen: every past run, re-rendered from its record."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget,
 )
 
 import dashboard_data as DATA
@@ -26,6 +27,7 @@ class _AbortedRow(QFrame):
     """
 
     expand = Signal()
+    remove = Signal()
 
     def __init__(self, count: int, parent=None):
         super().__init__(parent)
@@ -56,11 +58,21 @@ class _AbortedRow(QFrame):
         row.addWidget(C.button(i18n.t("Show them"), "tertiary",
                                icon_name="chevron-down",
                                on_click=self.expand.emit))
+        # Clearing the whole fold without expanding it first: on real data
+        # these are the overwhelming majority of records and all the same
+        # Chrome failure, so "delete all of them" is the common wish.
+        row.addWidget(C.icon_button("trash", i18n.t("Delete all of these"),
+                                    self.remove.emit))
 
         self.setAccessibleName(i18n.t("{n} runs that never started").format(
             n=count))
 
     def mousePressEvent(self, event):
+        child = self.childAt(event.position().toPoint())
+        while child is not None and child is not self:
+            if isinstance(child, QPushButton):
+                return super().mousePressEvent(event)
+            child = child.parentWidget()
         self.expand.emit()
         super().mousePressEvent(event)
 
@@ -83,7 +95,8 @@ class HistoryPanel(Page):
     TITLE = "History"
     BLURB = "Every past run, re-rendered out of its stored record."
 
-    open_run = Signal(str)          # path of the run record
+    open_run = Signal(str)              # path of the run record
+    runs_changed = Signal()             # runs were deleted; Home must re-read
     navigate = Signal(str)          # a key for MainWindow._handle_command
 
     LAZY = True
@@ -95,15 +108,26 @@ class HistoryPanel(Page):
         self._expanded = set()
         self._chips = None
         self._chip_counts = None
+        # Created here as well as in build(). This screen is LAZY, so
+        # refresh() returns without building while it is off-screen -- and
+        # the header's Clear all button exists from construction. A handler
+        # that fires before the first build must find its state, not an
+        # AttributeError.
+        self._runs = []
+        self._picked = set()
+        self._bulk = None
         super().__init__(cfg, parent)
 
     def header_actions(self):
-        return [C.button(i18n.t("New task"), "primary", icon_name="plus",
+        return [C.button(i18n.t("Clear all"), "destructive", icon_name="trash",
+                         on_click=self._clear_all),
+                C.button(i18n.t("New task"), "primary", icon_name="plus",
                          on_click=lambda: self.navigate.emit("workbench"))]
 
     def build(self):
         self._runs = DATA.recent_runs(self.cfg, self.LIMIT) or []
         self._expanded = set()
+        self._picked = set()            # paths of ticked rows
         self._chips = None
         self._chip_counts = None
 
@@ -121,6 +145,15 @@ class HistoryPanel(Page):
         self._chip_col.setContentsMargins(0, 0, 0, 0)
         self._chip_col.setSpacing(0)
         self._col.addWidget(self._chip_host)
+
+        self._bulk = C.Toolbar()
+        self._bulk_label = C.label("", role="meta")
+        self._bulk.add(self._bulk_label, stretch=1)
+        self._bulk.add(C.button(i18n.t("Delete selected"), "destructive",
+                                icon_name="trash", small=True,
+                                on_click=self._delete_picked))
+        self._bulk.setVisible(False)
+        self._col.addWidget(self._bulk)
 
         self._list = QWidget()
         self._list_col = QVBoxLayout(self._list)
@@ -230,9 +263,16 @@ class HistoryPanel(Page):
             for run, state in shown:
                 if not first:
                     col.addWidget(C.hairline())
-                row = _RunRow(run, state)
+                path = run.get("path", "")
+                row = _RunRow(run, state, selectable=True, deletable=True)
                 row.activated.connect(
-                    lambda p=run.get("path", ""): p and self.open_run.emit(p))
+                    lambda p=path: p and self.open_run.emit(p))
+                if path in self._picked:
+                    row.tick.setChecked(True)
+                row.picked.connect(
+                    lambda on, p=path: self._pick(p, on))
+                row.removed.connect(
+                    lambda r=run: self._delete([r]))
                 col.addWidget(row)
                 first = False
             if fold_them:
@@ -240,9 +280,87 @@ class HistoryPanel(Page):
                     col.addWidget(C.hairline())
                 fold = _AbortedRow(aborted)
                 fold.expand.connect(lambda b=bucket: self._expand(b))
+                folded = [r for r, st in items if st == "cancelled"]
+                fold.remove.connect(lambda rs=folded: self._delete(rs))
                 col.addWidget(fold)
             self._list_col.addWidget(card)
         self._list_col.addStretch(1)
+
+    # -- deleting -----------------------------------------------------------
+    def _pick(self, path: str, on: bool):
+        """Remember a ticked row, and show the bar once anything is ticked."""
+        if not path:
+            return
+        self._picked.add(path) if on else self._picked.discard(path)
+        n = len(self._picked)
+        if self._bulk is None:
+            return                      # ticked before the first build
+        self._bulk.setVisible(bool(n))
+        self._bulk_label.setText(
+            i18n.t("1 run selected") if n == 1
+            else i18n.t("{n} runs selected").format(n=n))
+
+    def _confirm_delete(self, n: int, everything: bool = False) -> bool:
+        """Ask, with No as the default. A seam: a test stubs this rather
+        than trying to press a button in a modal.
+
+        The copy says what is KEPT, the way every other destructive message
+        in this app does -- deleting a run removes the entry, not the work.
+        """
+        kept = i18n.t("The files those runs produced stay where they are, in "
+                      "Prism Artifacts.")
+        if everything:
+            question = i18n.t("Clear the whole history — all {n} runs?"
+                              ).format(n=n)
+        else:
+            question = (i18n.t("Delete this run?") if n == 1
+                        else i18n.t("Delete these {n} runs?").format(n=n))
+        return QMessageBox.question(
+            self, i18n.t("History"),
+            question + "\n\n" + i18n.t("This cannot be undone.")
+            + " " + kept,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No) == QMessageBox.Yes
+
+    def _delete(self, runs: list, everything: bool = False):
+        """Remove some runs, then redraw -- but never from in here.
+
+        The redraw destroys the very widget whose click handler is running.
+        This screen already learned that once, three methods up: "a chip row
+        that deletes itself from inside its own clicked handler is a crash
+        waiting for a slow machine." So the work happens now and the rebuild
+        is posted for the next turn of the event loop, the same way
+        widgets/input_panel.py refreshes its recent list. Do not "simplify"
+        this into a direct call.
+        """
+        paths = [r.get("path", "") for r in runs if r.get("path")]
+        if not paths or not self._confirm_delete(len(paths), everything):
+            return
+        gone, refused = DATA.delete_runs(self.cfg, paths)
+        for path in paths:
+            self._picked.discard(path)
+        if refused:
+            QMessageBox.information(
+                self, i18n.t("History"),
+                i18n.t("{n} could not be removed. They may be open in "
+                       "another program.").format(n=len(refused)))
+        QTimer.singleShot(0, self._reload)
+
+    def _delete_picked(self):
+        by_path = {r.get("path", ""): r for r in self._runs}
+        self._delete([by_path[p] for p in self._picked if p in by_path])
+
+    def _clear_all(self):
+        if not self._runs:
+            return
+        self._delete(list(self._runs), everything=True)
+
+    def _reload(self):
+        """Re-read the folder and rebuild. Home reads the same records for
+        its activity list and its counters, so it is told to re-read too."""
+        self._picked = set()
+        self.refresh()
+        self.runs_changed.emit()
 
     def _expand(self, bucket: str):
         self._expanded.add(bucket)

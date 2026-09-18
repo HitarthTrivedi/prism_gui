@@ -38,6 +38,56 @@ def _run_files(cfg: dict, mid: str = "") -> list[str]:
     return [os.path.join(folder, n) for n in names]
 
 
+def delete_runs(cfg: dict, paths: list[str], mid: str = "") -> tuple[int, list[str]]:
+    """Remove saved run records. Returns (deleted, [paths that would not go]).
+
+    Two guards, because the caller is a widget handing back paths it was
+    given, and a delete that trusts a path from a widget is one refactor
+    away from removing something else:
+
+      · the file must sit in THIS member's own runs folder, resolved fresh
+        through workspace.runs_dir() rather than taken on trust, and
+      · it must be named `run_*.json`.
+
+    The second guard is not pedantry. That folder is a junk drawer: the same
+    directory holds the artefacts runs produced -- reel scene specs and
+    their .mp4, BOQ and Gerber CSVs -- none of them named after the run that
+    made them, and `main_window` globs `reel_*.json` there to find the
+    latest spec. Deleting a record must never take one of those with it.
+
+    A file that has already gone counts as deleted. `recent_runs()` lists,
+    then a person clicks; the gap between is real, and it is the same race
+    that makes every getmtime in this module sit inside a try.
+    """
+    who = mid or identity.viewing()["mid"]
+    folder = workspace.runs_dir(who, cfg)
+    try:
+        root = os.path.realpath(folder)
+    except OSError:
+        return 0, list(paths)
+    deleted, refused = 0, []
+    for path in paths or []:
+        try:
+            full = os.path.realpath(path)
+        except OSError:
+            refused.append(path)
+            continue
+        name = os.path.basename(full)
+        if (os.path.dirname(full) != root
+                or not (name.startswith("run_") and name.endswith(".json"))):
+            refused.append(path)
+            continue
+        try:
+            os.remove(full)
+        except FileNotFoundError:
+            deleted += 1            # already gone is the outcome we wanted
+        except OSError:
+            refused.append(path)
+        else:
+            deleted += 1
+    return deleted, refused
+
+
 def _ago(stamp: float, now: float | None = None) -> str:
     """"2 hours ago" / "yesterday" / "1 week ago" — the design's phrasing."""
     now = now if now is not None else datetime.now().timestamp()

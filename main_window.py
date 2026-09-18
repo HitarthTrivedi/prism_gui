@@ -517,6 +517,10 @@ class MainWindow(QMainWindow):
         # notice the licence has gone.
         self.settings_panel.licence_changed.connect(self.refresh_licence_ui)
         self.history_panel.open_run.connect(self._open_run_record)
+        # Deleting runs changes what Home's activity list and its counters
+        # add up to, and Home is already built by then -- it re-reads from
+        # disk, so it just has to be told to look again.
+        self.history_panel.runs_changed.connect(self.home_panel.refresh)
         # A recent-activity row on Home opens the run it names, through the
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
