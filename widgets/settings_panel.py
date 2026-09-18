@@ -104,6 +104,8 @@ SECTIONS = [
     ("status", "Connections", "Configure",
      "Everything else Prism has to be able to reach: your browser, your "
      "team folder."),
+    ("appearance", "Appearance", "Configure",
+     "Dark or light mode, background wallpaper, card glassmorphism and visual effects."),
     ("privacy", "Privacy & data", "Configure",
      "Where your work is written, who else can read it, and every folder "
      "Prism keeps."),
@@ -218,26 +220,27 @@ class SettingsPanel(QWidget):
         root.addWidget(self._header)
 
         body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
+        body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
+                                theme.PAGE_PAD, theme.PAGE_PAD)
+        body.setSpacing(theme.CARD_GAP)
 
-        self._nav_host = QWidget()
+        self._nav_host = C.Card(radius=16)
         self._nav_host.setFixedWidth(self.NAV_W)
-        self._nav = QVBoxLayout(self._nav_host)
-        self._nav.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
-                                     theme.SPACE_4, theme.SPACE_5)
-        self._nav.setSpacing(2)
+        self._nav = self._nav_host.body((theme.SPACE_3, theme.SPACE_4,
+                                         theme.SPACE_3, theme.SPACE_4),
+                                        spacing=2)
         body.addWidget(self._nav_host)
-        body.addWidget(C.hairline(vertical=True))
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }")
         self._page = QWidget()
+        self._page.setObjectName("settingsPage")
+        self._page.setAttribute(Qt.WA_StyledBackground, True)
         self._col = QVBoxLayout(self._page)
-        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
-                                     theme.PAGE_PAD, theme.PAGE_PAD)
+        self._col.setContentsMargins(0, 0, 0, 0)
         self._col.setSpacing(theme.CARD_GAP)
         self._scroll.setWidget(self._page)
         body.addWidget(self._scroll, stretch=1)
@@ -266,6 +269,7 @@ class SettingsPanel(QWidget):
             "agents": self._agents,
             "language": self._language,
             "status": self._connections,
+            "appearance": self._appearance,
             "privacy": self._privacy,
             "diagnostics": self._diagnostics,
             "guide": self._guide_page,
@@ -1341,6 +1345,61 @@ class SettingsPanel(QWidget):
                      Pill(i18n.t("Yes") if seeded else i18n.t("Not yet"),
                           "ok" if seeded else "quiet")))
         return rows
+
+    # ── appearance ────────────────────────────────────────────────────────
+    def _appearance(self, col):
+        card_wall = Card()
+        cw = card_wall.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
+        head_w = QHBoxLayout()
+        head_w.setSpacing(theme.SPACE_3)
+        head_w.addWidget(C.IconPad("folder", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        w_col = QVBoxLayout()
+        w_col.addWidget(C.label(i18n.t("Dashboard wallpaper"), level="CARD_TITLE"))
+        w_col.addWidget(C.label(i18n.t("Canvas image blurred behind frosted cards"), level="META"))
+        head_w.addLayout(w_col, stretch=1)
+        cw.addLayout(head_w)
+        cw.addWidget(C.label(
+            i18n.t("The background image is dynamically blurred and sampled by all cards and the left navigation rail. "
+                   "You can select any image or photo on your computer."),
+            level="SUPPORT", wrap=True))
+        cw.addWidget(self._buttons([
+            C.button(i18n.t("Choose custom wallpaper…"), "primary",
+                     on_click=self._choose_wallpaper),
+            C.button(i18n.t("Reset to default"), "secondary",
+                     on_click=self._reset_wallpaper),
+        ]))
+        col.addWidget(card_wall)
+
+    def _choose_wallpaper(self):
+        suggested = os.path.expanduser("~")
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Select dashboard wallpaper"), suggested,
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if path:
+            win = self.window()
+            if hasattr(win, "set_wallpaper"):
+                win.set_wallpaper(path)
+            self.cfg["custom_bg"] = path
+            try:
+                CB.config.save(self.cfg)
+            except Exception:
+                pass
+            QMessageBox.information(
+                self, i18n.t("Wallpaper"),
+                i18n.t("Dashboard wallpaper updated successfully."))
+
+    def _reset_wallpaper(self):
+        win = self.window()
+        if hasattr(win, "set_wallpaper"):
+            win.set_wallpaper("")
+        self.cfg["custom_bg"] = ""
+        try:
+            CB.config.save(self.cfg)
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, i18n.t("Wallpaper"),
+            i18n.t("Dashboard wallpaper reset to default."))
 
     # ── privacy & data ────────────────────────────────────────────────────
     def _privacy(self, col):

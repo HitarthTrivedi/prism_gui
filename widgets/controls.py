@@ -299,16 +299,17 @@ class Card(QFrame):
     blueprint registration marks the old design cornered its panels with.
     """
 
-    def __init__(self, stripe: bool = False, radius: int = theme.R_CARD,
+    def __init__(self, stripe: bool = False, radius: int = 18,
                  raised: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
         self._radius = radius
         self._stripe = stripe
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # QSS provides the base fill; paintEvent layers the glass optics on top.
         self.setStyleSheet(
-            f"#card {{ background: {theme.CARD}; border-radius: {radius}px; "
-            f"border: 1px solid {theme.HAIRLINE}; }}"
+            f"#card {{ background: transparent; border-radius: {radius}px; "
+            f"border: none; }}"
         )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
 
@@ -321,15 +322,67 @@ class Card(QFrame):
         return col
 
     def paintEvent(self, event):
-        super().paintEvent(event)
-        if not self._stripe:
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        r = QRectF(self.rect())
+        radius = float(self._radius)
+
+        # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(self.rect()), self._radius, self._radius)
+        clip.addRoundedRect(r, radius, radius)
         painter.setClipPath(clip)
-        painter.fillRect(QRect(0, 0, self.width(), 3), theme.c(theme.ACCENT))
+
+        # ── Layer 1: True Gaussian Backdrop Blur ──────────────────────────
+        central = self.window().findChild(QWidget, "central")
+        if central and hasattr(central, "get_blurred_pixmap"):
+            blurred = central.get_blurred_pixmap()
+            if blurred and not blurred.isNull():
+                pos = self.mapTo(central, QPoint(0, 0))
+                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
+                painter.drawPixmap(r.toRect(), blurred, src_rect)
+
+        # ── Layer 2: Frosted light glass sheen ────────────────────────────
+        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
+                                     QPointF(r.left(), r.bottom()))
+        glass_grad.setColorAt(0.00, QColor(255, 255, 255, 215))  # ~84% frosted white at top rim
+        glass_grad.setColorAt(0.40, QColor(255, 255, 255, 175))  # ~68% frosted white in middle
+        glass_grad.setColorAt(1.00, QColor(255, 255, 255, 155))  # ~60% frosted white at bottom
+        painter.setBrush(QBrush(glass_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(r, radius, radius)
+
+        # ── Layer 3: Diagonal bright-light catch sheen ─────────────────────
+        sheen = QRadialGradient(QPointF(r.left() + r.width() * 0.2,
+                                        r.top() + r.height() * 0.1),
+                                r.width() * 0.65)
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 100))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setBrush(QBrush(sheen))
+        painter.drawRoundedRect(r, radius, radius)
+
+        # ── Layer 4: Outer glass specular and contact border ──────────────
+        border_grad = QLinearGradient(
+            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
+        border_grad.setColorAt(0.0, QColor(255, 255, 255, 230))
+        border_grad.setColorAt(0.5, QColor(255, 255, 255, 130))
+        border_grad.setColorAt(1.0, QColor(0, 0, 0, 24))
+        border_pen = QPen(QBrush(border_grad), 1.2)
+        painter.setPen(border_pen)
+        painter.setBrush(Qt.NoBrush)
+        inset = r.adjusted(0.6, 0.6, -0.6, -0.6)
+        painter.drawRoundedRect(inset, radius - 0.6, radius - 0.6)
+
+        # ── Stripe accent bar (optional) ───────────────────────────────────
+        if self._stripe:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(255, 255, 255, 180)))
+            painter.drawRect(QRectF(r.left(), r.top(), r.width(), 3))
+        # painter is implicitly ended when it goes out of scope.
+        # We do NOT call super().paintEvent(event) here — QFrame would overdraw
+        # our glass layers with a solid background. Children are painted by Qt
+        # through their own paint events, not through this frame's paintEvent.
 
 
 class Pill(QLabel):
@@ -1052,7 +1105,7 @@ class PageHeader(QFrame):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
+        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
                                theme.PAGE_PAD, theme.SPACE_4)
         row.setSpacing(theme.SPACE_4)
 
@@ -1079,6 +1132,35 @@ class PageHeader(QFrame):
         for widget in actions or []:
             self.actions_row.addWidget(widget)
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        r = QRectF(self.rect())
+
+        central = self.window().findChild(QWidget, "central")
+        if central and hasattr(central, "get_blurred_pixmap"):
+            blurred = central.get_blurred_pixmap()
+            if blurred and not blurred.isNull():
+                pos = self.mapTo(central, QPoint(0, 0))
+                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
+                painter.drawPixmap(r.toRect(), blurred, src_rect)
+
+        # Translucent frosted white glass fill
+        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
+                                     QPointF(r.left(), r.bottom()))
+        glass_grad.setColorAt(0.00, QColor(255, 255, 255, 215))
+        glass_grad.setColorAt(1.00, QColor(255, 255, 255, 175))
+        painter.setBrush(QBrush(glass_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(r)
+
+        # Bottom subtle hairline divider & specular edge
+        painter.setPen(QPen(QColor(0, 0, 0, 22), 1))
+        painter.drawLine(QPointF(r.left(), r.bottom() - 0.5), QPointF(r.right(), r.bottom() - 0.5))
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 1))
+        painter.drawLine(QPointF(r.left(), r.bottom() - 1.5), QPointF(r.right(), r.bottom() - 1.5))
+
     def set_subtitle(self, text: str):
         self.subtitle.setText(text)
         self.subtitle.setVisible(bool(text))
@@ -1099,9 +1181,11 @@ class SectionHeader(QWidget):
     def __init__(self, title: str, subtitle: str = "", actions: list = None,
                  parent=None):
         super().__init__(parent)
+        self.setObjectName("sectionHeader")
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        row.setContentsMargins(theme.SPACE_4, theme.SPACE_2,
+                               theme.SPACE_4, theme.SPACE_2)
         row.setSpacing(theme.SPACE_3)
 
         col = QVBoxLayout()
@@ -1135,6 +1219,44 @@ class SectionHeader(QWidget):
         row.addLayout(self.actions_row)
         for widget in actions or []:
             self.actions_row.addWidget(widget)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        r = QRectF(self.rect())
+        radius = 12.0
+
+        clip = QPainterPath()
+        clip.addRoundedRect(r, radius, radius)
+        painter.setClipPath(clip)
+
+        central = self.window().findChild(QWidget, "central")
+        if central and hasattr(central, "get_blurred_pixmap"):
+            blurred = central.get_blurred_pixmap()
+            if blurred and not blurred.isNull():
+                pos = self.mapTo(central, QPoint(0, 0))
+                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
+                painter.drawPixmap(r.toRect(), blurred, src_rect)
+
+        # Frosted glass pill fill
+        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
+                                     QPointF(r.left(), r.bottom()))
+        glass_grad.setColorAt(0.0, QColor(255, 255, 255, 205))
+        glass_grad.setColorAt(1.0, QColor(255, 255, 255, 165))
+        painter.setBrush(QBrush(glass_grad))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(r, radius, radius)
+
+        # Specular border
+        border_grad = QLinearGradient(
+            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
+        border_grad.setColorAt(0.0, QColor(255, 255, 255, 240))
+        border_grad.setColorAt(0.5, QColor(255, 255, 255, 140))
+        border_grad.setColorAt(1.0, QColor(0, 0, 0, 20))
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QBrush(border_grad), 1.0))
+        painter.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
     def set_subtitle(self, text: str):
         self.subtitle.setText(text)
@@ -1457,13 +1579,16 @@ class EmptyState(QWidget):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(theme.SPACE_5, theme.SPACE_5,
-                                 theme.SPACE_5, theme.SPACE_5)
-        outer.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.card = Card(radius=18)
+        outer = self.card.body((theme.SPACE_5, theme.SPACE_5,
+                                theme.SPACE_5, theme.SPACE_5), spacing=0)
         outer.addStretch(1)
 
-        col = QVBoxLayout()
+        self.content_layout = col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(theme.SPACE_3)
         col.setAlignment(Qt.AlignHCenter)
@@ -1489,7 +1614,7 @@ class EmptyState(QWidget):
         self.body.setObjectName("emptyBody")
         self.body.setAlignment(Qt.AlignCenter)
         self.body.setWordWrap(True)
-        self.body.setMaximumWidth(420)
+        self.body.setMaximumWidth(460)
         self.body.setVisible(bool(body))
         body_row = QHBoxLayout()
         body_row.setContentsMargins(0, 0, 0, 0)
@@ -1511,6 +1636,7 @@ class EmptyState(QWidget):
 
         outer.addLayout(col)
         outer.addStretch(1)
+        root.addWidget(self.card)
 
     def set_text(self, title: str = None, body: str = None):
         if title is not None:

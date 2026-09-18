@@ -282,7 +282,7 @@ def _ticked(value) -> bool:
 def _mix(base: str, ink: str, amount: float) -> QColor:
     """`base` moved `amount` of the way towards `ink` — an opaque tint, so a
     row ground never lets the hairline beneath it show through."""
-    a, b = QColor(base), QColor(ink)
+    a, b = theme.qcolor(base), theme.qcolor(ink)
     return QColor(round(a.red() + (b.red() - a.red()) * amount),
                   round(a.green() + (b.green() - a.green()) * amount),
                   round(a.blue() + (b.blue() - a.blue()) * amount))
@@ -317,8 +317,8 @@ def _paint_check(painter: QPainter, rect, state, hot: bool = False) -> None:
             mark.lineTo(box.left() + 11.9, box.top() + 5.4)
             painter.drawPath(mark)
     else:
-        painter.setPen(QPen(QColor(theme.ACCENT if hot else theme.NEUTRAL[400]), 1.2))
-        painter.setBrush(QColor(theme.CARD))
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT if hot else theme.NEUTRAL[400]), 1.2))
+        painter.setBrush(theme.qcolor(theme.CARD))
         painter.drawRoundedRect(box.adjusted(0.6, 0.6, -0.6, -0.6), 4, 4)
     painter.restore()
 
@@ -338,10 +338,10 @@ def _paint_row(painter: QPainter, option, index) -> None:
         ground = _mix(theme.CARD, theme.ACCENT,
                       (0.10 if is_open else 0.06) + (0.03 if hover else 0.0))
     else:
-        ground = QColor(theme.NEUTRAL[100] if hover else theme.CARD)
+        ground = theme.qcolor(theme.NEUTRAL[100] if hover else theme.CARD)
     painter.fillRect(rect, ground)
     painter.fillRect(QRect(rect.left(), rect.bottom(), rect.width(), 1),
-                     QColor(theme.HAIRLINE))
+                     theme.qcolor(theme.HAIRLINE))
     if is_open and index.column() == _C_TICK:
         painter.fillRect(QRect(rect.left(), rect.top(), 3, rect.height()),
                          QColor(theme.ACCENT))
@@ -531,9 +531,9 @@ class _LeadHeader(QHeaderView):
 
     def paintSection(self, painter, rect, logical):
         painter.save()
-        painter.fillRect(rect, QColor(theme.CARD))
+        painter.fillRect(rect, theme.qcolor(theme.CARD))
         painter.fillRect(QRect(rect.left(), rect.bottom(), rect.width(), 1),
-                         QColor(theme.HAIRLINE))
+                         theme.qcolor(theme.HAIRLINE))
         if logical == _C_TICK:
             _paint_check(painter, rect, self._state, self._hot_box)
         else:
@@ -721,12 +721,12 @@ class _SplitHandle(QSplitterHandle):
 
     def paintEvent(self, _event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(theme.CARD))
+        p.fillRect(self.rect(), theme.qcolor(theme.CARD))
         mid = self.width() // 2
         if self._hot:
-            p.fillRect(QRect(mid - 1, 0, 2, self.height()), QColor(theme.ACCENT))
+            p.fillRect(QRect(mid - 1, 0, 2, self.height()), theme.qcolor(theme.ACCENT))
         else:
-            p.fillRect(QRect(mid, 0, 1, self.height()), QColor(theme.HAIRLINE))
+            p.fillRect(QRect(mid, 0, 1, self.height()), theme.qcolor(theme.HAIRLINE))
 
 
 class _Splitter(QSplitter):

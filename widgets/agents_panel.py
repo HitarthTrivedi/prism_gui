@@ -731,24 +731,19 @@ class AgentsPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(theme.SPACE_3)
 
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_2)
-        titles = QVBoxLayout()
-        titles.setSpacing(0)
-        titles.addWidget(heading(i18n.t("Your plan"), level=5))
-        self.subtitle = meta(i18n.t(
-            "Prism drafted this. Reorder it, rewrite any prompt, change a "
-            "tool, or drop a step — nothing runs until you say so."))
-        self.subtitle.setWordWrap(True)
-        titles.addWidget(self.subtitle)
-        head.addLayout(titles, stretch=1)
+        self.header = C.SectionHeader(
+            i18n.t("Your plan"),
+            i18n.t("Prism drafted this. Reorder it, rewrite any prompt, change a "
+                   "tool, or drop a step — nothing runs until you say so.")
+        )
+        self.subtitle = self.header.subtitle
         self.count = C.Pill("", "neutral")
         self.count.setVisible(False)
-        head.addWidget(self.count)
+        self.header.add_action(self.count)
         self.budget = C.Pill("", "quiet")
         self.budget.setVisible(False)
-        head.addWidget(self.budget)
-        root.addLayout(head)
+        self.header.add_action(self.budget)
+        root.addWidget(self.header)
 
         # Prism's own restatement of the job, sitting between your words (the
         # composer recap, immediately above) and the steps it produced.

@@ -229,17 +229,18 @@ def _wrap(widget: QWidget, mine: bool, glyph: str = "",
 def _bubble(text: str, mine: bool = False) -> QWidget:
     frame = QFrame()
     frame.setObjectName("supportMine" if mine else "supportBot")
-    # Scoped by object name: unscoped, this fill lands on every child too and
-    # flattens the buttons inside an answer card back into plain boxes.
+    bg = theme.ACCENT if mine else "rgba(255, 255, 255, 0.92)"
+    edge = theme.ACCENT if mine else "rgba(0, 0, 0, 0.10)"
     frame.setStyleSheet(
         f"QFrame#{frame.objectName()} {{"
-        f"background: {theme.ACCENT_RAMP[100] if mine else theme.CARD};"
-        f"border: 1px solid {theme.ACCENT_RAMP[300] if mine else theme.HAIRLINE};"
+        f"background: {bg};"
+        f"border: 1px solid {edge};"
         f"border-radius: {theme.R_CARD}px; }}")
     box = QVBoxLayout(frame)
     box.setContentsMargins(theme.SPACE_4 - 1, theme.SPACE_3,
                            theme.SPACE_4 - 1, theme.SPACE_3)
-    body = C.label(text, level="BODY", wrap=True)
+    body = C.label(text, level="BODY", wrap=True,
+                   colour="#ffffff" if mine else theme.TEXT)
     body.setTextInteractionFlags(Qt.TextSelectableByMouse)
     box.addWidget(body)
     return _wrap(frame, mine, glyph="" if mine else "prism")
@@ -347,13 +348,13 @@ class _Choice(QFrame):
                 f"QFrame#{name}:focus {{ border-color: {theme.ACCENT}; }}")
             return
         self.setStyleSheet(
-            f"QFrame#{name} {{ background: {theme.CARD};"
-            f"border: 1px solid {theme.HAIRLINE};"
+            f"QFrame#{name} {{ background: rgba(255, 255, 255, 0.88);"
+            f"border: 1px solid rgba(0, 0, 0, 0.08);"
             f"border-radius: {theme.R_CONTROL}px; }}"
             f"QFrame#{name}:hover {{ border-color: {theme.ACCENT};"
-            f"background: {theme.ACCENT_RAMP[100]}; }}"
+            f"background: rgba(255, 255, 255, 0.98); }}"
             f"QFrame#{name}:focus {{ border-color: {theme.ACCENT};"
-            f"background: {theme.ACCENT_RAMP[100]}; }}")
+            f"background: rgba(255, 255, 255, 0.98); }}")
 
     def set_current(self, current: bool):
         if current == self._current:
@@ -686,10 +687,9 @@ class SupportPanel(QWidget):
 
     # ── the conversation ──────────────────────────────────────────────────
     def _talk_column(self) -> QWidget:
-        holder = QWidget()
-        col = QVBoxLayout(holder)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
+        card = C.Card(radius=18)
+        col = card.body((theme.SPACE_4, theme.SPACE_4,
+                         theme.SPACE_4, theme.SPACE_4), spacing=0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -707,7 +707,7 @@ class SupportPanel(QWidget):
         # same calculation that places the bubbles.
         inner.setMinimumSize(1, 1)
         self._thread_box = QVBoxLayout(inner)
-        self._thread_box.setContentsMargins(0, 0, theme.SPACE_3, theme.SPACE_4)
+        self._thread_box.setContentsMargins(0, 0, theme.SPACE_2, theme.SPACE_3)
         self._thread_box.setSpacing(theme.SPACE_3)
         self._thread_box.addStretch(1)
         scroll.setWidget(inner)
@@ -726,7 +726,7 @@ class SupportPanel(QWidget):
 
         col.addWidget(self._composer())
         col.addWidget(self._escalation())
-        return holder
+        return card
 
     # ── chrome ────────────────────────────────────────────────────────────
     def _composer(self) -> QWidget:

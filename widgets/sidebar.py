@@ -256,8 +256,7 @@ def nav_button(label: str, icon_name: str, small: bool = False,
     btn.setFlat(True)
     btn.setFocusPolicy(Qt.StrongFocus)
     size = 15 if small else 17
-    icons.button_icon(btn, icon_name, size,
-                      theme.over(INK_ITEM if small else INK_PRIMARY))
+    icons.button_icon(btn, icon_name, size, "#27272a")
     btn.setIconSize(QSize(size, size))
     btn.setProperty("cur", False)
     btn.setMinimumHeight(C.MIN_TARGET + 4)
@@ -761,9 +760,9 @@ class Sidebar(QFrame):
 
         # The wake word lives down here rather than above the add-on shelf: it
         # is a standing preference, not a destination, and it was occupying the
-        # most valuable strip in the rail.
-        foot_col.addWidget(self._wake_row())
-        foot_col.addSpacing(theme.SPACE_1 // 2)
+        # most valuable strip in the rail. Removed from visible nav bar per user request.
+        self._wake_row()
+        self.wake_row.setVisible(False)
         # The licence card folded into the profile row: two lines instead of a
         # card plus a row, and "what am I paying for" is still answered without
         # a scroll or a click.
@@ -777,7 +776,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #ffffff; border-radius: 2px;")
+        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -999,9 +998,7 @@ class Sidebar(QFrame):
         wake_label = QLabel(i18n.t('Listen for "Prism"'))
         wake_label.setObjectName("railMuted")
         wake_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        wake_label.setStyleSheet(theme.type_css("SUPPORT",
-                                                theme.over(INK_ITEM))
-                                 + " background: transparent;")
+        wake_label.setStyleSheet("color: #27272a; font-size: 13px; font-weight: 500; background: transparent;")
         wake_row.addWidget(wake_label, stretch=1)
         self._wake_label = wake_label
 
@@ -1458,31 +1455,9 @@ class Sidebar(QFrame):
         else:
             self.fav_list.setVisible(self.fav_toggle.isChecked())
 
-        # Foot: Wake row
+        # Foot: Wake row (hidden per user requirement)
         if hasattr(self, "wake_row"):
-            if c:
-                self.wake_switch.setVisible(False)
-                self._wake_label.setVisible(False)
-                self._wake_symbol.setVisible(True)
-                self.wake_row.setFixedSize(48, 38)
-                self.wake_row.setToolTip(i18n.t('Wake word: Listen for "Prism"'))
-                self._wake_row_layout.setContentsMargins(0, 0, 0, 0)
-                self._wake_row_layout.setAlignment(Qt.AlignCenter)
-            else:
-                self.wake_switch.setVisible(True)
-                self._wake_label.setVisible(True)
-                self._wake_symbol.setVisible(False)
-                self.wake_row.setMinimumHeight(C.MIN_TARGET + 6)
-                self.wake_row.setMaximumWidth(16777215)
-                self.wake_row.setMinimumWidth(0)
-                self.wake_row.setMaximumHeight(16777215)
-                self.wake_row.setToolTip(
-                    "Best-effort wake word: polls the mic every ~2s and checks Groq "
-                    "Whisper for the word 'Prism'. Not instant like a real wake-word "
-                    "engine — see wakeword.py for details.")
-                self._wake_row_layout.setContentsMargins(theme.SPACE_2 + 2, 4, theme.SPACE_2 + 2, 4)
-                self._wake_row_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self._update_wake_symbol(self.wake_switch.isChecked())
+            self.wake_row.setVisible(False)
 
         # Foot: Profile row
         if hasattr(self, "_profile_btn"):

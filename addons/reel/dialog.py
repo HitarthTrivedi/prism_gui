@@ -388,7 +388,7 @@ class ReelDialog(PrismDialog):
 
         total_footage_dur = 0.0
         try:
-            from core import footage as _footage
+            _footage = CB.get_footage()
             probed_clips = [_footage.probe(p) for p in self.videos if os.path.isfile(p)]
             total_footage_dur = sum(float(p.get("duration") or 0) for p in probed_clips)
         except Exception:
@@ -613,7 +613,7 @@ class ReelDialog(PrismDialog):
         audio_file = getattr(self, "_studio_audio", "")
         if audio_file and os.path.isfile(audio_file):
             try:
-                from core import footage as _footage
+                _footage = CB.get_footage()
                 voice_dur = float(_footage.probe(audio_file).get("duration") or 0)
                 if voice_dur > 0 and spec.get("scenes"):
                     planned_secs = sum(float(sc.get("seconds", 4) or 4) for sc in spec["scenes"])
@@ -700,7 +700,7 @@ class ReelDialog(PrismDialog):
         audio = getattr(self, "_studio_audio", "")
         if audio and os.path.isfile(audio):
             try:
-                from core import footage as _footage
+                _footage = CB.get_footage()
                 _footage.mix_audio(path, audio)
             except Exception:
                 pass

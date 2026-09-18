@@ -486,3 +486,9 @@ def get_motion_generate():
     from core.motion import generate
     return generate
 
+
+def get_footage():
+    """Client footage trimming, probing, and audio mixing."""
+    from core import footage
+    return footage
+

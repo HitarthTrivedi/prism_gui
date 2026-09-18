@@ -1,31 +1,31 @@
-/* Prism GUI â€” "Soft Industry" theme
+/* Prism GUI — "Soft Industry" theme
    theme.py mirrors the subset the custom-painted widgets need. Keep both in
    step: every hex, size and radius below has a named twin over there, and the
    painted widgets read theme.py directly, so drift shows as a visible seam.
 
-   â”€â”€ Colour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Colour ────────────────────────────────────────────────────────────────
    Six surfaces, one value each. Seventeen greys used to ship here with no rule
-   about which meant what â€” three hairlines two units apart, two page greys,
+   about which meant what — three hairlines two units apart, two page greys,
    two wells. Nobody could tell a deliberate step from a typo, so each job now
    has exactly one hex:
 
-     page background  #f4f5f6   CANVAS      card surface  #ffffff   CARD
-     inset well       #f7f8f9   WELL        hairline      #ececee   HAIRLINE
-     divider          #d0d0d1   DIVIDER     border        #e7e7ea   BORDER
+     page background  #ffffff   CANVAS      card surface  #ffffff   CARD
+     inset well       rgba(0, 0, 0, 0.02)   WELL        hairline      rgba(0, 0, 0, 0.06)   HAIRLINE
+     divider          #d0d0d1   DIVIDER     border        rgba(0, 0, 0, 0.10)   BORDER
 
-     rail     #142d46  (= accent ramp 900 â€” see below)
-     ink      #1d1f20
-     accent   #4480bb  ramp 100 #eff6fe Â· 200 #d8ebfd Â· 500 #5e9eda
-                            600 #457eb7 Â· 700 #306191 Â· 800 #1f456a Â· 900 #142d46
-     neutral  400 #b7b7ba Â· 500 #98989b Â· 600 #7a7a7d Â· 700 #5d5d60 Â· 800 #424244
-     semantic ok #186b53/#eafaf3 Â· warn #755a14/#fff8e8 Â· err #8a2f2f/#fdeeee
+     rail     #09090b  (= accent ramp 900 — see below)
+     ink      #09090b
+     accent   #09090b  ramp 100 rgba(0, 0, 0, 0.04) · 200 rgba(0, 0, 0, 0.08) · 500 #71717a
+                            600 #27272a · 700 #18181b · 800 #09090b · 900 #09090b
+     neutral  400 #b7b7ba · 500 #98989b · 600 #7a7a7d · 700 #5d5d60 · 800 #424244
+     semantic ok #186b53/#eafaf3 · warn #755a14/#fff8e8 · err #8a2f2f/#fdeeee
               info = the accent's own steps  (semantics never rotate; info does)
 
    Every status ink above clears WCAG AA 4.5:1 on its own tint. Two did not
    before this pass and were changed: warn ink was #8a6d1f (4.63, no headroom)
    and ok ink #1a7a5e (4.88). Hue unchanged in both; only the value moved.
 
-   â”€â”€ Type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Type ──────────────────────────────────────────────────────────────────
    Eight levels, seven pixel sizes, and nothing else. Twenty distinct sizes
    shipped before this pass, nine of them inside one 4px band. Half a pixel is
    not a decision anyone can see.
@@ -37,121 +37,167 @@
      13px  SUPPORT     Barlow 400      #body #lead, control labels
      12px  META        Barlow 500      #meta #dim #faint, timestamps, counts
      11px  LABEL       Condensed 600   #kick #colHead, tags, table headers
-     12px  MONO        mono 500        #mono â€” ids, keys, paths
+     12px  MONO        mono 500        #mono — ids, keys, paths
 
    Six heading object names collapse onto three real sizes so no panel has to
    be edited for the scale to take effect. Headings get their weight from
-   condensation, not from size â€” the old #h1 was 30px, which on a 900px window
+   condensation, not from size — the old #h1 was 30px, which on a 900px window
    spent a sixth of the vertical budget on a greeting.
 
    QSS has no letter-spacing property; the tracked labels (kickers, brand,
    window title) set it on their QFont in widgets/controls.py.
 
-   â”€â”€ Shape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Shape ─────────────────────────────────────────────────────────────────
    Three radii, not thirteen:
      6px   R_CHIP     pills, chips, badges, step marks, menu items, indicators
-     8px   R_CONTROL  buttons, inputs, rows, small cards â€” every one of them
+     8px   R_CONTROL  buttons, inputs, rows, small cards — every one of them
     12px   R_CARD     cards, panels, modals, dialogs, tables, group boxes
    999px   R_PILL     the special case: a true capsule at any height
-     4px   R_MICRO    NOT a scale step â€” half the width of a progress bar or a
+     4px   R_MICRO    NOT a scale step — half the width of a progress bar or a
                       scrollbar handle, i.e. the radius that makes it a capsule
    Adding a value outside this scale is what makes an app stop feeling like one
    system. Reach for the nearest step instead.
 
-   â”€â”€ Spacing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Spacing ───────────────────────────────────────────────────────────────
    4 / 8 / 12 / 16 / 20 / 28 / 40, and nothing between them. Page padding 28,
    card padding 20, card gutter 16, row spacing inside a card 12.
 
-   â”€â”€ Elevation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Elevation ─────────────────────────────────────────────────────────────
    Borders first, shadow rarely. A hairline is the default separator; shadow is
-   reserved for things that genuinely float â€” modals, dropdowns, a dragged row.
+   reserved for things that genuinely float — modals, dropdowns, a dragged row.
    QSS has no box-shadow anyway, so a card's surface is styled here and its
    shadow attached in Python by widgets.controls.elevate(), which is off by
    default. See controls.shadows_enabled() for why.
 
-   â”€â”€ Focus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Focus ─────────────────────────────────────────────────────────────────
    Every interactive control below carries a visible :focus ring, and every one
    of them keeps its box the same size while wearing it: the ring is 2px and
    the padding drops by 1px to pay for it. Without that compensation a focus
    ring reflows the row it is in, which reads as the layout twitching under the
    keyboard and is worse than no ring at all.
 
-   â”€â”€ Role colour â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   ── Role colour ───────────────────────────────────────────────────────────
    Every accent hex here is rewritten at load time by theme.role_stylesheet()
    so the whole app takes the signed-in role's hue. That includes the rail,
-   which is deliberately accent-ramp-900 rather than a separate navy â€” a role
+   which is deliberately accent-ramp-900 rather than a separate navy — a role
    that moved everything else but left a blue rail would look broken.
 
    The swap is a blunt string replace over eleven fixed hexes
    (theme._ACCENT_HEXES). So: an accent-coloured hex written here that is NOT
    one of those eleven will not rotate, and will strand one permanently blue
-   element in a green copy. And a hex that must NOT rotate â€” every neutral,
-   every semantic, every tool brand colour â€” has to be distinct from all
+   element in a green copy. And a hex that must NOT rotate — every neutral,
+   every semantic, every tool brand colour — has to be distinct from all
    eleven. "Won" stays green in every role. */
 
 * {
-    font-family: "Barlow", "Inter", -apple-system, "Segoe UI", sans-serif;
+    font-family: "Barlow", "Inter", system-ui, -apple-system, "Segoe UI", "Ubuntu", "DejaVu Sans", sans-serif;
     font-size: 14px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
-QMainWindow, QDialog, QWidget#central, QWidget#columns, QWidget#centralWidget {
-    background: #f4f5f6;
-    color: #1d1f20;
+QMainWindow, QWidget#central, QWidget#columns, QWidget#centralWidget {
+    background: transparent;
 }
 
-QDialog, QDialog QWidget#dialogBody, QDialog QScrollArea, QDialog QScrollArea > QWidget {
-    background: #f4f5f6;
-    color: #1d1f20;
+QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
+    background: transparent;
+    border: none;
 }
 
-QDialog #dialogHeader, QDialog #dialogFooter {
+/* ── Modals & Dialogs: Solid surfaces to eliminate Linux X11 pitch-black window bugs ── */
+QDialog {
+    background-color: #ffffff;
+    color: #09090b;
+}
+
+QDialog #dialogHeader {
+    background-color: #ffffff;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+QDialog #dialogFooter {
+    background-color: #fbfbfb;
+    border: none;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+QDialog #dialogBody, QDialog QWidget#dialogBody {
+    background-color: #ffffff;
+}
+
+QDialog QScrollArea,
+QDialog QScrollArea > QWidget,
+QDialog QScrollArea > QWidget > QWidget {
+    background-color: #ffffff;
     background: #ffffff;
+    border: none;
 }
 
-QDialog QListWidget, QDialog QTextBrowser, QDialog QPlainTextEdit, QDialog QLineEdit {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
-    color: #1d1f20;
+QDialog QListWidget {
+    background-color: #ffffff;
+    color: #09090b;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 8px;
 }
 
-/* Qt hands QDialogButtonBox platform icons â€” on GTK that's a red âœ• and a blue
-   download arrow, which is the one place the desktop theme leaks through this
-   one. Off everywhere; buttons in this system are text plus our own line
-   icons or nothing. */
+QDialog QTextBrowser,
+QDialog QPlainTextEdit,
+QDialog QTextEdit,
+QDialog QLineEdit {
+    background-color: #ffffff;
+    color: #09090b;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+}
+
+QDialog QComboBox {
+    background-color: #ffffff;
+    color: #09090b;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+QDialog QLabel {
+    color: #09090b;
+}
+
+/* Qt hands QDialogButtonBox platform icons */
 QDialogButtonBox {
     dialogbuttonbox-buttons-have-icons: 0;
 }
 
 QToolTip {
-    background: #1d1f20;
-    color: #f4f5f6;
-    border: 1px solid #1d1f20;
+    background: #09090b;
+    color: #ffffff;
+    border: 1px solid #27272a;
     border-radius: 6px;
     padding: 5px 8px;
     font-size: 13px;
 }
 
-/* â”€â”€ the card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-   The surface this whole redesign is built out of. Painted by
-   widgets.controls.Card, which also draws the optional accent stripe and
-   attaches the drop shadow. */
+/* ── the card: transparent shell — Card.paintEvent paints all glass layers ── */
 #card {
-    background: #ffffff;
+    background: transparent;
+    border-radius: 18px;
+    border: none;
+}
+
+#card QLabel {
+    color: #09090b;
+}
+
+/* An inset well inside a card */
+#well, #card #well {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     border-radius: 12px;
 }
 
-/* An inset well inside a card: the tool pill on a plan row, the "Prism's
-   proposed change" strip on a reply. */
-#well {
-    background: #f7f8f9;
-    border-radius: 8px;
-}
-
-/* Hairline between rows inside a card. The same #ececee as a card's own
-   border: two greys two units apart were not telling anyone anything. */
+/* Hairline between rows inside a card. */
 #cardLine {
-    background: #ececee;
+    background: rgba(0, 0, 0, 0.06);
     max-height: 1px;
     min-height: 1px;
     border: none;
@@ -159,195 +205,21 @@ QToolTip {
 
 /* The vertical separator between the work column and the context rail. */
 #railLine {
-    background: #ececee;
+    background: rgba(0, 0, 0, 0.08);
     max-width: 1px;
     min-width: 1px;
     border: none;
 }
 
-/* â”€â”€ sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-   Dark. Everything inside it has to name its own colour, because the `*`
-   rule above paints all text ink-on-light by default. */
+/* ── sidebar: floating rounded pure glassmorphic nav rail ───────── */
 #sidebar {
-    background: #142d46;
+    background: transparent;
     border: none;
+    border-radius: 20px;
 }
 
 #sidebarInner {
-    background: #142d46;
-}
-
-#brand {
-    font-family: "Barlow Condensed";
-    font-size: 18px;
-    font-weight: 600;
-    color: #ffffff;
-}
-
-/* .navitem â€” a sidebar destination. Flat until hovered; the current one is
-   lifted with a white wash rather than the accent tint it used to take, since
-   on a dark rail an accent fill and the accent-coloured New-task button
-   directly above it read as two primary actions. */
-#navItem {
-    text-align: left;
     background: transparent;
-    border: 2px solid transparent;
-    border-radius: 8px;
-    padding: 8px 11px;
-    font-family: "Barlow";
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
-}
-
-#navItem:hover {
-    background: rgba(255, 255, 255, 0.07);
-}
-
-#navItem:pressed {
-    background: rgba(255, 255, 255, 0.12);
-}
-
-/* On the dark rail an accent ring is barely brighter than the navy behind it,
-   so the keyboard ring here is white. It is the same 2px, and the transparent
-   border above already reserves its space. */
-#navItem:focus, #navSub:focus, #railProfile:focus {
-    border-color: rgba(255, 255, 255, 0.85);
-}
-
-#navItem[cur="true"] {
-    background: rgba(255, 255, 255, 0.09);
-    color: #ffffff;
-}
-
-/* The secondary rows â€” add-ons and the MORE group â€” sit one weight and one
-   step of contrast below the primary destinations. */
-#navSub {
-    text-align: left;
-    background: transparent;
-    border: 2px solid transparent;
-    border-radius: 8px;
-    padding: 6px 11px;
-    font-family: "Barlow";
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.55);
-}
-
-#navSub:hover {
-    background: rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.85);
-}
-
-#navSub[cur="true"] {
-    background: rgba(255, 255, 255, 0.09);
-    color: #ffffff;
-}
-
-/* An add-on the licence doesn't cover. Quieter than a live item but NOT
-   disabled â€” it stays clickable and opens the pitch for that add-on, because
-   the click is the customer telling us what they want. A greyed-out control
-   sells nothing and looks broken. */
-#navItem[locked="true"], #navSub[locked="true"] {
-    color: rgba(255, 255, 255, 0.32);
-}
-
-#navItem[locked="true"]:hover, #navSub[locked="true"]:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.55);
-}
-
-/* Shipped but not built yet. This one IS disabled â€” there is nothing behind
-   the click â€” but it stays visible, because a shelf with a visible "next one"
-   reads as a product line and an empty gap reads as an oversight. */
-#navSub:disabled {
-    color: rgba(255, 255, 255, 0.22);
-}
-
-#navSection {
-    font-family: "Barlow Condensed";
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.32);
-    padding: 2px 4px;
-    background: transparent;
-}
-
-#railRule {
-    background: rgba(255, 255, 255, 0.08);
-    max-height: 1px;
-    min-height: 1px;
-    border: none;
-}
-
-#railMuted {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    background: transparent;
-}
-
-/* The New-task button: the rail's one filled control, and the only accent
-   fill on the dark surface. Its shadow is attached in Python. */
-#railPrimary {
-    background: #4480bb;
-    border: 2px solid #4480bb;
-    border-radius: 8px;
-    color: #ffffff;
-    font-family: "Barlow Condensed";
-    font-weight: 600;
-    font-size: 15px;
-    padding: 8px 10px;
-    text-align: center;
-}
-
-#railPrimary:hover { background: #5e9eda; border-color: #5e9eda; }
-#railPrimary:pressed { background: #457eb7; border-color: #457eb7; }
-#railPrimary:focus { border-color: #ffffff; }
-#railPrimary:disabled {
-    background: #306191;
-    border-color: #306191;
-    color: rgba(255, 255, 255, 0.45);
-}
-
-/* The profile row, hard against the bottom edge. */
-#railProfile {
-    background: transparent;
-    border: 2px solid transparent;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0;
-    text-align: left;
-    padding: 8px 6px;
-}
-
-#railProfile:hover { background: rgba(255, 255, 255, 0.05); }
-
-#railProfileName {
-    font-size: 13px;
-    font-weight: 500;
-    color: #ffffff;
-    background: transparent;
-}
-
-#railProfileRole {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-    background: transparent;
-}
-
-/* Collapsible sidebar & accordion chrome */
-#railCollapseBtn {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 0;
-}
-
-#railCollapseBtn:hover {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-#railCollapseBtn:pressed {
-    background: rgba(255, 255, 255, 0.14);
 }
 
 #addonsHead, #helpHead, #settingsHead {
@@ -357,7 +229,7 @@ QToolTip {
 }
 
 #addonsHead:hover, #helpHead:hover, #settingsHead:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.04);
 }
 
 #addonsChevron, #helpChevron, #settingsChevron {
@@ -368,7 +240,23 @@ QToolTip {
 }
 
 #addonsChevron:hover, #helpChevron:hover, #settingsChevron:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.06);
+}
+
+#railCollapseBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0;
+}
+
+#railCollapseBtn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+#railCollapseBtn:pressed {
+    background: rgba(0, 0, 0, 0.09);
 }
 
 #sidebar[collapsed="true"] #navItem,
@@ -380,7 +268,8 @@ QToolTip {
 
 #sidebar[collapsed="true"] #navItem[cur="true"],
 #sidebar[collapsed="true"] #navSub[cur="true"] {
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 8px;
 }
 
@@ -389,75 +278,228 @@ QToolTip {
     padding: 0;
 }
 
-#hr {
-    background: #d0d0d1;
+#brand {
+    font-family: "Barlow Condensed";
+    font-size: 18px;
+    font-weight: 700;
+    color: #09090b;
+}
+
+#navItem {
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px 11px;
+    font-family: "Barlow";
+    font-size: 13px;
+    font-weight: 600;
+    color: #27272a;
+}
+
+#navItem:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #09090b;
+}
+
+#navItem:pressed {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+#navItem:focus, #navSub:focus, #railProfile:focus {
+    border-color: rgba(0, 0, 0, 0.35);
+}
+
+#navItem[cur="true"] {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
+    font-weight: 700;
+}
+
+#navSub {
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 6px 11px;
+    font-family: "Barlow";
+    font-size: 12px;
+    font-weight: 500;
+    color: #3f3f46;
+}
+
+#navSub:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #09090b;
+}
+
+#navSub[cur="true"] {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
+    font-weight: 700;
+}
+
+#navItem[locked="true"], #navSub[locked="true"] {
+    color: rgba(255, 255, 255, 0.40);
+}
+
+#navItem[locked="true"]:hover, #navSub[locked="true"]:hover {
+    background: rgba(0, 0, 0, 0.03);
+    color: rgba(0, 0, 0, 0.65);
+}
+
+#navSub:disabled {
+    color: rgba(0, 0, 0, 0.25);
+}
+
+#navSection {
+    font-family: "Barlow Condensed";
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(0, 0, 0, 0.45);
+    padding: 2px 4px;
+    background: transparent;
+    letter-spacing: 0.5px;
+}
+
+#railRule {
+    background: rgba(0, 0, 0, 0.06);
     max-height: 1px;
     min-height: 1px;
     border: none;
 }
 
-/* â”€â”€ type roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#railMuted {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+    background: transparent;
+}
+
+/* The New-task button */
+#railPrimary {
+    background: #09090b;
+    border: 1px solid #09090b;
+    border-radius: 8px;
+    color: #ffffff;
+    font-family: "Barlow Condensed";
+    font-weight: 600;
+    font-size: 15px;
+    padding: 8px 10px;
+    text-align: center;
+}
+
+#railPrimary:hover { background: #27272a; border-color: #27272a; }
+#railPrimary:pressed { background: #000000; }
+#railPrimary:focus { border-color: #09090b; }
+#railPrimary:disabled {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.10);
+    color: #a1a1aa;
+}
+
+/* The profile row */
+#railProfile {
+    background: transparent;
+    border: 1px solid transparent;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 0;
+    text-align: left;
+    padding: 8px 6px;
+}
+
+#railProfile:hover { background: rgba(0, 0, 0, 0.04); }
+
+#railProfileName {
+    font-size: 13px;
+    font-weight: 600;
+    color: #09090b;
+    background: transparent;
+}
+
+#railProfileRole {
+    font-size: 12px;
+    color: #71717a;
+    background: transparent;
+}
+
+#hr {
+    background: rgba(0, 0, 0, 0.08);
+    max-height: 1px;
+    min-height: 1px;
+    border: none;
+}
+
+/* ── type roles ──────────────────────────────────────────────────────────
    Eight levels. Every object name that existed before still resolves, so no
-   panel has to change for the scale to land â€” the six heading levels simply
+   panel has to change for the scale to land — the six heading levels simply
    collapse onto the three sizes that are actually distinguishable. */
 
-/* LABEL â€” the uppercase tracked micro-label. Tracking is set on the QFont by
+/* LABEL — the uppercase tracked micro-label. Tracking is set on the QFont by
    controls.kicker(); QSS cannot express it. */
 #kick, #colHead {
     font-family: "Barlow Condensed";
     font-size: 11px;
     font-weight: 600;
-    color: #306191;
+    color: #52525b;
 }
 
 #kickMuted {
     font-family: "Barlow Condensed";
     font-size: 11px;
     font-weight: 600;
-    color: #98989b;
+    color: #71717a;
 }
 
-/* PAGE_TITLE â€” one per screen. */
-#h1, #h2 { font-family: "Barlow Condensed"; font-size: 24px; font-weight: 600; }
-/* SECTION â€” the heading above a group of cards. */
-#h3, #h4 { font-family: "Barlow Condensed"; font-size: 18px; font-weight: 600; }
-/* CARD_TITLE â€” the name of a thing. */
-#h5, #h6 { font-family: "Barlow Condensed"; font-size: 15px; font-weight: 600; }
+/* PAGE_TITLE — one per screen. */
+#h1, #h2 { font-family: "Barlow Condensed"; font-size: 24px; font-weight: 600; color: #09090b; }
+#card #h1, #card #h2 { color: #09090b; }
+/* SECTION — the heading above a group of cards. */
+#h3, #h4 { font-family: "Barlow Condensed"; font-size: 18px; font-weight: 600; color: #09090b; }
+#card #h3, #card #h4 { color: #09090b; }
+/* CARD_TITLE — the name of a thing. */
+#h5, #h6 { font-family: "Barlow Condensed"; font-size: 15px; font-weight: 600; color: #09090b; }
+#card #h5, #card #h6 { color: #09090b; }
 
-/* The dashboard's big condensed figure â€” "12", "â‚¹8.4L", "58%". A metric is a
+/* The dashboard's big condensed figure — "12", "₹8.4L", "58%". A metric is a
    page title in a card, so it takes the same two steps. */
 #stat {
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 24px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
 #statSm {
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 18px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
-/* META â€” timestamps, durations, counts. */
+#card #stat, #card #statSm {
+    color: #09090b;
+}
+
+/* META — timestamps, durations, counts. */
 #meta, #dim {
     font-size: 12px;
     font-weight: 500;
-    color: #7a7a7d;
+    color: #71717a;
 }
 
-/* The greyest step â€” "Â· this week", the suffix after a count. Was #b7b7ba,
+/* The greyest step — "· this week", the suffix after a count. Was #b7b7ba,
    which is 2.0:1 on a card: present in the file and invisible on the screen.
 
    THE ONE TEXT ROLE IN THIS FILE THAT DOES NOT CLEAR AA. At 2.9:1 it is
    deliberately below the 4.5:1 every other role holds, because the muted stack
-   needs three distinguishable steps (#body 6.6 Â· #meta 4.3 Â· #faint 2.9) and
+   needs three distinguishable steps (#body 6.6 · #meta 4.3 · #faint 2.9) and
    the third one cannot be both distinct and compliant.
 
    So the rule for using it: #faint is for text that repeats something already
-   legible somewhere else on the same surface â€” the "Â· this week" after a
-   labelled figure, the "Â· 3 files" after a named row. Never put a fact here
+   legible somewhere else on the same surface — the "· this week" after a
+   labelled figure, the "· 3 files" after a named row. Never put a fact here
    that appears nowhere else. If it is the only place the user can read it, it
    is #meta. */
 #faint {
@@ -466,14 +508,14 @@ QToolTip {
     color: #98989b;
 }
 
-/* SUPPORT â€” sentences under a title, and the standard control label. #lead was
+/* SUPPORT — sentences under a title, and the standard control label. #lead was
    15px and is the same role at the same job, so it lands here too. */
 #body, #lead, #support {
     font-size: 13px;
     color: #5d5d60;
 }
 
-/* MONO â€” ids, keys, device codes, paths. No mono face is vendored; see
+/* MONO — ids, keys, device codes, paths. No mono face is vendored; see
    theme.FONT_MONO_STACK for why. */
 #mono {
     font-family: "JetBrains Mono", "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
@@ -484,7 +526,7 @@ QToolTip {
 
 /* dashed advisory box (the "Tip." card in the context rail) */
 #note {
-    border: 1px dashed #e7e7ea;
+    border: 1px dashed rgba(0, 0, 0, 0.10);
     border-radius: 12px;
     padding: 12px;
     font-size: 12px;
@@ -493,7 +535,7 @@ QToolTip {
 }
 
 /* The bare-label empty state. Kept because nine call sites set it, but the
-   real one is controls.EmptyState â€” this is the text-only degenerate case.
+   real one is controls.EmptyState — this is the text-only degenerate case.
    Its ink was #98989b, which is 2.6:1 on the canvas: the one message on an
    otherwise empty screen, and the hardest thing on it to read. */
 #emptyState {
@@ -501,7 +543,7 @@ QToolTip {
     font-size: 13px;
     padding: 20px 16px;
     background: transparent;
-    border: 1px dashed #e7e7ea;
+    border: 1px dashed rgba(0, 0, 0, 0.10);
     border-radius: 12px;
 }
 
@@ -511,7 +553,7 @@ QToolTip {
     font-family: "Barlow Condensed";
     font-size: 18px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
@@ -521,9 +563,9 @@ QToolTip {
     background: transparent;
 }
 
-/* â”€â”€ buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── buttons ─────────────────────────────────────────────────────────────
    Exactly four variants. Eleven named button object names shipped before this
-   pass and they were not four ideas with eleven names â€” they were eleven
+   pass and they were not four ideas with eleven names — they were eleven
    half-specified boxes, several missing hover, most missing focus, one
    (`#primary`) missing a rule entirely so three "run" CTAs rendered as plain
    hairline boxes. Every one of those names still works; each now resolves to
@@ -540,54 +582,49 @@ QToolTip {
 
    All four carry :hover, :pressed, :focus and :disabled. */
 
-/* SECONDARY â€” the default. Hairline box, rounded, ink label. */
-QPushButton {
-    background: transparent;
-    border: 2px solid #e7e7ea;
+/* SECONDARY — tactile frosted pill with high-contrast ink label. */
+QPushButton, #secondaryBtn {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 8px;
-    padding: 6px 13px;
+    padding: 6px 14px;
     min-height: 18px;
     font-family: "Barlow";
     font-size: 13px;
-    font-weight: 500;
-    color: #424244;
+    font-weight: 600;
+    color: #09090b;
 }
 
-QPushButton:hover {
-    background: #f7f8f9;
-    border-color: #d4d4d7;
+QPushButton:hover, #secondaryBtn:hover {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.25);
+    color: #000000;
 }
 
-QPushButton:pressed {
-    background: #e7e7ea;
-    border-color: #d4d4d7;
+QPushButton:pressed, #secondaryBtn:pressed {
+    background: rgba(240, 240, 240, 0.95);
+    border-color: #09090b;
+    color: #000000;
 }
 
-QPushButton:focus {
-    border-color: #4480bb;
-    color: #1f456a;
+QPushButton:focus, #secondaryBtn:focus {
+    border-color: #09090b;
+    color: #09090b;
 }
 
-QPushButton:disabled {
-    color: #b7b7ba;
-    border-color: #ececee;
-    background: transparent;
+QPushButton:disabled, #secondaryBtn:disabled {
+    color: rgba(9, 9, 11, 0.40);
+    border-color: rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.45);
 }
 
-#secondaryBtn {
-    background: transparent;
-    border: 2px solid #e7e7ea;
-    border-radius: 8px;
-    color: #424244;
-}
-
-/* PRIMARY â€” solid accent, one per surface. Flat: the fill is a single colour,
+/* PRIMARY — solid accent, one per surface. Flat: the fill is a single colour,
    not a gradient. A vertical gradient on a filled button is the single most
    dating thing an interface can wear, and it also breaks the role swap, which
    rewrites flat hexes and cannot see into a qlineargradient's stops. */
 #primaryBtn, #primary {
-    background: #4480bb;
-    border: 2px solid #4480bb;
+    background: #09090b;
+    border: 2px solid #09090b;
     border-radius: 8px;
     color: #ffffff;
     padding: 8px 17px;
@@ -598,39 +635,39 @@ QPushButton:disabled {
 }
 
 #primaryBtn:hover, #primary:hover {
-    background: #457eb7;
-    border-color: #457eb7;
+    background: #27272a;
+    border-color: #27272a;
 }
 
 #primaryBtn:pressed, #primary:pressed {
-    background: #306191;
-    border-color: #306191;
+    background: #18181b;
+    border-color: #18181b;
 }
 
-/* The ring on a filled button has to be darker than the fill, not lighter â€”
+/* The ring on a filled button has to be darker than the fill, not lighter —
    a white ring on accent disappears against the card behind it. */
 #primaryBtn:focus, #primary:focus {
-    border-color: #142d46;
+    border-color: #09090b;
 }
 
 /* Not greyed to a flat neutral: the button keeps its identity and simply
    loses weight, so it still reads as the thing to press once there is
    something to press it for. Both hexes are ramp steps, so a disabled primary
-   rotates with the role like the live one â€” it used to be a hardcoded
+   rotates with the role like the live one — it used to be a hardcoded
    #c7d3dc, which stayed blue in a green copy. */
 #primaryBtn:disabled, #primary:disabled {
-    background: #d8ebfd;
-    border-color: #d8ebfd;
-    color: #306191;
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #18181b;
 }
 
-/* TERTIARY â€” no box until you touch it. For in-place actions that must not
+/* TERTIARY — no box until you touch it. For in-place actions that must not
    compete with the surface's one primary. */
 #ghostBtn, #tertiaryBtn {
     background: transparent;
     border: 2px solid transparent;
     border-radius: 8px;
-    color: #306191;
+    color: #18181b;
     padding: 5px 8px;
     min-height: 18px;
     font-family: "Barlow";
@@ -639,16 +676,16 @@ QPushButton:disabled {
 }
 
 #ghostBtn:hover, #tertiaryBtn:hover {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 #ghostBtn:pressed, #tertiaryBtn:pressed {
-    background: #d8ebfd;
+    background: rgba(0, 0, 0, 0.08);
 }
 
 #ghostBtn:focus, #tertiaryBtn:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 #ghostBtn:disabled, #tertiaryBtn:disabled {
@@ -662,7 +699,7 @@ QPushButton:disabled {
     background: transparent;
     border: 2px solid transparent;
     border-radius: 6px;
-    color: #306191;
+    color: #18181b;
     font-family: "Barlow";
     font-size: 12px;
     font-weight: 500;
@@ -672,15 +709,15 @@ QPushButton:disabled {
 }
 
 #linkBtn:hover {
-    color: #1f456a;
-    background: #eff6fe;
+    color: #09090b;
+    background: rgba(0, 0, 0, 0.04);
 }
 
-#linkBtn:pressed { background: #d8ebfd; }
-#linkBtn:focus { border-color: #4480bb; }
+#linkBtn:pressed { background: rgba(0, 0, 0, 0.08); }
+#linkBtn:focus { border-color: #09090b; }
 #linkBtn:disabled { color: #b7b7ba; background: transparent; }
 
-/* DESTRUCTIVE â€” outlined red, filled only once pressed. Deliberately not a
+/* DESTRUCTIVE — outlined red, filled only once pressed. Deliberately not a
    solid red button at rest: an irreversible action should be reachable, not
    the loudest thing on the screen. */
 #dangerBtn, #destructiveBtn {
@@ -713,11 +750,11 @@ QPushButton:disabled {
 
 #dangerBtn:disabled, #destructiveBtn:disabled {
     color: #b7b7ba;
-    border-color: #ececee;
+    border-color: rgba(0, 0, 0, 0.06);
     background: transparent;
 }
 
-/* â”€â”€ button modifiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── button modifiers ────────────────────────────────────────────────────
    Size and shape only. Each of these inherits its colour model from one of
    the four variants above, which is why none of them repeats a hover or a
    focus rule. */
@@ -732,8 +769,8 @@ QPushButton:disabled {
 /* SECONDARY, square, glyph only. 34px keeps it past the 28px minimum target
    with room for the ring. */
 #iconBtn {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.25);
     border-radius: 8px;
     padding: 0;
     min-width: 34px;
@@ -743,15 +780,15 @@ QPushButton:disabled {
 }
 
 #iconBtn:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
-/* .mic-lg â€” the composer's mic. Neutral until armed, then it goes red,
+/* .mic-lg — the composer's mic. Neutral until armed, then it goes red,
    because "recording" is a state you must be able to see from across a
    workshop and an accent-blue mic looks identical to every other control. */
 #micBtn {
     background: transparent;
-    border: 2px solid #e7e7ea;
+    border: 2px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
     padding: 6px 13px;
     min-height: 18px;
@@ -762,7 +799,7 @@ QPushButton:disabled {
 }
 
 #micBtn:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 #micBtn:checked {
@@ -775,51 +812,52 @@ QPushButton:disabled {
     border-color: #8a2f2f;
 }
 
-/* SECONDARY in capsule form â€” the quick-start chips on the hero card, and the
+/* SECONDARY in capsule form — the quick-start chips on the hero card, and the
    filter chips on History and AI tools. */
 #chipBtn {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 999px;
     padding: 5px 13px;
     min-height: 18px;
     font-family: "Barlow";
     font-size: 13px;
     font-weight: 500;
-    color: #424244;
+    color: #09090b;
 }
 
 #chipBtn:hover {
-    border-color: #4480bb;
-    color: #306191;
+    background: rgba(255, 255, 255, 0.90);
+    border-color: rgba(0, 0, 0, 0.20);
+    color: #09090b;
 }
 
 #chipBtn:pressed {
-    background: #eff6fe;
+    background: rgba(0, 0, 0, 0.08);
 }
 
 #chipBtn:focus {
-    border-color: #4480bb;
-    color: #1f456a;
+    border-color: #09090b;
+    color: #09090b;
 }
 
 /* A filter chip that is on. Filled tint rather than an outline, so a row of
    eight chips shows its one selection from across the screen. */
 #chipBtn:checked, #chipBtn[cur="true"] {
-    background: #eff6fe;
-    border-color: #4480bb;
-    color: #1f456a;
+    background: #09090b;
+    border-color: #09090b;
+    color: #ffffff;
 }
 
 #chipBtn:disabled {
     color: #b7b7ba;
-    border-color: #ececee;
+    border-color: rgba(0, 0, 0, 0.06);
 }
 
 /* The segmented tab strip on Inquiry Automation, and controls.Tabs. */
 #tabStrip {
-    background: #ffffff;
-    border: 1px solid #ececee;
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 12px;
 }
 
@@ -836,17 +874,17 @@ QPushButton:disabled {
     color: #5d5d60;
 }
 
-#tabBtn:hover { background: #f7f8f9; }
-#tabBtn:pressed { background: #e7e7ea; }
-#tabBtn:focus { border-color: #4480bb; }
+#tabBtn:hover { background: rgba(0, 0, 0, 0.02); }
+#tabBtn:pressed { background: rgba(0, 0, 0, 0.10); }
+#tabBtn:focus { border-color: #09090b; }
 #tabBtn:disabled { color: #b7b7ba; }
 
 #tabBtn[cur="true"], #tabBtn:checked {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
-/* TERTIARY, full-width and left-aligned â€” the Settings section list. */
+/* TERTIARY, full-width and left-aligned — the Settings section list. */
 #secBtn {
     background: transparent;
     border: 2px solid transparent;
@@ -860,48 +898,48 @@ QPushButton:disabled {
     text-align: left;
 }
 
-#secBtn:hover { background: #f7f8f9; }
-#secBtn:pressed { background: #e7e7ea; }
-#secBtn:focus { border-color: #4480bb; }
+#secBtn:hover { background: rgba(0, 0, 0, 0.02); }
+#secBtn:pressed { background: rgba(0, 0, 0, 0.10); }
+#secBtn:focus { border-color: #09090b; }
 #secBtn:disabled { color: #b7b7ba; }
 
 #secBtn[cur="true"] {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
-/* â”€â”€ inputs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── inputs ──────────────────────────────────────────────────────────────
    2px border at rest in the border grey, so the accent focus ring can replace
    the colour without changing the box. */
 QTextEdit, QLineEdit, QComboBox, QListWidget, QPlainTextEdit {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 8px;
     padding: 6px 11px;
-    color: #1d1f20;
-    selection-background-color: #4480bb;
+    color: #09090b;
+    selection-background-color: #09090b;
     selection-color: #ffffff;
 }
 
 QTextEdit:hover, QLineEdit:hover, QComboBox:hover {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.22);
 }
 
 QTextEdit:focus, QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QTextEdit:disabled, QLineEdit:disabled, QComboBox:disabled,
 QPlainTextEdit:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
-    color: #b7b7ba;
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
+    color: #a1a1aa;
 }
 
 /* Lists don't take the accent focus ring on the box: a selected row already
    says where you are, and ringing the whole list reads as an error state. */
 QListWidget:focus {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.35);
 }
 
 /* The task card's own editor sits *inside* the composer card, so it drops the
@@ -919,24 +957,26 @@ QListWidget:focus {
     border-radius: 0;
     padding: 0;
     font-size: 15px;
-    color: #1d1f20;
+    color: #09090b;
 }
 
 #taskEdit:focus {
-    border-bottom-color: #4480bb;
+    border-bottom-color: rgba(0, 0, 0, 0.40);
 }
 
-/* controls.SearchField â€” a QLineEdit with a leading glyph and a clear action.
+/* controls.SearchField — a QLineEdit with a leading glyph and a clear action.
    Capsule rather than rounded-rect: a search box is the one input that reads
    faster as a pill, and it is always the first thing in a toolbar. */
 #searchField {
     border-radius: 999px;
     padding: 6px 14px;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    color: #09090b;
 }
 
 /* The clear button Qt inserts for setClearButtonEnabled(), and the leading
-   search glyph, are both QToolButtons Qt sizes at 22x18 â€” under the 28px
+   search glyph, are both QToolButtons Qt sizes at 22x18 — under the 28px
    minimum target, and the last thing left in the app's click-target audit
    (it showed up on AI tools, History and Help at once). Qt will not let a
    fixed width/height through here, but it honours the minimums, which lands
@@ -949,18 +989,67 @@ QListWidget:focus {
     border: 0;
 }
 
+QComboBox {
+    background: rgba(255, 255, 255, 0.95);
+    border: 1.5px solid rgba(0, 0, 0, 0.22);
+    border-radius: 8px;
+    padding: 6px 32px 6px 12px;
+    min-height: 20px;
+    color: #09090b;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QComboBox:hover {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.40);
+}
+
+QComboBox:focus {
+    border-color: #09090b;
+}
+
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
     border: none;
-    width: 20px;
+    background: transparent;
+}
+
+QComboBox::down-arrow {
+    image: url(%ASSETS%/caret-down.svg);
+    width: 14px;
+    height: 14px;
+    margin-right: 8px;
 }
 
 QComboBox QAbstractItemView {
     background: #ffffff;
-    border: 1px solid #e7e7ea;
+    border: 1.5px solid rgba(0, 0, 0, 0.20);
     border-radius: 8px;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
-    padding: 3px;
+    selection-background-color: #09090b;
+    selection-color: #ffffff;
+    padding: 4px;
+    color: #09090b;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item {
+    min-height: 26px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    color: #09090b;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background: #09090b;
+    color: #ffffff;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #09090b;
 }
 
 QListWidget {
@@ -974,23 +1063,33 @@ QListWidget::item {
 }
 
 QListWidget::item:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 QListWidget::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
-/* â”€â”€ rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── rows ────────────────────────────────────────────────────────────────
    A plan step / mention / stage. On the canvas these are their own small
    cards; inside a card they are transparent rows split by #cardLine. Rows take
    R_CONTROL and the card around them R_CARD, so the card stays deliberately
    looser than its own contents. */
 #row {
-    background: #ffffff;
-    border: none;
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    color: #09090b;
+}
+
+#row:hover {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#row QLabel {
+    color: #09090b;
 }
 
 #rowFlat {
@@ -1000,101 +1099,158 @@ QListWidget::item:selected {
 }
 
 #rowFlat:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.04);
+}
+
+#rowFlat QLabel {
+    color: #09090b;
 }
 
 #rowMuted {
     background: transparent;
-    border: 1px solid #ececee;
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 8px;
 }
 
-/* controls.FileItem and controls.StepRow â€” a row that is its own hairline box
+/* controls.FileItem and controls.StepRow — a row that is its own hairline box
    on the canvas rather than a band inside a card. */
 #listRow {
-    background: #ffffff;
-    border: 1px solid #ececee;
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    color: #09090b;
 }
 
 #listRow:hover {
-    border-color: #d4d4d7;
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#listRow QLabel {
+    color: #09090b;
 }
 
 /* the step marker painted by controls.StepMark */
 #stepMark {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
     border: none;
     border-radius: 6px;
 }
 
 #stepMark[on="true"] {
-    background: #4480bb;
+    background: #09090b;
 }
 
-/* The 1 Describe â†’ 2 Plan â†’ 3 Run breadcrumb. */
+/* The 1 Describe → 2 Plan → 3 Run breadcrumb. */
 #stepCur {
     font-size: 12px;
     font-weight: 600;
-    color: #306191;
+    color: #09090b;
 }
 
 #stepOff {
     font-size: 12px;
-    font-weight: 600;
-    color: #c2c2c5;
+    font-weight: 500;
+    color: #71717a;
 }
 
-/* â”€â”€ headers and toolbars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── headers and toolbars ────────────────────────────────────────────────
    The two standard bands: PageHeader is fixed at the top of a screen and never
    scrolls; SectionHeader sits above a group of cards inside the scroll. Both
    are drawn by widgets/controls.py so every screen gets the same one. */
 #pageHeader {
-    background: #f4f5f6;
+    background: transparent;
     border: none;
-    border-bottom: 1px solid #ececee;
 }
 
 #pageTitle {
     font-family: "Barlow Condensed";
     font-size: 24px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
 #pageSubtitle {
     font-size: 13px;
-    color: #5d5d60;
+    color: #3f3f46;
     background: transparent;
+}
+
+#pageHeader QPushButton {
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 8px;
+    color: #09090b;
+}
+
+#pageHeader QPushButton:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 0, 0, 0.25);
+}
+
+#sectionHeader {
+    background: transparent;
+    border: none;
 }
 
 #sectionTitle {
     font-family: "Barlow Condensed";
     font-size: 18px;
     font-weight: 600;
-    color: #1d1f20;
+    color: #09090b;
     background: transparent;
 }
 
 #sectionSubtitle {
     font-size: 12px;
     font-weight: 500;
-    color: #7a7a7d;
+    color: #3f3f46;
     background: transparent;
+}
+
+#card #sectionTitle, #card #h1, #card #h2, #card #h3, #card #h4, #card #h5, #card #h6, #card #stat, #card #statSm {
+    color: #09090b;
+}
+
+#card #sectionSubtitle {
+    color: #52525b;
+}
+
+/* ── licence & update banner ─────────────────────────────────────────── */
+#licenceBanner {
+    background: rgba(18, 20, 26, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#licenceBanner QLabel {
+    color: #f1f5f9;
+}
+
+#licenceBanner QPushButton {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    border-radius: 6px;
+    padding: 4px 10px;
+}
+
+#licenceBanner QPushButton:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.45);
 }
 
 /* A sticky strip of search / filter / actions above a long list. */
 #toolbar {
-    background: #ffffff;
-    border: 1px solid #ececee;
+    background: rgba(255, 255, 255, 0.60);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 12px;
 }
 
-/* â”€â”€ tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── tags ────────────────────────────────────────────────────────────────
    Pills. controls.Pill sets its own colours inline for the tones that vary by
    data; these object names remain for the fixed ones, and both now read the
-   same pairs â€” theme.TAG_TONES. They used to disagree: controls.Chip carried
+   same pairs — theme.TAG_TONES. They used to disagree: controls.Chip carried
    a second Python colour dict and rendered a "warning" chip grey-on-amber and
    a "success" chip blue-on-green while a plain QLabel wearing the same object
    name got the right ink from here. */
@@ -1104,16 +1260,16 @@ QListWidget::item:selected {
     border-radius: 999px;
 }
 
-#tagAccent { background: #eff6fe; color: #1f456a; border: 1px solid #eff6fe; }
-#tagOutline { background: #ffffff; border: 1px solid #4480bb; color: #306191; }
-#tagNeutral { background: #e7e7ea; color: #424244; border: 1px solid #e7e7ea; }
+#tagAccent { background: rgba(0, 0, 0, 0.04); color: #09090b; border: 1px solid rgba(0, 0, 0, 0.04); }
+#tagOutline { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.35); color: #ffffff; }
+#tagNeutral { background: rgba(0, 0, 0, 0.10); color: #424244; border: 1px solid rgba(0, 0, 0, 0.10); }
 #tagOk { background: #eafaf3; color: #186b53; border: 1px solid #eafaf3; }
 #tagWarn { background: #fff8e8; color: #755a14; border: 1px solid #fff8e8; }
 #tagErr { background: #fdeeee; color: #8a2f2f; border: 1px solid #fdeeee; }
 
-/* â”€â”€ output stage body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── output stage body ───────────────────────────────────────────────── */
 #stageBody {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
     border: none;
     border-radius: 8px;
     padding: 12px;
@@ -1121,34 +1277,44 @@ QListWidget::item:selected {
     color: #5d5d60;
 }
 
-/* â”€â”€ checkbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-QCheckBox {
-    color: #1d1f20;
+/* ── checkbox ────────────────────────────────────────────────────────── */
+QCheckBox, QRadioButton {
+    color: #09090b;
     spacing: 8px;
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+QCheckBox:focus, QRadioButton:focus {
+    border: none;
+    background: transparent;
+    outline: none;
 }
 
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid #d4d4d7;
-    border-radius: 6px;
-    background: #ffffff;
+    border: 1.5px solid rgba(0, 0, 0, 0.35);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.90);
 }
 
 QCheckBox::indicator:hover {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 /* The indicator is the only visible part of a checkbox, so the focus cue has
-   to land on it â€” a ring around the label text would say nothing. */
-QCheckBox:focus::indicator, QRadioButton:focus::indicator {
-    border: 2px solid #4480bb;
+   to land on it — a ring around the label text would say nothing.
+   Subcontrol (::indicator) must precede pseudo-state (:focus). */
+QCheckBox::indicator:focus, QRadioButton::indicator:focus {
+    border: 2px solid #09090b;
 }
 
 QCheckBox::indicator:checked {
-    background: #4480bb;
-    border: 1px solid #4480bb;
-    /* %ASSETS% is rewritten to an absolute path by main.py â€” a bare relative
+    background: #09090b;
+    border: 1.5px solid #09090b;
+    /* %ASSETS% is rewritten to an absolute path by main.py — a bare relative
        url() would resolve against the process's cwd, not the app. */
     image: url(%ASSETS%/check.svg);
 }
@@ -1158,28 +1324,28 @@ QCheckBox:disabled {
 }
 
 QCheckBox::indicator:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.06);
 }
 
-/* â”€â”€ tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── tabs ────────────────────────────────────────────────────────────────
    Neither this stylesheet nor the one before it ever styled QTabWidget, so
    the tab pane fell through to the desktop palette. On a machine running a
    dark GTK/KDE theme that painted the whole body of the setup dialogs
-   near-black behind our dark ink â€” unreadable, and nothing to do with the
+   near-black behind our dark ink — unreadable, and nothing to do with the
    app's own theme. Everything Qt can paint has to be named here.
 
    Shaped like the segmented strip on Inquiry Automation, so a tab reads the
    same whether it is in a dialog or on a screen. */
 QTabWidget::pane {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
     top: -1px;
 }
 
 QTabWidget > QWidget {
-    background: #ffffff;
+    background: transparent;
 }
 
 QTabBar {
@@ -1200,36 +1366,38 @@ QTabBar::tab {
 }
 
 QTabBar::tab:hover {
-    background: #f7f8f9;
+    background: rgba(0, 0, 0, 0.02);
 }
 
 QTabBar::tab:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 QTabBar::tab:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QTabBar::tab:disabled {
     color: #b7b7ba;
 }
 
-/* â”€â”€ tables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── tables ──────────────────────────────────────────────────────────── */
 QTableWidget, QTableView {
-    background: #ffffff;
-    alternate-background-color: #f7f8f9;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.06);
+    alternate-background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
-    gridline-color: #ececee;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
+    gridline-color: rgba(255, 255, 255, 0.08);
+    selection-background-color: rgba(255, 255, 255, 0.20);
+    selection-color: #ffffff;
+    color: #ffffff;
 }
 
 QTableWidget::item, QTableView::item {
     padding: 7px 9px;
     border: none;
+    color: #ffffff;
 }
 
 QHeaderView {
@@ -1237,81 +1405,87 @@ QHeaderView {
 }
 
 QHeaderView::section {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.10);
     border: none;
-    border-bottom: 1px solid #ececee;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding: 9px;
     font-size: 11px;
     font-weight: 600;
-    color: #98989b;
+    color: #e2e8f0;
 }
 
 QTableCornerButton::section {
-    background: #ffffff;
+    background: transparent;
     border: none;
 }
 
-/* â”€â”€ the rest of what Qt can paint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── the rest of what Qt can paint ───────────────────────────────────── */
 QTextBrowser {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     padding: 10px 12px;
-    color: #1d1f20;
+    color: #ffffff;
 }
 
 QRadioButton {
-    color: #1d1f20;
+    color: #09090b;
     spacing: 8px;
     background: transparent;
+    border: none;
+    outline: none;
+}
+
+QRadioButton:focus {
+    border: none;
+    background: transparent;
+    outline: none;
 }
 
 QRadioButton::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid #d4d4d7;
+    border: 1px solid rgba(0, 0, 0, 0.25);
     border-radius: 8px;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.65);
 }
 
-QRadioButton::indicator:hover { border-color: #4480bb; }
+QRadioButton::indicator:hover { border-color: #09090b; }
 
-/* No image: a radio's dot is drawn as a thick accent ring, which needs no
-   asset and cannot go missing from a frozen build the way a url() can. */
 QRadioButton::indicator:checked {
-    border: 5px solid #4480bb;
+    border: 5px solid #09090b;
     background: #ffffff;
 }
 
-QRadioButton:disabled { color: #b7b7ba; }
+QRadioButton:disabled { color: #a1a1aa; }
 
 QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit, QDateTimeEdit {
-    background: #ffffff;
-    border: 2px solid #e7e7ea;
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 8px;
     padding: 5px 9px;
-    color: #1d1f20;
-    selection-background-color: #4480bb;
+    color: #09090b;
+    selection-background-color: #09090b;
     selection-color: #ffffff;
 }
 
 QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QDateEdit:hover, QDateTimeEdit:hover {
-    border-color: #d4d4d7;
+    border-color: rgba(0, 0, 0, 0.18);
 }
 
 QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QDateEdit:focus, QDateTimeEdit:focus {
-    border-color: #4480bb;
+    border-color: #09090b;
 }
 
 QSpinBox:disabled, QDoubleSpinBox:disabled, QTimeEdit:disabled, QDateTimeEdit:disabled,
 QDateEdit:disabled {
-    background: #f7f8f9;
-    border-color: #ececee;
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.06);
     color: #b7b7ba;
 }
 
 /* The steppers. Left unstyled they fall through to the desktop's own arrows,
-   which on this system drew as a bare angular bracket half outside the box â€”
+   which on this system drew as a bare angular bracket half outside the box —
    the same gap that made the tab pane render dark. Sized generously on
    purpose: these are pressed by somebody setting a GST rate, not a developer
    nudging a value. */
@@ -1341,7 +1515,7 @@ QTimeEdit::down-button, QDateEdit::down-button, QDateTimeEdit::down-button {
 
 QSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
 }
 
 QSpinBox::up-arrow, QSpinBox::down-arrow,
@@ -1351,7 +1525,7 @@ QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {
 }
 
 QProgressBar {
-    background: #e7e7ea;
+    background: rgba(0, 0, 0, 0.10);
     border: none;
     border-radius: 4px;
     height: 8px;
@@ -1362,7 +1536,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: #4480bb;
+    background: #09090b;
     border-radius: 4px;
 }
 
@@ -1374,9 +1548,9 @@ QToolButton {
     color: #424244;
 }
 
-QToolButton:hover { background: #f7f8f9; }
-QToolButton:pressed { background: #e7e7ea; }
-QToolButton:focus { border-color: #4480bb; }
+QToolButton:hover { background: rgba(0, 0, 0, 0.02); }
+QToolButton:pressed { background: rgba(0, 0, 0, 0.10); }
+QToolButton:focus { border-color: #09090b; }
 QToolButton:disabled { color: #b7b7ba; }
 
 /* Labels never paint a background of their own. Without this a QLabel on a
@@ -1391,10 +1565,10 @@ QLabel:disabled {
     color: #b7b7ba;
 }
 
-/* â”€â”€ groupbox (setup dialogs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── groupbox (setup dialogs) ────────────────────────────────────────── */
 QGroupBox {
     background: transparent;
-    border: 1px solid #e7e7ea;
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 12px;
     margin-top: 14px;
     padding-top: 14px;
@@ -1407,10 +1581,10 @@ QGroupBox::title {
     subcontrol-origin: margin;
     left: 11px;
     padding: 0 6px;
-    color: #306191;
+    color: #18181b;
 }
 
-/* â”€â”€ scrollbars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── scrollbars ──────────────────────────────────────────────────────── */
 QScrollArea {
     background: transparent;
     border: none;
@@ -1427,7 +1601,7 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-    background: #d4d4d7;
+    background: rgba(0, 0, 0, 0.18);
     border-radius: 4px;
     min-height: 30px;
 }
@@ -1440,42 +1614,44 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 QScrollBar:horizontal { height: 0; }
 
-QSplitter::handle { background: #ececee; }
+QSplitter::handle { background: rgba(0, 0, 0, 0.06); }
 
-/* â”€â”€ chrome â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── chrome ──────────────────────────────────────────────────────────── */
 QStatusBar {
-    background: #f4f5f6;
-    color: #7a7a7d;
-    border-top: 1px solid #ececee;
+    background: rgba(15, 17, 23, 0.75);
+    color: #cbd5e1;
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
     font-size: 12px;
 }
 
 QStatusBar::item { border: none; }
 
 QMenu {
-    background: #ffffff;
-    border: 1px solid #e7e7ea;
+    background: rgba(18, 20, 26, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.20);
     border-radius: 8px;
     padding: 4px;
+    color: #ffffff;
 }
 
 QMenu::item {
     padding: 7px 20px 7px 12px;
     border-radius: 6px;
+    color: #ffffff;
 }
 
 QMenu::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
 }
 
 QMenu::separator {
     height: 1px;
-    background: #ececee;
+    background: rgba(255, 255, 255, 0.15);
     margin: 4px 0;
 }
 
-/* â”€â”€ the inquiry register â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── the inquiry register ────────────────────────────────────────────────────
  * A work surface, not an orientation surface: rows are tight, dividers are
  * hairlines rather than zebra stripes, and the numeric columns are right
  * aligned so they can be scanned down. Every accent hex below is one of the
@@ -1485,25 +1661,25 @@ QTableView#registerTable {
     background: transparent;
     border: none;
     gridline-color: transparent;
-    selection-background-color: #eff6fe;
-    selection-color: #1f456a;
+    selection-background-color: rgba(0, 0, 0, 0.04);
+    selection-color: #09090b;
 }
 
 QTableView#registerTable::item {
     padding: 0 10px;
     border: none;
-    border-bottom: 1px solid #ececee;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 QTableView#registerTable::item:selected {
-    background: #eff6fe;
-    color: #1f456a;
+    background: rgba(0, 0, 0, 0.04);
+    color: #09090b;
 }
 
 QTableView#registerTable QHeaderView::section:horizontal {
     background: transparent;
     border: none;
-    border-bottom: 1px solid #e7e7ea;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
     padding: 0 10px 8px 10px;
     font-family: 'Barlow Condensed';
     font-size: 11px;
@@ -1513,5 +1689,88 @@ QTableView#registerTable QHeaderView::section:horizontal {
 }
 
 QTableView#registerTable QHeaderView::section:horizontal:hover {
-    color: #306191;
+    color: #18181b;
+}
+
+/* ── sleek glassmorphic scrollbars ─────────────────────────────────────── */
+QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background: rgba(0, 0, 0, 0.15);
+    min-height: 24px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+QScrollBar::sub-line:vertical {
+    height: 0px;
+    width: 0px;
+    subcontrol-position: top;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:vertical {
+    height: 0px;
+    width: 0px;
+    subcontrol-position: bottom;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {
+    width: 0px;
+    height: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 6px;
+    margin: 0px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(0, 0, 0, 0.15);
+    min-width: 24px;
+    border-radius: 3px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: rgba(0, 0, 0, 0.28);
+}
+
+QScrollBar::sub-line:horizontal {
+    width: 0px;
+    height: 0px;
+    subcontrol-position: left;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-line:horizontal {
+    width: 0px;
+    height: 0px;
+    subcontrol-position: right;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+    width: 0px;
+    height: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
 }

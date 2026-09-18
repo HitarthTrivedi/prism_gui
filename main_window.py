@@ -12,12 +12,12 @@ The work column is a two-page stack: composing (task + plan) and running
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
-    QMenu, QApplication, QProgressDialog,
+    QMenu, QApplication, QProgressDialog, QGraphicsScene, QGraphicsBlurEffect,
 )
 
 import app_meta
@@ -54,6 +54,7 @@ from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
 from widgets.controls import kicker
+from widgets import controls as C
 from widgets.input_panel import InputPanel
 from widgets.files_panel import FilesPanel
 from widgets.prompt_panel import PromptPanel
@@ -192,6 +193,87 @@ AGENT_FEATURES = {agent: addon.feature
                   for agent in addon.agents}
 
 
+class DashboardCentral(QWidget):
+    """Central widget that paints the wallpaper background cleanly scaled to cover,
+    preserving aspect ratio across any window size, and caches a Gaussian-blurred
+    version for pure frosted glassmorphism cards and sidebar."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("central")
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        bg_path = None
+        try:
+            cfg = CB.config.load()
+            custom_bg = cfg.get("custom_bg") if cfg else None
+            if custom_bg and os.path.exists(custom_bg):
+                bg_path = custom_bg
+        except Exception:
+            pass
+        if not bg_path:
+            bg_path = paths.resource("assets", "dashboard-bg.jpg")
+        self._bg_orig = QPixmap(bg_path) if bg_path and os.path.exists(bg_path) else None
+        self._cached_pixmap = None
+        self._cached_blurred = None
+        self._cached_size = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_cache()
+
+    def _update_cache(self):
+        if self._bg_orig and not self._bg_orig.isNull():
+            w, h = max(1, self.width()), max(1, self.height())
+            self._cached_pixmap = self._bg_orig.scaled(
+                w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            )
+            self._cached_size = (w, h)
+
+            # Generate high-performance Gaussian blurred version for glassmorphic cards
+            bw, bh = max(1, w // 2), max(1, h // 2)
+            small = self._cached_pixmap.scaled(bw, bh, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            scene = QGraphicsScene()
+            item = scene.addPixmap(small)
+            blur = QGraphicsBlurEffect()
+            blur.setBlurRadius(24)
+            item.setGraphicsEffect(blur)
+            out = QImage(QSize(bw, bh), QImage.Format_ARGB32_Premultiplied)
+            out.fill(0)
+            p = QPainter(out)
+            scene.render(p)
+            p.end()
+            self._cached_blurred = QPixmap.fromImage(out).scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
+    def get_blurred_pixmap(self) -> QPixmap | None:
+        if self._cached_blurred is None or self._cached_size != (self.width(), self.height()):
+            self._update_cache()
+        return self._cached_blurred
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        if self._cached_pixmap is None or self._cached_size != (self.width(), self.height()):
+            self._update_cache()
+
+        if self._cached_pixmap and not self._cached_pixmap.isNull():
+            pw, ph = self._cached_pixmap.width(), self._cached_pixmap.height()
+            x = (self.width() - pw) // 2
+            y = (self.height() - ph) // 2
+            painter.drawPixmap(x, y, self._cached_pixmap)
+            painter.fillRect(self.rect(), QColor(255, 255, 255, 22))
+        else:
+            painter.fillRect(self.rect(), QColor("#09090b"))
+
+    def set_background(self, path: str):
+        if path and os.path.exists(path):
+            self._bg_orig = QPixmap(path)
+        else:
+            bg_path = paths.resource("assets", "dashboard-bg.jpg")
+            self._bg_orig = QPixmap(bg_path) if os.path.exists(bg_path) else None
+        self._cached_pixmap = None
+        self._cached_blurred = None
+        self._cached_size = None
+        self.update()
 
 
 class MainWindow(QMainWindow):
@@ -200,6 +282,11 @@ class MainWindow(QMainWindow):
     reel_edits_saved = Signal(list)
     reel_edits_rendered = Signal(list)
     reel_refine_requested = Signal(str, dict)
+
+    def set_wallpaper(self, path: str):
+        central = self.centralWidget()
+        if hasattr(central, "set_background"):
+            central.set_background(path)
 
     def __init__(self):
         super().__init__()
@@ -337,7 +424,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1060, 640)
 
     def _build_ui(self):
-        central = QWidget()
+        central = DashboardCentral()
         central.setObjectName("central")
         # A vertical shell so the licence banner can span the full width above
         # all three columns. It has to be impossible to miss and impossible to
@@ -350,8 +437,8 @@ class MainWindow(QMainWindow):
         columns = QWidget()
         columns.setObjectName("columns")
         outer = QHBoxLayout(columns)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setContentsMargins(14, 14, 14, 14)
+        outer.setSpacing(14)
 
         self.sidebar = Sidebar()
         outer.addWidget(self.sidebar)
@@ -674,12 +761,12 @@ class MainWindow(QMainWindow):
         else:
             self._banner_alt_action = None
         self._banner_alt.setVisible(bool(alt))
-        self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, tone))
+        self._banner_icon.setPixmap(icons.pixmap(icon_name, 16, "#ffffff"))
         self._banner_text.setText(text)
-        self._banner_text.setStyleSheet(f"color: {tone}; font-size: 13px;")
+        self._banner_text.setStyleSheet("color: #f1f5f9; font-size: 13px;")
         self.banner.setStyleSheet(
-            f"QFrame#licenceBanner {{ background: {theme.NEUTRAL[100]};"
-            f"border-bottom: 1px solid {theme.DIVIDER}; }}")
+            "QFrame#licenceBanner { background: rgba(18, 20, 26, 0.85);"
+            "border-bottom: 1px solid rgba(255, 255, 255, 0.12); }")
         self.banner.setVisible(True)
 
     # ── updates (Phase 1: a real in-app download+install, see updater.py) ──
@@ -810,7 +897,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(wrap)
         layout.setContentsMargins(40, 32, 40, 32)
         layout.setSpacing(20)
-        layout.addLayout(self._workbench_header())
+        layout.addWidget(self._workbench_header())
         layout.addWidget(self.work_stack, stretch=1)
         # Lifted out of the scrolling column and pinned to its foot. Prism's
         # full pipeline is nine stages, and with nine plan cards on screen
@@ -830,7 +917,7 @@ class MainWindow(QMainWindow):
                 i == COMPOSE and bool(self.agents_panel.selected_agents())))
         return wrap
 
-    def _workbench_header(self) -> QHBoxLayout:
+    def _workbench_header(self) -> QWidget:
         """"New task", and the 1 Describe → 2 Plan → 3 Run breadcrumb.
 
         The breadcrumb is the design's answer to a complaint the old workbench
@@ -839,30 +926,27 @@ class MainWindow(QMainWindow):
         that you could go back to it. Three labels and two chevrons make the
         whole shape of the job visible before any of it has happened.
         """
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        title = QLabel(i18n.t("New task"))
-        title.setObjectName("h2")
-        row.addWidget(title, stretch=1)
-
-        self._steps_crumb = {}
-        crumb = QHBoxLayout()
+        crumbs_w = QWidget()
+        crumb = QHBoxLayout(crumbs_w)
+        crumb.setContentsMargins(0, 0, 0, 0)
         crumb.setSpacing(6)
+        self._steps_crumb = {}
         for i, (key, label) in enumerate((("describe", i18n.t("Describe")),
                                           ("plan", i18n.t("Plan")),
                                           ("run", i18n.t("Run")))):
             if i:
                 sep = QLabel()
                 sep.setPixmap(icons.pixmap("chevron-right", 12,
-                                           theme.NEUTRAL[300], stroke=2))
+                                           theme.NEUTRAL[400], stroke=2))
                 crumb.addWidget(sep)
             step = QLabel(f"{i + 1} {label}")
             step.setObjectName("stepOff")
             self._steps_crumb[key] = step
             crumb.addWidget(step)
-        row.addLayout(crumb)
+
+        hdr = C.SectionHeader(i18n.t("New task"), "", [crumbs_w])
         self._set_stage("describe")
-        return row
+        return hdr
 
     def _ask_display_name(self):
         """Let a solo copy say who it belongs to.
@@ -951,14 +1035,12 @@ class MainWindow(QMainWindow):
 
         self.context_rail = QFrame()
         self.context_rail.setObjectName("contextRail")
-        # Scoped by object name on purpose: an unscoped rule set on a parent
-        # cascades into every descendant, which would draw this border down
-        # the left edge of each child in the rail too.
         self.context_rail.setStyleSheet(
-            f"QFrame#contextRail {{ border-left: 1px solid {theme.HAIRLINE}; }}")
+            "QFrame#contextRail { border: none; background: transparent; }")
         outer = QVBoxLayout(self.context_rail)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        self._context_outer = outer
 
         # -- collapsed: a chevron and a folder glyph -------------------------
         self._context_strip = QWidget()
@@ -983,10 +1065,8 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._context_strip)
 
         # -- expanded --------------------------------------------------------
-        self._context_body = QWidget()
-        layout = QVBoxLayout(self._context_body)
-        layout.setContentsMargins(18, 20, 18, 18)
-        layout.setSpacing(20)
+        self._context_body = C.Card(radius=18)
+        layout = self._context_body.body((16, 18, 16, 18), spacing=16)
         head = QHBoxLayout()
         head.addWidget(kicker(i18n.t("Files you mentioned")), stretch=1)
         shut = QPushButton()
@@ -1021,7 +1101,9 @@ class MainWindow(QMainWindow):
     def _set_context_open(self, open_: bool):
         self._context_body.setVisible(open_)
         self._context_strip.setVisible(not open_)
-        self.context_rail.setFixedWidth(280 if open_ else 44)
+        self.context_rail.setFixedWidth(296 if open_ else 44)
+        if hasattr(self, "_context_outer"):
+            self._context_outer.setContentsMargins(6, 6, 6, 6) if open_ else self._context_outer.setContentsMargins(0, 0, 0, 0)
         self._context_user_shut = not open_
 
     def _sync_context_rail(self):
@@ -1208,7 +1290,7 @@ class MainWindow(QMainWindow):
     def _open_reel(self):
         self._authorized_then("reel", "addon", self._open_reel_dialog)
 
-    def _open_reel_dialog(self, prefill: str = ""):
+    def _open_reel_dialog(self):
         ok, err = CB.reel_available()
         if not ok:
             # FFmpeg specifically is something Prism can fix by itself, so it
@@ -1219,10 +1301,7 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, i18n.t("Reel"), err)
             return
-        dialog = ReelDialog(self.cfg, self.attachments, self)
-        if prefill:
-            dialog.ask.set_text(prefill)
-        dialog.exec()
+        ReelDialog(self.cfg, self.attachments, self).exec()
 
     def _open_motion(self):
         # Same licence feature as Reel/Studio — Motion is the same "media"
@@ -1661,7 +1740,7 @@ class MainWindow(QMainWindow):
         # the "Already attached" guard.
 
     def _attach_file_dialog(self):
-        """Ask where the files are before asking which files.
+        """Ask where the file is before asking which file.
 
         A plain file dialog can only offer the disk, and half of what a
         company wants to feed Prism lives in its Drive. The choice comes

@@ -473,6 +473,8 @@ class HomePanel(QWidget):
                 widget.hide()
                 widget.setParent(None)      # persistent — re-added below
             elif widget:
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
             elif item.layout():
                 self._drop(item.layout())
@@ -502,6 +504,8 @@ class HomePanel(QWidget):
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
+                item.widget().setParent(None)
                 item.widget().deleteLater()
             elif item.layout():
                 self._drop(item.layout())

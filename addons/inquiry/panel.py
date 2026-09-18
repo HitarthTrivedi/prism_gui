@@ -57,13 +57,14 @@ class _FrontDoor(C.EmptyState):
         super().__init__(icon, title, body, action_text, parent)
         if not secondary_text:
             return
-        column = None
-        outer = self.layout()
-        for index in range(outer.count()):
-            item = outer.itemAt(index)
-            if item.layout() is not None:
-                column = item.layout()
-                break
+        column = getattr(self, "content_layout", None)
+        if column is None:
+            outer = self.layout()
+            for index in range(outer.count()):
+                item = outer.itemAt(index)
+                if item.layout() is not None:
+                    column = item.layout()
+                    break
         if column is None:                  # EmptyState changed shape
             return
         button = C.button(secondary_text, "tertiary")
