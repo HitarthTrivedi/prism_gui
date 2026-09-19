@@ -48,6 +48,8 @@ _STROKED: dict[str, list[str]] = {
     # A tray with mail landing in it — distinct from "mail" at 16px, which
     # matters because the two sit four rows apart in the same rail.
     "inbox":      ["M3 13h5l1.5 3h5L16 13h5", "M3 13l3-8h12l3 8v6H3z"],
+    # A speech bubble with a tail — WhatsApp, and any messaging surface.
+    "message":    ["M4 5h16v10H8l-4 4z"],
     "key":        ["M14 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", "M14 11h7", "M18 11v3"],
     "book":       ["M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z", "M8 7h7"],
     "globe":      ["M4 12a8 8 0 1 0 16 0 8 8 0 1 0-16 0z", "M4 12h16",

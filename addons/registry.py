@@ -43,9 +43,11 @@ from addons.leads.addon import MANIFEST as _leads          # noqa: E402
 from addons.motion.addon import MANIFEST as _motion        # noqa: E402
 from addons.reel.addon import MANIFEST as _reel            # noqa: E402
 from addons.step.addon import MANIFEST as _step            # noqa: E402
+from addons.whatsapp.addon import MANIFEST as _whatsapp    # noqa: E402
 
 REGISTRY: tuple[Addon, ...] = tuple(sorted(
-    (_inquiry, _boq, _gerber, _step, _bom, _email, _reel, _motion, _leads),
+    (_inquiry, _boq, _gerber, _step, _bom, _email, _reel, _motion, _leads,
+     _whatsapp),
     key=lambda a: (a.order, a.key)))
 
 # What the selftest asserts it can see. A count rather than a list, so that

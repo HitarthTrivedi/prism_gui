@@ -36,6 +36,7 @@ import plans
 _ICONS = {
     "core": "grid", "reel": "video", "boq": "file", "email": "mail",
     "inbox": "mail", "leads": "user", "gerber": "file", "step": "grid",
+    "marketing": "message",
 }
 
 PITCH = {key: (f.label, _ICONS.get(key, "grid"), f.pitch or f.blurb)

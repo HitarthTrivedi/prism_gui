@@ -113,6 +113,13 @@ FEATURES: dict[str, Feature] = {
         "Drop the STEP model and get every part measured on your own "
         "machine, then draft, ask or edit — the model is never shown to an "
         "AI."),
+
+    "marketing": Feature(
+        "marketing", "WhatsApp",
+        "Your team's WhatsApp — read the inbox, reply, manage contacts, send",
+        "Every conversation your WhatsApp number is having, read and "
+        "answered from here — the send itself goes out through your own "
+        "number, never a shared one."),
 }
 
 
@@ -134,7 +141,7 @@ PLANS: dict[str, Plan] = {
         "studio", "Prism Studio",
         "Every customer starts here — the pipeline plus Reel & Studio",
         includes=("core", "reel"),
-        addons=("boq", "email", "inbox", "leads", "gerber", "step"),
+        addons=("boq", "email", "inbox", "leads", "gerber", "step", "marketing"),
         note="The base product. Everything else is an add-on sold on top, "
              "one key each, and a licence is Studio plus whichever add-ons "
              "the customer bought."),

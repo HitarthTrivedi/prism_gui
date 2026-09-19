@@ -58,6 +58,10 @@ ADDON_FEATURES = {
     "leads": "leads",
     "reel": "reel",
     "motion": "reel",
+    # whatsapp is a rail add-on (like gerber/step) since 2026-09-17. It rides
+    # "marketing" -- WhatsApp broadcast/outreach is the marketing channel and
+    # no other add-on claims that key.
+    "whatsapp": "marketing",
 }
 
 EVERYTHING = tuple(plans.FEATURES)
@@ -81,7 +85,8 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
                      mock.patch.object(main_window, "ReelDialog") as reel, \
                      mock.patch.object(main_window, "MotionDialog") as motion, \
                      mock.patch.object(main_window, "BoqDialog") as boq, \
-                     mock.patch.object(main_window, "GerberDialog") as gerber:
+                     mock.patch.object(main_window, "GerberDialog") as gerber, \
+                     mock.patch.object(main_window, "WhatsAppDialog") as whatsapp:
                     win._handle_command(key)
 
                 self.assertIn(
@@ -92,7 +97,8 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
                 for name, opened in (("screen", shown), ("ReelDialog", reel),
                                      ("MotionDialog", motion),
                                      ("BoqDialog", boq),
-                                     ("GerberDialog", gerber)):
+                                     ("GerberDialog", gerber),
+                                     ("WhatsAppDialog", whatsapp)):
                     self.assertFalse(
                         opened.called,
                         "the %r add-on opened its %s despite the %r feature "

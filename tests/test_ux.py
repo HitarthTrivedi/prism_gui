@@ -219,7 +219,8 @@ class Plans(unittest.TestCase):
 
     def test_every_add_on_is_sold_on_top_of_studio(self):
         self.assertEqual(set(plans.PLANS["studio"].addons),
-                         {"boq", "email", "inbox", "leads", "gerber", "step"})
+                         {"boq", "email", "inbox", "leads", "gerber", "step",
+                          "marketing"})
 
     def test_every_add_on_is_something_the_app_actually_gates_on(self):
         """A key nothing gates on unlocks nothing — a licence carrying it is a

@@ -51,6 +51,7 @@ from addons.gerber.panel import GerberPanel
 from addons.step.panel import StepPanel
 from addons.leads.panel import LeadsPanel
 from addons.leads.dialog import LeadsDialog
+from addons.whatsapp.panel import WhatsAppPanel
 from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
@@ -75,6 +76,7 @@ from addons.gerber.dialog import GerberDialog
 from addons.step.dialog import StepDialog
 from addons.reel.dialog import ReelDialog
 from addons.motion.dialog import MotionDialog
+from addons.whatsapp.dialog import WhatsAppDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
@@ -107,7 +109,8 @@ SCREENS = (
     "inquiry_work",     # reached only by drilling in from the launcher panel
     "bom",
     "step",
-    "leads",            # appended last: nothing above renumbers
+    "leads",
+    "whatsapp",         # appended last: nothing above renumbers
 )
 _INDEX = {name: i for i, name in enumerate(SCREENS)}
 
@@ -491,7 +494,9 @@ class MainWindow(QMainWindow):
         self.step_panel = StepPanel(self.cfg)
         self.screens.addWidget(self.step_panel)             # STEP
         self.leads_panel = LeadsPanel(self.cfg)
-        self.screens.addWidget(self.leads_panel)            # LEADS (last: no renumber)
+        self.screens.addWidget(self.leads_panel)            # LEADS
+        self.whatsapp_panel = WhatsAppPanel(self.cfg)
+        self.screens.addWidget(self.whatsapp_panel)         # WHATSAPP (last: no renumber)
         outer.addWidget(self.screens, stretch=1)
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
@@ -536,6 +541,7 @@ class MainWindow(QMainWindow):
         self.email_panel.open_compose.connect(self._open_email_dialog)
         self.email_panel.change_account.connect(self._open_email_setup)
         self.leads_panel.opened.connect(self._open_leads_dialog)
+        self.whatsapp_panel.opened.connect(self._open_whatsapp_dialog)
         # The screens that now offer a way onward. Same pattern as
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
@@ -544,7 +550,8 @@ class MainWindow(QMainWindow):
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
-                      self.step_panel, self.email_panel, self.leads_panel):
+                      self.step_panel, self.email_panel, self.leads_panel,
+                      self.whatsapp_panel):
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
         self.inquiry_work_panel.navigate.connect(self._handle_command)
@@ -1293,6 +1300,8 @@ class MainWindow(QMainWindow):
             self._open_reel()
         elif key == "motion":
             self._open_motion()
+        elif key == "whatsapp":
+            self._open_whatsapp()
         elif key == "guide":
             self._show_screen("guide")
         elif key == "support":
@@ -1386,6 +1395,17 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Motion Graphics", err)
             return
         MotionDialog(self.cfg, self.attachments, self).exec()
+
+    def _open_whatsapp(self):
+        # WhatsApp is a rail add-on now, like Gerber/BOM/STEP -- see
+        # addons/whatsapp/addon.py. The rail click lands on its front door;
+        # the front door's own button (whatsapp_panel.opened) is what reaches
+        # the dialog.
+        self._authorized_then("marketing", "addon",
+                              lambda: self._show_screen("whatsapp"))
+
+    def _open_whatsapp_dialog(self):
+        WhatsAppDialog(self.cfg, self).exec()
 
     def _offer_ffmpeg(self, then=None):
         """Offer to fetch FFmpeg, then carry on with what they were doing.

@@ -290,3 +290,17 @@ def payload(license_id: str, device_fp: str, *, app_version: str) -> dict[str, A
         "device_fp": device_fp,
         "app_version": app_version,
     }, app_version=app_version)
+
+
+def call(endpoint: str, body: dict[str, Any], *, app_version: str,
+         timeout: int | None = None, retries: int = 0) -> dict[str, Any]:
+    """POST to an endpoint on this same server that isn't one of the licence-
+    lifecycle calls above — an add-on whose data lives behind this server
+    rather than in front of it (WhatsApp, at /v1/whatsapp/…, is the first).
+
+    Just `_post`, named and exported for that caller: the address, headers
+    and retry-once-on-transport-failure behaviour are this server's, not a
+    second set an add-on would otherwise have to invent and keep in sync.
+    """
+    return _post(endpoint, body, app_version=app_version, timeout=timeout,
+                retries=retries)
