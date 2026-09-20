@@ -140,8 +140,8 @@ class _POReviewDialog(PrismDialog):
                         # WARN, because a purchase order whose figures differ
                         # from the quotation is precisely the row a person has
                         # to look at before accepting it.
-                        cell.setBackground(QColor(theme.WARN_BG))
-                        cell.setForeground(QColor(theme.WARN_INK))
+                        cell.setBackground(theme.qcolor(theme.WARN_BG))
+                        cell.setForeground(theme.qcolor(theme.WARN_INK))
                     table.setItem(index, column, cell)
             layout.addWidget(table, stretch=1)
         elif order is not None and not advice:
@@ -360,7 +360,7 @@ class QuotationDialog(PrismDialog):
                 if c in (0, 1, 5):
                     cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
                 if c == 2 and not req.confident:
-                    cell.setBackground(QColor(theme.WARN_BG))
+                    cell.setBackground(theme.qcolor(theme.WARN_BG))
                     cell.setToolTip(i18n.t("No quantity was written next to "
                                            "this code — check it."))
                 self.lines_table.setItem(r, c, cell)

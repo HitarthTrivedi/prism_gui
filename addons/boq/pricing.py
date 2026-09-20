@@ -259,7 +259,7 @@ class PricingTable(QWidget):
             COL_BASIS: it.remark or (i18n.t("measured") if it.source.startswith("measured")
                                      else it.source),
         }
-        tint = QColor(theme.WARN_BG) if not it.priced else None
+        tint = theme.qcolor(theme.WARN_BG) if not it.priced else None
         for c, text in cells.items():
             cell = QTableWidgetItem(text)
             if c in (COL_QTY, COL_RATE, COL_AMOUNT):

@@ -142,9 +142,9 @@ class StatusPillDelegate(QStyledItemDelegate):
         pill = QRectF(option.rect.left() + 5,
                       option.rect.center().y() - height / 2 + 1, width, height)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(bg))
+        painter.setBrush(theme.qcolor(bg))
         painter.drawRoundedRect(pill, height / 2, height / 2)
-        painter.setPen(QColor(ink))
+        painter.setPen(theme.qcolor(ink))
         painter.drawText(pill, Qt.AlignCenter,
                          metrics.elidedText(text, Qt.ElideRight,
                                             int(width) - 12))

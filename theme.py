@@ -459,7 +459,7 @@ def role_stylesheet(qss: str, hue: int) -> str:
 # ── helpers for painted widgets ─────────────────────────────────────────────
 def c(hex_or_role: str, alpha: float = 1.0) -> QColor:
     """QColor from a token, optionally at partial alpha."""
-    col = QColor(hex_or_role)
+    col = qcolor(hex_or_role)               # QColor() alone cannot read rgba() tokens
     if alpha < 1.0:
         col.setAlphaF(alpha)
     return col

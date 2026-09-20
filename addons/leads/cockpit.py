@@ -449,10 +449,10 @@ class _FitDelegate(_CellDelegate):
         y = rect.top() + (rect.height() - h) // 2
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(bg))
+        painter.setBrush(theme.qcolor(bg))
         painter.drawRoundedRect(QRectF(x, y, w, h), theme.R_CHIP, theme.R_CHIP)
         painter.setFont(f)
-        painter.setPen(QColor(ink))
+        painter.setPen(theme.qcolor(ink))
         painter.drawText(QRect(x, y, w, h), Qt.AlignCenter, text)
 
 
@@ -481,10 +481,10 @@ class _PillDelegate(_CellDelegate):
         else:
             ink, bg = _TONE.get(text, (theme.INFO_INK, theme.INFO_BG))
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(bg))
+            painter.setBrush(theme.qcolor(bg))
         painter.drawRoundedRect(box, box.height() / 2, box.height() / 2)
         painter.setFont(f)
-        painter.setPen(QColor(ink))
+        painter.setPen(theme.qcolor(ink))
         painter.drawText(QRect(x, y, w, h), Qt.AlignCenter,
                          fm.elidedText(text, Qt.ElideRight, max(0, w - 12)))
 
