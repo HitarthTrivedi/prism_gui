@@ -38,6 +38,7 @@ import os
 
 import paths
 import theme
+from addons.leads import evidence
 from widgets import controls as C
 from widgets import icons
 from PySide6.QtCore import (
@@ -1546,8 +1547,13 @@ class LeadsCockpit(QWidget):
         # Docked, the splitter handle is its edge; floating over the table it
         # needs one of its own, and a soft shadow to lift it off the rows.
         edge = f"border-left:1px solid {theme.DIVIDER};" if floating else ""
+        # Floating, it sits ON the rows, so it must be opaque: the glass CARD
+        # tint is 65% white and let the table's Fit/Status pills show straight
+        # through the drawer's text. Docked beside the table there is nothing
+        # behind it, so the glass stays.
+        surface = "#ffffff" if floating else theme.CARD
         self._drawer_panel.setStyleSheet(
-            f"QFrame#leadDrawer{{background:{theme.CARD};border:none;{edge}}}")
+            f"QFrame#leadDrawer{{background:{surface};border:none;{edge}}}")
         self._drawer_w.set_shadow(_SHADOW if floating else 0)
 
     # ── the splitter, and where the drawer lives ──────────────────────────────
@@ -2267,6 +2273,9 @@ class LeadsCockpit(QWidget):
             who.addWidget(_muted(role, 12))
         self._drawer_head.addLayout(who, 1)
 
+        # The verdict leads: it is what the rest of the drawer is the proof of.
+        for part in evidence.headline(dos):
+            lay.addWidget(part)
         lay.addWidget(self._d_card("Fit", f"{getattr(lead,'fit_score',0) or 0:g} / 100 · "
                                           f"{lead.fit_reason or ''}"))
         status = status_of(dos, draft)
@@ -2291,6 +2300,10 @@ class LeadsCockpit(QWidget):
                                  "hasn't researched them or drafted an email."))
             lay.addStretch(1)
             return
+        # The six dimensions with their evidence and the why-now news with its
+        # source — what "hot" and "why-now" in the table rest on.
+        for part in evidence.detail(dos):
+            lay.addWidget(part)
         opener = (draft.body if draft is not None else "") or dos.opener or ""
         if opener:
             lay.addWidget(self._d_card("Drafted opener", opener, mono=False, well=True))
