@@ -45,6 +45,9 @@ def _auth_body(**extra) -> dict:
 
 
 def _call(endpoint: str, **extra) -> dict:
+    from addons.whatsapp import demo
+    if demo.enabled():
+        return demo.handle(endpoint, extra)
     try:
         return licensing.client.call(
             "/v1/whatsapp" + endpoint, _auth_body(**extra),

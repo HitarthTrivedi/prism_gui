@@ -1,13 +1,13 @@
-"""WhatsApp — a CRM run by n8n, read and acted on from Prism.
+"""WhatsApp — your team's inbox, contacts and broadcasts, in Prism.
 
-Plan B, as it actually landed: n8n (its own always-on host) is the WhatsApp
-engine — Meta credentials, the AI conversation bot, the broadcast/follow-up
-sends. Prism is the front door onto it: a rail add-on like BOQ or Leads, with
-its own screen (addons/whatsapp/panel.py) and working window
-(addons/whatsapp/dialog.py) reading Supabase and triggering n8n's webhooks.
-cloud_api.py + webhook.py are the older direct-Meta path, kept for the
-dialog's manual "Send" tab and for a gateway process, should Prism ever run
-one itself.
+n8n (its own always-on host) is the WhatsApp engine — Meta credentials, the AI
+conversation bot, the sends. Prism is the workspace on top of it: a rail
+add-on like Leads, whose whole surface lives in the window
+(addons/whatsapp/panel.py → workbench.py). Every read and send goes through
+the licence server (addons/whatsapp/license_client.py), so no Supabase key or
+n8n URL ever sits on a customer's computer. cloud_api.py + webhook.py are the
+older direct-Meta path, kept for Settings' manual test send and for a gateway
+process, should Prism ever run one itself.
 
 STDLIB ONLY, like the rest of the manifest layer.
 """
@@ -22,8 +22,7 @@ MANIFEST = Addon(
     # marketing channel, and no other add-on claims that key. A one-word diff if
     # WhatsApp ever earns its own licence line. See plans.FEATURES.
     feature="marketing",
-    tip="Your team's WhatsApp, run by n8n — inbox, contacts and sends, read "
-        "and acted on from here",
+    tip="Your team's WhatsApp — inbox, contacts and broadcasts in one place",
     blurb="Reach customers on WhatsApp",
     icon="message",
     tone=OK,                       # WhatsApp green — the OK token's ramp
