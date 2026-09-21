@@ -152,8 +152,13 @@ class _LeadCard(QFrame):
 
 
 # ── faces and painted cells ─────────────────────────────────────────────────
-_AVATAR_INKS = (theme.ACCENT_RAMP[600], theme.OK, theme.WARN,
-                theme.ACCENT_RAMP[800], theme.NEUTRAL[600], theme.ACCENT_RAMP[500])
+# One quiet disc for every lead. The avatar colour used to be picked from a ring
+# that held the OK green and the WARN amber -- the same two colours the Status and
+# Fit chips use for a verdict, so a lead's initials could read as one -- next to
+# near-black entries that were the heaviest thing in a row of light chips. Colour
+# in this table now means something (a status, a fit band) or nothing at all.
+_AVATAR_FILL = theme.NEUTRAL[200]
+_AVATAR_TEXT = theme.NEUTRAL[700]
 _RAIL_W = 320          # the rail's default width; 300 cut every job title
 _RAIL_MIN = 260        # a drag on the rail's edge stays between these
 _RAIL_MAX = 520
@@ -212,7 +217,8 @@ def _initials(name: str) -> str:
 
 
 def _avatar_ink(name: str) -> str:
-    return _AVATAR_INKS[sum(map(ord, name or "?")) % len(_AVATAR_INKS)]
+    """The avatar disc's fill. The same for everyone -- see _AVATAR_FILL."""
+    return _AVATAR_FILL
 
 
 def _avatar(name: str, size: int = 32) -> QLabel:
@@ -220,7 +226,7 @@ def _avatar(name: str, size: int = 32) -> QLabel:
     lab.setFixedSize(size, size)
     lab.setAlignment(Qt.AlignCenter)
     lab.setStyleSheet(
-        f"QLabel{{color:#ffffff;background:{_avatar_ink(name)};"
+        f"QLabel{{color:{_AVATAR_TEXT};background:{_avatar_ink(name)};"
         f"border-radius:{size // 2}px;font-weight:700;font-size:{max(11, size // 3)}px;}}")
     return lab
 
@@ -410,7 +416,7 @@ class _LeadDelegate(_CellDelegate):
         painter.setBrush(QColor(_avatar_ink(name)))
         painter.drawEllipse(QRectF(x, ay, d, d))
         painter.setFont(_font(11, QFont.Bold))
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(QColor(_AVATAR_TEXT))
         painter.drawText(QRect(x, ay, d, d), Qt.AlignCenter, _initials(name))
         _two_lines(painter, x + d + theme.SPACE_3, rect, name, company,
                    _font(14, QFont.DemiBold), theme.TEXT, _font(12), theme.NEUTRAL[600])

@@ -338,6 +338,7 @@ class AddonRow(QPushButton):
             self.setMaximumWidth(16777215)
             self.setMinimumWidth(0)
             self.setMaximumHeight(16777215)
+        self._repaint()          # tile and glyph size differ between the two rails
 
     # ── state ─────────────────────────────────────────────────────────────
     def set_locked(self, locked: bool) -> None:
@@ -369,6 +370,18 @@ class AddonRow(QPushButton):
     def _repaint(self) -> None:
         live = not self._locked
         hue = self._hue if live else theme.NEUTRAL[400]
+        if getattr(self, "_collapsed", False):
+            # On the collapsed rail the glyph stands alone. A tinted tile behind
+            # every add-on turned a slim strip of icons into a column of grey
+            # blocks, which is what made it look full. The open rail keeps its
+            # tiles: there they set the shelf apart from the flat rows around it.
+            # Same ink as the Home / History / Artifacts glyphs above, so the
+            # add-ons do not sit on the rail as a heavier, blacker group.
+            glyph = (theme.over(INK_CURRENT if self._current else INK_ITEM)
+                     if live else hue)
+            self._chip.setPixmap(icons.pixmap(self._icon_name, 18, glyph))
+            self._chip.setStyleSheet("background: transparent;")
+            return
         chip_bg = (theme.tint(self._hue, "2e") if live
                    else theme.tint("#ffffff", "16"))
         self._chip.setPixmap(icons.pixmap(self._icon_name, 14, hue))
@@ -519,8 +532,8 @@ class Sidebar(QFrame):
         self._work_collapsed_rule.setVisible(False)
         root.addWidget(self._work_collapsed_rule)
 
-        # The rail's one filled control, and the only accent fill on the dark
-        # surface.
+        # The rail's one emphasised control. A soft tinted button rather than a
+        # solid black one: the black slab was the heaviest thing on the screen.
         self.new_task_btn = QPushButton(f"  {i18n.t('New task')}")
         self.new_task_btn.setObjectName("railPrimary")
         self.new_task_btn.setCursor(Qt.PointingHandCursor)
@@ -528,7 +541,7 @@ class Sidebar(QFrame):
         self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
+        icons.button_icon(self.new_task_btn, "plus", 15, theme.NEUTRAL[800])
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
         elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
@@ -776,7 +789,8 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
+        self._pip.setStyleSheet(
+            "background: rgba(0, 0, 0, 0.32); border-radius: 1px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -1211,12 +1225,18 @@ class Sidebar(QFrame):
         if widget is None or not widget.isVisibleTo(self):
             self._pip.hide()
             return
-        top = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0))).y()
-        height = max(14, min(22, widget.height() - 10))
-        c = getattr(self, "_collapsed", False)
-        self._pip.setGeometry(2 if c else 0,
+        # mapTo() assumes widget is a descendant of self._inner in the same
+        # window; that stopped holding once the sidebar could be reparented,
+        # so go through global coordinates instead (see 4f65dfd).
+        origin = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
+        top = origin.y()
+        height = max(12, min(16, widget.height() - 16))
+        # A short, thin, soft-grey marker inside the row's own highlight, near
+        # its left edge -- not a black bar on the panel's edge, a dozen pixels
+        # from the row it is marking.
+        self._pip.setGeometry(origin.x() + 3,
                               top + (widget.height() - height) // 2,
-                              3 if c else 4, height)
+                              2, height)
         self._pip.show()
         self._pip.raise_()
 
@@ -1373,7 +1393,7 @@ class Sidebar(QFrame):
             self.new_task_btn.setText("")
             self.new_task_btn.setFixedSize(48, 38)
             self.new_task_btn.setToolTip(i18n.t("New task"))
-            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
+            icons.button_icon(self.new_task_btn, "plus", 16, theme.NEUTRAL[800])
         else:
             self.new_task_btn.setText(f"  {i18n.t('New task')}")
             self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
@@ -1381,7 +1401,7 @@ class Sidebar(QFrame):
             self.new_task_btn.setMinimumWidth(0)
             self.new_task_btn.setMaximumHeight(16777215)
             self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-            icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
+            icons.button_icon(self.new_task_btn, "plus", 15, theme.NEUTRAL[800])
 
         # Primary nav buttons
         for key, label, icon_name, tip in PRIMARY:

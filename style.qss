@@ -377,12 +377,14 @@ QToolTip {
     background: transparent;
 }
 
-/* The New-task button */
+/* The New-task button. A soft tint of the ink with a hairline edge, not a solid
+   black slab: it is still the strongest control on the rail, but no longer the
+   heaviest thing on the screen. The solid primary belongs inside a screen. */
 #railPrimary {
-    background: #09090b;
-    border: 1px solid #09090b;
+    background: rgba(0, 0, 0, 0.055);
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
-    color: #ffffff;
+    color: #09090b;
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 15px;
@@ -390,8 +392,8 @@ QToolTip {
     text-align: center;
 }
 
-#railPrimary:hover { background: #27272a; border-color: #27272a; }
-#railPrimary:pressed { background: #000000; }
+#railPrimary:hover { background: rgba(0, 0, 0, 0.085); border-color: rgba(0, 0, 0, 0.16); }
+#railPrimary:pressed { background: rgba(0, 0, 0, 0.12); }
 #railPrimary:focus { border-color: #09090b; }
 #railPrimary:disabled {
     background: rgba(0, 0, 0, 0.05);
@@ -571,7 +573,7 @@ QToolTip {
    hairline boxes. Every one of those names still works; each now resolves to
    one of the four below, plus a size or shape modifier.
 
-     PRIMARY      solid accent      #primaryBtn #primary #railPrimary
+     PRIMARY      solid accent      #primaryBtn #primary   (#railPrimary is the rail's soft tint)
                   one per surface
      SECONDARY    outlined neutral  the bare QPushButton default, #smallBtn,
                   the workhorse     #iconBtn #micBtn #chipBtn #secondaryBtn

@@ -498,15 +498,21 @@ class IconPad(QLabel):
 
 class Avatar(QLabel):
     """Circular initial. The rail, the profile row and every register line use
-    the same one so a customer reads the same in all three."""
+    the same one so a customer reads the same in all three.
+
+    With no `hue` it is a soft grey disc with dark lettering -- a solid black
+    disc on the rail and on every register line was far louder than the name
+    beside it. A caller that passes a `hue` still gets a solid disc with a
+    white letter."""
 
     def __init__(self, name: str, size: int = 28, hue: str = None, parent=None):
         super().__init__((name or "?").strip()[:1].upper() or "?", parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignCenter)
+        fill, ink = (hue, "#ffffff") if hue else (theme.NEUTRAL[200], theme.NEUTRAL[700])
         self.setStyleSheet(
-            f"background: {hue or theme.ACCENT}; color: #ffffff;"
+            f"background: {fill}; color: {ink};"
             f" border-radius: {size // 2}px;"
             f" font-family: '{theme.FONT_HEADING}'; font-weight: 700;"
             f" font-size: {max(10, int(size * 0.42))}px;")
