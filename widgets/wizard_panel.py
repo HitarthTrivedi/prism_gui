@@ -140,6 +140,7 @@ class WizardPanel(QWidget):
         self.key_edit.setEchoMode(QLineEdit.Password)
         self.key_edit.setPlaceholderText("gsk_…")
         self.key_edit.textChanged.connect(lambda: self.key_error.setVisible(False))
+        C.add_password_visibility(self.key_edit)
         body.addWidget(self.key_edit)
         self.key_error = label(
             i18n.t("That doesn't look like a Groq key — it should start "

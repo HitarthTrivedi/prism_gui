@@ -125,6 +125,7 @@ class EmailSetupDialog(PrismDialog):
         self.pass_edit = QLineEdit()
         self.pass_edit.setEchoMode(QLineEdit.Password)
         self.pass_edit.textChanged.connect(self._update_password_status)
+        C.add_password_visibility(self.pass_edit)
         form.addRow("Password:", self.pass_edit)
         self.host_edit = QLineEdit()
         self.host_edit.setPlaceholderText("auto-detected for Gmail/Outlook/Yahoo")

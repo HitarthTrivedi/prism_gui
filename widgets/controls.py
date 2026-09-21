@@ -33,7 +33,7 @@ from PySide6.QtCore import (
     QTimer, QPoint, QPointF,
 )
 from PySide6.QtGui import (
-    QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
+    QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
     QLinearGradient, QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -49,6 +49,28 @@ from widgets import icons
 # component in this module asserts it, because a 24px row is reachable with a
 # mouse on a desk and is not reachable with a trackpad on a train.
 MIN_TARGET = 28
+
+
+def add_password_visibility(edit: QLineEdit):
+    """Add a trailing eye action that reveals a secret only while requested."""
+    import i18n
+
+    action = QAction(icons.icon("eye", 16, theme.NEUTRAL[500]), "", edit)
+    action.setCheckable(True)
+    action.setText(i18n.t("Show password"))
+    action.setToolTip(i18n.t("Show password"))
+
+    def toggle(visible: bool):
+        edit.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+        action.setIcon(icons.icon(
+            "eye-off" if visible else "eye", 16, theme.NEUTRAL[600]))
+        label = i18n.t("Hide password") if visible else i18n.t("Show password")
+        action.setText(label)
+        action.setToolTip(label)
+
+    action.toggled.connect(toggle)
+    edit.addAction(action, QLineEdit.TrailingPosition)
+    return action
 
 
 # ── text helpers ────────────────────────────────────────────────────────────
@@ -339,7 +361,7 @@ class Card(QFrame):
         if central and hasattr(central, "get_blurred_pixmap"):
             blurred = central.get_blurred_pixmap()
             if blurred and not blurred.isNull():
-                pos = self.mapTo(central, QPoint(0, 0))
+                pos = central.mapFromGlobal(self.mapToGlobal(QPoint(0, 0)))
                 src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
                 painter.drawPixmap(r.toRect(), blurred, src_rect)
 
@@ -1114,6 +1136,7 @@ class PageHeader(QFrame):
         col.setSpacing(2)
         self.title = QLabel(title)
         self.title.setObjectName("pageTitle")
+        self.title.setTextFormat(Qt.RichText)
         track(self.title, -0.015)
         col.addWidget(self.title)
         # Parented at creation: setVisible below runs before col.addWidget, and
@@ -1121,6 +1144,7 @@ class PageHeader(QFrame):
         # window — the ghost-window flash. See SectionHeader for the full note.
         self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("pageSubtitle")
+        self.subtitle.setTextFormat(Qt.RichText)
         self.subtitle.setVisible(bool(subtitle))
         col.addWidget(self.subtitle)
         row.addLayout(col, stretch=1)
@@ -1142,7 +1166,7 @@ class PageHeader(QFrame):
         if central and hasattr(central, "get_blurred_pixmap"):
             blurred = central.get_blurred_pixmap()
             if blurred and not blurred.isNull():
-                pos = self.mapTo(central, QPoint(0, 0))
+                pos = central.mapFromGlobal(self.mapToGlobal(QPoint(0, 0)))
                 src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
                 painter.drawPixmap(r.toRect(), blurred, src_rect)
 
@@ -1235,7 +1259,7 @@ class SectionHeader(QWidget):
         if central and hasattr(central, "get_blurred_pixmap"):
             blurred = central.get_blurred_pixmap()
             if blurred and not blurred.isNull():
-                pos = self.mapTo(central, QPoint(0, 0))
+                pos = central.mapFromGlobal(self.mapToGlobal(QPoint(0, 0)))
                 src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
                 painter.drawPixmap(r.toRect(), blurred, src_rect)
 

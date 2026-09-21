@@ -325,6 +325,7 @@ class InquirySetupDialog(PrismDialog):
 
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        C.add_password_visibility(self.password)
         self.password.setPlaceholderText(i18n.t(
             "leave blank to keep the saved password") if self._saved_password
             else i18n.t("your mail password"))

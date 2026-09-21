@@ -1590,8 +1590,8 @@ class LeadsCockpit(QWidget):
         body = self._body
         top = 0
         if not self._toolbar.isHidden():
-            top = self._toolbar.mapTo(body, QPoint(0, self._toolbar.height())).y()
-        bottom = self._view_stack.mapTo(body, QPoint(0, self._view_stack.height())).y()
+            top = body.mapFromGlobal(self._toolbar.mapToGlobal(QPoint(0, self._toolbar.height()))).y()
+        bottom = body.mapFromGlobal(self._view_stack.mapToGlobal(QPoint(0, self._view_stack.height()))).y()
         width = min(_DRAWER_W + _SHADOW, body.width())
         return QRect(body.width() - width, top, width, max(0, bottom - top))
 
@@ -2077,7 +2077,7 @@ class LeadsCockpit(QWidget):
         if head.isSectionHidden(col) or head.sectionSize(col) <= 0:
             return QRect()
         vp = head.viewport()
-        at = vp.mapTo(head, QPoint(head.sectionViewportPosition(col), 0))
+        at = head.mapFromGlobal(vp.mapToGlobal(QPoint(head.sectionViewportPosition(col), 0)))
         return QRect(at.x(), at.y(), head.sectionSize(col), vp.height())
 
     def _scroll_to_column(self, col: int) -> None:

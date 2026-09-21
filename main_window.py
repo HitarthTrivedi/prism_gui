@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
     QMenu, QApplication, QProgressDialog, QGraphicsScene, QGraphicsBlurEffect,
+    QGraphicsOpacityEffect,
 )
 
 import app_meta
@@ -57,7 +58,6 @@ from widgets.controls import kicker
 from widgets import controls as C
 from widgets.input_panel import InputPanel
 from widgets.files_panel import FilesPanel
-from widgets.prompt_panel import PromptPanel
 from widgets.agents_panel import AgentsPanel
 from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
@@ -443,9 +443,10 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         outer.addWidget(self.sidebar)
 
-        # The redesign turns the rail's destinations into screens rather than
-        # dialogs, so the body is a stack the rail switches between. The
-        # workbench keeps its own inner stack (compose → running) and its own
+        # The rail's destinations are screens except Settings, which remains
+        # in the stack for registry compatibility but is presented as a
+        # focused modal over the current screen. The workbench keeps its own
+        # inner stack (compose → running) and its own
         # context rail; both live inside the one screen, because the files and
         # prompt panels are about the task being composed and mean nothing on
         # any other screen — which is why they used to be a permanently
@@ -456,7 +457,7 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self._workbench_screen())  # WORKBENCH
         self.inquiry_panel = InquiryPanel(self.cfg)
         self.screens.addWidget(self.inquiry_panel)        # INQUIRY
-        self.settings_panel = SettingsPanel(self.cfg)
+        self.settings_panel = SettingsPanel(self.cfg, self)
         self.screens.addWidget(self.settings_panel)       # SETTINGS
         self.guide_panel = GuidePanel(self.cfg)
         self.screens.addWidget(self.guide_panel)          # GUIDE
@@ -505,7 +506,8 @@ class MainWindow(QMainWindow):
         self.wizard_panel.guide_requested.connect(self._open_guide)
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
         # The four screens the rail used to spend a row each on.
-        self.settings_panel.navigate.connect(self._handle_command)
+        self.settings_panel.navigate.connect(self._navigate_from_settings)
+        self.settings_panel.finished.connect(self._close_settings)
         self.settings_panel.tour_requested.connect(self._start_tour)
         self.settings_panel.rename_requested.connect(self._ask_display_name)
         # Releasing this computer's seat happens on the Settings screen now
@@ -552,7 +554,9 @@ class MainWindow(QMainWindow):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(self._work_column(), stretch=1)
-        row.addWidget(self._context_column())
+        # Context rail (files panel) is instantiated for signal wiring
+        # but not added to the visible layout — the right-side strip is hidden.
+        self._context_column()
         return wrap
 
     def _show_screen(self, name: str = "workbench"):
@@ -1031,7 +1035,6 @@ class MainWindow(QMainWindow):
         which is the only time it has anything to report.
         """
         self.files_panel = FilesPanel()
-        self.prompt_panel = PromptPanel()
 
         self.context_rail = QFrame()
         self.context_rail.setObjectName("contextRail")
@@ -1080,7 +1083,6 @@ class MainWindow(QMainWindow):
         head.addWidget(shut)
         layout.addLayout(head)
         layout.addWidget(self.files_panel)
-        layout.addWidget(self.prompt_panel)
         layout.addStretch(1)
 
         tip = QLabel(i18n.t("Tip.  Click any step to leave it out, or click "
@@ -1192,7 +1194,6 @@ class MainWindow(QMainWindow):
         self._auto_run = False
         self.input_panel.reset()
         self.agents_panel.clear()
-        self.prompt_panel.clear()
         self.files_panel.clear_mentions()
         self.output_panel.set_finished(False)
         self.statusBar().showMessage("Ready for the next one.", 4000)
@@ -1204,6 +1205,47 @@ class MainWindow(QMainWindow):
                 "Show steps to start the first one.", 5000)
 
     # ── sidebar commands ─────────────────────────────────────────────────────
+    def _open_settings(self, section: str = "licence"):
+        """Open Settings as a centred modal without navigating away.
+
+        The screen underneath remains the user's context.  While the dialog
+        is open, the rail marks Settings as active; closing it restores the
+        highlight for the page that was already there.
+        """
+        self.settings_panel.cfg = self.cfg
+        # A modal should separate its work from the workspace without taking
+        # it away.  This gives the background the quiet, recessed treatment
+        # of the reference while keeping it recognisably in place underneath.
+        central = self.centralWidget()
+        if central is not None:
+            self._settings_dim = QGraphicsOpacityEffect(central)
+            self._settings_dim.setOpacity(0.48)
+            central.setGraphicsEffect(self._settings_dim)
+        self.sidebar.set_current("config")
+        self.settings_panel.open_section(section)
+        # Settings starts life in the stack so the application's screen
+        # registry stays backwards compatible.  Its first modal open promotes
+        # it to a top-level dialog, which removes that widget from the stack.
+        # Put an inert slot straight back at index 3: otherwise every later
+        # index shifts left and Support (9) becomes Gerber (10's old slot).
+        if self.screens.count() < len(SCREENS):
+            self._settings_stack_placeholder = QWidget()
+            self.screens.insertWidget(SETTINGS,
+                                      self._settings_stack_placeholder)
+
+    def _close_settings(self, _result=0):
+        """Restore the underlying page and its rail state after dismissal."""
+        central = self.centralWidget()
+        if central is not None:
+            central.setGraphicsEffect(None)
+        self.sidebar.set_current(SCREEN_NAME.get(
+            self.screens.currentIndex(), "home"))
+
+    def _navigate_from_settings(self, key: str):
+        """A Settings door (Help, History, &c.) replaces the modal."""
+        self.settings_panel.reject()
+        self._handle_command(key)
+
     def _handle_command(self, key: str):
         if key == "home":
             self._show_screen("home")
@@ -1229,14 +1271,10 @@ class MainWindow(QMainWindow):
             self._start_tour()
         elif key in ("agents", "profile", "key", "chrome", "licence",
                      "language", "team", "config", "status"):
-            # All nine land on the Settings screen now, each on the section
-            # that actually holds the editable field: your role is part of
-            # Profile, the Groq key lives on Agents (beside the picks it
-            # routes for), and Chrome's pin is a Connections fact. Every
-            # field on the page you land on is editable right there — no
-            # second dialog to hop into.
-            self._show_screen("config")
-            self.settings_panel.show_section(
+            # Every settings shortcut opens the matching section in the
+            # focused modal. The workspace behind it stays put, so closing
+            # Settings returns a person to exactly what they were doing.
+            self._open_settings(
                 {"team": "profile", "key": "agents",
                  "chrome": "status", "config": "licence"}.get(key, key))
         elif key == "login":
@@ -1650,12 +1688,16 @@ class MainWindow(QMainWindow):
         """
         dialog = self._history_dialog()
         runs = getattr(dialog, "runs", None)
-        if runs is not None:
+        if runs is not None and path:
+            norm_path = os.path.normpath(path)
+            base_name = os.path.basename(norm_path)
             for i in range(runs.count()):
                 item = runs.item(i)
-                if item is not None and item.data(1000) == path:
-                    runs.setCurrentRow(i)
-                    break
+                if item is not None:
+                    item_path = os.path.normpath(item.data(1000) or "")
+                    if item_path == norm_path or os.path.basename(item_path) == base_name:
+                        runs.setCurrentRow(i)
+                        break
         dialog.exec()
 
     # ── attachments ───────────────────────────────────────────────────────────
@@ -2050,7 +2092,6 @@ class MainWindow(QMainWindow):
         self._set_stage("plan")
         self.routing = routing
         agents_cfg = CB.config.active_agents(self.cfg)
-        self.prompt_panel.set_content(self._last_query, routing, agents_cfg)
         self.agents_panel.set_content(routing, agents_cfg, self._last_query)
         self.agents_panel.set_attachment_count(len(self.attachments))
         self.work_stack.setCurrentIndex(COMPOSE)
@@ -3039,12 +3080,20 @@ class MainWindow(QMainWindow):
         plan = plan if isinstance(plan, dict) else {}
         steps = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
         reel = self._studio_reel_in(links)
-        can_reel = bool(reel and links.get("design"))
+        saved_studio = (reel[2].get("_studio") or {}) if reel else {}
+        design_url = (links.get("design") or saved_studio.get("design_url") or "")
+        can_reel = bool(reel and design_url)
         images = (plan.get("images") or "").strip() if "artwork" in steps else ""
         ordinary = [s for s in steps
                     if s in responses and s not in ("design", "media")]
+        low_followup = getattr(self, "_followup_text", "").casefold()
+        reel_copy_change = any(term in low_followup for term in (
+            "script", "voice-over", "voiceover", "narration", "catchy",
+            "ad copy", "advertising copy", "hook", "tagline", "slogan",
+            "pro ad", "ad maker"))
         wants_reel = can_reel and (
-            not steps or bool({"reel", "artwork", "design", "media"} & set(steps)))
+            not steps or bool({"reel", "artwork", "design", "media"} & set(steps))
+            or reel_copy_change)
         if wants_reel:
             agent = (self._stage_agents.get("design")
                      or self._stage_agents.get("brains") or "ChatGPT")
@@ -3060,10 +3109,42 @@ class MainWindow(QMainWindow):
                 self._start_followup_run(
                     ordinary, atts, plan_agents=shown,
                     then=lambda r, l: self._continue_studio_followup(
-                        r, l, reel, links["design"], agent, atts, images))
+                        r, l, reel, design_url, agent, atts, images))
             else:
-                self._start_studio_followup(reel, links["design"], agent,
+                self._start_studio_followup(reel, design_url, agent,
                                             atts, images=images)
+            return
+        # Local footage reel: a script/copy change needs to regenerate voice
+        # and re-render the video too — not just re-write the text.
+        has_local_mp4 = any(
+            isinstance(v, str) and v.lower().endswith(".mp4")
+            and not CB.get_reel_edit().is_studio_spec({})
+            for v in (links or {}).values())
+        has_footage_mp4 = any(
+            isinstance(v, str) and (v.lower().endswith(".mp4")
+            or "client_reel" in os.path.basename(v))
+            for v in (links or {}).values())
+        has_audio_stage = "audio" in responses
+        has_media_stage = "media" in responses
+        if reel_copy_change and has_footage_mp4 and (has_audio_stage or has_media_stage):
+            # Chain: content re-run → audio re-gen → media re-render
+            content_steps = [s for s in (ordinary or [list(responses.keys())[0]])
+                             if s in responses]
+            if not content_steps:
+                content_steps = ["content"] if "content" in responses else [
+                    list(responses.keys())[0]]
+            chain_steps = list(content_steps)
+            plan_agents = {s: self._stage_agents.get(s, "") for s in chain_steps}
+            if has_audio_stage:
+                chain_steps.append("audio")
+                plan_agents["audio"] = self._stage_agents.get("audio", "ElevenLabs")
+            if has_media_stage:
+                chain_steps.append("media")
+                plan_agents["media"] = self._stage_agents.get("media", "Prism Studio")
+            self.statusBar().showMessage(
+                i18n.t("Rewriting script, then regenerating voice and video…"), 0)
+            self._set_stage("run")
+            self._start_followup_run(chain_steps, atts, plan_agents=plan_agents)
             return
         if not ordinary:
             ordinary = [list(responses.keys())[-1]]     # unsure → the last step

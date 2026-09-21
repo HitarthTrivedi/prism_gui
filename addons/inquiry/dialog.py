@@ -346,7 +346,10 @@ class _RoomyTabBar(QTabBar):
     hunting the exact padding arithmetic, is what makes it impossible to
     regress when the font or the stylesheet moves."""
 
-    SLACK = 8
+    # Keep a little more than the painted semi-bold title needs. The opaque
+    # tab treatment adds a border, and the extra two pixels preserve the
+    # no-truncation guarantee at the smallest supported window size.
+    SLACK = 10
 
     def tabSizeHint(self, index: int):      # noqa: N802 — Qt's name
         hint = super().tabSizeHint(index)
@@ -859,6 +862,10 @@ class InquiryDialog(QWidget):
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
+        # This screen is data-dense.  It needs a deliberately more opaque
+        # treatment than the dashboard cards so the wallpaper never competes
+        # with a customer, date or quotation status.
+        self.setObjectName("inquiryWorkspace")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -936,13 +943,21 @@ class InquiryDialog(QWidget):
         self.status.setWordWrap(True)
         bar_row.addWidget(self.status, stretch=1)
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setFixedWidth(140)
+        self.progress.setObjectName("inquiryProgress")
+        self.progress.setRange(0, 0)   # indeterminate until we know count
+        self.progress.setAccessibleName(i18n.t("Mailbox check progress"))
+        self.progress.setAccessibleDescription(i18n.t(
+            "Shows that Prism is checking the configured inboxes."))
+        self.progress.setTextVisible(False)
+        self.progress.setFixedWidth(164)
+        self.progress.setFixedHeight(8)
         self.progress.setVisible(False)
         bar_row.addWidget(self.progress)
         self.body.addWidget(bar)
 
         self.tabs = _Tabs()
+        self.tabs.setObjectName("inquiryTabs")
+        self.tabs.tabBar().setObjectName("inquiryTabBar")
         builders = {
             "to_quote": self._to_quote_tab, "waiting": self._followup_tab,
             "replies": self._replies_tab, "orders": self._orders_tab,
@@ -1229,6 +1244,7 @@ class InquiryDialog(QWidget):
         the ones named in `fit` size to their text — so a date is never
         "02-08-20…" and an inquiry number is never "INQ/…"."""
         table = QTableWidget(0, len(headers))
+        table.setObjectName("inquiryTable")
         table.setHorizontalHeaderLabels([i18n.t(h) for h in headers])
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1916,6 +1932,15 @@ class InquiryDialog(QWidget):
         self._queue = accounts
         self._queue_pos = 0
         self._partial = []
+        if len(accounts) == 1:
+            self.progress.setRange(0, 0)
+        else:
+            self.progress.setRange(0, len(accounts))
+            self.progress.setValue(0)
+        # The status line says which mailbox and position we are on; keeping
+        # numbers out of the 8px motion bar makes the animation legible rather
+        # than a row of flashing, segmented purple blocks.
+        self.progress.setTextVisible(False)
         self._set_checking(True)
         self.progress.setVisible(True)
         self._check_account()
@@ -1943,6 +1968,7 @@ class InquiryDialog(QWidget):
                 pass        # already deleted; nothing to wait for
         self._quiet = False
         self._set_checking(False)
+        self.progress.setVisible(False)
         self.status.setText(i18n.t(
             "Check cancelled. Press Check my mail now to try again."))
 
@@ -2016,6 +2042,7 @@ class InquiryDialog(QWidget):
 
         register_locked = bool(result.error) and "Excel" in result.error
         self._queue_pos += 1
+        self.progress.setValue(self._queue_pos)
         if register_locked:
             # The same locked file would refuse every account after this one,
             # and none of their bookmarks have moved — stopping loses nothing
@@ -3825,10 +3852,6 @@ class _EditRowDialog(PrismDialog):
         else:
             out["Result"] = ""
         return out
-
-
-
-
 
 
 

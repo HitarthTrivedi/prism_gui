@@ -105,6 +105,9 @@ THE RULES, IN ORDER OF IMPORTANCE
 7. If it sounds like a bug, or like something only we can fix, say so
    honestly and point at "Contact the team". That is a good answer, not a
    failure.
+8. If the reference material provides an 'Action' key for the solution, append
+   exactly this string to the very end of your response, on a new line:
+   [ACTION: <key>]
 """
 
 
@@ -525,36 +528,24 @@ class _AnswerCard(QFrame):
 
 # ════════════════════════════════════════════════════════════════════════════
 class SupportPanel(QWidget):
-    """The Help & support screen. `command_requested` carries a sidebar
-    command key so an answer's button can take them to the setting instead
-    of describing where it lives — the same wiring the guide uses.
+    """Help & support — simplified, single-column, AI-first.
 
-    Holds `cfg` because the assistant runs on the customer's own planning
-    key; the window re-hands it on every visit so a key saved thirty seconds
-    ago — which is exactly when somebody opens the help screen — is seen.
+    No tier-gating, no 71-topic browser, no "still stuck" friction.
+    Type a question → get an AI answer immediately. Three quick chips
+    for the most common questions. Book a meeting or contact support
+    always visible at the bottom.
     """
 
     command_requested = Signal(str)
 
-    # The browse column. Fixed, because it is an index: a column that grows
-    # with the window would put the topic names on one line at 1920 and three
-    # at 1280, and the list would stop being scannable at either end.
-    NAV_W = 352
-    # How many of the most-pointed-at questions the thread opens on. Seven
-    # fills the conversation column at 1440x900 without the last one landing
-    # half-cut on the fold, which reads as a rendering fault rather than as
-    # "there is more below".
-    STARTERS = 7
+    STARTERS = 3
 
     def __init__(self, cfg: dict | None = None, parent=None):
         super().__init__(parent)
         self.cfg = cfg or {}
-        self._stage = "triage"
-        self._seen: list[str] = []          # answers actually shown
-        self._unsolved: list[str] = []      # ones that did not help
-        self._log: list[tuple[str, str]] = []   # ("you"/"prism", text)
-        self._live: list[QWidget] = []      # menus still pressable
-        self._nav_rows: dict[str, _Choice] = {}
+        self._seen: list[str] = []
+        self._log: list[tuple[str, str]] = []
+        self._live: list[QWidget] = []
         self._worker = None
         self._thinking: QWidget | None = None
         self._thinking_timer: QTimer | None = None
@@ -565,24 +556,19 @@ class SupportPanel(QWidget):
 
         self._restart = C.button(i18n.t("Start over"), "secondary", small=True,
                                  on_click=self._start_over)
-        self._restart.setToolTip(i18n.t(
-            "Clear this conversation and begin again"))
         self._head = C.PageHeader(
-            i18n.t("Help & support"),
-            i18n.t("{n} written answers, in plain English. Most things are "
-                   "sorted by one of them.").format(n=ANSWER_COUNT),
+            i18n.t("AI Help Centre"),
+            i18n.t("Ask anything about Prism — answered instantly."),
             [self._restart])
         root.addWidget(self._head)
 
-        body = QHBoxLayout()
+        body = QVBoxLayout()
         body.setContentsMargins(theme.PAGE_PAD, theme.PAGE_PAD,
                                 theme.PAGE_PAD, theme.PAGE_PAD)
         body.setSpacing(theme.CARD_GAP)
-        body.addWidget(self._browse_column())
         body.addWidget(self._talk_column(), stretch=1)
         root.addLayout(body, stretch=1)
 
-        self._fill_nav()
         self._greet()
 
     # ── the book: search, then the shelves ────────────────────────────────
@@ -644,9 +630,11 @@ class SupportPanel(QWidget):
 
         if not query:
             self._nav_kicker.setText(i18n.t("Browse by topic").upper())
+            topics = [topic for topic in KB.TOPICS
+                      if topic.key in self.QUICK_TOPICS]
             self._nav_count.setText(
-                i18n.t("{n} answers").format(n=ANSWER_COUNT))
-            for topic in KB.TOPICS:
+                i18n.t("{n} topics").format(n=len(topics)))
+            for topic in topics:
                 row = _Choice(topic.label, topic.icon, topic.blurb,
                               trail=str(len(topic.questions)), flat=True,
                               level="CARD_TITLE")
@@ -740,7 +728,7 @@ class SupportPanel(QWidget):
         row.setSpacing(theme.SPACE_2 + 1)
         self._entry = QLineEdit()
         self._entry.setPlaceholderText(
-            i18n.t("Or type your question in your own words…"))
+            i18n.t("Ask anything about Prism…"))
         self._entry.setMinimumHeight(38)
         self._entry.setAccessibleName(i18n.t("Your question"))
         self._entry.returnPressed.connect(self._on_typed)
@@ -760,56 +748,24 @@ class SupportPanel(QWidget):
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, theme.SPACE_3 - 1, 0, 0)
         row.setSpacing(theme.SPACE_2 + 1)
-        self._foot_note = C.label("", role="meta", wrap=True)
+        self._foot_note = C.label(
+            i18n.t("Need to speak to someone?"), role="meta", wrap=True)
         row.addWidget(self._foot_note, stretch=1)
 
-        self._ai_btn = C.button(i18n.t(" Ask the assistant"), "secondary",
-                                small=True, on_click=self._start_ai)
-        row.addWidget(self._ai_btn)
+        self._meeting_btn = C.button(i18n.t(" Book a meeting"), "secondary",
+                                     small=True, on_click=self._book_meeting)
+        icons.button_icon(self._meeting_btn, "clock", 14, theme.ACCENT)
+        row.addWidget(self._meeting_btn)
 
-        self._contact_btn = C.button(i18n.t(" Contact the team"), "secondary",
+        self._contact_btn = C.button(i18n.t(" Contact support"), "secondary",
                                      small=True, on_click=self._open_contact)
+        icons.button_icon(self._contact_btn, "mail", 14, theme.TEXT)
         row.addWidget(self._contact_btn)
 
-        self._refresh_escalation()
         return bar
 
     def _refresh_escalation(self):
-        """Both routes out, locked or open, with the reason written down.
-
-        A disabled button with no explanation is indistinguishable from a
-        broken one, so the padlock always comes with the sentence that says
-        what opens it.
-        """
-        open_now = bool(self._unsolved)
-        for btn, icon_name in ((self._ai_btn, "bulb"),
-                               (self._contact_btn, "mail")):
-            enabled = open_now and not (btn is self._ai_btn
-                                        and self._stage == "ai")
-            btn.setEnabled(enabled)
-            icons.button_icon(btn, icon_name if open_now else "lock", 14,
-                              theme.TEXT if enabled else theme.NEUTRAL[400])
-        if self._stage == "ai":
-            self._foot_note.setText(i18n.t(
-                "You're talking to the assistant. It answers from Prism's own "
-                "help, and says so when it doesn't know."))
-            self._ai_btn.setToolTip("")
-            self._contact_btn.setToolTip("")
-        elif open_now:
-            self._foot_note.setText(i18n.t(
-                "Still stuck? The assistant knows Prism's help in full, or "
-                "send it to a person."))
-            self._ai_btn.setToolTip("")
-            self._contact_btn.setToolTip("")
-        else:
-            self._foot_note.setText(i18n.t(
-                "Have a look through the questions first — these open as soon "
-                "as one doesn't sort it."))
-            tip = i18n.t("Read an answer and press “No, still stuck”, "
-                         "or type a question we have no answer for, and this "
-                         "opens.")
-            self._ai_btn.setToolTip(tip)
-            self._contact_btn.setToolTip(tip)
+        """No-op in the simplified design — buttons are always enabled."""
 
     # ── the transcript ────────────────────────────────────────────────────
     def _say(self, widget: QWidget, scroll: bool = True):
@@ -875,25 +831,16 @@ class SupportPanel(QWidget):
 
     # ── tier 1: the written answers ───────────────────────────────────────
     def _greet(self):
-        # scroll=False on both: the opening state reads from the TOP.
-        self._log.append(("prism", i18n.t(
-            "Hello. I can answer most questions about Prism straight away.")))
         self._say(_bubble(i18n.t(
-            "Hello. I can answer most questions about Prism straight away."
-            "\n\nPick one of these, browse the topics on the left, or type "
-            "your question at the bottom in your own words."), mine=False),
+            "Hi! I'm the Prism assistant. Ask me anything about the app — "
+            "I'll answer from the help guides straight away.\n\n"
+            "Or pick a quick question below:"), mine=False),
             scroll=False)
         self._show_starters(scroll=False)
         self._entry.setFocus()
 
     def _show_starters(self, scroll: bool = True):
-        """Open on real questions rather than on a row of topic names.
-
-        These are not a guess at what is popular — see `_most_pointed_at`.
-        They are the answers the rest of the written material keeps handing
-        people to, which is the closest thing the book has to a well-worn
-        page, and every one of them is one press from being read.
-        """
+        """Three most-common questions as pressable chips."""
         rows = []
         for question in _most_pointed_at(self.STARTERS):
             topic = _TOPIC_OF.get(question.qid)
@@ -902,9 +849,7 @@ class SupportPanel(QWidget):
             row.clicked.connect(
                 lambda _=False, qid=question.qid: self._show_answer(qid))
             rows.append(row)
-        self._options(rows, scroll=scroll, header=i18n.t("Common questions"),
-                      note=i18n.t("The ones the rest of the help points back "
-                                  "at most often."))
+        self._options(rows, scroll=scroll, header=i18n.t("Quick questions"))
 
     def _show_topic(self, key: str):
         topic = KB.topic(key)
@@ -962,10 +907,6 @@ class SupportPanel(QWidget):
             self._options([again])
             return
 
-        if qid not in self._unsolved:
-            self._unsolved.append(qid)
-        self._refresh_escalation()
-
         nearby = [q for q in KB.related_to(qid) if q.qid not in self._seen]
         if nearby:
             self._bot(i18n.t("Sorry about that. These are close to it — one "
@@ -981,9 +922,8 @@ class SupportPanel(QWidget):
             self._bot(i18n.t("Sorry about that."))
 
         self._bot(i18n.t(
-            "The two buttons at the bottom are open now. The assistant can "
-            "talk it through with you, or you can send it straight to our "
-            "team with everything we'd need already filled in."))
+            "You can ask the assistant or contact the team using the options "
+            "at the bottom."))
 
     # ── typing a question ─────────────────────────────────────────────────
     def _on_typed(self):
@@ -993,69 +933,18 @@ class SupportPanel(QWidget):
         self._entry.clear()
         self._retire_menus()
         self._me(text)
-        if self._stage == "ai":
-            self._ask_ai(text)
-            return
-
-        hits = [q for q in KB.search(text) if q.qid not in self._seen]
-        if hits:
-            self._bot(i18n.t("Here's the closest I have:"))
-            buttons = []
-            for question in hits:
-                btn = _Choice(question.text, "chevron-right")
-                btn.clicked.connect(
-                    lambda _=False, q=question.qid: self._show_answer(q))
-                buttons.append(btn)
-            none = _Choice(i18n.t("None of these is what I meant"), "x",
-                           muted=True)
-            none.clicked.connect(lambda t=text: self._no_answer(t))
-            buttons.append(none)
-            self._options(buttons)
-        else:
-            self._no_answer(text)
+        # Always go directly to AI — no tier-gating, no KB search triage.
+        self._ask_ai(text)
 
     def _no_answer(self, text: str):
-        """No written answer for this one — which opens the gate immediately.
-
-        This is the case the gate exists to let through. Making somebody read
-        unrelated answers because the book happens not to cover their problem
-        would be exactly the behaviour that gives these systems their
-        reputation.
-        """
+        """Forward to AI when a KB answer isn't selected."""
         self._retire_menus()
-        marker = f"typed:{text[:60]}"
-        if marker not in self._unsolved:
-            self._unsolved.append(marker)
-        self._refresh_escalation()
-        self._bot(i18n.t(
-            "I don't have a written answer for that one — so I've opened both "
-            "buttons at the bottom. The assistant can work through it with "
-            "you, or send it to our team and a person will pick it up."))
+        self._ask_ai(text)
 
-    # ── tier 2: the assistant ─────────────────────────────────────────────
+    # ── AI assistant ──────────────────────────────────────────────────────
     def _start_ai(self):
-        if not self.cfg.get("api_key"):
-            self._bot(i18n.t(
-                "The assistant needs the free key Prism uses to work out your "
-                "tasks, and there isn't one saved on this computer yet. You "
-                "can still contact our team with the button beside this "
-                "one."))
-            go = _chip(i18n.t("Add the key in Settings"), "key")
-            go.clicked.connect(lambda: self.command_requested.emit("key"))
-            self._options([go])
-            return
-        self._stage = "ai"
-        self._entry.setPlaceholderText(
-            i18n.t("Tell the assistant what's happening…"))
-        self._head.set_subtitle(i18n.t(
-            "The assistant answers from Prism's own help. If it doesn't know, "
-            "it will say so — then use Contact the team."))
-        self._refresh_escalation()
-        self._bot(i18n.t(
-            "Right — I'm the assistant. Tell me what's happening in your own "
-            "words, including anything you've already tried, and I'll work "
-            "through it with you."))
-        self._entry.setFocus()
+        """No-op — AI is always on in the simplified design."""
+        pass
 
     def _ask_ai(self, text: str):
         if self._worker is not None:
@@ -1146,9 +1035,22 @@ class SupportPanel(QWidget):
 
     def _ai_answered(self, reply: str):
         self._clear_thinking()
+        
+        reply = reply or ""
+        import re
+        match = re.search(r"\[ACTION:\s*([a-zA-Z0-9_-]+)\]", reply, re.IGNORECASE)
+        action = None
+        if match:
+            action = match.group(1)
+            reply = reply[:match.start()].strip()
+            
         self._bot(reply or i18n.t(
             "I didn't get an answer back that time. Try asking again, or use "
             "Contact the team."))
+            
+        if action:
+            # Emit command to directly navigate/solve the query
+            QTimer.singleShot(500, lambda: self.command_requested.emit(action))
 
     def _ai_failed(self, error: str):
         self._clear_thinking()
@@ -1192,17 +1094,15 @@ class SupportPanel(QWidget):
                 "Sent to our team. We read every one of these and normally "
                 "reply the same working day."))
 
-    def _transcript(self) -> str:
-        lines = [f"{'Me' if who == 'you' else 'Prism'}: {said}"
-                 for who, said in self._log]
-        return "\n\n".join(lines)
+    def _book_meeting(self):
+        """Open the AlphaKore meeting booking link in the browser."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl("https://alphakore.in/book"))
 
     # ── starting again ────────────────────────────────────────────────────
     def _start_over(self):
-        """Forget the conversation and greet afresh — the one control that
-        does. Refused while the assistant is mid-answer, because a reply
-        arriving into a cleared thread would answer a question nobody can
-        see any more."""
+        """Forget the conversation and greet afresh."""
         if self._worker is not None:
             return
         while self._thread_box.count() > 1:      # keep the trailing stretch
@@ -1211,20 +1111,14 @@ class SupportPanel(QWidget):
                 item.widget().deleteLater()
         self._live = []
         self._seen = []
-        self._unsolved = []
         self._log = []
-        self._stage = "triage"
         self._thinking = None
         self._entry.setEnabled(True)
         self._send.setEnabled(True)
         self._entry.clear()
         self._entry.setPlaceholderText(
-            i18n.t("Or type your question in your own words…"))
-        self._head.set_subtitle(i18n.t(
-            "{n} written answers, in plain English. Most things are sorted "
-            "by one of them.").format(n=ANSWER_COUNT))
-        self._search.clear()                     # also redraws the column
-        self._fill_nav()
+            i18n.t("Ask anything about Prism…"))
+        self._head.set_subtitle(i18n.t("Ask anything about Prism — answered instantly."))
         self._refresh_escalation()
         self._greet()
 
@@ -1246,3 +1140,4 @@ class SupportPanel(QWidget):
                 worker.wait(1000)
         except RuntimeError:
             pass                            # already deleted; nothing to wait
+

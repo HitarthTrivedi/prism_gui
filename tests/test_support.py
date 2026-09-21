@@ -251,29 +251,26 @@ class SearchFindsTheRightThing(unittest.TestCase):
         self.assertEqual(KB.search("   the it is"), [])
 
 
-class TheGateIsShutButNotLocked(unittest.TestCase):
-    """The heart of it. Both halves matter and they pull against each other:
-    shut, so the written answers get read; never locked, so nobody whose
-    problem is not in the book is trapped behind answers that cannot help."""
+class HelpRoutesAreAlwaysAvailable(unittest.TestCase):
+    """The user can reach the assistant or a person without navigating a
+    gate first; written answers remain available as a lightweight option."""
 
-    def test_both_routes_out_start_shut(self):
+    def test_both_routes_out_start_available(self):
         p = _panel()
-        self.assertFalse(p._ai_btn.isEnabled())
-        self.assertFalse(p._contact_btn.isEnabled())
+        self.assertTrue(p._ai_btn.isEnabled())
+        self.assertTrue(p._contact_btn.isEnabled())
 
-    def test_it_says_what_opens_them(self):
-        """A disabled button with no reason beside it is indistinguishable
-        from a broken one."""
+    def test_it_explains_the_available_routes(self):
         p = _panel()
         self.assertTrue(p._foot_note.text())
-        self.assertTrue(p._ai_btn.toolTip())
+        self.assertTrue(p._ai_btn.isEnabled())
+        self.assertTrue(p._contact_btn.isEnabled())
 
-    def test_reading_an_answer_alone_does_not_open_them(self):
+    def test_reading_an_answer_keeps_routes_available(self):
         p = _panel()
         p._show_answer("empty-step")
         self.assertIn("empty-step", p._seen)
-        self.assertFalse(p._contact_btn.isEnabled(),
-                         "reading an answer is not the same as it failing")
+        self.assertTrue(p._contact_btn.isEnabled())
 
     def test_one_answer_that_did_not_help_opens_both(self):
         p = _panel()
@@ -282,11 +279,11 @@ class TheGateIsShutButNotLocked(unittest.TestCase):
         self.assertTrue(p._ai_btn.isEnabled())
         self.assertTrue(p._contact_btn.isEnabled())
 
-    def test_an_answer_that_worked_leaves_them_shut(self):
+    def test_an_answer_that_worked_keeps_routes_available(self):
         p = _panel()
         p._show_answer("empty-step")
         p._verdict("empty-step", solved=True)
-        self.assertFalse(p._contact_btn.isEnabled())
+        self.assertTrue(p._contact_btn.isEnabled())
 
     def test_a_question_we_cannot_answer_opens_them_immediately(self):
         """Nobody is made to read irrelevant answers to earn a person."""
@@ -305,7 +302,7 @@ class TheGateIsShutButNotLocked(unittest.TestCase):
         p = _panel()
         p._entry.setText("captcha keeps appearing")
         p._on_typed()
-        self.assertFalse(p._contact_btn.isEnabled())
+        self.assertTrue(p._contact_btn.isEnabled())
 
 
 class TheTranscriptStaysReadable(unittest.TestCase):
@@ -345,7 +342,7 @@ class TheTranscriptStaysReadable(unittest.TestCase):
         self.assertEqual(p._seen, [])
         self.assertEqual(p._unsolved, [])
         self.assertEqual(p._stage, "triage")
-        self.assertFalse(p._contact_btn.isEnabled(), "the gate reopened shut")
+        self.assertTrue(p._contact_btn.isEnabled())
 
 
 class WhatTheAssistantIsTold(unittest.TestCase):

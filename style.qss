@@ -1527,17 +1527,21 @@ QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {
 QProgressBar {
     background: rgba(0, 0, 0, 0.10);
     border: none;
-    border-radius: 4px;
-    height: 8px;
+    border-radius: 9px;
+    height: 18px;
+    min-height: 18px;
     text-align: center;
-    font-size: 12px;
-    font-weight: 500;
-    color: #5d5d60;
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffffff;
 }
 
 QProgressBar::chunk {
-    background: #09090b;
-    border-radius: 4px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #6c63ff, stop:1 #a78bfa);
+    border-radius: 9px;
+    width: 30px;
+    margin: 1px;
 }
 
 QToolButton {
@@ -1692,6 +1696,88 @@ QTableView#registerTable QHeaderView::section:horizontal:hover {
     color: #18181b;
 }
 
+/* ── Email inquiry automation: opaque operational work surface ────────────
+   The dashboard wallpaper is useful for orientation, but an inquiry register
+   contains names, dates, quantities and quotation state.  Those facts must
+   stay readable over every wallpaper, not just a dark or low-contrast one. */
+#inquiryWorkspace #toolbar {
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+#inquiryWorkspace #inquiryTabBar {
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.75);
+    border-radius: 10px;
+    padding: 3px;
+}
+
+#inquiryWorkspace #inquiryTabBar::tab {
+    color: #52525b;
+    margin: 0;
+}
+
+#inquiryWorkspace #inquiryTabBar::tab:selected {
+    background: #ffffff;
+    color: #09090b;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+#inquiryWorkspace QTabWidget::pane {
+    background: rgba(255, 255, 255, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.80);
+}
+
+#inquiryWorkspace QTableWidget#inquiryTable {
+    background: rgba(255, 255, 255, 0.96);
+    alternate-background-color: #f6f7f8;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    gridline-color: rgba(0, 0, 0, 0.06);
+    selection-background-color: rgba(0, 0, 0, 0.08);
+    selection-color: #09090b;
+    color: #18181b;
+}
+
+#inquiryWorkspace QTableWidget#inquiryTable::item {
+    color: #18181b;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+#inquiryWorkspace QTableWidget#inquiryTable::item:selected {
+    background: rgba(0, 0, 0, 0.08);
+    color: #09090b;
+}
+
+#inquiryWorkspace QTableWidget#inquiryTable QHeaderView::section {
+    background: #f6f7f8;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+    color: #52525b;
+}
+
+#inquiryWorkspace #meta {
+    color: #52525b;
+}
+
+/* Mailbox checks are an ongoing background action, not a warning. The global
+   bar uses a deliberately chunky purple treatment for media work; this thin,
+   monochrome sweep is quieter and reads cleanly at the top of a register. */
+#inquiryWorkspace QProgressBar#inquiryProgress {
+    background: rgba(0, 0, 0, 0.10);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
+    min-height: 8px;
+    max-height: 8px;
+    padding: 0;
+}
+
+#inquiryWorkspace QProgressBar#inquiryProgress::chunk {
+    background: #27272a;
+    border-radius: 3px;
+    width: 1px;
+    margin: 0;
+}
+
 /* ── sleek glassmorphic scrollbars ─────────────────────────────────────── */
 QScrollBar:vertical {
     background: transparent;
@@ -1773,4 +1859,156 @@ QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
 
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: none;
+}
+
+/* ── Dashboard (Home) Redesign Styles ────────────────────────────── */
+#homeSearchPill {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 999px;
+    padding: 3px 12px;
+}
+
+#homeSearchPill:hover, #homeSearchPill:focus-within {
+    background: rgba(255, 255, 255, 0.90);
+    border-color: rgba(0, 0, 0, 0.18);
+}
+
+#homeSearchInput {
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    color: #09090b;
+}
+
+#homeKbdBadge {
+    background: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #52525b;
+}
+
+#homeIconBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 6px;
+}
+
+#homeIconBtn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+#homeProfileBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 2px 6px 2px 2px;
+}
+
+#homeProfileBtn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+#heroPromptCard {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 18px;
+}
+
+#heroPromptInput {
+    background: transparent;
+    border: none;
+    font-size: 15px;
+    color: #09090b;
+    padding: 4px 0px;
+}
+
+#promptChipBtn {
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #27272a;
+}
+
+#promptChipBtn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#promptSendBtn {
+    background: #09090b;
+    border: none;
+    border-radius: 999px;
+    min-width: 36px;
+    max-width: 36px;
+    min-height: 36px;
+    max-height: 36px;
+}
+
+#promptSendBtn:hover {
+    background: #27272a;
+}
+
+#tryChip {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.07);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #27272a;
+}
+
+#tryChip:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 0, 0, 0.14);
+}
+
+#tourCard {
+    background-color: #0b1120;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 18px;
+}
+
+#tourPlayBtn {
+    background: #ffffff;
+    color: #09090b;
+    border: none;
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+#tourPlayBtn:hover {
+    background: #f4f4f5;
+}
+
+#toolTile {
+    background: rgba(255, 255, 255, 0.65);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    padding: 6px;
+}
+
+#toolTile:hover {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.15);
+}
+
+#recentMenuBtn {
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+#recentMenuBtn:hover {
+    background: rgba(0, 0, 0, 0.06);
 }

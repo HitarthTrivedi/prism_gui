@@ -298,14 +298,15 @@ class InputPanel(Card):
         self.mic_btn.clicked.connect(self.mic_toggle_clicked.emit)
         row.addWidget(self.mic_btn)
 
-        file_btn = _action(i18n.t("Add file"), "paperclip", i18n.t("Attach a file"))
-        file_btn.clicked.connect(self.attach_file_clicked.emit)
-        row.addWidget(file_btn)
+        self.attach_file_btn = _action(i18n.t("Add file"), "file",
+                                       i18n.t("Attach a file from your computer"))
+        self.attach_file_btn.clicked.connect(self.attach_file_clicked.emit)
+        row.addWidget(self.attach_file_btn)
 
-        folder_btn = _action(i18n.t("Add folder"), "folder",
-                             i18n.t("Attach a whole folder"))
-        folder_btn.clicked.connect(self.attach_folder_clicked.emit)
-        row.addWidget(folder_btn)
+        self.attach_folder_btn = _action(i18n.t("Add folder"), "folder",
+                                         i18n.t("Attach a whole folder"))
+        self.attach_folder_btn.clicked.connect(self.attach_folder_clicked.emit)
+        row.addWidget(self.attach_folder_btn)
 
         self.add_task_btn = _action(
             i18n.t("Add task"), "plus",

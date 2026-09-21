@@ -13,22 +13,25 @@ artifacts_panel.py calls instead.
 Only a real remote URL — the "open the chat that made this" globe button —
 keeps leaving the app; that one has nowhere to render TO inside Prism.
 
-What actually renders in-app: images, plain-text/code, PDF, video and audio,
-and a folder's own contents (as a list, not a raw OS file-manager window).
-Everything else (.docx/.xlsx/.pptx and the rest of Office's formats, plus
-archives) has no renderer here or anywhere else in the app, and building one
-is its own project — those get an explicit "Open in the default app" button
-instead of a silent, surprise hand-off, and it's built as a normal PrismDialog
-button, not a fallback smuggled into what looks like a working preview.
+What actually renders in-app: images, plain-text/code, PDF, video, audio,
+modern Word documents, Excel workbooks, PowerPoint decks, and a folder's own
+contents (as a list, not a raw OS file-manager window). Office previews show
+their readable content rather than pretending to be a full Office editor;
+legacy/binary Office formats and archives retain an explicit "Open in the
+default app" escape hatch.
 """
 from __future__ import annotations
 
+import html
 import os
+import re
+import zipfile
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QSlider,
+    QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QSlider, QTabWidget,
+    QTableWidget, QTableWidgetItem, QTextBrowser,
 )
 
 import i18n
@@ -42,6 +45,9 @@ _AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac")
 _TEXT_EXTS = (".txt", ".md", ".json", ".py", ".js", ".ts", ".tsx", ".jsx",
              ".html", ".css", ".java", ".c", ".cpp", ".h", ".go", ".rb",
              ".php", ".sh", ".sql", ".csv", ".ipynb", ".yaml", ".yml")
+_DOCUMENT_EXTS = (".docx",)
+_SPREADSHEET_EXTS = (".xlsx",)
+_PRESENTATION_EXTS = (".pptx",)
 
 
 def _classify(path: str) -> str:
@@ -54,6 +60,12 @@ def _classify(path: str) -> str:
         return "audio"
     if ext == ".pdf":
         return "pdf"
+    if ext in _DOCUMENT_EXTS:
+        return "document"
+    if ext in _SPREADSHEET_EXTS:
+        return "spreadsheet"
+    if ext in _PRESENTATION_EXTS:
+        return "presentation"
     if ext in _TEXT_EXTS:
         return "text"
     return "other"
@@ -65,12 +77,10 @@ def open_preview(path: str, parent=None):
     nothing here can render — a small dialog offering to open it externally
     instead of doing that automatically.
 
-    video/audio/pdf fall back the same way if their Qt module is missing.
-    That is not hypothetical: packaging/prism.spec EXCLUDES QtMultimedia and
-    QtPdf from the shipped build on purpose, to keep it off the customer's
-    disk (they pull in an FFmpeg backend). A dev checkout has them; a real
-    build of Prism does not, and must not crash a customer's click over it —
-    it gets the same "open in the default app" a .docx already gets.
+    Video and audio fall back to the default-app dialog if Qt's optional
+    multimedia module is unavailable. PDF uses pypdf's text extraction, so it
+    stays readable even in the compact shipped build, which deliberately does
+    not include QtPdf.
     """
     if os.path.isdir(path):
         FolderPreviewDialog(path, parent).exec()
@@ -90,7 +100,8 @@ def open_preview(path: str, parent=None):
 # The dialog-header glyph registry (widgets/icons.py) only has "image",
 # "video", "code" and "file" — not one for every kind this dialog renders.
 _HEADER_ICON = {"image": "image", "video": "video", "audio": "video",
-               "pdf": "file", "text": "code"}
+               "pdf": "file", "document": "file", "spreadsheet": "file",
+               "presentation": "file", "text": "code"}
 
 
 class PreviewDialog(PrismDialog):
@@ -111,14 +122,48 @@ class PreviewDialog(PrismDialog):
             "video": self._build_video,
             "audio": self._build_audio,
             "pdf": self._build_pdf,
+            "document": self._build_document,
+            "spreadsheet": self._build_spreadsheet,
+            "presentation": self._build_presentation,
             "text": self._build_text,
         }[kind]
         body()
 
         self.footer.add_utility(self.button(
             i18n.t("Open in default app"), on_click=self._open_externally))
+
+        # Check if editable reel
+        if kind == "video":
+            try:
+                from widgets.artifacts_panel import _editable_reel
+                if _editable_reel(self.path):
+                    self.footer.add_secondary(self.button(
+                        i18n.t("Edit the layout"), "secondary",
+                        on_click=self._edit_layout))
+            except Exception:
+                pass
+
+        # Check if chat link exists
+        try:
+            from widgets.artifacts_panel import _chat_link
+            chat_url = _chat_link(self.path)
+            if chat_url:
+                self.footer.add_secondary(self.button(
+                    i18n.t("Open chat"), "secondary",
+                    on_click=lambda: QDesktopServices.openUrl(QUrl(chat_url))))
+        except Exception:
+            pass
+
         self.footer.set_primary(self.button(
             i18n.t("Close"), "primary", on_click=self.accept))
+
+    def _edit_layout(self):
+        self.accept()
+        win = self.window()
+        if hasattr(win, "_edit_reel_layout"):
+            win._edit_reel_layout(self.path)
+        elif self.parent() and hasattr(self.parent(), "edit_reel"):
+            self.parent().edit_reel.emit(self.path)
 
     def _open_externally(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
@@ -147,16 +192,126 @@ class PreviewDialog(PrismDialog):
             edit.setPlainText(f"({e})")
         self.body.addWidget(edit, stretch=1)
 
+    # -- Office previews -----------------------------------------------------
+    def _build_document(self):
+        """Render the readable structure of a modern Word document.
+
+        python-docx is already bundled because Prism writes DOCX fallbacks
+        for agents. Reusing it gives headings, paragraphs and tables without
+        pretending to be a full Word editor or sending the person elsewhere.
+        """
+        view = QTextBrowser()
+        view.setOpenExternalLinks(False)
+        view.setStyleSheet(theme.type_css("BODY", theme.TEXT))
+        try:
+            from docx import Document
+            doc = Document(self.path)
+            parts = []
+            for paragraph in doc.paragraphs:
+                text = html.escape(paragraph.text).replace("\n", "<br>")
+                if not text:
+                    continue
+                style = (paragraph.style.name or "").lower()
+                heading = re.search(r"heading\s*([1-6])", style)
+                if heading:
+                    parts.append(f"<h{heading.group(1)}>{text}</h{heading.group(1)}>")
+                elif "list" in style:
+                    parts.append(f"<p>• {text}</p>")
+                else:
+                    parts.append(f"<p>{text}</p>")
+            for table in doc.tables:
+                rows = []
+                for row in table.rows:
+                    cells = "".join(
+                        f"<td>{html.escape(cell.text).replace(chr(10), '<br>')}</td>"
+                        for cell in row.cells)
+                    rows.append(f"<tr>{cells}</tr>")
+                if rows:
+                    parts.append("<table border='1' cellspacing='0' cellpadding='5'>"
+                                 + "".join(rows) + "</table><br>")
+            empty = html.escape(i18n.t("This document is empty."))
+            view.setHtml("".join(parts) or f"<p>{empty}</p>")
+        except Exception as e:                            # malformed DOCX
+            view.setPlainText(i18n.t("This Word document could not be read.")
+                              + f"\n\n{e}")
+        self.body.addWidget(view, stretch=1)
+
+    def _build_spreadsheet(self):
+        """Show workbook sheets as bounded, read-only tables.
+
+        The bound keeps a workbook with a million formatted rows responsive;
+        the original remains one click away in the default spreadsheet app.
+        """
+        tabs = QTabWidget()
+        try:
+            from openpyxl import load_workbook
+            from openpyxl.utils import get_column_letter
+            book = load_workbook(self.path, read_only=True, data_only=True)
+            for sheet in book.worksheets[:12]:
+                rows = list(sheet.iter_rows(max_row=300, max_col=40,
+                                            values_only=True))
+                cols = max((len(row) for row in rows), default=1)
+                table = QTableWidget(len(rows), cols)
+                table.setEditTriggers(QTableWidget.NoEditTriggers)
+                table.setHorizontalHeaderLabels(
+                    [get_column_letter(i + 1) for i in range(cols)])
+                for r, row in enumerate(rows):
+                    for c, value in enumerate(row):
+                        if value is not None:
+                            table.setItem(r, c, QTableWidgetItem(str(value)))
+                tabs.addTab(table, sheet.title)
+            if not book.worksheets:
+                tabs.addTab(QLabel(i18n.t("This workbook is empty.")), "Sheet")
+        except Exception as e:                            # corrupt or encrypted XLSX
+            tabs.addTab(QLabel(i18n.t("This workbook could not be read.")
+                               + f"\n\n{e}"), i18n.t("Preview"))
+        self.body.addWidget(tabs, stretch=1)
+
+    def _build_presentation(self):
+        """Extract visible PPTX text slide-by-slide for an in-app preview."""
+        tabs = QTabWidget()
+        try:
+            with zipfile.ZipFile(self.path) as deck:
+                names = sorted(
+                    (name for name in deck.namelist()
+                     if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)),
+                    key=lambda name: int(re.search(r"\d+", name).group()))
+                for index, name in enumerate(names, 1):
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(deck.read(name))
+                    words = [node.text for node in root.iter()
+                             if node.tag.endswith("}t") and node.text]
+                    page = QTextBrowser()
+                    page.setStyleSheet(theme.type_css("BODY", theme.TEXT))
+                    page.setPlainText("\n".join(words) or "(No text on this slide.)")
+                    tabs.addTab(page, i18n.t("Slide {n}").format(n=index))
+            if not tabs.count():
+                tabs.addTab(QLabel(i18n.t("This presentation has no slides.")),
+                            i18n.t("Preview"))
+        except Exception as e:                            # malformed PPTX
+            tabs.addTab(QLabel(i18n.t("This presentation could not be read.")
+                               + f"\n\n{e}"), i18n.t("Preview"))
+        self.body.addWidget(tabs, stretch=1)
+
     # -- pdf ------------------------------------------------------------------
     def _build_pdf(self):
-        from PySide6.QtPdf import QPdfDocument
-        from PySide6.QtPdfWidgets import QPdfView
-        self._pdf_doc = QPdfDocument(self)
-        self._pdf_doc.load(self.path)
-        view = QPdfView()
-        view.setDocument(self._pdf_doc)
-        view.setPageMode(QPdfView.PageMode.MultiPage)
-        view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        """Keep PDFs readable in builds that intentionally omit QtPdf.
+
+        pypdf is already bundled for the engine; unlike QtPdf it does not
+        pull a second native rendering stack into every installer. The reader
+        gets the document's selectable text in Prism, and can still use the
+        explicit default-app button for original visual fidelity.
+        """
+        view = QTextBrowser()
+        view.setStyleSheet(theme.type_css("BODY", theme.TEXT))
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(self.path)
+            pages = [page.extract_text() or i18n.t("(No extractable text on this page.)")
+                     for page in reader.pages]
+            view.setPlainText("\n\n".join(pages) or i18n.t("This PDF is empty."))
+        except Exception as e:
+            view.setPlainText(i18n.t("This PDF could not be read.") + f"\n\n{e}")
         self.body.addWidget(view, stretch=1)
 
     # -- video ------------------------------------------------------------------
@@ -227,7 +382,7 @@ class PreviewDialog(PrismDialog):
 
 
 class UnsupportedPreviewDialog(PrismDialog):
-    """A file kind nothing in Prism can render — Office documents, archives.
+    """A legacy/binary file kind Prism cannot preview — archives, .doc, .xls.
     Says so plainly rather than silently doing what the row used to do."""
 
     def __init__(self, path: str, parent=None):
@@ -266,7 +421,8 @@ class FolderPreviewDialog(PrismDialog):
 
         entries = sorted(
             (os.path.join(path, name) for name in os.listdir(path)
-             if not name.endswith(".link.txt")),
+             if not name.endswith(".link.txt")
+             and not (name.endswith(".json") and os.path.isfile(os.path.join(path, os.path.splitext(name)[0] + ".mp4")))),
             key=lambda p: (os.path.isfile(p), os.path.basename(p).lower()))
         if not entries:
             self.body.addWidget(C.EmptyState(
@@ -289,6 +445,7 @@ class FolderPreviewDialog(PrismDialog):
             detail = (i18n.t("1 file") if n == 1
                      else i18n.t("{n} files").format(n=n))
             icon = "folder"
+            kind = ""
         else:
             classified = _classify(path)
             kind = classified if classified != "other" else ""
@@ -297,12 +454,38 @@ class FolderPreviewDialog(PrismDialog):
                 if p)
             icon = {"image": "image", "video": "video", "audio": "video",
                    "text": "code"}.get(kind, "file")
-        row = C.FileItem(name, detail, icon, [C.icon_button(
+        actions = [C.icon_button(
             "external", i18n.t("Open"),
-            lambda _=False, p=path: open_preview(p, self))])
+            lambda _=False, p=path: open_preview(p, self))]
+        if kind == "video":
+            try:
+                from widgets.artifacts_panel import _editable_reel
+                if _editable_reel(path):
+                    actions.append(C.icon_button(
+                        "pencil", i18n.t("Edit the layout"),
+                        lambda _=False, p=path: self._edit_child_layout(p)))
+            except Exception:
+                pass
+        try:
+            from widgets.artifacts_panel import _chat_link
+            link = _chat_link(path)
+            if link:
+                actions.append(C.icon_button(
+                    "globe", i18n.t("Open the chat that made this"),
+                    lambda _=False, u=link: QDesktopServices.openUrl(QUrl(u))))
+        except Exception:
+            pass
+
+        row = C.FileItem(name, detail, icon, actions)
         row.setToolTip(path)
         row.activated.connect(lambda p=path: open_preview(p, self))
         return row
+
+    def _edit_child_layout(self, p: str):
+        self.accept()
+        win = self.window()
+        if hasattr(win, "_edit_reel_layout"):
+            win._edit_reel_layout(p)
 
     def _open_externally(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))

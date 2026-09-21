@@ -68,7 +68,6 @@
     "Copy output": "आउटपुट कॉपी करें",
     "Couldn't write the file: {error}": "फ़ाइल नहीं लिखी जा सकी: {error}",
     "Current profile, key & agents": "मौजूदा प्रोफ़ाइल, की और एजेंट",
-    "Describe what you want done — name any file or folder in plain words and Prism will go find it.": "आप क्या कराना चाहते हैं, बताइए — किसी भी फ़ाइल या फ़ोल्डर का नाम सीधे शब्दों में लिखें, Prism उसे ढूँढ़ लेगा।",
     "Designation key": "पदनाम की",
     "Detach all": "सब हटाएँ",
     "Detached 1 file from {name}.": "{name} से 1 फ़ाइल हटाई।",

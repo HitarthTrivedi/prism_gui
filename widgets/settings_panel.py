@@ -1,4 +1,4 @@
-"""Settings, as one screen with a grouped section list and a page that fills.
+"""Settings, as a grouped section list in a focused modal.
 
 The design folds the rail's old WORKSPACE and CONFIGURE groups — nine separate
 rows, each opening the same dialog scrolled to a different place — into a single
@@ -109,19 +109,20 @@ SECTIONS = [
     ("privacy", "Privacy & data", "Configure",
      "Where your work is written, who else can read it, and every folder "
      "Prism keeps."),
-    ("diagnostics", "Diagnostics", "Support",
-     "What this machine can do, what the licence server last said, and the "
-     "file support will ask you for."),
-    ("more", "Help & more", "Support",
-     "The screens that used to have a rail row each, and the way to reach "
-     "us."),
-    ("guide", "How to use Prism", "Resources",
-     "What Prism can do, and what to type."),
-    ("catalog", "AI tools directory", "Resources",
-     "Every tool Prism can drive, and whether you're signed in to it."),
-    ("tour", "Product tour", "Resources",
-     "Interactive walkthrough of the workspace."),
+    ("more", "Help & contact", "Support",
+     "Get help, contact Alphakore, or read the legal terms."),
 ]
+
+_SECTION_SEARCH = {
+    "licence": "license activate activation plan seat subscription expiry",
+    "profile": "name company team workspace folder shared designation",
+    "agents": "ai api key groq tools models login credentials",
+    "language": "translation output language hindi gujarati",
+    "status": "connection browser chrome drive sync login",
+    "appearance": "theme dark light wallpaper display",
+    "privacy": "data files storage privacy folders",
+    "more": "help meeting contact email phone legal support",
+}
 
 # (config key, name, what it is for). The e-mail keys Prism brings its own way
 # of using: the free verifier waterfall confirms an address Prism already
@@ -191,7 +192,7 @@ def feature_name(key: str) -> str:
     return key.replace("_", " ").replace("-", " ").title()
 
 
-class SettingsPanel(QWidget):
+class SettingsPanel(QDialog):
     login_tabs = Signal()
     navigate = Signal(str)           # a rail command key — see MORE_LINKS
     rename_requested = Signal()      # set the display name on a solo copy
@@ -202,10 +203,22 @@ class SettingsPanel(QWidget):
     # thread, which is the whole reason it is a Signal and not a callback.
     _update_checked = Signal()
 
-    NAV_W = 214
+    # The modal is deliberately compact: the category list is a navigation
+    # aid, not a second page competing with the details beside it.
+    NAV_W = 190
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
+        self.setWindowTitle(i18n.t("Settings"))
+        self.setObjectName("settingsDialog")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setMinimumSize(680, 500)
+        self.resize(860, 660)
+        self.setStyleSheet(
+            f"#settingsDialog {{ background: #ffffff;"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_MODAL}px; }}")
         self.cfg = cfg
         self._section = "licence"
         self._claims_height = False
@@ -216,19 +229,25 @@ class SettingsPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._header = C.PageHeader(i18n.t("Settings"))
+        self._header = C.PageHeader(
+            i18n.t("Settings"), i18n.t("Manage your Prism experience"))
+        self._header.add_action(C.icon_button(
+            "x", i18n.t("Close settings"), self.reject))
         root.addWidget(self._header)
 
         body = QHBoxLayout()
-        body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
-                                theme.PAGE_PAD, theme.PAGE_PAD)
-        body.setSpacing(theme.CARD_GAP)
+        body.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
+                                theme.SPACE_4, theme.SPACE_4)
+        body.setSpacing(theme.SPACE_3)
 
         self._nav_host = C.Card(radius=16)
         self._nav_host.setFixedWidth(self.NAV_W)
         self._nav = self._nav_host.body((theme.SPACE_3, theme.SPACE_4,
                                          theme.SPACE_3, theme.SPACE_4),
                                         spacing=2)
+        self._settings_search = C.SearchField(i18n.t("Search settings"))
+        self._settings_search.setAccessibleName(i18n.t("Search settings"))
+        self._settings_search.changed.connect(self._settings_search_changed)
         body.addWidget(self._nav_host)
 
         self._scroll = QScrollArea()
@@ -239,9 +258,21 @@ class SettingsPanel(QWidget):
         self._page = QWidget()
         self._page.setObjectName("settingsPage")
         self._page.setAttribute(Qt.WA_StyledBackground, True)
-        self._col = QVBoxLayout(self._page)
+        
+        outer = QHBoxLayout(self._page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        
+        self._container = QWidget()
+        self._container.setMaximumWidth(640)
+        
+        self._col = QVBoxLayout(self._container)
         self._col.setContentsMargins(0, 0, 0, 0)
         self._col.setSpacing(theme.CARD_GAP)
+        
+        outer.addWidget(self._container)
+        outer.addStretch(1)
+        
         self._scroll.setWidget(self._page)
         body.addWidget(self._scroll, stretch=1)
 
@@ -249,19 +280,36 @@ class SettingsPanel(QWidget):
         self.refresh()
 
     def show_section(self, key: str):
-        """Jump straight to one section — the rail's direct-jump shortcuts
-        still land where they always did, just on the page instead of in a
-        dialog."""
+        """Jump straight to a section inside the open settings dialog."""
         keys = {k for k, _l, _g, _b in SECTIONS}
         self._section = key if key in keys else "licence"
         self.refresh()
 
+    def open_section(self, key: str):
+        """Refresh, centre and present Settings over the current workspace."""
+        self.show_section(key)
+        host = self.parentWidget()
+        # The settings panel is kept in the window's screen registry so older
+        # command routing continues to recognise it.  A QStackedWidget turns
+        # child widgets into ordinary in-place widgets though, so promote it
+        # back to a dialog the first time someone opens Settings.
+        if host is not None and not self.isWindow():
+            host = host.window()
+            self.setParent(host, Qt.Dialog | Qt.FramelessWindowHint)
+            self.setWindowModality(Qt.ApplicationModal)
+        if host is not None:
+            centre = host.mapToGlobal(host.rect().center())
+            self.move(centre.x() - self.width() // 2,
+                      centre.y() - self.height() // 2)
+        self.open()
+
     # ── build ─────────────────────────────────────────────────────────────
     def refresh(self):
-        self._drop(self._nav)
+        self._clear_nav()
         self._drop(self._col)
         self._build_nav()
-        self._header.set_subtitle(self._who())
+        # The concise dialog subtitle remains stable while the content below
+        # changes. The licence page itself states the current plan in full.
 
         page = {
             "licence": self._licence,
@@ -271,10 +319,6 @@ class SettingsPanel(QWidget):
             "status": self._connections,
             "appearance": self._appearance,
             "privacy": self._privacy,
-            "diagnostics": self._diagnostics,
-            "guide": self._guide_page,
-            "catalog": self._catalog_page,
-            "tour": self._tour_page,
             "more": self._more,
         }[self._section]
         label, blurb = next((l, b) for k, l, _g, b in SECTIONS
@@ -313,8 +357,13 @@ class SettingsPanel(QWidget):
         return (plan_key or "").strip().title()
 
     def _build_nav(self):
+        query = self._settings_search.text().strip().casefold()
         group = ""
-        for key, label, section_group, _blurb in SECTIONS:
+        matched = [item for item in SECTIONS
+                   if not query or query in " ".join((
+                       i18n.t(item[1]), i18n.t(item[2]), i18n.t(item[3]),
+                       _SECTION_SEARCH.get(item[0], ""))).casefold()]
+        for key, label, section_group, _blurb in matched:
             if section_group != group:
                 group = section_group
                 self._nav.addSpacing(theme.SPACE_3 if self._nav.count()
@@ -328,6 +377,9 @@ class SettingsPanel(QWidget):
             btn.setProperty("cur", key == self._section)
             btn.clicked.connect(lambda _=False, k=key: self.show_section(k))
             self._nav.addWidget(btn)
+        if query and not matched:
+            self._nav.addWidget(C.label(
+                i18n.t("No settings sections match."), level="META", wrap=True))
         self._nav.addStretch(1)
         self._nav.addWidget(C.hairline())
         self._nav.addSpacing(theme.SPACE_3)
@@ -338,6 +390,39 @@ class SettingsPanel(QWidget):
                           colour=theme.ACCENT_RAMP[700])
         support.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._nav.addWidget(support)
+        meeting = C.button(
+            i18n.t("Request a meeting"), "secondary", small=True,
+            on_click=self._request_meeting)
+        meeting.setToolTip(i18n.t(
+            "Opens an email to arrange a time with Alphakore."))
+        self._nav.addWidget(meeting)
+
+    def _settings_search_changed(self, _query: str):
+        self._clear_nav()
+        self._build_nav()
+
+    def _clear_nav(self):
+        while self._nav.count():
+            item = self._nav.takeAt(0)
+            widget = item.widget()
+            if widget is self._settings_search:
+                continue
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout():
+                self._drop(item.layout())
+        self._nav.addWidget(self._settings_search)
+
+    def _request_meeting(self):
+        from urllib.parse import quote
+
+        subject = quote("Book a meeting with Alphakore")
+        body = quote("Hello Alphakore team,\n\nI would like to book a meeting. "
+                     "Please let me know what times are available.\n")
+        QDesktopServices.openUrl(QUrl(
+            f"mailto:{app_meta.SUPPORT_EMAIL}?subject={subject}&body={body}"))
 
     def _drop(self, layout):
         while layout.count():
@@ -520,22 +605,13 @@ class SettingsPanel(QWidget):
 
         col.addWidget(self._head(
             i18n.t("What's included"),
-            i18n.t("Everything Prism does. The padlocked ones are the parts "
-                   "this licence does not carry — ask us and we add them to "
-                   "the same key.")))
+            i18n.t("The add-ons and features your current licence plan covers.")))
         grid = C.CardGrid(min_col_width=300)
         for key, name, blurb, have in self._features(state):
             grid.add(self._feature_card(key, name, blurb, have))
         col.addWidget(grid)
 
-        col.addWidget(self._head(i18n.t("This computer")))
-        col.addWidget(self._facts([
-            (i18n.t("Licence id"), self._mono(state.license_id or "—")),
-            (i18n.t("Device id"),
-             self._mono(self._safe(licensing.device_fingerprint) or "—")),
-            (i18n.t("Authorisation"),
-             self._safe(licensing.lease_state) or "—"),
-        ]))
+
 
         col.addWidget(self._danger(
             i18n.t("Careful with these"),
@@ -596,27 +672,22 @@ class SettingsPanel(QWidget):
 
     @staticmethod
     def _features(state) -> list[tuple[str, str, str, bool]]:
-        """Every add-on Prism sells, with this licence's answer for each.
-
-        Listing the locked ones is deliberate: this is the only screen on
-        which a customer can see what else the product does.
-        """
+        """Every add-on Prism sells that this licence covers."""
         try:
             import plans
             table = plans.FEATURES
         except Exception:                            # noqa: BLE001
             table = {}
-        keys = list(table.keys())
-        for extra in sorted(state.features):
-            if extra not in table:
-                keys.append(extra)
+        
         out = []
-        for key in keys:
+        # Only show what the user actually has to avoid cluttering settings
+        # with locked upgrades they might not need.
+        for key in sorted(state.features):
             entry = table.get(key)
             out.append((key,
                         entry.label if entry else feature_name(key),
                         entry.blurb if entry else "",
-                        key in state.features))
+                        True))
         return out
 
     def _feature_card(self, key: str, name: str, blurb: str,
@@ -626,14 +697,10 @@ class SettingsPanel(QWidget):
                          theme.SPACE_4, theme.SPACE_4), spacing=0)
         head = QHBoxLayout()
         head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad("check" if have else "lock",
-                                 theme.OK if have else theme.NEUTRAL[500],
-                                 30, theme.R_CONTROL, 15))
+        head.addWidget(C.IconPad("check", theme.OK, 30, theme.R_CONTROL, 15))
         head.addWidget(C.label(i18n.t(name), level="CARD_TITLE", wrap=True),
                        stretch=1)
-        head.addWidget(Pill(i18n.t("Included") if have else i18n.t("Locked"),
-                            "ok" if have else "quiet"),
-                       alignment=Qt.AlignTop)
+        head.addWidget(Pill(i18n.t("Included"), "ok"), alignment=Qt.AlignTop)
         col.addLayout(head)
         if blurb:
             col.addSpacing(theme.SPACE_2)
@@ -686,8 +753,7 @@ class SettingsPanel(QWidget):
         if role and role.blurb:
             col.addWidget(self._note(i18n.t(role.blurb)))
 
-        col.addWidget(self._head(i18n.t("Who can see your work")))
-        col.addWidget(self._note(self._visibility(me), "info"))
+
 
         # ── what you do — edited right where it's shown ────────────────────
         profile_edit = QLineEdit(self.cfg.get("profile", ""))
@@ -768,15 +834,7 @@ class SettingsPanel(QWidget):
                 self._row([member_name, member_role]),
                 lambda: self._add_member(member_name, member_role)))
 
-        col.addWidget(self._head(
-            i18n.t("The roles Prism knows"),
-            i18n.t("A designation key sets this copy to one of these. The "
-                   "role decides its default tools, the window's colour, and "
-                   "whether History can open anybody else's work.")))
-        grid = C.CardGrid(min_col_width=290)
-        for entry in R.ordered():
-            grid.add(self._role_card(entry, entry.key == (me.get("role") or "")))
-        col.addWidget(grid)
+
 
     def _save_profile_line(self, field: QLineEdit):
         self.cfg["profile"] = field.text().strip()
@@ -845,27 +903,7 @@ class SettingsPanel(QWidget):
                                 name, role_key)
         self._after_save(i18n.t("{name} added.").format(name=name))
 
-    def _role_card(self, role, current: bool) -> Card:
-        """One row of roles.ordered(), read straight off the table the
-        designation keys are minted against — this screen must never invent a
-        job title the key format cannot carry."""
-        card = Card()
-        col = card.body((theme.SPACE_4, theme.SPACE_4,
-                         theme.SPACE_4, theme.SPACE_4), spacing=0)
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad(role.icon,
-                                 theme.ACCENT if current else theme.NEUTRAL[500],
-                                 30, theme.R_CONTROL, 15))
-        head.addWidget(C.label(role.label, level="CARD_TITLE", wrap=True),
-                       stretch=1)
-        if current:
-            head.addWidget(Pill(i18n.t("This copy"), "accent"),
-                           alignment=Qt.AlignTop)
-        col.addLayout(head)
-        col.addSpacing(theme.SPACE_2)
-        col.addWidget(C.label(role.blurb, level="META", wrap=True))
-        return card
+
 
     def _member_card(self, member: dict) -> Card:
         import roles as R
@@ -911,6 +949,7 @@ class SettingsPanel(QWidget):
         # destinations (this section and Connections).
         key_edit = QLineEdit(self.cfg.get("api_key", ""))
         key_edit.setEchoMode(QLineEdit.Password)
+        C.add_password_visibility(key_edit)
         key_edit.setPlaceholderText("gsk_…")
         col.addWidget(self._field_card(
             i18n.t("Groq key"),
@@ -1031,6 +1070,7 @@ class SettingsPanel(QWidget):
             col.addWidget(C.label(i18n.t(blurb), level="META", wrap=True))
             field = QLineEdit(self.cfg.get(key, ""))
             field.setEchoMode(QLineEdit.Password)
+            C.add_password_visibility(field)
             edits[key] = field
             col.addWidget(field)
         col.addSpacing(theme.SPACE_1)
@@ -1426,52 +1466,7 @@ class SettingsPanel(QWidget):
              self._path(self._safe(licensing.client.server_url) or "—")),
         ]))
 
-        col.addWidget(self._head(i18n.t("Who can read it")))
-        col.addWidget(self._note(self._visibility(me), "info"))
 
-        col.addWidget(self._head(i18n.t("What leaves this computer")))
-        col.addWidget(self._note(i18n.t(
-            "Your task text goes to the AI tools you have chosen, through "
-            "your own signed-in browser and your own accounts — exactly as if "
-            "you had typed it there yourself. Prism itself contacts only the "
-            "licence server above, and sends it nothing but this machine's id "
-            "and your licence key. Your files, your register and your run "
-            "history never leave the folders listed here.")))
-
-        col.addWidget(self._head(
-            i18n.t("What a support export never contains"),
-            i18n.t("Diagnostics is scrubbed as it is written, not as it is "
-                   "sent, so nothing sensitive is ever in the file to leak.")))
-        grid = C.CardGrid(min_col_width=280)
-        for label in ("Your Groq API key", "Your mailbox password",
-                      "Your licence key and designation key",
-                      "The authorisation lease", "Every email address"):
-            grid.add(self._redacted_card(label))
-        col.addWidget(grid)
-
-        buttons = []
-        if root and os.path.isdir(root):
-            buttons.append(C.button(
-                i18n.t("Open the workspace folder"), "secondary",
-                on_click=lambda: self._open_folder(root)))
-        if prism_dir and os.path.isdir(prism_dir):
-            buttons.append(C.button(
-                i18n.t("Open Prism's folder"), "secondary",
-                on_click=lambda: self._open_folder(prism_dir)))
-        # Always offered, not gated on the folder already existing — it is
-        # created lazily on the first generated file (same as Gerber's own
-        # Desktop folder), and a button that only appears after something has
-        # already been saved into it is no help finding it beforehand.
-        buttons.append(C.button(
-            i18n.t("Open the artifacts folder"), "secondary",
-            on_click=lambda: self._open_artifacts_folder(artifacts_dir)))
-        # The workspace folder is edited on Profile, next to who it's shared
-        # with — this jumps there instead of opening a second editor for the
-        # same field.
-        buttons.append(C.button(
-            i18n.t("Change the workspace folder"), "secondary",
-            on_click=lambda: self.show_section("profile")))
-        col.addWidget(self._buttons(buttons))
 
     def _redacted_card(self, label: str) -> Card:
         """One thing diagnostics._scrub() removes. The list is short and it is
@@ -1614,187 +1609,45 @@ class SettingsPanel(QWidget):
         except Exception:                            # noqa: BLE001
             pass
 
-    # ── diagnostics ───────────────────────────────────────────────────────
-    def _diagnostics(self, col):
-        col.addWidget(self._head(
-            i18n.t("What this machine can do"),
-            i18n.t("An add-on needs its own libraries as well as its licence. "
-                   "This is what is actually installed here.")))
-        grid = C.CardGrid(min_col_width=270)
-        for label, ok, detail in self._capabilities():
-            grid.add(self._capability_card(label, ok, detail))
-        col.addWidget(grid)
 
-        col.addWidget(self._head(i18n.t("This installation")))
-        col.addWidget(self._facts([
-            (i18n.t("Version"), self._version_row()),
-            (i18n.t("Packaged build"),
-             i18n.t("Yes") if self._safe(paths.is_frozen) else i18n.t("No")),
-            (i18n.t("Platform"), platform.platform()),
-            (i18n.t("Python"), sys.version.split()[0]),
-            (i18n.t("Device id"),
-             self._mono(self._safe(licensing.device_fingerprint) or "—")),
-            (i18n.t("Authorisation"),
-             self._safe(licensing.lease_state) or "—"),
-            (i18n.t("Card shadows"),
-             Pill(i18n.t("On") if C.shadows_enabled() else i18n.t("Off"),
-                  "accent" if C.shadows_enabled() else "quiet")),
-        ]))
-        update_card = self._update_card()
-        if update_card is not None:
-            col.addWidget(update_card)
-        col.addWidget(self._note(i18n.t(
-            "Card shadows and entrance animations are drawn through a "
-            "separate graphics path that renders nothing at all on some "
-            "drivers, virtual machines and remote desktops — which is why "
-            "they are off unless this computer is known to handle them. Set "
-            "\"shadows\": true in Prism's config.json to turn them back on.")))
-
-        tail = (self._safe(lambda: self._log_tail(14)) or "").strip()
-        col.addWidget(self._head(
-            i18n.t("Recent activity"),
-            i18n.t("The last few lines Prism wrote to its log. Keys, "
-                   "passwords and addresses are removed as it is written.")))
-        col.addWidget(self._log_card(tail))
-
-        col.addWidget(self._buttons([
-            C.button(i18n.t("Export diagnostics…"), "primary",
-                     on_click=self._export_diagnostics),
-            C.button(i18n.t("Open the log folder"), "secondary",
-                     on_click=lambda: self._open_folder(
-                         self._safe(self._log_dir) or "")),
-            C.button(_amp(i18n.t("Help & support")), "secondary",
-                     on_click=lambda: self.navigate.emit("support")),
-        ]))
-
-    def _capabilities(self) -> list[tuple[str, bool, str]]:
-        """The same probes diagnostics.report() runs, as cards. Nothing here
-        is asserted — every row is the answer a real probe just gave."""
-        out = []
-        probes = [("Browser automation", CB.automation_available),
-                  ("BOQ measuring", CB.boq_available),
-                  ("Reel & Studio", CB.reel_available),
-                  ("Motion Graphics", CB.motion_available)]
-        try:
-            import wakeword
-            probes.append(("Voice input", wakeword.available))
-        except Exception:                            # noqa: BLE001
-            pass
-        for label, probe in probes:
-            answer = self._safe(probe)
-            if isinstance(answer, tuple) and len(answer) == 2:
-                ok, why = bool(answer[0]), str(answer[1] or "")
-            else:
-                ok, why = False, i18n.t("Could not be checked")
-            out.append((label, ok, "" if ok else why.splitlines()[0][:110]))
-        sources = self._safe(self._cloud_sources)
-        if sources is not None:
-            out.append(("Cloud folders", bool(sources),
-                        ", ".join(sources) if sources
-                        else i18n.t("None found on this computer")))
-        return out
-
-    @staticmethod
-    def _cloud_sources() -> list[str]:
-        import cloud
-        return [s["label"] for s in cloud.sources()]
-
-    def _capability_card(self, label: str, ok: bool, detail: str) -> Card:
-        card = Card()
-        col = card.body((theme.SPACE_4, theme.SPACE_4,
-                         theme.SPACE_4, theme.SPACE_4), spacing=0)
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad("check" if ok else "alert",
-                                 theme.OK if ok else theme.WARN,
-                                 30, theme.R_CONTROL, 15))
-        head.addWidget(C.label(i18n.t(label), level="CARD_TITLE"), stretch=1)
-        head.addWidget(Pill(i18n.t("Ready") if ok else i18n.t("Missing"),
-                            "ok" if ok else "warn"))
-        col.addLayout(head)
-        if detail:
-            col.addSpacing(theme.SPACE_2)
-            col.addWidget(C.label(detail, level="META", wrap=True))
-        return card
-
-    @staticmethod
-    def _log_tail(lines: int) -> str:
-        import diagnostics
-        text = diagnostics.tail(lines) or ""
-        # One line per row, clipped: the log carries whole tracebacks and a
-        # 400-character line would push the card off the right of the screen.
-        return "\n".join(row[:150] for row in text.splitlines()[-lines:])
-
-    def _log_card(self, tail: str) -> Card:
-        card = Card()
-        col = card.body((theme.CARD_PAD, theme.SPACE_4,
-                         theme.CARD_PAD, theme.SPACE_4), spacing=0)
-        if not tail:
-            col.addWidget(C.label(
-                i18n.t("Nothing logged yet on this computer."),
-                level="SUPPORT", wrap=True))
-            return card
-        body = QLabel(tail)
-        body.setObjectName("well")
-        body.setAttribute(Qt.WA_StyledBackground, True)
-        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        body.setStyleSheet(
-            f"#well {{ background: {theme.WELL};"
-            f" border-radius: {theme.R_CONTROL}px;"
-            f" padding: {theme.SPACE_3}px;"
-            f" {theme.type_css('MONO', theme.NEUTRAL[700])} }}")
-        col.addWidget(body)
-        return card
-
-    def _export_diagnostics(self):
-        """The one button that makes a support call short. Same call the Setup
-        dialog's footer makes; this is simply the door somebody looking for it
-        would open."""
-        import time
-
-        import diagnostics
-        suggested = os.path.join(
-            os.path.expanduser("~"),
-            f"prism-diagnostics-{time.strftime('%Y%m%d-%H%M')}.txt")
-        target, _filter = QFileDialog.getSaveFileName(
-            self, i18n.t("Save diagnostics"), suggested, "Text (*.txt)")
-        if not target:
-            return
-        try:
-            diagnostics.export(target)
-        except Exception as error:                   # noqa: BLE001
-            QMessageBox.warning(self, i18n.t("Diagnostics"), i18n.t(
-                "Couldn't write the file: {error}").format(error=error))
-            return
-        QMessageBox.information(self, i18n.t("Diagnostics"), i18n.t(
-            "Saved to {path}\n\nEmail it to support and they'll be able to "
-            "see what happened. Your API key, passwords and licence key are "
-            "not in it.").format(path=target))
 
     # ── help & more ───────────────────────────────────────────────────────
     def _more(self, col):
-        grid = C.CardGrid(min_col_width=300)
-        for key, label, blurb in MORE_LINKS:
-            grid.add(self._door_card(key, label, blurb))
-        col.addWidget(grid)
-
-        col.addWidget(self._head(i18n.t("New to Prism?")))
-        col.addWidget(self._note(i18n.t(
-            "The tour walks through where everything lives, in six steps. It "
-            "takes about a minute and you can stop it at any point.")))
+        # AI Help Centre Button
         col.addWidget(self._buttons([
-            C.button(i18n.t("Take a tour"), "primary",
-                     on_click=self.tour_requested.emit)]))
+            C.button(i18n.t("Open AI Help Centre"), "primary",
+                     on_click=lambda: self.navigate.emit("support")),
+        ]))
+        
+        # Book a meeting card
+        meeting_card = Card()
+        mc = meeting_card.body((theme.SPACE_4, theme.SPACE_4, theme.SPACE_4, theme.SPACE_4), spacing=theme.SPACE_3)
+        mc_head = QHBoxLayout()
+        mc_head.setSpacing(theme.SPACE_3)
+        mc_head.addWidget(C.IconPad("clock", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        mc_head_text = QVBoxLayout()
+        mc_head_text.addWidget(C.label(i18n.t("Book a meeting with AlphaKore"), level="CARD_TITLE"))
+        mc_head_text.addWidget(C.label(i18n.t("Schedule a 1-on-1 session with our team"), level="META"))
+        mc_head.addLayout(mc_head_text, stretch=1)
+        mc.addLayout(mc_head)
+        mc.addWidget(C.label(
+            i18n.t("Need help with complex workflows or customizing Prism for your team? "
+                   "Book a meeting directly with us."),
+            level="SUPPORT", wrap=True))
+        mc.addWidget(self._buttons([
+            C.button(i18n.t("Book a meeting"), "primary",
+                     on_click=self._book_meeting)]))
+        col.addWidget(meeting_card)
 
-        col.addWidget(self._head(i18n.t("Still stuck?")))
+        # Contact facts
         col.addWidget(self._facts([
             (i18n.t("Email us"), app_meta.SUPPORT_EMAIL),
             (i18n.t("Call us"), app_meta.SUPPORT_PHONE),
             (i18n.t("Website"), app_meta.WEBSITE),
             (i18n.t("Version"), app_meta.VERSION),
         ]))
-
-        col.addWidget(self._head(i18n.t("Legal")))
+        
+        # Legal links
         col.addWidget(self._buttons([
             C.button(i18n.t("Terms of Use"), "secondary", small=True,
                      on_click=lambda: self._open_legal(
@@ -1804,66 +1657,11 @@ class SettingsPanel(QWidget):
                          i18n.t("Privacy Policy"), "PRIVACY_POLICY.md")),
         ]))
 
-    # ── resources (shifted into settings) ─────────────────────────────────
-    def _guide_page(self, col):
-        card = Card()
-        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad("book", theme.ACCENT, 34, theme.R_CONTROL, 17))
-        head_text = QVBoxLayout()
-        head_text.addWidget(C.label(i18n.t("How to use Prism"), level="CARD_TITLE"))
-        head_text.addWidget(C.label(i18n.t("Comprehensive handbook and prompt engineering guide"), level="META"))
-        head.addLayout(head_text, stretch=1)
-        c.addLayout(head)
-        c.addWidget(C.label(
-            i18n.t("Learn how to orchestrate automated workflows, write effective prompts, inspect plans, "
-                   "and review generated output."),
-            level="SUPPORT", wrap=True))
-        c.addWidget(self._buttons([
-            C.button(i18n.t("Open Full User Guide"), "primary",
-                     on_click=lambda: self.navigate.emit("guide"))]))
-        col.addWidget(card)
-
-    def _catalog_page(self, col):
-        card = Card()
-        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad("grid", theme.ACCENT, 34, theme.R_CONTROL, 17))
-        head_text = QVBoxLayout()
-        head_text.addWidget(C.label(i18n.t("AI tools directory"), level="CARD_TITLE"))
-        head_text.addWidget(C.label(i18n.t("Directory of all 24+ tools Prism integrates with"), level="META"))
-        head.addLayout(head_text, stretch=1)
-        c.addLayout(head)
-        c.addWidget(C.label(
-            i18n.t("See every supported browser and terminal tool, check whether you are logged in, "
-                   "and launch tool sessions directly."),
-            level="SUPPORT", wrap=True))
-        c.addWidget(self._buttons([
-            C.button(i18n.t("Open AI Tools Directory"), "primary",
-                     on_click=lambda: self.navigate.emit("catalog"))]))
-        col.addWidget(card)
-
-    def _tour_page(self, col):
-        card = Card()
-        c = card.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.IconPad("present", theme.ACCENT, 34, theme.R_CONTROL, 17))
-        head_text = QVBoxLayout()
-        head_text.addWidget(C.label(i18n.t("Product tour"), level="CARD_TITLE"))
-        head_text.addWidget(C.label(i18n.t("Interactive six-step workspace walkthrough"), level="META"))
-        head.addLayout(head_text, stretch=1)
-        c.addLayout(head)
-        c.addWidget(C.label(
-            i18n.t("Take an interactive six-step tour highlighting the main features of the PRISM dashboard, "
-                   "including the workbench, add-on shelf, history, and status bar."),
-            level="SUPPORT", wrap=True))
-        c.addWidget(self._buttons([
-            C.button(i18n.t("Start Product Tour"), "primary",
-                     on_click=self.tour_requested.emit)]))
-        col.addWidget(card)
+    def _book_meeting(self):
+        """Open the AlphaKore meeting booking link in the browser."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl("https://alphakore.in/book"))
 
     def _open_legal(self, title: str, resource_name: str):
         # Local import, same convention support_panel.py's _open_contact()

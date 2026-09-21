@@ -128,6 +128,18 @@ class OneLineSaysWhatToHandBack(unittest.TestCase):
         self.assertNotIn(".docx", C.deliverable_line("file", "Gamma.app", {}, ""))
         self.assertNotIn(".docx", C.reask("file", ""))
 
+    def test_a_file_retry_carries_the_original_task_for_a_recovered_chat(self):
+        retry = C.reask("file", ".docx", "Create a product brief for the valve range")
+        self.assertIn("Original task: Create a product brief", retry)
+        self.assertIn(".docx", retry)
+
+    def test_a_file_retry_prefers_the_write_steps_actual_prompt(self):
+        retry = C.reask(
+            "file", ".docx", "Make a catalogue",
+            task="Write a customer-ready product catalogue for the valve range")
+        self.assertIn("Original task: Write a customer-ready product catalogue", retry)
+        self.assertNotIn("Original task: Make a catalogue", retry)
+
     def test_the_tools_own_hint_rides_along(self):
         line = C.deliverable_line("file", "Claude", {"file_hint": "Use your tools."})
         self.assertTrue(line.endswith("Use your tools."))
@@ -253,6 +265,16 @@ class TheClickLandsOnTheControl(unittest.TestCase):
         self.assertTrue(button.clicked)
         self.assertFalse(card.clicked)
 
+    def test_current_chatgpt_file_card_is_clicked_before_old_page_controls(self):
+        """ChatGPT's current card is filename + ``Document`` plus an
+        icon-only ``Download file`` button.  The button belongs to the last
+        assistant turn, so it must win before the page-wide fallback sees an
+        older artifact in the same conversation."""
+        driver = mock.Mock()
+        driver.execute_script.return_value = True
+        self.assertTrue(AU._click_download_control(driver, {}))
+        driver.find_elements.assert_not_called()
+
 
 class AStepIsHeldToItsContract(unittest.TestCase):
     """_meet_contract with no browser: the half that must work regardless."""
@@ -266,6 +288,31 @@ class AStepIsHeldToItsContract(unittest.TestCase):
         self.assertTrue(got["files"][0]["path"].endswith(".docx"))
         self.assertIn("Word document", got["note"])
         self.assertEqual("", got["missing"])
+
+    def test_a_clarifying_retry_never_replaces_the_actual_document_text(self):
+        """A real ChatGPT retry said there was no earlier conversation.
+
+        That reply is longer than a short report introduction, so the old
+        longest-string fallback wrote the clarification into the DOCX instead
+        of the report the first turn had already supplied.
+        """
+        original = "# Product brief\n\nThe actual product summary belongs here."
+        clarification = (
+            "I don't see anything earlier in this conversation to turn into "
+            "a file — this looks like the start of our chat here. Please "
+            "paste the content you want saved.")
+        driver = mock.Mock()
+        cfg = {"textarea_selector": "textarea"}
+        with mock.patch.object(AU, "_reask", return_value=[clarification]), \
+             mock.patch.object(AU, "_wait_for_files", return_value=0), \
+             mock.patch.object(AU, "_harvest_files", return_value=[]):
+            got = AU._meet_contract(
+                driver, cfg, "content", "file", [original], [],
+                query="make DOCX document for this product")
+        from docx import Document
+        body = "\n".join(p.text for p in Document(got["files"][0]["path"]).paragraphs)
+        self.assertIn("actual product summary", body)
+        self.assertNotIn("don't see anything earlier", body)
 
     def test_a_spreadsheet_request_is_reported_not_faked(self):
         got = AU._meet_contract(None, {}, "content", "file", ["Company | Email"], [],

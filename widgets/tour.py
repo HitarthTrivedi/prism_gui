@@ -339,9 +339,9 @@ class TourOverlay(QWidget):
         self.update()
 
     def _hole(self) -> QRect | None:
-        if self._target is None:
+        if self._target is None or not self._target.isVisible():
             return None
-        top_left = self._target.mapTo(self._host, QPoint(0, 0))
+        top_left = self.mapFromGlobal(self._target.mapToGlobal(QPoint(0, 0)))
         rect = QRect(top_left, self._target.size()).adjusted(
             -self._PAD, -self._PAD, self._PAD, self._PAD)
         page = max(1, self.width() * self.height())

@@ -180,7 +180,7 @@ class ThePipelineBuildsTheBlockAfterTheUpload(unittest.TestCase):
         with open(os.path.join(root, "prism_terminal", "core", "automation.py"),
                   encoding="utf-8") as f:
             source = f.read()
-        self.assertIn("include_attachment = bool(attachments)\n", source)
+        self.assertIn("include_attachment = (bool(browser_attachments)\n", source)
         self.assertNotIn("stage_idx == 0 or not prior or producer", source)
 
     def test_context_block_is_asked_per_stage_with_the_upload_result(self):
@@ -188,7 +188,10 @@ class ThePipelineBuildsTheBlockAfterTheUpload(unittest.TestCase):
         with open(os.path.join(root, "prism_terminal", "core", "automation.py"),
                   encoding="utf-8") as f:
             source = f.read()
-        self.assertIn("F.context_block(attachments, uploaded=bool(went_up))", source)
+        self.assertIn(
+            "F.context_block(browser_attachments,\n"
+            "                                           uploaded=bool(went_up))",
+            source)
         self.assertNotIn("attach_ctx = F.context_block(attachments)", source)
 
 

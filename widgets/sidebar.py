@@ -803,7 +803,7 @@ class Sidebar(QFrame):
         if central and hasattr(central, "get_blurred_pixmap"):
             blurred = central.get_blurred_pixmap()
             if blurred and not blurred.isNull():
-                pos = self.mapTo(central, QPoint(0, 0))
+                pos = central.mapFromGlobal(self.mapToGlobal(QPoint(0, 0)))
                 src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
                 painter.drawPixmap(r.toRect(), blurred, src_rect)
 
@@ -1211,7 +1211,7 @@ class Sidebar(QFrame):
         if widget is None or not widget.isVisibleTo(self):
             self._pip.hide()
             return
-        top = widget.mapTo(self._inner, QPoint(0, 0)).y()
+        top = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0))).y()
         height = max(14, min(22, widget.height() - 10))
         c = getattr(self, "_collapsed", False)
         self._pip.setGeometry(2 if c else 0,

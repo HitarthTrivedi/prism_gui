@@ -476,6 +476,7 @@ class LeadsWorkbench(QWidget):
         self._exa.setText(self.cfg.get("exa_api_key") or "")
         self._exa.setEchoMode(QLineEdit.PasswordEchoOnEdit)   # never on screen at rest
         self._exa.setPlaceholderText(i18n.t("Needed to find people — saved once"))
+        C.add_password_visibility(self._exa)
         kb.addWidget(self._exa)
         kb.addSpacing(theme.SPACE_1)
         kb.addWidget(_field(i18n.t("Apollo API key · searches Apollo's own database")))
@@ -484,6 +485,7 @@ class LeadsWorkbench(QWidget):
         self._apollo.setEchoMode(QLineEdit.PasswordEchoOnEdit)
         self._apollo.setPlaceholderText(i18n.t(
             "Search Apollo's database and reveal verified emails — saved once"))
+        C.add_password_visibility(self._apollo)
         kb.addWidget(self._apollo)
         kb.addSpacing(theme.SPACE_2)
         self._claims = C.button(i18n.t("Approved claims file…"), "secondary",

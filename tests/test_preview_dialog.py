@@ -29,9 +29,15 @@ class Classifying(unittest.TestCase):
         self.assertEqual(_classify("a.pdf"), "pdf")
         self.assertEqual(_classify("a.py"), "text")
 
-    def test_office_and_archive_formats_are_not_renderable(self):
+    def test_modern_office_files_open_inside_prism(self):
         from dialogs.preview_dialog import _classify
-        for ext in (".docx", ".pptx", ".xlsx", ".zip", ".doc"):
+        self.assertEqual(_classify("a.DOCX"), "document")
+        self.assertEqual(_classify("a.xlsx"), "spreadsheet")
+        self.assertEqual(_classify("a.pptx"), "presentation")
+
+    def test_legacy_office_and_archive_formats_are_not_renderable(self):
+        from dialogs.preview_dialog import _classify
+        for ext in (".zip", ".doc", ".xls", ".ppt", ".ods"):
             self.assertEqual(_classify(f"a{ext}"), "other")
 
 
@@ -78,10 +84,74 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
         dlg = PreviewDialog(path, "image")
         dlg.reject()
 
+    @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
+    def test_demo_video_constructs_without_header_actions(self):
+        from dialogs.preview_dialog import PreviewDialog
+        path = self._file("demo.mp4", b"constructor regression")
+        # Exercise the actual demo layout without opening an audio device.
+        with mock.patch.object(PreviewDialog, "_wire_player") as wire:
+            dlg = PreviewDialog(path, "video", demo_mode=True)
+            try:
+                wire.assert_called_once()
+                self.assertEqual(dlg.header.actions_row.count(), 1)
+                self.assertIs(dlg.header.actions_row.itemAt(0).widget(),
+                              dlg.header.close_btn)
+            finally:
+                dlg.reject()
+
+    def test_header_actions_and_close_work_in_both_modes(self):
+        from dialogs.preview_dialog import PreviewDialog
+        path = self._file("header.txt", b"Preview regression")
+        for demo_mode in (False, True):
+            with self.subTest(demo_mode=demo_mode):
+                dlg = PreviewDialog(path, "text", demo_mode=demo_mode)
+                try:
+                    row = dlg.header.actions_row
+                    self.assertEqual(row.count(), 1 if demo_mode else 5)
+                    self.assertIs(row.itemAt(row.count() - 1).widget(),
+                                  dlg.header.close_btn)
+                    if not demo_mode:
+                        with mock.patch("dialogs.preview_dialog.QApplication.clipboard") as clipboard:
+                            row.itemAt(2).widget().click()
+                            clipboard.return_value.setText.assert_called_once_with(path)
+                    with mock.patch.object(dlg, "_stop_playback") as stop:
+                        dlg.header.close_btn.click()
+                        stop.assert_called_once()
+                finally:
+                    dlg.reject()
+
     def test_text(self):
         from dialogs.preview_dialog import PreviewDialog
         path = self._file("a.py", b"print('hi')")
         dlg = PreviewDialog(path, "text")
+        dlg.reject()
+
+    def test_docx(self):
+        from docx import Document
+        from dialogs.preview_dialog import PreviewDialog
+        path = os.path.join(self._tmp.name, "brief.docx")
+        doc = Document()
+        doc.add_heading("Product brief", level=1)
+        doc.add_paragraph("A readable in-app document preview.")
+        doc.save(path)
+        dlg = PreviewDialog(path, "document")
+        dlg.reject()
+
+    def test_xlsx(self):
+        import openpyxl
+        from dialogs.preview_dialog import PreviewDialog
+        path = os.path.join(self._tmp.name, "brief.xlsx")
+        book = openpyxl.Workbook()
+        book.active.append(["Part", "Qty"])
+        book.active.append(["Bracket", 4])
+        book.save(path)
+        dlg = PreviewDialog(path, "spreadsheet")
+        dlg.reject()
+
+    def test_pptx_text_preview_handles_a_bad_file_without_crashing(self):
+        from dialogs.preview_dialog import PreviewDialog
+        path = self._file("brief.pptx", b"not a real presentation")
+        dlg = PreviewDialog(path, "presentation")
         dlg.reject()
 
     def test_pdf(self):
@@ -172,31 +242,28 @@ class OpenPreviewDispatch(unittest.TestCase):
             PD.open_preview(path)
             m.assert_called_once()
 
-    def test_a_missing_qtpdf_falls_back_gracefully_not_a_crash(self):
-        """packaging/prism.spec deliberately excludes QtMultimedia/QtPdf from
-        the shipped build (keeps FFmpeg off the customer's disk) — a real
-        build must degrade to "open in default app" here, not crash on the
-        customer's click. Simulated by making the dialog's own construction
-        raise ImportError, the same exception a stripped build's import
-        would actually throw."""
+    def test_a_docx_uses_the_in_app_preview(self):
+        from dialogs import preview_dialog as PD
+        path = os.path.join(self._tmp.name, "a.docx")
+        with open(path, "wb") as f:
+            f.write(b"not a real docx")
+        with mock.patch.object(PD.PreviewDialog, "exec", return_value=0) as m:
+            PD.open_preview(path)
+            m.assert_called_once()
+
+    def test_a_pdf_uses_the_in_app_text_preview_without_qtpdf(self):
+        """QtPdf is excluded from releases, but pypdf keeps PDFs readable."""
         from dialogs import preview_dialog as PD
         path = os.path.join(self._tmp.name, "a.pdf")
         with open(path, "wb") as f:
             f.write(b"x")
-        with mock.patch.object(
-                PD, "PreviewDialog",
-                side_effect=ImportError("PySide6.QtPdf")), \
-             mock.patch.object(PD.UnsupportedPreviewDialog, "exec",
-                               return_value=0) as m:
+        with mock.patch.object(PD.PreviewDialog, "exec", return_value=0) as m:
             PD.open_preview(path)
             m.assert_called_once()
 
 
 class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
-    """The path a real customer takes. packaging/prism.spec excludes
-    QtMultimedia and QtPdf from shipped builds on purpose, so on every
-    installed copy of Prism these viewers CANNOT construct — and clicking a
-    video in Artifacts must offer the default app, not raise.
+    """The shipped app omits QtMultimedia, so video/audio may not construct.
 
     Never covered: the class above builds PreviewDialog directly, which is
     the one path that has no guard. So the guard that every shipped build

@@ -282,7 +282,12 @@ class FollowupRouteWorker(_Worker):
                     "scenes or look in its design chat and film it again. Any "
                     'change that should show in the video ends with "reel". '
                     'A picture that is only made and never placed is useless, '
-                    'so "artwork" is always followed by "reel".')
+                    'so "artwork" is always followed by "reel". '
+                    'IMPORTANT: if the user asks to change the script, narration, '
+                    'voice-over, ad copy, hook, or phrasing of a reel that has '
+                    'an "audio" step, include BOTH the writing step AND "audio" '
+                    'AND "media" in your plan — changing the words means '
+                    'regenerating the voice and re-rendering the video too.')
             prompt = (
                 "A multi-step task just finished. The steps that ran, each with "
                 "its category key, the tool that did it, and a snippet of its "

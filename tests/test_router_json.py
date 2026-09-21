@@ -114,6 +114,18 @@ class ThePlanCall(unittest.TestCase):
         self.assertIn("planner", str(caught.exception))
         self.assertIn("Make a plan again", str(caught.exception))
 
+    def test_a_routed_research_step_also_gets_think_it_through(self):
+        cfg = {"api_key": "k", "agents": {"research": "Perplexity",
+                                              "brains": "ChatGPT"}}
+        only_research = json.dumps({
+            "research": {"needed": True,
+                         "questions": ["Research current EV incentives."]},
+        })
+        with mock.patch.object(R, "groq_chat", _Groq(only_research)):
+            routing = R.route("Research current EV incentives", cfg)
+        self.assertTrue(routing["brains"]["needed"])
+        self.assertIn("Think through", routing["brains"]["questions"][0])
+
 
 class ReelImageryGuardrail(unittest.TestCase):
     """1.5.7: the guardrail sets a flag instead of forcing a second image
@@ -152,6 +164,32 @@ class ReelImageryGuardrail(unittest.TestCase):
             "make a brand reel", routing,
             {"media": "Runway", "visual": "ChatGPT"}))
         self.assertNotIn("_reel_imagery", routing)
+
+
+class ResearchReasoningGuardrail(unittest.TestCase):
+
+    def test_research_gets_the_configured_think_it_through_step(self):
+        routing = {"research": {"needed": True, "questions": ["Research EV incentives."]},
+                   "brains": {"needed": False, "questions": []}}
+        self.assertTrue(R.apply_research_reasoning_guardrail(
+            routing, {"research": "Perplexity", "brains": "ChatGPT"}))
+        self.assertTrue(routing["brains"]["needed"])
+        self.assertIn("Think through", routing["brains"]["questions"][0])
+
+    def test_it_keeps_a_reasoning_step_the_planner_already_wrote(self):
+        routing = {"research": {"needed": True, "questions": ["Research EV incentives."]},
+                   "brains": {"needed": True, "questions": ["Compare policy options."]}}
+        self.assertFalse(R.apply_research_reasoning_guardrail(
+            routing, {"research": "Perplexity", "brains": "ChatGPT"}))
+        self.assertEqual(routing["brains"]["questions"], ["Compare policy options."])
+
+    def test_it_does_nothing_without_a_routed_research_step_or_brains_agent(self):
+        for routing, agents in (
+            ({"research": {"needed": False, "questions": []}}, {"brains": "ChatGPT"}),
+            ({"research": {"needed": True, "questions": ["Research it."]}}, {}),
+        ):
+            with self.subTest(routing=routing, agents=agents):
+                self.assertFalse(R.apply_research_reasoning_guardrail(routing, agents))
 
 
 if __name__ == "__main__":

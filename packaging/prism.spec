@@ -289,7 +289,7 @@ def _addon_modules() -> list[str]:
 hiddenimports = _engine_modules() + _addon_modules() + [
     "rapidocr_onnxruntime", "onnxruntime",
     # Optional-at-runtime, imported inside functions.
-    "pypdf", "docx", "pyaudio",
+    "pypdf", "docx", "openpyxl", "pyaudio",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`
     # inside mx_host(), which degrades SILENTLY to guessing when absent. That
     # is right on a customer machine and wrong in a build — and it was already

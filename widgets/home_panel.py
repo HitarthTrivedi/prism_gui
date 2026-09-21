@@ -38,16 +38,22 @@ They are counted and named separately here, never hidden. See `_split()`.
 """
 from __future__ import annotations
 from datetime import datetime
+import os
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QBrush, QColor, QFontMetrics, QLinearGradient, QPainter,
+    QPainterPath, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import dashboard_data as DATA
 import i18n
 import identity
+import paths
 import theme
 from addons import manifest, registry
 from widgets import controls as C
@@ -69,7 +75,7 @@ RUN_WINDOW = 120
 
 # The number of recent runs listed. Five is what fits beside the two narrower
 # columns without either of them stretching to fill.
-RECENT_SHOWN = 5
+RECENT_SHOWN = 6
 
 # Stages shown in an active run's tool chain before it collapses to a count.
 # A nine-stage plan drawn in full is 800px of badges, which is wider than the
@@ -244,6 +250,189 @@ class _Row(QFrame):
         super().keyPressEvent(event)
 
 
+class TimelineNode(QWidget):
+    """Paints vertical timeline connector track with centered node dot."""
+
+    def __init__(self, is_first: bool = False, is_last: bool = False, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(20)
+        self._is_first = is_first
+        self._is_last = is_last
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        cx = w / 2.0
+        cy = h / 2.0
+
+        pen = QPen(theme.qcolor(theme.HAIRLINE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        top_y = cy if self._is_first else 0.0
+        bot_y = cy if self._is_last else float(h)
+        painter.drawLine(QPointF(cx, top_y), QPointF(cx, bot_y))
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(theme.qcolor(theme.ACCENT)))
+        painter.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
+
+
+class ShowcaseTourCard(QFrame):
+    """Featured demo video card on the right side of the hero section:
+    'Ideas to outcomes.'
+    'Prism combines AI, tools and automation — so you can focus on what matters.'
+    '▶ Watch demo video'
+    '“Less work. More possibilities.”'
+    """
+
+    tour_clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tourCard")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(250)
+        C.elevate(self, theme.SHADOW_RAISED)
+
+        col = QVBoxLayout(self)
+        col.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
+                               theme.SPACE_4, theme.SPACE_3)
+        col.setSpacing(theme.SPACE_2)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        demo_badge = QLabel("DEMO")
+        demo_badge.setStyleSheet(
+            "background: rgba(255, 255, 255, 0.22); color: #ffffff; "
+            "border: 1px solid rgba(255, 255, 255, 0.35); "
+            "border-radius: 4px; padding: 2px 7px; font-size: 10px; "
+            "font-weight: 700; letter-spacing: 0.5px;"
+        )
+        top_row.addWidget(demo_badge)
+        top_row.addStretch(1)
+        time_lbl = QLabel("01:03 >")
+        time_lbl.setStyleSheet(
+            "background: rgba(0, 0, 0, 0.55); color: #ffffff; "
+            "border: 1px solid rgba(255, 255, 255, 0.2); "
+            "border-radius: 10px; padding: 2px 8px; font-size: 11px; "
+            "font-weight: 600;"
+        )
+        top_row.addWidget(time_lbl)
+        col.addLayout(top_row)
+
+        title = QLabel(i18n.t("Ideas to outcomes."))
+        title.setStyleSheet(
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 22px; "
+            "font-weight: 700; color: #ffffff;"
+        )
+        col.addWidget(title)
+
+        desc = QLabel(i18n.t("Prism combines AI, tools and automation — so you can focus on what matters."))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
+            "color: rgba(255, 255, 255, 0.90); line-height: 1.4;"
+        )
+        col.addWidget(desc)
+        col.addSpacing(theme.SPACE_2)
+
+        tour_btn = QPushButton(f"  {i18n.t('Watch demo video')}")
+        tour_btn.setObjectName("tourPlayBtn")
+        tour_btn.setIcon(icons.icon("play", 13, "#09090b"))
+        tour_btn.setCursor(Qt.PointingHandCursor)
+        tour_btn.clicked.connect(self._play_demo)
+        tour_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        col.addWidget(tour_btn)
+
+        col.addStretch(1)
+
+        quote = QLabel(i18n.t("“Less work. More possibilities.”"))
+        quote.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 12px; "
+            "font-style: italic; color: rgba(255, 255, 255, 0.85);"
+        )
+        quote.setAlignment(Qt.AlignRight)
+        col.addWidget(quote)
+
+        prog = QFrame()
+        prog.setFixedHeight(2)
+        prog.setStyleSheet("background: rgba(255, 255, 255, 0.25); border-radius: 1px;")
+        col.addWidget(prog)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        r = QRectF(self.rect())
+        radius = 18.0
+
+        clip = QPainterPath()
+        clip.addRoundedRect(r, radius, radius)
+        painter.setClipPath(clip)
+
+        # 1. Dark foundation base
+        painter.fillRect(r, QBrush(QColor(11, 17, 32)))
+
+        # 2. Draw scenic mountain landscape if available
+        bg_path = paths.resource("assets", "demo_card_bg.jpg")
+        if not os.path.exists(bg_path):
+            bg_path = os.path.join(os.path.dirname(__file__), "..", "assets", "demo_card_bg.jpg")
+
+        if os.path.exists(bg_path):
+            pix = QPixmap(bg_path)
+            if not pix.isNull():
+                target_w = max(1, int(r.width()))
+                target_h = max(1, int(r.height()))
+                scaled = pix.scaled(target_w, target_h,
+                                    Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                sx = max(0, int((scaled.width() - target_w) * 0.75))
+                sy = max(0, (scaled.height() - target_h) // 2)
+                painter.drawPixmap(0, 0, scaled, sx, sy, target_w, target_h)
+
+        # 3. Horizontal gradient: dark on left for text readability, clear on right for mountain
+        grad = QLinearGradient(0.0, 0.0, float(r.width()), 0.0)
+        grad.setColorAt(0.00, QColor(8, 14, 26, 205))
+        grad.setColorAt(0.40, QColor(8, 14, 26, 155))
+        grad.setColorAt(0.70, QColor(8, 14, 26, 45))
+        grad.setColorAt(1.00, QColor(8, 14, 26, 15))
+        painter.fillRect(r, QBrush(grad))
+
+        # Bottom subtle gradient for quote
+        bot_grad = QLinearGradient(0.0, float(r.height() * 0.65), 0.0, float(r.height()))
+        bot_grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+        bot_grad.setColorAt(1.0, QColor(0, 0, 0, 95))
+        painter.fillRect(QRectF(0.0, float(r.height() * 0.65), float(r.width()), float(r.height() * 0.35)), QBrush(bot_grad))
+
+        # 4. Subtle border
+        painter.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        painter.end()
+
+    def mousePressEvent(self, event):
+        self._play_demo()
+        super().mousePressEvent(event)
+
+    def _play_demo(self):
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "..", "inspo.mp4"),
+            os.path.join(os.path.dirname(__file__), "..", "videos", "prism-creator-promo",
+                         "renders", "prism-creator-promo_2026-08-16_05-15-18.mp4"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "inspo-final", "alphakore-run2-1080.mp4"),
+        ]
+        video_path = next((p for p in candidates if os.path.exists(p)), "")
+        if video_path:
+            from dialogs.preview_dialog import open_preview
+            open_preview(video_path, self)
+        else:
+            self.tour_clicked.emit()
+
+
 class ActiveRunCard(C.Card):
     """One in-flight task: its state, the tools it will pass through, how far
     along it is, and what is happening right now.
@@ -369,33 +558,17 @@ class HomePanel(QWidget):
         super().__init__(parent)
         self.cfg = cfg
         self._active: list[dict] = []
-        self._rows: list[dict] = []     # register, read once per refresh()
+        self._rows: list[dict] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._header = C.PageHeader(
-            "", i18n.t("Here's where things stand."),
-            [C.button(i18n.t("Search history"), "secondary", "search",
-                      on_click=self.open_history.emit)])
-        # The avatar is built once and hidden rather than skipped, so a rename
-        # can bring it back without rebuilding the band. It shows only when
-        # this copy actually belongs to a named person: a "?" avatar on a solo
-        # install identifies nobody and reads as a broken image — it is there
-        # to disambiguate between colleagues, and with no colleagues there is
-        # nothing for it to say.
-        self._avatar = C.Avatar("", 34)
-        self._header.add_action(self._avatar)
-        # The standard band is padded for a one-line page title; Home's is a
-        # two-line greeting, and 20/16 around it left 45 rows of bare canvas
-        # above the fold — every empty row on this screen, and a fifth of the
-        # band itself. Tightened here rather than in controls.py, because the
-        # other ten screens do carry a single title and are right as they are.
-        self._header.layout().setContentsMargins(
-            theme.PAGE_PAD, theme.SPACE_3 + 2, theme.PAGE_PAD, theme.SPACE_3)
-        root.addWidget(self._header)
+        # ── Top Bar ────────────────────────────────────────────────────────
+        self._top_bar_widget = self._build_top_bar()
+        root.addWidget(self._top_bar_widget)
 
+        # ── Scrollable Body ─────────────────────────────────────────────────
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.NoFrame)
@@ -403,33 +576,105 @@ class HomePanel(QWidget):
         self._host = QWidget()
         self._scroll.setWidget(self._host)
         self._col = QVBoxLayout(self._host)
-        self._col.setContentsMargins(theme.PAGE_PAD, theme.PAGE_PAD,
+        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
                                      theme.PAGE_PAD, theme.PAGE_PAD)
         self._col.setSpacing(theme.CARD_GAP)
         root.addWidget(self._scroll, stretch=1)
 
-        # Owns the active-run section and outlives every refresh(), so
-        # set_active() can repaint it without rebuilding the dashboard around
-        # it. Built before the first refresh() because refresh() adds it.
+        # Active run host slot
         self._active_host = QWidget()
         _slot = QVBoxLayout(self._active_host)
         _slot.setContentsMargins(0, 0, 0, 0)
+
         self.refresh()
+
+    # ── Top Bar ─────────────────────────────────────────────────────────────
+    def _build_top_bar(self) -> QWidget:
+        bar = QWidget()
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
+                                  theme.PAGE_PAD, theme.SPACE_2)
+        layout.setSpacing(theme.SPACE_3)
+
+        # Search Pill
+        search_pill = QFrame()
+        search_pill.setObjectName("homeSearchPill")
+        search_pill.setCursor(Qt.PointingHandCursor)
+        pill_layout = QHBoxLayout(search_pill)
+        pill_layout.setContentsMargins(10, 4, 10, 4)
+        pill_layout.setSpacing(theme.SPACE_2)
+
+        search_icon = QLabel()
+        search_icon.setPixmap(icons.pixmap("search", 15, theme.NEUTRAL[400]))
+        pill_layout.addWidget(search_icon)
+
+        self._search_input = QLineEdit()
+        self._search_input.setObjectName("homeSearchInput")
+        self._search_input.setPlaceholderText(i18n.t("Search anything..."))
+        self._search_input.returnPressed.connect(self.open_history.emit)
+        pill_layout.addWidget(self._search_input, stretch=1)
+
+        kbd = QLabel("⌘ K")
+        kbd.setObjectName("homeKbdBadge")
+        pill_layout.addWidget(kbd)
+
+        search_pill.mousePressEvent = lambda e: self._search_input.setFocus()
+        layout.addWidget(search_pill, stretch=1)
+
+        layout.addStretch(1)
+
+        # Right actions: Sun (theme) | Bell (notifications) | Date | Profile
+        sun_btn = QPushButton()
+        sun_btn.setObjectName("homeIconBtn")
+        sun_btn.setIcon(icons.icon("sun", 18, theme.NEUTRAL[600]))
+        sun_btn.setFixedSize(32, 32)
+        sun_btn.setToolTip(i18n.t("Toggle theme"))
+        layout.addWidget(sun_btn)
+
+        bell_btn = QPushButton()
+        bell_btn.setObjectName("homeIconBtn")
+        bell_btn.setIcon(icons.icon("bell", 18, theme.NEUTRAL[600]))
+        bell_btn.setFixedSize(32, 32)
+        bell_btn.setToolTip(i18n.t("Notifications"))
+        layout.addWidget(bell_btn)
+
+        date_str = datetime.now().strftime("%a, %d %b %Y")
+        date_lbl = QLabel(date_str)
+        date_lbl.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
+            f"color: {theme.NEUTRAL[500]}; font-weight: 500;"
+        )
+        layout.addWidget(date_lbl)
+        layout.addSpacing(theme.SPACE_1)
+
+        self._profile_btn = QPushButton()
+        self._profile_btn.setObjectName("homeProfileBtn")
+        self._profile_btn.setCursor(Qt.PointingHandCursor)
+        prof_layout = QHBoxLayout(self._profile_btn)
+        prof_layout.setContentsMargins(2, 2, 4, 2)
+        prof_layout.setSpacing(4)
+
+        self._avatar = C.Avatar("", 28)
+        prof_layout.addWidget(self._avatar)
+
+        chev = QLabel()
+        chev.setPixmap(icons.pixmap("chevron-down", 12, theme.NEUTRAL[500]))
+        prof_layout.addWidget(chev)
+
+        self._profile_btn.clicked.connect(self._on_profile_clicked)
+        layout.addWidget(self._profile_btn)
+
+        return bar
+
+    def _on_profile_clicked(self):
+        self.open_addon.emit("config")
 
     # ── live run state, pushed in by the window ──────────────────────────
     def set_active(self, runs: list[dict]):
-        """`runs` is [{title, stages, fraction, note, started}]. Empty clears
-        the section — Home must not keep showing a run that has finished.
-
-        Repaints ONLY the run card. Called on every stage of every run, so it
-        must not touch the register or the runs folder — see the class
-        docstring for what it used to cost.
-        """
         self._active = list(runs or [])
         self._fill_active()
 
     def _fill_active(self):
-        """Rebuild the run section alone, from state already in memory."""
         slot = self._active_host.layout()
         while slot.count():
             item = slot.takeAt(0)
@@ -439,125 +684,7 @@ class HomePanel(QWidget):
                 self._drop(item.layout())
         if self._active:
             slot.addLayout(self._active_runs())
-        # Hidden rather than absent, so the section carries no spacing of its
-        # own when there is no run — the host is always in the column.
         self._active_host.setVisible(bool(self._active))
-
-    # ── build ─────────────────────────────────────────────────────────────
-    def _refresh_header(self):
-        """The greeting and the avatar, re-read from identity.
-
-        The band is fixed and outlives refresh(), so this has to be explicit:
-        MainWindow._ask_display_name() calls refresh() precisely so that the
-        name someone has just typed appears here, and a header built only in
-        __init__ would keep greeting the old one until the app restarted.
-        """
-        who = (identity.display_name(self.cfg) or "").split(" ")[0]
-        self._header.title.setText(
-            f"{_greeting()}, {who}" if who else _greeting())
-        whole = identity.describe()
-        self._avatar.setText((whole or "?").strip()[:1].upper())
-        self._avatar.setToolTip(whole)
-        self._avatar.setAccessibleName(whole)
-        self._avatar.setVisible(bool(whole))
-
-    def refresh(self):
-        self._refresh_header()
-        while self._col.count():
-            item = self._col.takeAt(0)
-            widget = item.widget()
-            if widget is self._active_host:
-                # Hidden first so setParent(None) can't flash it as a
-                # top-level window; _fill_active() re-asserts visibility
-                # right after the host is re-added below.
-                widget.hide()
-                widget.setParent(None)      # persistent — re-added below
-            elif widget:
-                widget.hide()
-                widget.setParent(None)
-                widget.deleteLater()
-            elif item.layout():
-                self._drop(item.layout())
-
-        # ONE read of each store, threaded through everything below. _stats()
-        # called inquiry_stats() and inquiries_per_day() without rows, and
-        # _addons() called inquiry_stats() again — three full reads of a CSV
-        # that on a company install sits on a shared drive, for one screen.
-        # The runs folder is now read once too, and the window is split into
-        # its three outcomes for both the figures and the activity list.
-        self._rows = DATA.register_rows(self.cfg)
-        runs = DATA.recent_runs(self.cfg, RUN_WINDOW)
-        done, failed, stalled = _split(runs)
-
-        self._col.addWidget(self._hero())
-        self._col.addWidget(self._active_host)
-        self._fill_active()
-        metrics = self._metrics(runs, done, failed, stalled)
-        if metrics is not None:
-            self._col.addWidget(metrics)
-        # stretch=1, and nothing after it. The bottom row is three columns of
-        # cards; handed the leftover height they grow into it, which is what
-        # keeps Home from finishing in a band of bare canvas.
-        self._col.addLayout(self._bottom(runs, stalled), stretch=1)
-
-    def _drop(self, layout):
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().hide()
-                item.widget().setParent(None)
-                item.widget().deleteLater()
-            elif item.layout():
-                self._drop(item.layout())
-
-    # ── sections ──────────────────────────────────────────────────────────
-    def _hero(self) -> QWidget:
-        """The one primary action on the screen, and the three jobs that get
-        done every day, in the width of one card."""
-        card = C.Card(stripe=True, raised=True)
-        col = card.body((theme.SPACE_6, theme.SPACE_5,
-                         theme.SPACE_6, theme.SPACE_5), spacing=0)
-
-        col.addWidget(C.kicker(i18n.t("New task")))
-        col.addSpacing(theme.SPACE_2)
-
-        head = QHBoxLayout()
-        head.setSpacing(theme.SPACE_5)
-        title = C.heading(i18n.t("What do you need done today?"), 3)
-        title.setWordWrap(True)
-        head.addWidget(title, stretch=1)
-        go = C.button(i18n.t("Describe a task"), "primary", "arrow-right",
-                      on_click=self.describe_task.emit)
-        go.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        C.elevate(go, theme.SHADOW_ACCENT, theme.ACCENT)
-        head.addWidget(go, alignment=Qt.AlignTop)
-        col.addLayout(head)
-        col.addSpacing(theme.SPACE_1)
-
-        lead = C.label(i18n.t("Describe what you want done — name any file or "
-                              "folder in plain words and Prism will go find "
-                              "it."), level="SUPPORT", wrap=True)
-        lead.setMaximumWidth(640)
-        col.addWidget(lead)
-        col.addSpacing(theme.SPACE_4)
-
-        # Literal inside the t() call, not lifted into a table: the three
-        # quick-starts are the only copy on this screen the extractor reads
-        # straight off the call site, and a key it cannot see never reaches a
-        # translator.
-        chips = QHBoxLayout()
-        chips.setSpacing(theme.SPACE_2)
-        for key, text in (("inquiry", i18n.t("Read today's inbox")),
-                          ("boq", i18n.t("Take a BOQ off a drawing")),
-                          ("email", i18n.t("Draft an email"))):
-            chip = C.button(text, "secondary")
-            chip.setObjectName("chipBtn")
-            chip.clicked.connect(
-                lambda _=False, k=key: self.open_addon.emit(k))
-            chips.addWidget(chip)
-        chips.addStretch(1)
-        col.addLayout(chips)
-        return card
 
     def _active_runs(self) -> QVBoxLayout:
         wrap = QVBoxLayout()
@@ -577,85 +704,244 @@ class HomePanel(QWidget):
             card.opened.connect(self.open_run.emit)
             row.addWidget(card)
         if len(self._active) == 1:
-            row.addStretch(1)           # one run must not stretch to full width
+            row.addStretch(1)
         wrap.addLayout(row)
         return wrap
 
-    def _metrics(self, runs, done, failed, stalled) -> QWidget | None:
-        """Four figures, or six once the inquiry register exists.
+    # ── refresh ──────────────────────────────────────────────────────────
+    def _refresh_identity(self):
+        whole = identity.describe()
+        initial = (whole or "?").strip()[:1].upper()
+        self._avatar.setText(initial)
+        self._avatar.setToolTip(whole)
+        self._profile_btn.setToolTip(whole or i18n.t("Profile"))
 
-        Returns None on a workspace with no runs at all. Four cards reading
-        zero is the "wall of zeroes" this whole dashboard is written to avoid —
-        no runs and no successful runs are very different facts, and the
-        Recent activity card says the first one in words.
-        """
-        stats = DATA.inquiry_stats(self.cfg, self._rows)
-        if not runs and not stats:
-            return None
+    def refresh(self):
+        self._refresh_identity()
+        while self._col.count():
+            item = self._col.takeAt(0)
+            widget = item.widget()
+            if widget is self._active_host:
+                widget.hide()
+                widget.setParent(None)
+            elif widget:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+            elif item.layout():
+                self._drop(item.layout())
 
-        cards = []
-        if runs:
-            week = DATA.runs_per_day(self.cfg, 7)
-            scope = i18n.t("of your last {n} runs").format(n=len(runs))
-            cards += [
-                # "Started this week", not "Started". The other three cards
-                # partition the same window and visibly add up to it; this one
-                # counts a different window entirely, and titled just
-                # "Started" it read as a contradiction at a glance — "0
-                # started" sitting beside "15 completed". The window belongs
-                # in the title, where the eye lands, not only in the scope
-                # line underneath the number.
-                C.MetricCard(i18n.t("Started this week"), str(sum(week)),
-                             i18n.t("last 7 days"), "clock", week, theme.ACCENT),
-                C.MetricCard(i18n.t("Completed"), str(len(done)), scope,
-                             "check", None, theme.OK),
-                C.MetricCard(i18n.t("Failed"), str(len(failed)), scope,
-                             "alert", None,
-                             theme.ERR if failed else theme.NEUTRAL[400]),
-                # Same scope line as the two above it, on purpose: the three
-                # numbers then visibly add up to the window, which is what
-                # stops "Never started 87" reading as a glitch.
-                C.MetricCard(i18n.t("Never started"), str(len(stalled)), scope,
-                             "x", None,
-                             theme.WARN if stalled else theme.NEUTRAL[400]),
-            ]
-            cards[-1].setToolTip(i18n.t("These runs stopped before any tool "
-                                        "was reached."))
-        if stats:
-            cards += [
-                C.MetricCard(i18n.t("Inquiries logged"),
-                             str(stats["logged_week"]), i18n.t("this week"),
-                             "inbox", DATA.inquiries_per_day(self.cfg,
-                                                             self._rows),
-                             theme.OK),
-                C.MetricCard(i18n.t("Quoted"), stats["quoted_value"],
-                             i18n.t("this month"), "file", None, theme.ACCENT),
-            ]
-        # Four across on a wide window, three across once the register adds
-        # two more, so the row always divides evenly instead of leaving a
-        # half-empty second line.
-        grid = C.CardGrid(min_col_width=200,
-                          max_columns=4 if len(cards) <= 4 else 3)
-        grid.add_all(cards)
-        return grid
+        self._rows = DATA.register_rows(self.cfg)
+        runs = DATA.recent_runs(self.cfg, RUN_WINDOW)
+        done, failed, stalled = _split(runs)
 
-    def _bottom(self, runs, stalled) -> QHBoxLayout:
+        # 1. Hero row (Left: Greeting + Composer + Try chips; Right: Tour card)
+        self._col.addLayout(self._hero_section())
+
+        # 2. Active runs (if any)
+        self._col.addWidget(self._active_host)
+        self._fill_active()
+
+        # 3. Bottom section (Left: Recent activity; Right: Add-ons)
+        self._col.addLayout(self._bottom_section(runs, stalled))
+        self._col.addStretch(1)
+
+    def _drop(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+            elif item.layout():
+                self._drop(item.layout())
+
+    # ── Section 1: Hero Section (Two Columns) ─────────────────────────────
+    def _hero_section(self) -> QHBoxLayout:
+        hero = QHBoxLayout()
+        hero.setSpacing(theme.CARD_GAP)
+
+        # Left Column (~62%)
+        left_col = QVBoxLayout()
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(theme.SPACE_3)
+
+        # Greeting row with script motto on the right
+        greet_row = QHBoxLayout()
+        greet_row.setContentsMargins(0, 0, 0, 0)
+        greet_row.setSpacing(theme.SPACE_2)
+
+        greet_stack = QVBoxLayout()
+        greet_stack.setContentsMargins(0, 0, 0, 0)
+        greet_stack.setSpacing(0)
+
+        salutation = QLabel(f"{_greeting()},")
+        salutation.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 16px; "
+            f"font-weight: 500; color: {theme.NEUTRAL[500]};"
+        )
+        greet_stack.addWidget(salutation)
+
+        who = (identity.display_name(self.cfg) or "").split(" ")[0]
+        if not who:
+            who = "there"
+        name_lbl = QLabel(f"{who},")
+        name_lbl.setStyleSheet(
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 32px; "
+            f"font-weight: 700; color: {theme.TEXT};"
+        )
+        C.track(name_lbl, -0.02)
+        greet_stack.addWidget(name_lbl)
+
+        sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
+        sub_lbl.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 14px; "
+            f"color: {theme.NEUTRAL[500]};"
+        )
+        greet_stack.addWidget(sub_lbl)
+        greet_row.addLayout(greet_stack, stretch=1)
+
+        motto = QLabel(i18n.t("Less work.\nMore possibilities."))
+        motto.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
+            f"font-style: italic; color: {theme.NEUTRAL[400]}; line-height: 1.2;"
+        )
+        motto.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        greet_row.addWidget(motto)
+        left_col.addLayout(greet_row)
+
+        left_col.addWidget(self._prompt_card())
+        left_col.addLayout(self._try_chips_row())
+
+        hero.addLayout(left_col, stretch=62)
+
+        # Right Column (~38%)
+        tour_card = ShowcaseTourCard()
+        tour_card.tour_clicked.connect(lambda: self.open_addon.emit("guide"))
+        hero.addWidget(tour_card, stretch=38)
+
+        return hero
+
+    def _prompt_card(self) -> QWidget:
+        card = QFrame()
+        card.setObjectName("heroPromptCard")
+        card.setMinimumHeight(220)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
+                               theme.SPACE_4, theme.SPACE_3)
+        col.setSpacing(theme.SPACE_3)
+
+        input_row = QHBoxLayout()
+        input_row.setContentsMargins(0, 0, 0, 0)
+        input_row.setSpacing(theme.SPACE_2)
+
+        cursor_bar = QFrame()
+        cursor_bar.setFixedWidth(2)
+        cursor_bar.setFixedHeight(20)
+        cursor_bar.setStyleSheet(f"background: {theme.ACCENT}; border-radius: 1px;")
+        input_row.addWidget(cursor_bar)
+
+        self._prompt_input = QLineEdit()
+        self._prompt_input.setObjectName("heroPromptInput")
+        self._prompt_input.setPlaceholderText(i18n.t("What can I take care of today?"))
+        self._prompt_input.returnPressed.connect(self.describe_task.emit)
+        input_row.addWidget(self._prompt_input, stretch=1)
+        col.addLayout(input_row)
+
+        # Spacer to give the card visual height like a multi-line composer
+        col.addStretch(1)
+
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(theme.SPACE_2)
+
+        attach_btn = QPushButton(f"  {i18n.t('Attach')}")
+        attach_btn.setObjectName("promptChipBtn")
+        attach_btn.setIcon(icons.icon("paperclip", 13, theme.TEXT))
+        attach_btn.setCursor(Qt.PointingHandCursor)
+        attach_btn.clicked.connect(self.describe_task.emit)
+        bar.addWidget(attach_btn)
+
+        cmds_btn = QPushButton(f"  {i18n.t('Commands')}")
+        cmds_btn.setObjectName("promptChipBtn")
+        cmds_btn.setIcon(icons.icon("command", 13, theme.TEXT))
+        cmds_btn.setCursor(Qt.PointingHandCursor)
+        cmds_btn.clicked.connect(self.open_history.emit)
+        bar.addWidget(cmds_btn)
+
+        tools_btn = QPushButton(f"  {i18n.t('Tools')}")
+        tools_btn.setObjectName("promptChipBtn")
+        tools_btn.setIcon(icons.icon("grid", 13, theme.TEXT))
+        tools_btn.setCursor(Qt.PointingHandCursor)
+        tools_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
+        bar.addWidget(tools_btn)
+
+        bar.addStretch(1)
+
+        send_btn = QPushButton()
+        send_btn.setObjectName("promptSendBtn")
+        send_btn.setCursor(Qt.PointingHandCursor)
+        send_btn.setIcon(icons.icon("arrow-right", 16, "#ffffff"))
+        send_btn.setToolTip(i18n.t("Start task"))
+        send_btn.clicked.connect(self.describe_task.emit)
+        bar.addWidget(send_btn)
+
+        col.addLayout(bar)
+        return card
+
+    def _try_chips_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(theme.CARD_GAP)
-        row.addWidget(self._recent(runs, stalled), stretch=2)
-        row.addWidget(self._addons(), stretch=1)
-        row.addWidget(self._tools(), stretch=1)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_2)
+
+        prefix = QLabel(i18n.t("Try:"))
+        prefix.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 12px; "
+            f"font-weight: 500; color: {theme.NEUTRAL[500]};"
+        )
+        row.addWidget(prefix)
+
+        chips_data = [
+            ("inquiry", i18n.t("Summarize a PDF"), "file"),
+            ("reel", i18n.t("Create a reel"), "film"),
+            ("boq", i18n.t("Analyze this BOQ"), "chart"),
+            ("artifacts", i18n.t("Clean up artifacts"), "sparkles"),
+        ]
+
+        for key, label, icon_name in chips_data:
+            chip = QPushButton(f"  {label}")
+            chip.setObjectName("tryChip")
+            chip.setIcon(icons.icon(icon_name, 12, theme.NEUTRAL[600]))
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, k=key: self.open_addon.emit(k))
+            row.addWidget(chip)
+
+        row.addStretch(1)
         return row
 
-    def _recent(self, runs, stalled) -> QWidget:
+    # ── Section 2: Bottom Section (Two Columns) ───────────────────────────
+    def _bottom_section(self, runs, stalled) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(theme.CARD_GAP)
+        row.addWidget(self._recent_activity_card(runs, stalled), stretch=60)
+        row.addWidget(self._addons_card(), stretch=40)
+        return row
+
+    def _recent_activity_card(self, runs, stalled) -> QWidget:
         card = C.Card()
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), spacing=0)
-        col.addWidget(C.SectionHeader(
-            i18n.t("Recent activity"), "",
-            [C.button(i18n.t("See all in History"), "link",
-                      on_click=self.open_history.emit)]))
-        col.addSpacing(theme.SPACE_2)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        title = C.heading(i18n.t("Recent activity"), 4)
+        head.addWidget(title, stretch=1)
+
+        see_all = C.button(f"{i18n.t('See all')} →", "link",
+                           on_click=self.open_history.emit)
+        head.addWidget(see_all)
+        col.addLayout(head)
+        col.addSpacing(theme.SPACE_3)
 
         if not runs:
             empty = C.EmptyState(
@@ -667,14 +953,8 @@ class HomePanel(QWidget):
             col.addWidget(empty, stretch=1)
             return card
 
-        # Newest first, and only the runs that actually reached a tool — see
-        # _never_started(). The rest are counted at the foot of the card.
         listed = [r for r in runs if not _never_started(r)][:RECENT_SHOWN]
         if not listed:
-            # Every run in the window stopped before a tool. That is a fault
-            # to report, not a list to draw — one centred block that says what
-            # happened and where to look beats a column of identical rows over
-            # a white void.
             empty = C.EmptyState(
                 "alert", i18n.t("Nothing has finished yet"),
                 i18n.t("Every recent run stopped before a tool was reached. "
@@ -685,60 +965,65 @@ class HomePanel(QWidget):
             return card
 
         for i, run in enumerate(listed):
-            if i:
-                col.addWidget(C.hairline())
-            col.addWidget(self._recent_row(run))
+            is_first = (i == 0)
+            is_last = (i == len(listed) - 1 and not stalled)
+            col.addWidget(self._timeline_row(run, is_first, is_last))
+
         if stalled:
-            col.addSpacing(theme.SPACE_2)
-            col.addWidget(C.hairline())
+            col.addSpacing(theme.SPACE_1)
             col.addWidget(self._stalled_row(stalled))
+
         col.addStretch(1)
         return card
 
-    def _recent_row(self, run: dict) -> QWidget:
-        """One finished run. The state is a StatusBadge, so "COMPLETED" is the
-        semantic green everywhere it appears — it used to be `Pill("Done",
-        "accent")`, which rotates with the role hue, so in a green profile the
-        pill for "done" and the pill for "failed" stopped being different
-        colours at all."""
+    def _timeline_row(self, run: dict, is_first: bool, is_last: bool) -> QWidget:
         wrap = _Row()
         wrap.clicked.connect(
             lambda p=run.get("path", ""): p and self.open_run_record.emit(p))
+
         row = QHBoxLayout(wrap)
-        row.setContentsMargins(theme.SPACE_2, theme.SPACE_2,
-                               theme.SPACE_2, theme.SPACE_2)
+        row.setContentsMargins(0, theme.SPACE_2, theme.SPACE_2, theme.SPACE_2)
         row.setSpacing(theme.SPACE_3)
 
+        track = TimelineNode(is_first=is_first, is_last=is_last)
+        row.addWidget(track)
+
         tools = run.get("tools") or []
-        if tools:
-            row.addWidget(C.ToolBadge(tools[0], 32, theme.R_CONTROL))
-        else:
-            row.addWidget(C.IconPad("clock", theme.NEUTRAL[400], 32,
-                                    theme.R_CONTROL, 16))
+        primary = tools[0] if tools else "Task"
+        badge = C.ToolBadge(primary, 34, theme.R_CONTROL) if tools else \
+            C.IconPad("file", theme.NEUTRAL[400], 34, theme.R_CONTROL, 16)
+        row.addWidget(badge)
 
-        stack = QVBoxLayout()
-        stack.setSpacing(1)
-        title = _Elided(run["title"], "BODY", weight=500)
-        stack.addWidget(title)
-        detail = " · ".join(list(tools) + [run.get("when", "")]) if tools \
-            else i18n.t("No tool recorded") + " · " + run.get("when", "")
-        stack.addWidget(_Elided(detail, "META"))
-        row.addLayout(stack, stretch=1)
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
 
-        row.addWidget(C.StatusBadge(
-            "completed" if run.get("ok", True) else "failed", focusable=False))
+        title = _Elided(run.get("title", ""), "BODY", weight=500)
+        text_col.addWidget(title)
+
+        source = tools[0] if tools else "Prism"
+        when = run.get("when", "")
+        detail_text = f"{source} · {when}" if when else source
+        subtitle = _Elided(detail_text, "META")
+        text_col.addWidget(subtitle)
+        row.addLayout(text_col, stretch=1)
+
+        is_ok = run.get("ok", True)
+        status_badge = C.StatusBadge("completed" if is_ok else "failed", focusable=False)
+        row.addWidget(status_badge)
+
+        menu_btn = QPushButton()
+        menu_btn.setObjectName("recentMenuBtn")
+        menu_btn.setIcon(icons.icon("more-horizontal", 16, theme.NEUTRAL[400]))
+        menu_btn.setFixedSize(28, 28)
+        menu_btn.clicked.connect(
+            lambda: self.open_run_record.emit(run.get("path", "")))
+        row.addWidget(menu_btn)
+
         wrap.setAccessibleName(title.text_value())
         return wrap
 
     def _stalled_row(self, stalled: list[dict]) -> QWidget:
-        """The runs that never reached a tool, as one line rather than as four
-        identical "Untitled task · Failed" rows.
-
-        They are not hidden and they are not deleted — History still lists
-        every one. What changes is that Home stops reporting an environment
-        fault as four separate failed jobs, which is what made a working
-        install read as a broken one.
-        """
         wrap = _Row()
         wrap.clicked.connect(self.open_history.emit)
         row = QHBoxLayout(wrap)
@@ -751,165 +1036,102 @@ class HomePanel(QWidget):
         stack.setSpacing(1)
         stack.addWidget(_Elided(i18n.t("Stopped before any tool ran"),
                                 "BODY", weight=500))
-        # dashboard_data does not hand back the recorded reason yet (see the
-        # WIRING NEEDED note); when it does, this line names it — "Chrome would
-        # not launch" — instead of the generic sentence.
         reason = ""
         for run in stalled:
             reason = (run.get("error") or "").strip()
             if reason:
                 break
         stack.addWidget(_Elided(
-            reason or i18n.t("These runs never reached a tool. Open History to "
-                             "see them."), "META"))
+            reason or i18n.t("These runs never reached a tool. Open History to see them."),
+            "META"))
         row.addLayout(stack, stretch=1)
         row.addWidget(C.Pill(str(len(stalled)), "warn"))
         return wrap
 
-    def _addons(self) -> QWidget:
+    def _addons_card(self) -> QWidget:
         card = C.Card()
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), spacing=0)
-        col.addWidget(C.SectionHeader(i18n.t("Your add-ons")))
-        col.addSpacing(theme.SPACE_2)
-        stats = DATA.inquiry_stats(self.cfg, self._rows)
-        waiting = (i18n.t("{n} waiting").format(n=stats["waiting"])
-                   if stats and stats["waiting"] else "")
-        for key, label, desc, icon_name, hue in ADDONS:
-            badge = waiting if key == "inquiry" else ""
-            col.addWidget(self._addon_row(key, label, desc, icon_name, hue,
-                                          badge))
-        col.addStretch(1)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        title = C.heading(i18n.t("Add-ons"), 4)
+        head.addWidget(title, stretch=1)
+
+        manage_btn = C.button(i18n.t("Manage"), "secondary", small=True,
+                              on_click=lambda: self.open_addon.emit("catalog"))
+        head.addWidget(manage_btn)
+        col.addLayout(head)
+        col.addSpacing(theme.SPACE_3)
+
+        grid = QGridLayout()
+        grid.setSpacing(theme.SPACE_2)
+
+        addon_specs = [
+            ("Email Inquiry", "inquiry", "inquiry"),
+            ("BOQ", "boq", "boq"),
+            ("Gerber", "gerber", "gerber"),
+            ("STEP", "step", "step"),
+            ("BOM & Stock", "bom", "bom"),
+            ("Email", "email", "email"),
+            ("Leads", "leads", "leads"),
+            ("Reel", "reel", "reel"),
+            ("Motion", "motion", "motion"),
+        ]
+
+        for i, (name, logo_key, nav_key) in enumerate(addon_specs):
+            tile = self._make_addon_tile(name, logo_key, nav_key)
+            row_idx = i // 3
+            col_idx = i % 3
+            grid.addWidget(tile, row_idx, col_idx)
+
+        col.addLayout(grid)
+        col.addSpacing(theme.SPACE_3)
+
+        foot = QHBoxLayout()
+        foot.setContentsMargins(0, 0, 0, 0)
+        browse_btn = QPushButton(f"+ {i18n.t('Browse Add-ons')}")
+        browse_btn.setObjectName("chipBtn")
+        browse_btn.setCursor(Qt.PointingHandCursor)
+        browse_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
+        foot.addWidget(browse_btn)
+
+        foot.addStretch(1)
+
+        guide_link = C.button(f"{i18n.t('Explore all add-ons')} →", "link",
+                              on_click=lambda: self.open_addon.emit("catalog"))
+        foot.addWidget(guide_link)
+        col.addLayout(foot)
+
         return card
 
-    def _addon_row(self, key, label, desc, icon_name, hue, badge) -> QWidget:
-        # Was `soon = key in ("bom", "motion")` -- a hardcoded pair inside a
-        # render method, and an eighth place add-on identity was written down.
-        #
-        # Motion belongs there: core/motion/render.py sets
-        # _DISABLED_PENDING_ASSET_FIX and is_available() returns False
-        # unconditionally, so the tile stays visible (a visible "next one"
-        # beats an empty gap) and stays unclickable.
-        #
-        # BOM did not. It shipped, boq_available() is True, and it opens from
-        # the rail -- but it sat in that tuple next to Motion and so was dead
-        # on this screen. Driving this off the manifest's `status` is what
-        # makes the difference between the two expressible at all.
-        entry = registry.by_key(key)
-        soon = entry is not None and entry.status == manifest.SOON
-        wrap = _Row(enabled=not soon)
-        if not soon:
-            wrap.clicked.connect(
-                lambda k=key: self.open_addon.emit(k))
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(theme.SPACE_2, theme.SPACE_2,
-                               theme.SPACE_2, theme.SPACE_2)
-        row.setSpacing(theme.SPACE_3)
-        # theme.tone() at draw time, not a colour frozen when this module was
-        # imported -- which is before theme.apply_role() has run.
-        row.addWidget(C.IconPad(icon_name, theme.tone(hue), 32,
-                                theme.R_CONTROL, 16))
-        stack = QVBoxLayout()
-        stack.setSpacing(1)
-        ink = theme.NEUTRAL[400] if soon else theme.TEXT
-        stack.addWidget(_Elided(i18n.t(label), "SUPPORT", ink, weight=500))
-        stack.addWidget(_Elided(i18n.t(desc), "META"))
-        row.addLayout(stack, stretch=1)
-        if badge:
-            row.addWidget(C.Pill(badge, "warn"))
-        wrap.setAccessibleName(i18n.t(label))
-        return wrap
+    def _make_addon_tile(self, name: str, logo_key: str, nav_key: str) -> QWidget:
+        tile = QFrame()
+        tile.setObjectName("toolTile")
+        tile.setCursor(Qt.PointingHandCursor)
+        tile.mousePressEvent = lambda e: self.open_addon.emit(nav_key)
 
-    def _tools(self) -> QWidget:
-        """Which tool each pipeline stage is set up to drive.
+        tile_col = QVBoxLayout(tile)
+        tile_col.setContentsMargins(4, 8, 4, 6)
+        tile_col.setSpacing(3)
+        tile_col.setAlignment(Qt.AlignCenter)
 
-        Straight off `cfg["agents"]` and the engine's own category table, which
-        is the same pair the AI tools screen and Settings → Agents read — so
-        what Home reports and what those two screens edit cannot disagree.
-        """
-        card = C.Card()
-        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
-                         theme.CARD_PAD, theme.CARD_PAD), spacing=0)
-        col.addWidget(C.SectionHeader(
-            i18n.t("Connected tools"), "",
-            [C.button(i18n.t("Manage"), "link",
-                      on_click=lambda: self.open_addon.emit("catalog"))]))
-        col.addSpacing(theme.SPACE_2)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(icons.tool_logo(logo_key, 24))
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        tile_col.addWidget(icon_lbl)
 
-        stages, chosen, labels = self._pipeline()
-        if not stages:
-            col.addWidget(C.label(
-                i18n.t("No tools are set up yet. Pick one for each kind of "
-                       "work and Prism will drive it in your own Chrome."),
-                level="SUPPORT", wrap=True))
-            col.addStretch(1)
-            return card
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(
+            f"font-family: '{theme.FONT_BODY}'; font-size: 11px; "
+            f"font-weight: 600; color: {theme.TEXT};"
+        )
+        name_lbl.setAlignment(Qt.AlignCenter)
+        tile_col.addWidget(name_lbl)
 
-        # Distinct tools, in the order the pipeline first reaches them, each
-        # carrying the kinds of work it covers. A tool driving four kinds is a
-        # different fact from one driving a single kind, and naming them is
-        # what turns this from a list of logos into an answer.
-        order: list[str] = []
-        covers: dict[str, list[str]] = {}
-        for stage in stages:
-            tool = (chosen.get(stage) or "").strip()
-            if not tool:
-                continue
-            if tool not in covers:
-                order.append(tool)
-                covers[tool] = []
-            covers[tool].append(labels.get(stage, stage))
+        dot = QLabel("●")
+        dot.setStyleSheet(f"font-size: 8px; color: {theme.OK};")
+        dot.setAlignment(Qt.AlignCenter)
+        tile_col.addWidget(dot)
 
-        assigned = sum(len(v) for v in covers.values())
-        col.addWidget(C.label(
-            i18n.t("Every kind of work has a tool") if assigned >= len(stages)
-            else i18n.t("{done} of {total} kinds of work have a tool").format(
-                done=assigned, total=len(stages)),
-            level="META"))
-        col.addSpacing(theme.SPACE_2)
-
-        for i, tool in enumerate(order):
-            if i:
-                col.addWidget(C.hairline())
-            col.addWidget(self._tool_row(tool, covers[tool]))
-        col.addStretch(1)
-        return card
-
-    def _pipeline(self) -> tuple[list[str], dict, dict]:
-        """(stages that carry a tool choice, the tool chosen for each, the
-        name of each kind of work).
-
-        Guarded, and the guard is not tidiness: HomePanel is built inside
-        MainWindow.__init__, so an import error reaching this far does not
-        blank a card — it stops the window existing at all, in a frozen build
-        with no console to say why.
-        """
-        try:
-            import core_bridge as CB
-            stages = [s for s in CB.agents.PIPELINE_ORDER if s != "summary"]
-            cats = CB.agents.CATEGORIES or {}
-        except Exception:                                   # noqa: BLE001
-            return [], {}, {}
-        # The engine's own label, split at the ampersand: "Research & Academic"
-        # is a catalogue heading, and this column is 240px wide.
-        labels = {s: (cats.get(s, {}).get("label") or s).split(" & ")[0]
-                  for s in stages}
-        return stages, dict(self.cfg.get("agents") or {}), labels
-
-    def _tool_row(self, tool: str, covers: list[str]) -> QWidget:
-        wrap = _Row()
-        wrap.clicked.connect(lambda: self.open_addon.emit("catalog"))
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(theme.SPACE_2, theme.SPACE_2 - 2,
-                               theme.SPACE_2, theme.SPACE_2 - 2)
-        row.setSpacing(theme.SPACE_3)
-        row.addWidget(C.ToolBadge(tool, 28, theme.R_CHIP))
-        stack = QVBoxLayout()
-        stack.setSpacing(1)
-        # A tool's name is a brand, never translated — hence _Elided on the
-        # raw value rather than anything that could reach the catalogue.
-        stack.addWidget(_Elided(tool, "SUPPORT", weight=500))
-        stack.addWidget(_Elided(" · ".join(covers), "META"))
-        row.addLayout(stack, stretch=1)
-        wrap.setAccessibleName(f"{tool}. {', '.join(covers)}")
-        return wrap
+        return tile

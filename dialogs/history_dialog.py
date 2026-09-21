@@ -324,19 +324,43 @@ class HistoryDialog(PrismDialog):
             return
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
         # A follow-up needs something to follow up: a run that saved stage
-        # output. A record with none (a planning failure, an add-on dialog's
-        # own run) has nothing to send a note about.
-        has_output = any(v for v in (record.get("responses") or {}).values())
+        # output, links, or add-on details.
+        has_output = bool(
+            any(v for v in (record.get("responses") or {}).values())
+            or record.get("links")
+            or record.get("step")
+            or record.get("reel")
+            or record.get("boq")
+            or record.get("gerber")
+            or record.get("email")
+            or record.get("query")
+        )
         self._current_record = record if has_output else None
         self.follow_up_btn.setVisible(has_output)
-        # The reel button reads the URLs this run actually produced, not the
-        # HTML _render() just wrote — one source of truth for "is there a
-        # reel here", matched against by widgets.artifacts_panel and
-        # widgets.output_panel the same way.
-        self._current_reel = next(
-            (url for url in (record.get("links") or {}).values()
-             if url and _editable_reel(url)), "")
+
+        # Detect editable reel from reel, artifacts, or links
+        self._current_reel = self._find_reel(record)
         self.edit_reel_btn.setVisible(bool(self._current_reel))
+
+    @staticmethod
+    def _find_reel(record: dict) -> str:
+        reel_info = record.get("reel") or {}
+        if isinstance(reel_info, dict):
+            for key in ("mp4", "artifact"):
+                c = reel_info.get(key) or ""
+                if c and _editable_reel(c):
+                    return c
+        artifacts = record.get("artifacts") or {}
+        if isinstance(artifacts, dict):
+            for val in artifacts.values():
+                if val and isinstance(val, str) and _editable_reel(val):
+                    return val
+        elif isinstance(artifacts, str) and _editable_reel(artifacts):
+            return artifacts
+        for url in (record.get("links") or {}).values():
+            if url and isinstance(url, str) and _editable_reel(url):
+                return url
+        return ""
 
     def _edit_current_reel(self):
         if not self._current_reel:
@@ -360,21 +384,57 @@ class HistoryDialog(PrismDialog):
 
     def _render(self, record: dict, filename: str) -> str:
         A = CB.agents
+        # History is a reader for records from several Prism versions (and
+        # occasionally a hand-edited recovery file). A pre-structured record
+        # can hold ``routing[stage]`` as its old plain string prompt rather
+        # than the current {needed, questions} object. Treat that as an older
+        # prompt, never as an object to call .get() on; one malformed field
+        # must not make the entire History screen unusable.
         routing = record.get("routing") or {}
+        routing = routing if isinstance(routing, dict) else {}
         responses = record.get("responses") or {}
+        responses = responses if isinstance(responses, dict) else {}
         links = record.get("links") or {}
+        links = links if isinstance(links, dict) else {}
         attachments = record.get("attachments") or []
+        attachments = attachments if isinstance(attachments, list) else []
+
+        def stage_routing(stage: str) -> dict:
+            data = routing.get(stage)
+            if isinstance(data, dict):
+                return data
+            # Old runs stored the prompt itself here. Render it as the
+            # question rather than hiding it, while retaining a safe shape.
+            if isinstance(data, str) and data.strip():
+                return {"questions": [data]}
+            return {}
         day, clock = _when(filename)
 
+        # Collect all stages: pipeline order first, then any extra stages from responses, links, or routing
         ran = [s for s in A.PIPELINE_ORDER
-               if (routing.get(s) or {}).get("needed")
-               and (routing.get(s) or {}).get("questions")]
+               if stage_routing(s).get("needed")
+               and stage_routing(s).get("questions")]
+        all_stage_keys = list(responses.keys()) + list(links.keys()) + list(routing.keys())
+        for s in all_stage_keys:
+            # `_brief`, `_title`, and the other routing metadata are not
+            # stages. They are strings too, so letting them through would
+            # make a History card titled "Brief" after fixing legacy strings.
+            if isinstance(s, str) and s and not s.startswith("_") and s not in ran:
+                ran.append(s)
 
+        step_info = record.get("step") or {}
+        reel_info = record.get("reel") or {}
+
+        step_count = len(ran) + (1 if step_info else 0) + (1 if reel_info else 0)
+        query_html = _esc(str(record.get("query") or ""))
+        query_html = (query_html.replace("\r\n", "<br>")
+                      .replace("\r", "<br>").replace("\n", "<br>"))
         parts = [
-            f"<p style='font-family:{theme.FONT_HEADING};font-size:22px;"
-            f"margin:0 0 4px 0'>{_esc(_one_line(record.get('query', ''), 400))}</p>",
+            f"<div style='font-family:{theme.FONT_BODY};font-size:16px;"
+            f"line-height:145%;margin:0 0 8px 0'>"
+            f"{query_html}</div>",
             f"<p style='color:{theme.NEUTRAL[600]};font-size:12px;margin:0 0 4px 0'>"
-            f"{day} at {clock} &nbsp;·&nbsp; {len(ran)} step{'' if len(ran) == 1 else 's'}"
+            f"{day} at {clock} &nbsp;·&nbsp; {step_count} step{'' if step_count == 1 else 's'}"
             + (f" &nbsp;·&nbsp; {len(attachments)} file"
                f"{'' if len(attachments) == 1 else 's'}" if attachments else "")
             + "</p>",
@@ -410,20 +470,37 @@ class HistoryDialog(PrismDialog):
                 f"<b>✉&nbsp; {_esc(email.get('subject', '(no subject)'))}</b><br>"
                 f"<span style='color:{theme.NEUTRAL[700]};font-size:12px'>"
                 f"{_esc(line)}</span></td></tr></table>")
+
+        if step_info:
+            action = step_info.get("action", "draft")
+            models = step_info.get("models") or []
+            parts.append(
+                f"<div style='margin:12px 0; padding:10px; background:{theme.ACCENT_RAMP[100]}; border-radius:6px;'>"
+                f"<b>📐 STEP CAD: {_esc(action.upper())}</b><br>")
+            for m in models:
+                parts.append(f"<span style='font-size:12px;'>File: <b>{_esc(m.get('file', ''))}</b> &nbsp;·&nbsp; "
+                             f"Folder: {_esc(m.get('out_dir', ''))}</span><br>")
+            parts.append("</div>")
+
+        if reel_info:
+            mp4 = reel_info.get("mp4") or reel_info.get("artifact") or ""
+            parts.append(
+                f"<div style='margin:12px 0; padding:10px; background:{theme.ACCENT_RAMP[100]}; border-radius:6px;'>"
+                f"<b>🎬 Reel Generated:</b> {_esc(os.path.basename(mp4))}<br>"
+                f"<span style='font-size:12px; color:{theme.NEUTRAL[600]}'>{_esc(mp4)}</span>"
+                f"</div>")
+
         parts.append(f"<hr style='height:1px;background:{theme.DIVIDER};border:0'>")
 
-        if not ran:
-            parts.append(f"<p style='color:{theme.NEUTRAL[600]}'>This run didn't "
-                         f"get as far as the steps — none was marked needed.</p>")
-            return "".join(parts)
-
+        rendered_urls = set()
         agents = record.get("agents") or {}
         for number, stage in enumerate(ran, start=1):
-            _, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
+            stage_clean = stage.replace("_", " ").replace("-", " ")
+            _, title, _ = STAGE_COPY.get(stage, ("grid", stage_clean.title(), ""))
             url = links.get(stage) or ""
+            if url:
+                rendered_urls.add(url)
             texts = responses.get(stage) or []
-            # Runs saved before the GUI recorded this (and every CLI run) have
-            # no agent map — fall back to the stage key rather than a blank.
             ran_by = agents.get(stage) or stage
 
             parts.append(
@@ -436,22 +513,38 @@ class HistoryDialog(PrismDialog):
                 f"&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(ran_by)}</span></p>")
             if url:
                 parts.append(f"<p style='margin:0 0 8px 0;font-size:12px'>"
-                             f"<a href='{_esc(url)}' style='color:"
-                             f"{theme.ACCENT_RAMP[700]}'>{_esc(_one_line(url, 70))}"
-                             f"</a></p>")
+                             f"🔗 <a href='{_esc(url)}' style='color:"
+                             f"{theme.ACCENT_RAMP[700]}; text-decoration: underline; font-weight: 500;'>"
+                             f"{_esc(_one_line(url, 75))}</a></p>")
 
-            parts.append(self._sub("What Prism asked"))
-            for question in (routing.get(stage) or {}).get("questions") or []:
-                parts.append(self._quote(_esc(question), theme.NEUTRAL[100]))
+            questions = stage_routing(stage).get("questions") or []
+            if questions:
+                parts.append(self._sub("What Prism asked"))
+                for question in questions:
+                    parts.append(self._quote(_esc(question), theme.NEUTRAL[100]))
 
-            parts.append(self._sub("What came back"))
             if texts:
+                parts.append(self._sub("What came back"))
                 joined = "\n\n———\n\n".join(t for t in texts if t)
                 parts.append(self._quote(render_markdown(joined), theme.SURFACE,
                                          raw_html=True)
                              if joined.strip() else self._nothing(url))
-            else:
+            elif not questions and not url:
                 parts.append(self._nothing(url))
+
+        # Render any additional tool links not yet shown
+        extra_links = {k: v for k, v in links.items() if v and v not in rendered_urls}
+        if extra_links:
+            parts.append(self._sub("Tool & AI Links"))
+            for k, u in extra_links.items():
+                parts.append(
+                    f"<p style='margin:4px 0 8px 0;font-size:13px'>"
+                    f"<b>{_esc(k)}:</b> &nbsp;<a href='{_esc(u)}' style='color:{theme.ACCENT_RAMP[700]}; text-decoration: underline; font-weight: 500;'>"
+                    f"{_esc(u)}</a></p>")
+
+        if not ran and not step_info and not reel_info and not extra_links:
+            parts.append(f"<p style='color:{theme.NEUTRAL[600]}'>This run didn't "
+                         f"record any step responses.</p>")
 
         return "".join(parts)
 

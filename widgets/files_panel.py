@@ -180,8 +180,6 @@ class FilesPanel(QWidget):
     detach_requested = Signal(str)
     detach_folder_requested = Signal(str)   # the folder's own path
     detach_all_requested = Signal()
-    attach_file_requested = Signal()
-    attach_folder_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -195,22 +193,11 @@ class FilesPanel(QWidget):
         # printed it put the title on screen twice.
 
         self.empty = QLabel(i18n.t(
-            "Nothing attached yet. Mention a file out loud, or use Add file."))
+            "Nothing attached yet. Name a file or folder in your task and "
+            "Prism will look for it."))
         self.empty.setObjectName("emptyState")
         self.empty.setWordWrap(True)
         root.addWidget(self.empty)
-
-        add = QHBoxLayout()
-        add.setSpacing(theme.SPACE_2 - 1)
-        self.add_file_btn = C.button(i18n.t("Add file"), "secondary",
-                                     "paperclip", small=True)
-        self.add_file_btn.clicked.connect(self.attach_file_requested.emit)
-        add.addWidget(self.add_file_btn, stretch=1)
-        self.add_folder_btn = C.button(i18n.t("Add folder"), "secondary",
-                                       "folder", small=True)
-        self.add_folder_btn.clicked.connect(self.attach_folder_requested.emit)
-        add.addWidget(self.add_folder_btn, stretch=1)
-        root.addLayout(add)
 
         mentions_wrap = QWidget()
         self.mentions_box = QVBoxLayout(mentions_wrap)

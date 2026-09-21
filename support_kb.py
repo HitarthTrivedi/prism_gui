@@ -1233,8 +1233,8 @@ _PRIVACY = Topic(
                 "receive is that your licence asked permission to start a "
                 "run, and how much of your allowance was used — never the "
                 "content.",
-                ("Read what a run sent under Behind the scenes on the right "
-                 "of the window.",
+                ("Before starting work, open Prompt on a step in the plan "
+                 "to review what that tool will be asked.",
                  "Switch on Keep everything on this computer in Email "
                  "automation if you would rather no message text left the "
                  "machine at all.")),
@@ -1571,6 +1571,8 @@ def as_text(q: Question) -> str:
     lines += [f"   {i}. {s}" for i, s in enumerate(q.answer.steps, 1)]
     if q.answer.note:
         lines.append(f"   Note: {q.answer.note}")
+    if q.answer.action:
+        lines.append(f"   Action: '{q.answer.action}'")
     return "\n".join(lines)
 
 

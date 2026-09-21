@@ -188,6 +188,9 @@ class ArtifactsPanel(Page):
                 # on its artifact's row (_row, below) instead of getting one.
                 if name.endswith(".link.txt"):
                     continue
+                # Skip json specs that accompany an mp4 reel
+                if name.endswith(".json") and os.path.isfile(os.path.join(folder, os.path.splitext(name)[0] + ".mp4")):
+                    continue
                 path = os.path.join(folder, name)
                 if os.path.isfile(path):
                     paths.append(path)
@@ -204,7 +207,8 @@ class ArtifactsPanel(Page):
                         and os.path.isdir(os.path.join(path, n))]
                 loose = [n for n in os.listdir(path)
                          if not os.path.isdir(os.path.join(path, n))
-                         and not n.endswith(".link.txt")]
+                         and not n.endswith(".link.txt")
+                         and not (n.endswith(".json") and os.path.isfile(os.path.join(path, os.path.splitext(n)[0] + ".mp4")))]
                 for run in runs:
                     self._labels[run] = f"{name}  ·  {_run_time(run)}"
                     paths.append(run)
@@ -276,13 +280,56 @@ class ArtifactsPanel(Page):
         files_word = (i18n.t("1 file") if count == 1
                      else i18n.t("{n} files").format(n=count))
         detail = " · ".join(p for p in (files_word, size) if p)
+
+        single_target = self._single_deliverable(path)
+        target_path = single_target if single_target else path
+
         actions = [C.icon_button(
-            "external", i18n.t("Open the folder"),
-            lambda _=False, p=path: self._open_file(p))]
-        row = C.FileItem(name, detail, "folder", actions)
+            "external", i18n.t("Open"),
+            lambda _=False, p=target_path: self._open_file(p))]
+
+        if single_target and single_target.lower().endswith(".mp4") and _editable_reel(single_target):
+            actions.append(C.icon_button(
+                "pencil", i18n.t("Edit the layout"),
+                lambda _=False, p=single_target: self.edit_reel.emit(p)))
+
+        link = _chat_link(single_target) if single_target else _chat_link(path)
+        if link:
+            actions.append(C.icon_button(
+                "globe", i18n.t("Open the chat that made this"),
+                lambda _=False, u=link: self._open_link(u)))
+
+        icon = "folder"
+        leading = None
+        if single_target:
+            ext = os.path.splitext(single_target)[1].lower()
+            kind = _KINDS.get(ext, "")
+            icon = _ICON_FOR_KIND.get(kind, "folder")
+            if kind == "image":
+                leading = _thumbnail(single_target)
+
+        row = C.FileItem(name, detail, icon, actions, leading=leading)
         row.setToolTip(path)
-        row.activated.connect(lambda p=path: self._open_file(p))
+        row.activated.connect(lambda p=target_path: self._open_file(p))
         return row
+
+    @staticmethod
+    def _single_deliverable(folder: str) -> str | None:
+        """If a task/run folder contains exactly one primary deliverable file,
+        return its path directly so clicking opens it instead of an empty or
+        intermediate 1-file folder view."""
+        try:
+            files = []
+            for root, _dirs, names in os.walk(folder):
+                for n in names:
+                    if n.endswith(".link.txt") or n == CB.config.ABOUT_FILE:
+                        continue
+                    if n.endswith(".json") and os.path.isfile(os.path.join(root, os.path.splitext(n)[0] + ".mp4")):
+                        continue
+                    files.append(os.path.join(root, n))
+            return files[0] if len(files) == 1 else None
+        except Exception:
+            return None
 
     def _open_file(self, path: str):
         # In-app, not handed to the OS — see dialogs/preview_dialog.py's own
