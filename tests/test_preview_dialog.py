@@ -176,7 +176,7 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
 
     def test_unsupported_offers_the_default_app_instead_of_crashing(self):
         from dialogs.preview_dialog import UnsupportedPreviewDialog
-        path = self._file("a.docx", b"not a real docx")
+        path = self._file("a.xyz", b"not a real docx")
         dlg = UnsupportedPreviewDialog(path)
         dlg.reject()
 
@@ -234,7 +234,7 @@ class OpenPreviewDispatch(unittest.TestCase):
 
     def test_an_unrenderable_file_offers_the_default_app_instead(self):
         from dialogs import preview_dialog as PD
-        path = os.path.join(self._tmp.name, "a.docx")
+        path = os.path.join(self._tmp.name, "a.xyz")
         with open(path, "wb") as f:
             f.write(b"x")
         with mock.patch.object(PD.UnsupportedPreviewDialog, "exec",
