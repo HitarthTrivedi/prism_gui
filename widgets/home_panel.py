@@ -338,7 +338,7 @@ class ShowcaseTourCard(QFrame):
         col.addWidget(desc)
         col.addSpacing(theme.SPACE_2)
 
-        tour_btn = QPushButton(f"  {i18n.t('Watch demo video')}")
+        tour_btn = QPushButton(i18n.t('Watch demo video'))
         tour_btn.setObjectName("tourPlayBtn")
         tour_btn.setIcon(icons.icon("play", 13, "#09090b"))
         tour_btn.setCursor(Qt.PointingHandCursor)
@@ -781,21 +781,21 @@ class HomePanel(QWidget):
         bar.setContentsMargins(0, 0, 0, 0)
         bar.setSpacing(theme.SPACE_2)
 
-        attach_btn = QPushButton(f"  {i18n.t('Attach')}")
+        attach_btn = QPushButton(i18n.t('Attach'))
         attach_btn.setObjectName("promptChipBtn")
         attach_btn.setIcon(icons.icon("paperclip", 13, theme.TEXT))
         attach_btn.setCursor(Qt.PointingHandCursor)
         attach_btn.clicked.connect(self._on_attach_clicked)
         bar.addWidget(attach_btn)
 
-        cmds_btn = QPushButton(f"  {i18n.t('Commands')}")
+        cmds_btn = QPushButton(i18n.t('Commands'))
         cmds_btn.setObjectName("promptChipBtn")
         cmds_btn.setIcon(icons.icon("command", 13, theme.TEXT))
         cmds_btn.setCursor(Qt.PointingHandCursor)
         cmds_btn.clicked.connect(self.open_history.emit)
         bar.addWidget(cmds_btn)
 
-        tools_btn = QPushButton(f"  {i18n.t('Tools')}")
+        tools_btn = QPushButton(i18n.t('Tools'))
         tools_btn.setObjectName("promptChipBtn")
         tools_btn.setIcon(icons.icon("grid", 13, theme.TEXT))
         tools_btn.setCursor(Qt.PointingHandCursor)
@@ -932,7 +932,7 @@ class HomePanel(QWidget):
         ]
 
         for key, label, icon_name in chips_data:
-            chip = QPushButton(f"  {label}")
+            chip = QPushButton(label)
             chip.setObjectName("tryChip")
             chip.setIcon(icons.icon(icon_name, 12, theme.NEUTRAL[600]))
             chip.setCursor(Qt.PointingHandCursor)

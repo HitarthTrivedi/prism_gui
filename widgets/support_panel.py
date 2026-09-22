@@ -178,7 +178,7 @@ def _chip(label: str, icon_name: str = "", tip: str = "") -> QPushButton:
     is the secondary variant in capsule form and already carries hover,
     pressed, focus and disabled states from style.qss.
     """
-    btn = C.button(f" {label}" if icon_name else label, "secondary",
+    btn = C.button(label, "secondary",
                    small=True)
     btn.setObjectName("chipBtn")
     if icon_name:
@@ -754,17 +754,17 @@ class SupportPanel(QWidget):
             i18n.t("Need to speak to someone?"), role="meta", wrap=True)
         row.addWidget(self._foot_note, stretch=1)
 
-        self._ai_btn = C.button(i18n.t(" Ask the assistant"), "secondary",
+        self._ai_btn = C.button(i18n.t("Ask the assistant"), "secondary",
                                 small=True, on_click=self._start_ai)
         icons.button_icon(self._ai_btn, "bulb", 14, theme.ACCENT)
         row.addWidget(self._ai_btn)
 
-        self._meeting_btn = C.button(i18n.t(" Book a meeting"), "secondary",
+        self._meeting_btn = C.button(i18n.t("Book a meeting"), "secondary",
                                      small=True, on_click=self._book_meeting)
         icons.button_icon(self._meeting_btn, "clock", 14, theme.ACCENT)
         row.addWidget(self._meeting_btn)
 
-        self._contact_btn = C.button(i18n.t(" Contact support"), "secondary",
+        self._contact_btn = C.button(i18n.t("Contact support"), "secondary",
                                      small=True, on_click=self._open_contact)
         icons.button_icon(self._contact_btn, "mail", 14, theme.TEXT)
         row.addWidget(self._contact_btn)

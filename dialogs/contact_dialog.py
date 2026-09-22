@@ -156,9 +156,9 @@ class ContactDialog(PrismDialog):
 
     def _copy_all(self):
         QApplication.clipboard().setText(self._full_text())
-        self._copy.setText(i18n.t(" Copied"))
+        self._copy.setText(i18n.t("Copied"))
         QTimer.singleShot(1600,
-                          lambda: self._copy.setText(i18n.t(" Copy it all")))
+                          lambda: self._copy.setText(i18n.t("Copy it all")))
 
     def _send(self):
         """Hand it to their mail app, with the whole thing on the clipboard.

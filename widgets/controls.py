@@ -26,11 +26,12 @@ accent rotation is a blunt string replace over eleven fixed hexes, so an
 off-palette blue written here will not rotate and will strand one permanently
 blue element in an otherwise green copy."""
 from __future__ import annotations
+import math
 import os
 
 from PySide6.QtCore import (
     Qt, Signal, QSize, QRect, QRectF, QPropertyAnimation, QEasingCurve, Property,
-    QTimer, QPoint, QPointF,
+    QTimer, QPoint, QPointF, QEvent,
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
@@ -38,8 +39,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
-    QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QPushButton,
-    QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
+    QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QProgressBar,
+    QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import theme
@@ -500,21 +501,15 @@ class IconPad(QLabel):
 
 class Avatar(QLabel):
     """Circular initial. The rail, the profile row and every register line use
-    the same one so a customer reads the same in all three.
-
-    With no `hue` it is a soft grey disc with dark lettering -- a solid black
-    disc on the rail and on every register line was far louder than the name
-    beside it. A caller that passes a `hue` still gets a solid disc with a
-    white letter."""
+    the same one so a customer reads the same in all three."""
 
     def __init__(self, name: str, size: int = 28, hue: str = None, parent=None):
         super().__init__((name or "?").strip()[:1].upper() or "?", parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignCenter)
-        fill, ink = (hue, "#ffffff") if hue else (theme.NEUTRAL[200], theme.NEUTRAL[700])
         self.setStyleSheet(
-            f"background: {fill}; color: {ink};"
+            f"background: {hue or theme.ACCENT}; color: #ffffff;"
             f" border-radius: {size // 2}px;"
             f" font-family: '{theme.FONT_HEADING}'; font-weight: 700;"
             f" font-size: {max(10, int(size * 0.42))}px;")
@@ -794,17 +789,19 @@ class ToolChip(QAbstractButton):
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = self.rect()
         if not self.isEnabled():
-            # A chip on a dropped step keeps its shape but stops competing —
-            # painted state, so QSS :disabled can't reach it.
             painter.setOpacity(0.4)
+            fill_color = theme.NEUTRAL[200]
+            text_color = theme.NEUTRAL[600]
+            chev_color = theme.NEUTRAL[400]
+        else:
+            hovered = self.underMouse()
+            fill_color = "#27272a" if hovered else "#18181b"
+            text_color = "#ffffff"
+            chev_color = "#a1a1aa"
 
-        # The chip is a soft well now rather than an outlined box: the plan
-        # rows it sits on are already white cards, so a second hairline inside
-        # one only added noise. Hover lifts the fill instead of the border.
-        hovered = self.underMouse()
-        painter.setPen(QPen(theme.c(theme.HAIRLINE), 1))
-        painter.setBrush(theme.c(theme.NEUTRAL[200] if hovered else theme.NEUTRAL[100]))
-        painter.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), theme.R_CONTROL,
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.c(fill_color))
+        painter.drawRoundedRect(QRectF(rect), theme.R_CONTROL,
                                 theme.R_CONTROL)
 
         badge = QRectF(self._PAD_L, (rect.height() - self.BADGE) / 2,
@@ -816,14 +813,14 @@ class ToolChip(QAbstractButton):
         painter.drawText(badge, Qt.AlignCenter,
                          theme.badge_initial(self._current))
 
-        painter.setPen(theme.c(theme.TEXT))
+        painter.setPen(theme.c(text_color))
         painter.setFont(self._font)
         text_x = int(badge.right()) + self._GAP
         painter.drawText(QRect(text_x, 0, rect.width() - text_x - self._PAD_R - 15,
                                rect.height()),
                          Qt.AlignVCenter | Qt.AlignLeft, self._current)
 
-        chevron = icons.pixmap("chevron-down", 15, theme.NEUTRAL[500])
+        chevron = icons.pixmap("chevron-down", 15, chev_color)
         painter.drawPixmap(rect.width() - self._PAD_R - 15,
                            (rect.height() - 15) // 2, chevron)
 
@@ -844,7 +841,7 @@ class ToolChip(QAbstractButton):
 # as plain hairline boxes.
 _VARIANTS = {
     "primary": "primaryBtn",        # solid accent — exactly one per surface
-    "secondary": "",                # outlined neutral — the default, the workhorse
+    "secondary": "secondaryBtn",    # outlined neutral — the default, the workhorse
     "tertiary": "ghostBtn",         # text/ghost — in-place actions
     "destructive": "dangerBtn",     # outlined red — irreversible only
     "link": "linkBtn",              # tertiary, left-aligned, for a column of them
@@ -2005,3 +2002,329 @@ class CardGrid(QWidget):
             self._cols = cols
         finally:
             self._laying = False
+
+
+# ── Toast notifications ──────────────────────────────────────────────────
+class Toast(QFrame):
+    """A floating, high-contrast notification pill/card that floats above a window.
+
+    Dismisses automatically after `duration` ms (default 4000ms), or when the user
+    clicks the close button or the toast itself.
+    """
+
+    def __init__(self, parent: QWidget | None, title: str, body: str = "",
+                 tone: str = "ok", duration: int = 4000, position: str = "bottom",
+                 on_click=None):
+        top = parent.window() if (parent and hasattr(parent, "window")) else parent
+        self._top = top
+        self._position = position
+        self._on_click = on_click
+        super().__init__(top)
+        self.setObjectName("toastNotification")
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(28)
+        shadow.setColor(QColor(0, 0, 0, 85))
+        shadow.setOffset(0, 6)
+        self.setGraphicsEffect(shadow)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(18, 12, 16, 12)
+        layout.setSpacing(14)
+
+        # Icon badge
+        badge = QLabel()
+        badge.setFixedSize(28, 28)
+        badge.setAlignment(Qt.AlignCenter)
+        if tone == "ok":
+            badge.setStyleSheet("background: #186b53; border-radius: 14px;")
+            badge.setPixmap(icons.pixmap("check", 15, "#ffffff", stroke=2.0))
+        elif tone in ("err", "error"):
+            badge.setStyleSheet("background: #8a2f2f; border-radius: 14px;")
+            badge.setPixmap(icons.pixmap("x", 13, "#ffffff", stroke=2.0))
+        elif tone in ("warn", "warning"):
+            badge.setStyleSheet("background: #755a14; border-radius: 14px;")
+            badge.setPixmap(icons.pixmap("alert", 15, "#ffffff", stroke=2.0))
+        else:
+            badge.setStyleSheet("background: #27272a; border-radius: 14px;")
+            badge.setPixmap(icons.pixmap("help", 15, "#ffffff", stroke=2.0))
+        layout.addWidget(badge)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setStyleSheet(
+            "color: #ffffff; font-family: 'Barlow', 'Inter', sans-serif; "
+            "font-size: 14px; font-weight: 600; background: transparent;")
+        text_col.addWidget(self.title_lbl)
+
+        if body:
+            self.body_lbl = QLabel(body)
+            self.body_lbl.setStyleSheet(
+                "color: #a1a1aa; font-family: 'Barlow', 'Inter', sans-serif; "
+                "font-size: 12px; font-weight: 400; background: transparent;")
+            text_col.addWidget(self.body_lbl)
+
+        layout.addLayout(text_col, stretch=1)
+
+        close_btn = QPushButton()
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setFixedSize(24, 24)
+        icons.button_icon(close_btn, "x", 12, "#71717a")
+        close_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; border-radius: 12px; min-height: 24px; min-width: 24px; padding: 0; } "
+            "QPushButton:hover { background: rgba(255, 255, 255, 0.15); }")
+        close_btn.clicked.connect(self.dismiss)
+        layout.addWidget(close_btn)
+
+        self.setStyleSheet(
+            "QFrame#toastNotification { "
+            "background: #09090b; "
+            "border: 1px solid rgba(255, 255, 255, 0.16); "
+            "border-radius: 12px; "
+            "}")
+
+        self.setMinimumWidth(380)
+        self.adjustSize()
+        self._reposition(animate=False)
+
+        if self._top:
+            self._top.installEventFilter(self)
+
+        if duration > 0:
+            QTimer.singleShot(duration, self.dismiss)
+
+    def mousePressEvent(self, event):
+        if self._on_click:
+            self._on_click()
+        super().mousePressEvent(event)
+
+    def closeEvent(self, event):
+        top = getattr(self, "_top", None)
+        if top:
+            try:
+                top.removeEventFilter(self)
+            except Exception:
+                pass
+        super().closeEvent(event)
+
+    def eventFilter(self, watched, event):
+        top = getattr(self, "_top", None)
+        if top and watched == top and event.type() in (QEvent.Resize, QEvent.Move):
+            self._reposition(animate=False)
+        return super().eventFilter(watched, event)
+
+    def _reposition(self, animate: bool = True):
+        top = getattr(self, "_top", None)
+        if not top:
+            return
+        top_w = top.width()
+        top_h = top.height()
+        w = max(self.width(), self.sizeHint().width(), 380)
+        h = max(self.height(), self.sizeHint().height())
+        x = (top_w - w) // 2
+        if self._position == "top":
+            y = 28
+        else:
+            y = top_h - h - 32
+
+        if animate:
+            start_y = y + 16 if self._position == "bottom" else y - 16
+            self.setGeometry(x, start_y, w, h)
+            self._anim = QPropertyAnimation(self, b"pos", self)
+            self._anim.setDuration(220)
+            self._anim.setStartValue(QPoint(x, start_y))
+            self._anim.setEndValue(QPoint(x, y))
+            self._anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._anim.start()
+        else:
+            self.setGeometry(x, y, w, h)
+        self.raise_()
+
+    def dismiss(self):
+        try:
+            top = getattr(self, "_top", None)
+            if top:
+                try:
+                    top.removeEventFilter(self)
+                except Exception:
+                    pass
+            self._anim_out = QPropertyAnimation(self, b"pos", self)
+            self._anim_out.setDuration(160)
+            self._anim_out.setStartValue(self.pos())
+            out_y = self.y() + 16 if self._position == "bottom" else self.y() - 16
+            self._anim_out.setEndValue(QPoint(self.x(), out_y))
+            self._anim_out.setEasingCurve(QEasingCurve.InCubic)
+            self._anim_out.finished.connect(self.close)
+            self._anim_out.start()
+        except Exception:
+            self.close()
+
+
+def show_toast(parent: QWidget | None, title: str, body: str = "",
+               tone: str = "ok", duration: int = 4000, position: str = "bottom",
+               on_click=None) -> Toast:
+    """Show a modern, floating toast notification on `parent` (or active window)."""
+    top = None
+    if parent is not None:
+        top = parent.window() if hasattr(parent, "window") else parent
+    if top is None:
+        from PySide6.QtWidgets import QApplication
+        top = QApplication.activeWindow()
+    toast = Toast(top, title=title, body=body, tone=tone, duration=duration,
+                  position=position, on_click=on_click)
+    toast.show()
+    return toast
+
+
+# ── Animated Wave Dots Loader ─────────────────────────────────────────────
+class WaveDots(QWidget):
+    """Animated waving dots loader matching Framer Motion's WaveDots.
+
+    5 circular dots that oscillate up and down with a sinusoidal wave and
+    phase offset (delay = i * 0.15s, cycle = 1.0s, amplitude = ±3.5px).
+    Automatically pauses animation when hidden to consume 0% idle CPU.
+    """
+
+    def __init__(self, parent: QWidget | None = None, dot_size: int = 6,
+                 dot_count: int = 5, spacing: int = 5, color: str | None = None):
+        super().__init__(parent)
+        self._dot_size = dot_size
+        self._dot_count = dot_count
+        self._spacing = spacing
+        self._custom_color = color
+        self._amplitude = 3.5
+        self._duration = 1.0
+        self._delay_step = 0.15
+        self._time = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)  # ~60 FPS
+        self._timer.timeout.connect(self._on_tick)
+
+        total_w = dot_count * dot_size + (dot_count - 1) * spacing
+        total_h = 22
+        self.setFixedSize(total_w, total_h)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+    def sizeHint(self) -> QSize:
+        total_w = self._dot_count * self._dot_size + (self._dot_count - 1) * self._spacing
+        return QSize(total_w, 22)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._time = 0.0
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._timer.isActive():
+            self._timer.stop()
+
+    def start(self):
+        self._time = 0.0
+        if not self._timer.isActive():
+            self._timer.start()
+        self.show()
+
+    def stop(self):
+        if self._timer.isActive():
+            self._timer.stop()
+        self.hide()
+
+    def _on_tick(self):
+        self._time += 0.016
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+
+        c = QColor(self._custom_color) if self._custom_color else theme.c(theme.NEUTRAL[800])
+        painter.setBrush(QBrush(c))
+
+        center_y = self.height() / 2.0
+        r = self._dot_size / 2.0
+
+        for i in range(self._dot_count):
+            t = (self._time - i * self._delay_step) % self._duration
+            phase = (2.0 * math.pi * t) / self._duration
+            y_off = -self._amplitude * math.cos(phase)
+            cx = i * (self._dot_size + self._spacing) + r
+            painter.drawEllipse(QRectF(cx - r, center_y + y_off - r, self._dot_size, self._dot_size))
+        painter.end()
+
+
+class WaveDotsProgress(QProgressBar):
+    """QProgressBar drop-in replacement that paints animated WaveDots.
+
+    Compatible with existing progress bar API (setVisible, isVisible, setRange,
+    setValue, etc.) while rendering a modern, sleek 5-dot wave animation
+    instead of an obsolete rectangular bar.
+    """
+
+    def __init__(self, parent: QWidget | None = None, dot_size: int = 6,
+                 dot_count: int = 5, spacing: int = 5, color: str | None = None):
+        super().__init__(parent)
+        self._dot_size = dot_size
+        self._dot_count = dot_count
+        self._spacing = spacing
+        self._custom_color = color
+        self._amplitude = 3.5
+        self._duration = 1.0
+        self._delay_step = 0.15
+        self._time = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._on_tick)
+
+        total_w = dot_count * dot_size + (dot_count - 1) * spacing
+        total_h = 22
+        self.setFixedSize(total_w, total_h)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setTextVisible(False)
+        self.setStyleSheet("background: transparent; border: none;")
+
+    def sizeHint(self) -> QSize:
+        total_w = self._dot_count * self._dot_size + (self._dot_count - 1) * self._spacing
+        return QSize(total_w, 22)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._time = 0.0
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._timer.isActive():
+            self._timer.stop()
+
+    def _on_tick(self):
+        self._time += 0.016
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+
+        c = QColor(self._custom_color) if self._custom_color else theme.c(theme.NEUTRAL[800])
+        painter.setBrush(QBrush(c))
+
+        center_y = self.height() / 2.0
+        r = self._dot_size / 2.0
+
+        for i in range(self._dot_count):
+            t = (self._time - i * self._delay_step) % self._duration
+            phase = (2.0 * math.pi * t) / self._duration
+            y_off = -self._amplitude * math.cos(phase)
+            cx = i * (self._dot_size + self._spacing) + r
+            painter.drawEllipse(QRectF(cx - r, center_y + y_off - r, self._dot_size, self._dot_size))
+        painter.end()
+
+

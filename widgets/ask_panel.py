@@ -29,7 +29,7 @@ from widgets.files_panel import kind_label, size_label
 
 
 def small_button(label: str, icon_name: str, tip: str = "") -> QPushButton:
-    btn = QPushButton(f" {label}")
+    btn = QPushButton(label)
     btn.setObjectName("smallBtn")
     btn.setCursor(Qt.PointingHandCursor)
     icons.button_icon(btn, icon_name, 15, theme.TEXT)
@@ -101,7 +101,7 @@ class AskPanel(QWidget):
         self.edit.setPlainText((existing + " " + value).strip())
 
     def set_recording(self, on: bool):
-        self.mic_btn.setText(" Stop" if on else " Speak")
+        self.mic_btn.setText("Stop" if on else "Speak")
 
     # ── files ───────────────────────────────────────────────────────────
     def _pick_file(self):

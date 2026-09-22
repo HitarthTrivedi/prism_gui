@@ -377,14 +377,12 @@ QToolTip {
     background: transparent;
 }
 
-/* The New-task button. A soft tint of the ink with a hairline edge, not a solid
-   black slab: it is still the strongest control on the rail, but no longer the
-   heaviest thing on the screen. The solid primary belongs inside a screen. */
+/* The New-task button */
 #railPrimary {
-    background: rgba(0, 0, 0, 0.055);
-    border: 1px solid rgba(0, 0, 0, 0.10);
+    background: #09090b;
+    border: 1px solid #09090b;
     border-radius: 8px;
-    color: #09090b;
+    color: #ffffff;
     font-family: "Barlow Condensed";
     font-weight: 600;
     font-size: 17px;
@@ -392,8 +390,8 @@ QToolTip {
     text-align: center;
 }
 
-#railPrimary:hover { background: rgba(0, 0, 0, 0.085); border-color: rgba(0, 0, 0, 0.16); }
-#railPrimary:pressed { background: rgba(0, 0, 0, 0.12); }
+#railPrimary:hover { background: #27272a; border-color: #27272a; }
+#railPrimary:pressed { background: #000000; }
 #railPrimary:focus { border-color: #09090b; }
 #railPrimary:disabled {
     background: rgba(0, 0, 0, 0.05);
@@ -560,7 +558,7 @@ QToolTip {
    hairline boxes. Every one of those names still works; each now resolves to
    one of the four below, plus a size or shape modifier.
 
-     PRIMARY      solid accent      #primaryBtn #primary   (#railPrimary is the rail's soft tint)
+     PRIMARY      solid accent      #primaryBtn #primary #railPrimary
                   one per surface
      SECONDARY    outlined neutral  the bare QPushButton default, #smallBtn,
                   the workhorse     #iconBtn #micBtn #chipBtn #secondaryBtn
@@ -754,6 +752,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 5px 11px;
     border-radius: 6px;
 }
+
 
 /* SECONDARY, square, glyph only. 34px keeps it past the 28px minimum target
    with room for the ring. */
@@ -1389,48 +1388,116 @@ QTabBar::tab:disabled {
 
 /* ── tables ──────────────────────────────────────────────────────────── */
 QTableWidget, QTableView {
-    background: rgba(255, 255, 255, 0.06);
-    alternate-background-color: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    gridline-color: rgba(255, 255, 255, 0.08);
-    selection-background-color: rgba(255, 255, 255, 0.20);
-    selection-color: #ffffff;
-    color: #ffffff;
+    background: #ffffff;
+    alternate-background-color: #f9f9fb;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    border-radius: 8px;
+    gridline-color: rgba(0, 0, 0, 0.05);
+    selection-background-color: rgba(0, 0, 0, 0.06);
+    selection-color: #09090b;
+    color: #09090b;
+    outline: none;
 }
 
 QTableWidget::item, QTableView::item {
-    padding: 7px 9px;
+    padding: 7px 10px;
     border: none;
-    color: #ffffff;
+    color: #09090b;
+    outline: none;
+}
+
+QTableWidget::item:selected, QTableView::item:selected {
+    background: rgba(0, 0, 0, 0.06);
+    color: #09090b;
+    outline: none;
+}
+
+QTableWidget::item:focus, QTableView::item:focus {
+    background: rgba(0, 0, 0, 0.06);
+    color: #09090b;
+    outline: none;
+    border: none;
 }
 
 QHeaderView {
     background: transparent;
+    border: none;
+    outline: none;
 }
 
 QHeaderView::section {
-    background: rgba(255, 255, 255, 0.10);
+    background: #f4f4f5;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-    padding: 9px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+    padding: 8px 10px;
     font-size: 12px;
     font-weight: 600;
-    color: #e2e8f0;
+    color: #52525b;
 }
 
 QTableCornerButton::section {
-    background: transparent;
+    background: #f4f4f5;
     border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+/* ── Email compose: CSV recipients table ─────────────────────────────── */
+QTableWidget#emailRecipientsTable {
+    background: #ffffff;
+    alternate-background-color: #fafafa;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    gridline-color: transparent;
+    selection-background-color: rgba(0, 0, 0, 0.06);
+    selection-color: #09090b;
+    color: #09090b;
+    outline: none;
+}
+
+QTableWidget#emailRecipientsTable::item {
+    padding: 7px 12px;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    color: #09090b;
+    font-size: 13px;
+    outline: none;
+}
+
+QTableWidget#emailRecipientsTable::item:selected {
+    background: rgba(0, 0, 0, 0.06);
+    color: #09090b;
+    outline: none;
+}
+
+QTableWidget#emailRecipientsTable::item:focus {
+    outline: none;
+    border: none;
+}
+
+QTableWidget#emailRecipientsTable QHeaderView::section {
+    background: #f4f4f5;
+    border: none;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #52525b;
 }
 
 /* ── the rest of what Qt can paint ───────────────────────────────────── */
 QTextBrowser {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 8px;
     padding: 10px 12px;
-    color: #ffffff;
+    color: #09090b;
+}
+
+/* ── Toast notifications ────────────────────────────────────────────────── */
+QFrame#toastNotification {
+    background: #09090b;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 12px;
 }
 
 QRadioButton {
@@ -1772,18 +1839,18 @@ QTableView#registerTable QHeaderView::section:horizontal:hover {
    bar uses a deliberately chunky purple treatment for media work; this thin,
    monochrome sweep is quieter and reads cleanly at the top of a register. */
 #inquiryWorkspace QProgressBar#inquiryProgress {
-    background: rgba(0, 0, 0, 0.10);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 4px;
-    min-height: 8px;
-    max-height: 8px;
+    background: transparent;
+    border: none;
+    min-height: 22px;
+    max-height: 22px;
+    min-width: 50px;
+    max-width: 50px;
     padding: 0;
 }
 
 #inquiryWorkspace QProgressBar#inquiryProgress::chunk {
-    background: #27272a;
-    border-radius: 3px;
-    width: 1px;
+    background: transparent;
+    width: 0px;
     margin: 0;
 }
 

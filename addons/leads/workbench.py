@@ -340,7 +340,7 @@ class LeadsWorkbench(QWidget):
                                     icon_name="file", on_click=self._export)
         self._export_btn.setEnabled(False)
         self._send_btn = C.button(i18n.t("Send all"), "primary",
-                                  icon_name="mail", on_click=self._on_send)
+                                  on_click=self._on_send)
         self._send_btn.setEnabled(False)
 
     def action_buttons(self) -> list:

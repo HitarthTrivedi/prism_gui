@@ -139,7 +139,7 @@ class InquiryPanel(QWidget):
 
         self._header.add_action(C.button(i18n.t("Edit setup"), "secondary",
                                          on_click=self.set_up.emit))
-        door = C.button(i18n.t(OPEN_LABEL), "primary", icon_name="inbox",
+        door = C.button(i18n.t(OPEN_LABEL), "primary",
                         on_click=lambda: self.open_dialog.emit(0))
         door.setToolTip(i18n.t(
             "Opens the working window — check the mail, quote, chase, and "

@@ -50,7 +50,7 @@ class EmailPanel(QWidget):
         self._actions = [
             C.button(i18n.t("Change account"), "secondary", icon_name="key",
                      on_click=self.change_account.emit),
-            C.button(i18n.t(NEW_LABEL), "primary", icon_name="pencil",
+            C.button(i18n.t(NEW_LABEL), "primary",
                      on_click=self.opened.emit),
         ]
         root = QVBoxLayout(self)

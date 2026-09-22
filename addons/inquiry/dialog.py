@@ -935,24 +935,26 @@ class InquiryDialog(QWidget):
         # action row, where "Writing it in your browser — this takes a minute
         # or two…" pushed "Check my mail now" off the right edge.
         bar = QWidget()
+        bar.setObjectName("inquiryStatusBar")
         bar_row = QHBoxLayout(bar)
         bar_row.setContentsMargins(0, 0, 0, 0)
-        bar_row.setSpacing(theme.SPACE_3)
-        self.status = _StatusLine("")
-        self.status.setObjectName("meta")
-        self.status.setWordWrap(True)
-        bar_row.addWidget(self.status, stretch=1)
-        self.progress = QProgressBar()
+        bar_row.setSpacing(theme.SPACE_2)
+
+        self.progress = C.WaveDotsProgress(bar)
         self.progress.setObjectName("inquiryProgress")
         self.progress.setRange(0, 0)   # indeterminate until we know count
         self.progress.setAccessibleName(i18n.t("Mailbox check progress"))
         self.progress.setAccessibleDescription(i18n.t(
             "Shows that Prism is checking the configured inboxes."))
-        self.progress.setTextVisible(False)
-        self.progress.setFixedWidth(164)
-        self.progress.setFixedHeight(8)
         self.progress.setVisible(False)
         bar_row.addWidget(self.progress)
+
+        self.status = _StatusLine("")
+        self.status.setObjectName("meta")
+        self.status.setWordWrap(True)
+        bar_row.addWidget(self.status)
+        bar_row.addStretch(1)
+
         self.body.addWidget(bar)
 
         self.tabs = _Tabs()

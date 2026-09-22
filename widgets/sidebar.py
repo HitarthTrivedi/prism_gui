@@ -481,12 +481,12 @@ class Sidebar(QFrame):
                 border: none;
             }
             QScrollBar::handle:vertical {
-                background: rgba(255, 255, 255, 0.20);
+                background: rgba(0, 0, 0, 0.20);
                 min-height: 20px;
                 border-radius: 2px;
             }
             QScrollBar::handle:vertical:hover {
-                background: rgba(255, 255, 255, 0.40);
+                background: rgba(0, 0, 0, 0.40);
             }
             QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical {
                 height: 0px;
@@ -535,14 +535,14 @@ class Sidebar(QFrame):
 
         # The rail's one emphasised control. A soft tinted button rather than a
         # solid black one: the black slab was the heaviest thing on the screen.
-        self.new_task_btn = QPushButton(f"  {i18n.t('New task')}")
+        self.new_task_btn = QPushButton(i18n.t('New task'))
         self.new_task_btn.setObjectName("railPrimary")
         self.new_task_btn.setCursor(Qt.PointingHandCursor)
         self.new_task_btn.setFocusPolicy(Qt.StrongFocus)
         self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, theme.NEUTRAL[800])
+        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
         elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
@@ -790,8 +790,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet(
-            "background: rgba(0, 0, 0, 0.32); border-radius: 1px;")
+        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -1126,7 +1125,7 @@ class Sidebar(QFrame):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(theme.SPACE_1 // 2)
 
-        toggle = QPushButton(f"  {i18n.t('More settings')}")
+        toggle = QPushButton(i18n.t('More settings'))
         toggle.setObjectName("navSub")
         toggle.setCursor(Qt.PointingHandCursor)
         toggle.setFlat(True)
@@ -1231,13 +1230,11 @@ class Sidebar(QFrame):
         # so go through global coordinates instead (see 4f65dfd).
         origin = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
         top = origin.y()
-        height = max(12, min(16, widget.height() - 16))
-        # A short, thin, soft-grey marker inside the row's own highlight, near
-        # its left edge -- not a black bar on the panel's edge, a dozen pixels
-        # from the row it is marking.
-        self._pip.setGeometry(origin.x() + 3,
+        height = max(14, min(22, widget.height() - 10))
+        c = getattr(self, "_collapsed", False)
+        self._pip.setGeometry(2 if c else 0,
                               top + (widget.height() - height) // 2,
-                              2, height)
+                              3 if c else 4, height)
         self._pip.show()
         self._pip.raise_()
 
@@ -1394,15 +1391,15 @@ class Sidebar(QFrame):
             self.new_task_btn.setText("")
             self.new_task_btn.setFixedSize(48, 38)
             self.new_task_btn.setToolTip(i18n.t("New task"))
-            icons.button_icon(self.new_task_btn, "plus", 16, theme.NEUTRAL[800])
+            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
         else:
-            self.new_task_btn.setText(f"  {i18n.t('New task')}")
+            self.new_task_btn.setText(i18n.t('New task'))
             self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
             self.new_task_btn.setMaximumWidth(16777215)
             self.new_task_btn.setMinimumWidth(0)
             self.new_task_btn.setMaximumHeight(16777215)
             self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-            icons.button_icon(self.new_task_btn, "plus", 15, theme.NEUTRAL[800])
+            icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
 
         # Primary nav buttons
         for key, label, icon_name, tip in PRIMARY:

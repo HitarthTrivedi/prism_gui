@@ -641,7 +641,6 @@ class AddonFrontDoor(Page):
     def header_actions(self):
         return [
             C.button(i18n.t(self.ACTION), "primary",
-                     icon_name=self.ACTION_ICON,
                      on_click=self.opened.emit),
         ]
 

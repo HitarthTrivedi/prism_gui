@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDialog,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
-    QPushButton, QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QSpinBox, QStyle, QStyledItemDelegate,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -456,6 +456,14 @@ class EmailSetupDialog(PrismDialog):
         super().closeEvent(event)
 
 
+class _NoFocusDelegate(QStyledItemDelegate):
+    """Suppresses cell focus outline rectangles while keeping clean row selection."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        option.state &= ~QStyle.State_HasFocus
+
+
 class EmailComposeDialog(PrismDialog):
     """To, Subject, Message — then Send. Everything else is optional and
     says so.
@@ -550,21 +558,30 @@ class EmailComposeDialog(PrismDialog):
         list_col.setContentsMargins(0, 0, 0, 0)
         list_col.setSpacing(theme.SPACE_2)
         self.list_table = QTableWidget(0, 2)
+        self.list_table.setObjectName("emailRecipientsTable")
         self.list_table.setHorizontalHeaderLabels([i18n.t("Name"), i18n.t("Email")])
         self.list_table.verticalHeader().setVisible(False)
+        self.list_table.verticalHeader().setDefaultSectionSize(30)
         self.list_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.list_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.list_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_table.setAlternatingRowColors(True)
+        self.list_table.setShowGrid(False)
+        self.list_table.setFocusPolicy(Qt.NoFocus)
+        self.list_table.setItemDelegate(_NoFocusDelegate(self.list_table))
+        self.list_table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.list_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         head = self.list_table.horizontalHeader()
+        head.setHighlightSections(False)
+        head.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         head.setSectionResizeMode(1, QHeaderView.Stretch)
         # Four rows visible, always; more scroll. A table that shows only
         # its header is a table nobody can read.
         row_h = self.list_table.verticalHeader().defaultSectionSize()
         head_h = head.sizeHint().height()
-        self.list_table.setMinimumHeight(head_h + 4 * row_h + 4)
-        self.list_table.setMaximumHeight(head_h + 6 * row_h + 4)
+        self.list_table.setMinimumHeight(head_h + 4 * row_h + 6)
+        self.list_table.setMaximumHeight(head_h + 6 * row_h + 6)
         list_col.addWidget(self.list_table)
         list_btns = QHBoxLayout()
         list_btns.setContentsMargins(0, 0, 0, 0)
@@ -1420,27 +1437,33 @@ class EmailComposeDialog(PrismDialog):
                 path=sent_log.path(self.cfg), error=e))
         self._save_run(sent, failed)
         if len(recipients) == 1 and sent and not failed:
-            msg = i18n.t("Sent to {who}.").format(who=sent[0])
+            title = i18n.t("Sent to {who}.").format(who=sent[0])
+            body = ""
         else:
-            msg = i18n.t("Sent to {n} of {total}.").format(
+            title = i18n.t("Sent to {n} of {total}.").format(
                 n=len(sent), total=len(recipients))
-        if stopped:
-            msg += "\n" + i18n.t("Stopped early — the rest were not attempted.")
-        if failed:
-            shown = "\n".join(f"· {email} — {err[:120]}" for email, err in failed[:8])
-            msg += "\n\n" + i18n.t("{n} failed:").format(n=len(failed)) + "\n" + shown
-            hint = CB.mailer.explain_error(
-                failed[0][1], self._sending_as.get("address", ""))
-            if hint != failed[0][1]:
-                msg += f"\n\n{hint}"
         held = list(self._held_back)
-        if held and not stopped:
-            msg += "\n\n" + i18n.t(
-                "{k} people are still in the list — they were held back by "
-                "the limit. Press Send again when you want them to go.").format(
-                k=len(held))
-        self.status.setText(msg.split("\n")[0])
-        QMessageBox.information(self, i18n.t("Email spamming"), msg)
+        if stopped:
+            body = i18n.t("Stopped early — the rest were not attempted.")
+        elif failed:
+            shown = ", ".join(email for email, _ in failed[:3])
+            body = i18n.t("{n} failed ({shown})").format(n=len(failed), shown=shown)
+        elif held and not stopped:
+            body = i18n.t("{k} people held back by limit.").format(k=len(held))
+        elif sent and not failed:
+            body = i18n.t("All messages delivered successfully.")
+
+        self.status.setText(title)
+
+        # Show modern, sleek floating Toast notification instead of tiny native modal box
+        tone = "warn" if (failed or stopped) else "ok"
+        parent_win = self.parent()
+
+        # Display toast directly on this dialog and on parent if available
+        C.show_toast(self, title=title, body=body, tone=tone, duration=3500)
+        if parent_win:
+            C.show_toast(parent_win, title=title, body=body, tone=tone, duration=4000)
+
         if held and not stopped:
             # What went is gone from the screen; what stayed is the list.
             self._held_back = []
@@ -1448,8 +1471,12 @@ class EmailComposeDialog(PrismDialog):
             self.status.setText(i18n.t(
                 "{k} still to send — held back by the limit.").format(k=len(held)))
             return
+
         if sent and not failed and not stopped:
-            self.accept()
+            self.send_btn.setEnabled(False)
+            self.send_btn.setText(i18n.t("Sent"))
+            # Close dialog cleanly after showing toast
+            QTimer.singleShot(1800, self.accept)
 
     def _on_send_failed(self, error: str):
         """Login or connection died — nothing went out at all."""

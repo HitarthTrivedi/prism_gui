@@ -11,7 +11,7 @@ Paths are lifted verbatim from the design file. `icon()` returns a QIcon and
 colour, both cached — these get requested once per repaint of a list row."""
 from __future__ import annotations
 from PySide6.QtCore import QByteArray, Qt, QSize, QRectF
-from PySide6.QtGui import QIcon, QPixmap, QPainter
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
@@ -101,6 +101,26 @@ _FILLED: dict[str, list[str]] = {
 _cache: dict[tuple, QPixmap] = {}
 
 
+def _svg_color_attrs(color: str, prop: str) -> str:
+    """Return the SVG colour attribute(s) for *prop* ('stroke' or 'fill').
+
+    QtSvg does not parse CSS3 rgba(…) syntax inside attribute values — the
+    renderer silently ignores the attribute and the icon becomes invisible.
+    When the colour carries an alpha channel we emit the separate
+    ``stroke-opacity`` / ``fill-opacity`` attribute instead, which QtSvg
+    does understand at every version.
+    """
+    qc = QColor(color)
+    if not qc.isValid():
+        # Fallback: let the theme string through and hope for the best.
+        return f'{prop}="{color}"'
+    if qc.alpha() < 255:
+        r, g, b = qc.red(), qc.green(), qc.blue()
+        a = f"{qc.alphaF():.3f}"
+        return f'{prop}="rgb({r},{g},{b})" {prop}-opacity="{a}"'
+    return f'{prop}="{color}"'
+
+
 def _svg(name: str, color: str, stroke: float) -> bytes:
     # Every multi-part icon (sliders, home, grid, clock, …) used to render as
     # N sibling <path> elements under one <svg>. On macOS's QtSvg, only one of
@@ -111,13 +131,15 @@ def _svg(name: str, color: str, stroke: float) -> bytes:
     # siblings for a renderer to selectively drop — same pixels everywhere.
     if name in _FILLED:
         d = " ".join(_FILLED[name])
-        body = f'<path d="{d}" fill="{color}" stroke="none" fill-rule="evenodd"/>'
+        fill_attr = _svg_color_attrs(color, "fill")
+        body = f'<path d="{d}" {fill_attr} stroke="none" fill-rule="evenodd"/>'
     else:
         paths = _STROKED.get(name)
         if paths is None:
             raise KeyError(f"unknown icon {name!r}")
         d = " ".join(paths)
-        body = (f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{stroke}" '
+        stroke_attr = _svg_color_attrs(color, "stroke")
+        body = (f'<path d="{d}" fill="none" {stroke_attr} stroke-width="{stroke}" '
                 f'stroke-linecap="round" stroke-linejoin="round"/>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
             f'width="24" height="24">{body}</svg>').encode()

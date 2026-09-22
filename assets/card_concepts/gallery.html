@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PRISM — Creative Card Layouts (Full Dashboard View)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #09090b; color: #f4f4f5; padding: 40px 20px; }
+    .container { max-width: 1280px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 48px; }
+    h1 { font-size: 34px; font-weight: 700; color: #ffffff; margin-bottom: 12px; letter-spacing: -0.5px; }
+    p.sub { color: #a1a1aa; font-size: 16px; max-width: 680px; margin: 0 auto; }
+    .badge { display: inline-block; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; color: #c084fc; }
+    
+    .section-title { font-size: 22px; font-weight: 700; color: #f3f4f6; margin: 48px 0 24px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.12); display: flex; align-items: center; gap: 10px; }
+    .cards-grid { display: grid; grid-template-columns: 1fr; gap: 48px; margin-bottom: 40px; }
+    
+    .card-item { background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 20px; overflow: hidden; box-shadow: 0 24px 48px rgba(0,0,0,0.6); }
+    .card-img-wrap { position: relative; width: 100%; background: #000; overflow: hidden; }
+    .card-img-wrap img { width: 100%; height: auto; display: block; transition: transform 0.3s ease; }
+    .card-img-wrap:hover img { transform: scale(1.008); }
+    
+    .card-info { padding: 28px 32px; background: rgba(24, 24, 27, 0.6); }
+    .card-info h3 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+    .card-info p { font-size: 15px; color: #a1a1aa; line-height: 1.6; margin-bottom: 18px; }
+    .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tag { font-size: 12px; font-weight: 500; padding: 4px 12px; background: rgba(255,255,255,0.08); border-radius: 999px; color: #e4e4e7; border: 1px solid rgba(255,255,255,0.08); }
+    .tag.highlight { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border-color: rgba(168, 85, 247, 0.4); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge">PRISM UI · Client-Aligned Designs</div>
+      <h1>Creative Non-Technical Card Layouts</h1>
+      <p class="sub">Fully aligned inside the real PRISM desktop dashboard, featuring the signature floating glass sidebar, dark purple wallpaper, and intuitive, outcome-focused cards for non-technical clients.</p>
+    </header>
+
+    <div class="section-title">✨ 3 New Creative Layouts Aligned Inside PRISM</div>
+    <div class="cards-grid">
+      
+      <!-- Design 1: Plan Deliverables -->
+      <div class="card-item">
+        <div class="card-img-wrap">
+          <img src="prism_creative_plan_1789846655131.jpg" alt="Visual Deliverables Plan">
+        </div>
+        <div class="card-info">
+          <h3>1. The Visual Deliverables Plan (Workbench View)</h3>
+          <p>Aligned right inside PRISM's '1 Describe → 2 Plan → 3 Run' workflow. Instead of technical prompt boxes, it presents 3 tactile deliverable cards: <strong>1. Market & Brand Angle</strong> (key insights & audience), <strong>2. Marketing Script</strong> (story excerpt + 'Punchy & Premium' tone pill), and <strong>3. Studio Product Renders</strong> (visual product angles) with PRISM's primary 'Start the work' button.</p>
+          <div class="tags">
+            <span class="tag highlight">Full PRISM Window Aligned</span>
+            <span class="tag">Zero Technical Code</span>
+            <span class="tag">Visual Outcomes</span>
+            <span class="tag">Breadcrumb Integrated</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Design 2: Storyboard Hub -->
+      <div class="card-item">
+        <div class="card-img-wrap">
+          <img src="prism_creative_storyboard_1789846596526.jpg" alt="Executive Creative Storyboard">
+        </div>
+        <div class="card-info">
+          <h3>2. The Executive Creative Storyboard</h3>
+          <p>For video & marketing clients: features a visual filmstrip storyboard with 3 rendered cinematic scene thumbnails, an interactive <strong>Voiceover & Audio</strong> waveform player card ('Aria, female, 30s'), and an <strong>Approved Deliverables</strong> card with 1-click downloads for 'Instagram Reel (9:16 MP4)' and '4K Poster (JPG)'.</p>
+          <div class="tags">
+            <span class="tag highlight">Full PRISM Window Aligned</span>
+            <span class="tag">Audio Waveform Player</span>
+            <span class="tag">Scene Storyboard</span>
+            <span class="tag">Instant File Download</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Design 3: Creative Bento Studio -->
+      <div class="card-item">
+        <div class="card-img-wrap">
+          <img src="prism_creative_bento_1789846625124.jpg" alt="Campaign Launch Studio">
+        </div>
+        <div class="card-info">
+          <h3>3. The Campaign Launch Studio (Bento Suite)</h3>
+          <p>A luxury marketing bento card layout: a prominent 3D metallic product showcase card with 'View High-Res Render', an interactive <strong>Headline & Hooks</strong> card where clients can click their favorite headline ('Option A: Pure Innovation'), and an <strong>Audience & Vibe</strong> card with glowing tags (#Luxury, #Sleek, #AppleStyle) and a primary 'Approve Campaign ✨' action.</p>
+          <div class="tags">
+            <span class="tag highlight">Full PRISM Window Aligned</span>
+            <span class="tag">3D Product Showcase</span>
+            <span class="tag">Selectable Headlines</span>
+            <span class="tag">Brand Vibe Pills</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

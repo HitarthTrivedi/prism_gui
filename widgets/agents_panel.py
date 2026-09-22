@@ -415,7 +415,7 @@ class PlanRow(QFrame):
         actions = QHBoxLayout()
         actions.setSpacing(theme.SPACE_2 - 2)
         actions.setContentsMargins(_LEAD, 0, 0, 0)
-        self.inspect_btn = QPushButton("  " + i18n.t("Prompt"))
+        self.inspect_btn = QPushButton(i18n.t("Prompt"))
         self.inspect_btn.setObjectName("ghostBtn")
         self.inspect_btn.setCheckable(True)
         self.inspect_btn.setCursor(Qt.PointingHandCursor)
@@ -427,7 +427,7 @@ class PlanRow(QFrame):
         self.inspect_btn.toggled.connect(self._on_inspect)
         actions.addWidget(self.inspect_btn)
 
-        self.dup_btn = QPushButton("  " + i18n.t("Duplicate"))
+        self.dup_btn = QPushButton(i18n.t("Duplicate"))
         self.dup_btn.setObjectName("ghostBtn")
         self.dup_btn.setCursor(Qt.PointingHandCursor)
         self.dup_btn.setMinimumHeight(C.MIN_TARGET)
@@ -439,7 +439,7 @@ class PlanRow(QFrame):
             lambda: self.duplicate_requested.emit(self))
         actions.addWidget(self.dup_btn)
 
-        self.del_btn = QPushButton("  " + i18n.t("Remove"))
+        self.del_btn = QPushButton(i18n.t("Remove"))
         self.del_btn.setObjectName("ghostBtn")
         self.del_btn.setCursor(Qt.PointingHandCursor)
         self.del_btn.setMinimumHeight(C.MIN_TARGET)
@@ -875,11 +875,10 @@ class AgentsPanel(QWidget):
         self._tail.setVisible(False)
         root.addWidget(self._tail, stretch=1)
 
-        self.run_btn = QPushButton(f"  {i18n.t('Start the work')}")
+        self.run_btn = QPushButton(i18n.t('Start the work'))
         self.run_btn.setObjectName("primaryBtn")
         self.run_btn.setCursor(Qt.PointingHandCursor)
         self.run_btn.setMinimumHeight(44)
-        icons.button_icon(self.run_btn, "play", 15, theme.CARD)
         self.run_btn.setEnabled(False)
         self.run_btn.setToolTip(i18n.t(
             "Make a plan first — this fills in once Prism picks the steps."))
@@ -896,7 +895,7 @@ class AgentsPanel(QWidget):
         cta.setContentsMargins(0, 0, 0, 0)
         cta.setSpacing(theme.SPACE_2 + 1)
         cta.addWidget(self.run_btn, stretch=1)
-        self.discard_btn = QPushButton(f" {i18n.t('Discard')}", self)
+        self.discard_btn = QPushButton(i18n.t('Discard'), self)
         self.discard_btn.setCursor(Qt.PointingHandCursor)
         self.discard_btn.setMinimumHeight(44)
         self.discard_btn.setToolTip(i18n.t(

@@ -164,6 +164,7 @@ class GerberDialog(PrismDialog):
         self.docs_label.setWordWrap(True)
         docs_l.addWidget(self.docs_label, stretch=1)
         docs_l.addWidget(self.button(i18n.t("Add files…"), "secondary",
+                                     icon_name="paperclip",
                                      small=True, on_click=self._pick_docs))
         self.docs_clear_btn = self.button(i18n.t("Clear"), "secondary",
                                           small=True,

@@ -37,7 +37,7 @@ class WhatsAppPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self.broadcast_btn = C.button(i18n.t("New broadcast"), "primary",
-                                      icon_name="plus", on_click=self.new_broadcast)
+                                      on_click=self.new_broadcast)
         self.header = C.PageHeader(
             i18n.t(self.TITLE), i18n.t(self.BLURB), [
                 C.button(i18n.t("AI tools"), "tertiary", icon_name="grid",

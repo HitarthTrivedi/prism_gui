@@ -266,7 +266,7 @@ class LicenseDialog(PrismDialog):
         # acts on rather than in the footer — the footer's job here is the way
         # OUT (Quit / Continue without it / Cancel), and putting the way in and
         # the way out shoulder to shoulder is how somebody quits by accident.
-        self.activate_btn = C.button(i18n.t(" Activate"), "primary", "check",
+        self.activate_btn = C.button(i18n.t("Activate"), "primary",
                                      on_click=self._activate)
         self.activate_btn.setDefault(True)
         self.activate_btn.setEnabled(False)
@@ -467,7 +467,7 @@ class LicenseDialog(PrismDialog):
 
     def _busy(self, on: bool):
         self.activate_btn.setEnabled(not on)
-        self.activate_btn.setText(" Checking…" if on else " Activate")
+        self.activate_btn.setText(i18n.t("Checking…") if on else i18n.t("Activate"))
         self.key_edit.setEnabled(not on)
 
     def _activate(self):

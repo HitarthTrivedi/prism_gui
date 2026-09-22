@@ -81,7 +81,7 @@ def examples() -> list[tuple[str, str]]:
 
 
 def _action(label: str, icon_name: str, tip: str = "") -> QPushButton:
-    btn = QPushButton(f" {label}")
+    btn = QPushButton(label)
     btn.setCursor(Qt.PointingHandCursor)
     btn.setMinimumHeight(C.MIN_TARGET + 4)
     icons.button_icon(btn, icon_name, 15, theme.NEUTRAL[600])
@@ -455,12 +455,10 @@ class InputPanel(Card):
         row.addWidget(self.add_task_btn)
         row.addStretch(1)
 
-        self.route_btn = QPushButton(f"{i18n.t('Make a plan')}  ")
+        self.route_btn = QPushButton(i18n.t("Make a plan"))
         self.route_btn.setObjectName("primaryBtn")
         self.route_btn.setCursor(Qt.PointingHandCursor)
         self.route_btn.setMinimumHeight(C.MIN_TARGET + 10)
-        self.route_btn.setLayoutDirection(Qt.RightToLeft)   # arrow trails
-        icons.button_icon(self.route_btn, "arrow-right", 15, theme.CARD)
         self.route_btn.clicked.connect(self._on_route_btn_clicked)
         row.addWidget(self.route_btn)
         self.content.addWidget(self.actions_row)
@@ -567,7 +565,7 @@ class InputPanel(Card):
             self.set_recent([])
 
     def _example(self, title: str, body: str) -> QPushButton:
-        btn = QPushButton(f"  {title}")
+        btn = QPushButton(title)
         btn.setObjectName("linkBtn")
         btn.setCursor(Qt.PointingHandCursor)
         btn.setMinimumHeight(C.MIN_TARGET)
@@ -836,7 +834,7 @@ class InputPanel(Card):
 
     def set_recording(self, on: bool):
         self.mic_btn.setChecked(on)
-        self.mic_btn.setText(f" {i18n.t('Stop') if on else i18n.t('Speak')}")
+        self.mic_btn.setText(i18n.t('Stop') if on else i18n.t('Speak'))
         icons.button_icon(self.mic_btn, "stop" if on else "mic", 15,
                           theme.ERR if on else theme.NEUTRAL[600])
         if on:
@@ -866,9 +864,7 @@ class InputPanel(Card):
     def set_busy(self, busy: bool):
         self._busy = busy
         self.route_btn.setText(
-            f"{i18n.t('Cancel') if busy else i18n.t('Make a plan')}  ")
-        icons.button_icon(self.route_btn, "stop" if busy else "arrow-right",
-                          15, theme.CARD)
+            i18n.t('Cancel') if busy else i18n.t('Make a plan'))
         if busy:
             self.set_state("routing")
         # Enabled either way: "routing" disables it in set_state (nothing to
