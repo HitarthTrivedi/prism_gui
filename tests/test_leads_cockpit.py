@@ -1368,7 +1368,7 @@ class ASheetImportThatFoundNobody(_Workbench):
         return RunResult(dossiers=[], total_in_sheet=0, signal_source="",
                          all_leads=[])
 
-    def test_a_sheet_with_no_name_column_says_so(self):
+    def test_a_sheet_with_no_contact_signal_says_so(self):
         import openpyxl
         path = os.path.join(self._tmp, "companies.xlsx")
         wb_file = openpyxl.Workbook()
@@ -1382,7 +1382,7 @@ class ASheetImportThatFoundNobody(_Workbench):
         wb._show_result(self._empty_run(), [])
 
         empty = wb._cockpit.leads._empty
-        self.assertIn("no name column", empty.title.text())
+        self.assertIn("no name, e-mail or LinkedIn column", empty.title.text())
         self.assertIn("name", empty.body.text().lower())
         self.assertTrue(empty.body.text().strip())
 
@@ -1402,16 +1402,17 @@ class ASheetImportThatFoundNobody(_Workbench):
         wb._show_result(self._empty_run(), [])
 
         empty = wb._cockpit.leads._empty
-        self.assertNotIn("no name column", empty.title.text())
+        self.assertNotIn("no name, e-mail or LinkedIn column", empty.title.text())
         self.assertEqual(empty.title.text(), self._WB.i18n.t("No leads yet"))
 
-    def test_icp_mode_is_never_told_it_needs_a_name_column(self):
+    def test_icp_mode_is_never_told_it_needs_a_contact_signal(self):
         # An empty Find-people run has nothing to do with a sheet at all;
         # the sheet-specific message must only ever fire in sheet mode.
         wb = self._WB.LeadsWorkbench({})
         wb._set_mode("icp")
         wb._show_result(self._empty_run(), [])
-        self.assertNotIn("no name column", wb._cockpit.leads._empty.title.text())
+        self.assertNotIn("no name, e-mail or LinkedIn column",
+                         wb._cockpit.leads._empty.title.text())
 
     def test_a_missing_or_unreadable_file_does_not_crash_the_message(self):
         # has_name_column() itself can raise (a deleted file, a locked one);

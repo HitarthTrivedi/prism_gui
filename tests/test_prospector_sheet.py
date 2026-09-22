@@ -149,5 +149,76 @@ class AnEmptyOrMissingFile(unittest.TestCase):
         self.assertTrue(SH.has_name_column(path2))
 
 
+class AContactsSheetDoesNotNeedANameColumn(unittest.TestCase):
+    """22-Sep-2026 follow-up: Apollo's own "Import contacts" accepts a row
+    with Company Name, Company Website, LinkedIn URL OR Contact Email —
+    any ONE, not specifically a person's name. leads_from_sheet() used to
+    require a Name column outright, which skipped a real, if thin,
+    contacts sheet (Company + Email, no separate Name column at all) the
+    same way it correctly skips a genuine company-research export.
+    has_contact_signal() is the broader header check that tells the two
+    apart; has_name_column() (above) stays as the narrower "does it have a
+    Name column specifically" building block, unchanged."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+
+    def test_company_and_email_with_no_name_column_is_a_real_contacts_sheet(self):
+        path = _xlsx(self._tmp, "email_only.xlsx", ["Company", "Email"],
+                    [["Acme Tooling", "owner@acmetooling.example"]])
+        self.assertTrue(SH.has_contact_signal(path))
+        self.assertFalse(SH.has_name_column(path))   # still true, narrower
+        leads = SH.load(path)
+        self.assertEqual(len(leads), 1)
+        self.assertEqual((leads[0].name, leads[0].email, leads[0].company),
+                         ("", "owner@acmetooling.example", "Acme Tooling"))
+
+    def test_company_and_linkedin_with_no_name_or_email_is_also_a_contact(self):
+        path = _xlsx(self._tmp, "linkedin_only.xlsx", ["Company", "LinkedIn URL"],
+                    [["Beta Corp", "linkedin.com/in/somebody"]])
+        self.assertTrue(SH.has_contact_signal(path))
+        leads = SH.load(path)
+        self.assertEqual(len(leads), 1)
+        self.assertEqual(leads[0].name, "")
+        self.assertEqual(leads[0].extra.get("linkedin"), "linkedin.com/in/somebody")
+
+    def test_company_and_website_alone_is_still_not_a_contact(self):
+        # This is the line Apollo itself draws between "Import contacts"
+        # and "Import accounts" — Company/Website alone describes an
+        # ACCOUNT, matching the company-only-sheet search path
+        # (addons.leads.workbench), not a person to reach directly.
+        path = _xlsx(self._tmp, "website_only.xlsx", ["Company", "Website"],
+                    [["Gamma Inc", "gamma.example.com"]])
+        self.assertFalse(SH.has_contact_signal(path))
+        self.assertEqual(SH.load(path), [])
+
+    def test_a_blank_row_is_still_skipped_not_a_false_contact(self):
+        path = _xlsx(self._tmp, "spacer.xlsx", ["Name", "Company", "Email"],
+                    [["Jane Doe", "Acme", "jane@acme.example"],
+                     ["", "", ""],
+                     ["John Smith", "Acme", ""]])
+        leads = SH.load(path)
+        self.assertEqual([l.name for l in leads], ["Jane Doe", "John Smith"])
+
+    def test_a_real_leads_sheet_has_a_contact_signal_too(self):
+        # The ordinary, already-working case: a Name column is itself a
+        # contact signal, same as before this change.
+        path = _xlsx(self._tmp, "leads.xlsx", ["Name", "Company", "Email"],
+                    [["Jane Doe", "Acme", "jane@acme.example"]])
+        self.assertTrue(SH.has_contact_signal(path))
+
+    def test_the_193_company_sheet_shape_still_has_no_contact_signal(self):
+        # The exact shape that started all of this — must still route to
+        # the company-only search path, not be swallowed as 0-value
+        # "contacts" with nothing to reach them by.
+        path = _xlsx(self._tmp, "research.xlsx",
+                    ["Company Name", "Industry Category", "City", "Website"],
+                    [["Acme Tooling", "Packaging Machinery", "Vadodara",
+                      "acme.example.com"]])
+        self.assertFalse(SH.has_contact_signal(path))
+        self.assertEqual(SH.load(path), [])
+        self.assertEqual(SH.load_companies(path), ["Acme Tooling"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -881,21 +881,27 @@ class LeadsWorkbench(QWidget):
             "limit": self._limit.value(), "verify_limit": self._verify_limit.value(),
             "claims_path": self._claims_path, "include_earlier": include_earlier,
         }
-        # A sheet with no name column (has_name_column() False) is a list of
-        # COMPANIES, not people -- a research export, not a contacts sheet.
-        # load() correctly reads zero people out of it (nothing to qualify),
-        # which used to be the whole story: the sheet loaded, found nobody,
-        # and looked exactly like the button had done nothing (see the
-        # 22-Sep-2026 report). Now that sheet becomes the search: its
+        # A sheet with no contact signal (has_contact_signal() False -- no
+        # name, email or LinkedIn column) is a list of COMPANIES, not
+        # people -- a research export, not a contacts sheet. load() reads
+        # zero people out of it (nothing identifies a person on any row),
+        # which used to be the whole story: the sheet loaded, found
+        # nobody, and looked exactly like the button had done nothing (see
+        # the 22-Sep-2026 report). Now that sheet becomes the search: its
         # companies go into the SAME "Current company" filter Find people
         # already has, MAX_FACET_VALUES at a time (that cap is a real
         # product limit -- unbounded companies is unbounded Exa queries --
-        # not something to route around), one press per batch.
+        # not something to route around), one press per batch. A sheet
+        # with Company + Email columns and no separate Name column (real,
+        # if thin, contacts -- Apollo's own "Import contacts" accepts
+        # exactly this) has a contact signal and goes through load()
+        # normally instead -- has_contact_signal is deliberately broader
+        # than "has a Name column" for this reason.
         from prospector import sheet as _sheet
         sheet_companies = False
         if self._mode != "icp" and self._path:
             try:
-                sheet_companies = not _sheet.has_name_column(self._path)
+                sheet_companies = not _sheet.has_contact_signal(self._path)
             except Exception:                                   # noqa: BLE001
                 pass    # unreadable -- fall through to the normal sheet
                         # path below, which will read it again and fail
@@ -1064,30 +1070,31 @@ class LeadsWorkbench(QWidget):
         elif (self._mode == "sheet" and self._path and not res.dossiers
               and not getattr(res, "all_leads", None)):
             # A totally empty result from a sheet import is ambiguous: an
-            # empty file and a real file with no name column both come back
-            # with nothing, and the default "No leads yet" tells the owner
-            # to do what they just did. Say which one actually happened —
-            # "the sheet importer found no name column" was a click that
-            # looked like it did nothing (see the 22-Sep-2026 report: a
-            # company-research export, no person/name column anywhere,
-            # read as zero people rather than a file that needed a name
-            # column it didn't have).
+            # empty file and a real file with no contact signal both come
+            # back with nothing, and the default "No leads yet" tells the
+            # owner to do what they just did. Say which one actually
+            # happened — this is mostly a defensive fallback now (a normal
+            # "Load the sheet" press on a company-only sheet runs the
+            # search in _on_prepare instead of reaching this with nothing),
+            # reached by an old saved session from before that existed, or
+            # has_contact_signal itself failing to read the file here too.
             from prospector import sheet as _sheet
             try:
-                has_name = _sheet.has_name_column(self._path)
+                has_contact = _sheet.has_contact_signal(self._path)
             except Exception:                               # noqa: BLE001
-                has_name = True    # unsure beats a wrong claim
-            if has_name:
+                has_contact = True    # unsure beats a wrong claim
+            if has_contact:
                 self._cockpit.set_empty_text()
             else:
                 self._cockpit.set_empty_text(
-                    i18n.t("This sheet has no name column Prism recognises"),
-                    i18n.t("Prism looks for a column with each person's name "
-                           "(Name, Full name, Contact…) and skips any row "
-                           "without one — every row in this sheet was "
-                           "skipped. If it only lists companies, it needs a "
-                           "“find people at these companies” step "
-                           "first, not Import a sheet."))
+                    i18n.t("This sheet has no name, e-mail or LinkedIn "
+                           "column Prism recognises"),
+                    i18n.t("Prism looks for a column that identifies a "
+                           "person — Name, Email or LinkedIn — and skips "
+                           "any row without one; every row in this sheet "
+                           "was skipped. If it only lists companies, "
+                           "press Load the sheet again to search for "
+                           "people at them."))
         else:
             self._cockpit.set_empty_text()
         self._cockpit.set_dossiers(res.dossiers, self._drafts,

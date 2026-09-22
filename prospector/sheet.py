@@ -43,6 +43,7 @@ _ALIASES = {
     "location": ("location", "city", "region", "country", "geo", "area"),
     "since": ("in role since", "role since", "since", "start date", "tenure"),
     "linkedin": ("linkedin", "linkedin url", "profile url", "linkedin profile", "profile"),
+    "website": ("website", "company website", "url", "domain", "site"),
 }
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
@@ -175,21 +176,27 @@ def leads_from_sheet(name, header, rows) -> list[Lead]:
         carry_company, carry_industry = company, (cell("industry") or carry_industry)
 
         person = cell("name")
-        if not person:
-            continue                     # a spacer / blank row, skip it
-
         email, extra_emails = _split_emails(cell("email"))
+        linkedin = cell("linkedin")
+        # Apollo's own rule for a row worth keeping: name, email or LinkedIn
+        # — any ONE identifies a person worth reaching. Company alone does
+        # not (that is what a company-only sheet's own search path is for,
+        # see has_contact_signal) — a spacer/blank row and a pure company-
+        # research row look identical here, and both get skipped the same
+        # way they always did.
+        if not (person or email or linkedin):
+            continue
         lead = Lead(
             name=person, title=cell("title"), company=company,
             email=email, phone=cell("phone"), industry=industry or name,
         )
         if extra_emails:
             lead.extra["other_emails"] = extra_emails
-        # Kept for the leads-sheet export (Location / In role since / LinkedIn);
-        # unmapped, they were being dropped, which is why the exported sheet
-        # looked thinner than the client's own.
-        for key in ("location", "since", "linkedin"):
-            v = cell(key)
+        # Kept for the leads-sheet export (Location / In role since / LinkedIn
+        # / Website); unmapped, they were being dropped, which is why the
+        # exported sheet looked thinner than the client's own.
+        for key, v in (("location", cell("location")), ("since", cell("since")),
+                      ("linkedin", linkedin), ("website", cell("website"))):
             if v:
                 lead.extra[key] = v
         out.append(lead)
@@ -233,9 +240,35 @@ def has_name_column(path: str, sheet: str | None = None) -> bool:
     return False
 
 
+def has_contact_signal(path: str, sheet: str | None = None) -> bool:
+    """Whether any sheet's header has a column that could identify or reach
+    a PERSON — name, email or LinkedIn (see _ALIASES) — the header check
+    alone, no row work. This is leads_from_sheet's own row-keeping rule
+    (name or email or LinkedIn) read off the header instead of the rows,
+    so it answers the same question load() answers by actually reading the
+    sheet, cheaply, before doing that work.
+
+    Broader than has_name_column on purpose, matching the same widened row
+    rule: a sheet with Company + Email columns and no separate Name column
+    at all is a real, if thin, contacts sheet — Apollo's own "Import
+    contacts" accepts exactly this shape — not a company-research export.
+    Company or Website alone is NOT enough here even though load_companies
+    can still read the companies out of such a sheet; that is what a
+    company-only sheet's own search path (addons.leads.workbench) is for."""
+    reader = _read_xlsx if path.lower().endswith((".xlsx", ".xlsm")) else _read_csv
+    want = _norm(sheet) if sheet else None
+    for sname, header, _rows in reader(path):
+        if want and want not in _norm(sname):
+            continue
+        cm = _column_map(header)
+        if "name" in cm or "email" in cm or "linkedin" in cm:
+            return True
+    return False
+
+
 def load_companies(path: str, sheet: str | None = None) -> list[str]:
     """Every distinct company named in the workbook — the read a sheet with
-    no name column (has_name_column() is False) falls back to.
+    no contact signal (has_contact_signal() is False) falls back to.
 
     Reuses leads_from_sheet's own forward-fill: a block-formatted export
     (LinkedIn Data.xlsx's shape, see the module docstring) leaves Company
