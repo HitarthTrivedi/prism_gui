@@ -42,12 +42,12 @@ import os
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QFontMetrics, QLinearGradient, QPainter,
+    QBrush, QColor, QCursor, QFontMetrics, QLinearGradient, QPainter,
     QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import dashboard_data as DATA
@@ -549,6 +549,7 @@ class HomePanel(QWidget):
     """
 
     describe_task = Signal()
+    task_submitted = Signal(str, list)  # (prompt_text, [file_or_folder_paths])
     open_addon = Signal(str)        # any command the window's router accepts
     open_history = Signal()
     open_run = Signal()
@@ -559,6 +560,7 @@ class HomePanel(QWidget):
         self.cfg = cfg
         self._active: list[dict] = []
         self._rows: list[dict] = []
+        self._home_attachments: list[str] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -844,9 +846,15 @@ class HomePanel(QWidget):
         self._prompt_input = QLineEdit()
         self._prompt_input.setObjectName("heroPromptInput")
         self._prompt_input.setPlaceholderText(i18n.t("What can I take care of today?"))
-        self._prompt_input.returnPressed.connect(self.describe_task.emit)
+        self._prompt_input.returnPressed.connect(self._submit_home_task)
         input_row.addWidget(self._prompt_input, stretch=1)
         col.addLayout(input_row)
+
+        # Attachment chips bar for files/folders attached right from the dashboard
+        self._home_attachments_bar = QWidget()
+        self._home_attachments_flow = C.FlowLayout(self._home_attachments_bar, margin=0, h_space=6, v_space=6)
+        self._home_attachments_bar.setVisible(False)
+        col.addWidget(self._home_attachments_bar)
 
         # Spacer to give the card visual height like a multi-line composer
         col.addStretch(1)
@@ -859,7 +867,7 @@ class HomePanel(QWidget):
         attach_btn.setObjectName("promptChipBtn")
         attach_btn.setIcon(icons.icon("paperclip", 13, theme.TEXT))
         attach_btn.setCursor(Qt.PointingHandCursor)
-        attach_btn.clicked.connect(self.describe_task.emit)
+        attach_btn.clicked.connect(self._on_attach_clicked)
         bar.addWidget(attach_btn)
 
         cmds_btn = QPushButton(f"  {i18n.t('Commands')}")
@@ -883,11 +891,108 @@ class HomePanel(QWidget):
         send_btn.setCursor(Qt.PointingHandCursor)
         send_btn.setIcon(icons.icon("arrow-right", 16, "#ffffff"))
         send_btn.setToolTip(i18n.t("Start task"))
-        send_btn.clicked.connect(self.describe_task.emit)
+        send_btn.clicked.connect(self._submit_home_task)
         bar.addWidget(send_btn)
 
         col.addLayout(bar)
         return card
+
+    def _on_attach_clicked(self):
+        menu = QMenu(self)
+        add_file = menu.addAction(i18n.t("Attach file(s)…"))
+        add_folder = menu.addAction(i18n.t("Attach folder…"))
+        chosen = menu.exec(QCursor.pos())
+        if chosen == add_file:
+            paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Attach file(s)"))
+            if paths:
+                for p in paths:
+                    if p not in self._home_attachments:
+                        self._home_attachments.append(p)
+                self._render_home_attachments()
+        elif chosen == add_folder:
+            path = QFileDialog.getExistingDirectory(self, i18n.t("Attach folder"))
+            if path:
+                if path not in self._home_attachments:
+                    self._home_attachments.append(path)
+                self._render_home_attachments()
+
+    def _render_home_attachments(self):
+        while self._home_attachments_flow.count():
+            item = self._home_attachments_flow.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for path in self._home_attachments:
+            is_dir = os.path.isdir(path)
+            chip = QFrame()
+            chip.setObjectName("attachmentChip")
+            chip.setStyleSheet("""
+                QFrame#attachmentChip {
+                    background-color: #ffffff;
+                    border: 1px solid rgba(0, 0, 0, 0.14);
+                    border-radius: 8px;
+                }
+                QFrame#attachmentChip:hover {
+                    border-color: rgba(0, 0, 0, 0.35);
+                    background-color: #fafafa;
+                }
+            """)
+            crow = QHBoxLayout(chip)
+            crow.setContentsMargins(8, 4, 8, 4)
+            crow.setSpacing(6)
+            icon = QLabel()
+            icon.setPixmap(icons.pixmap("folder" if is_dir else "file", 14, theme.ACCENT))
+            crow.addWidget(icon)
+            lbl = QLabel(os.path.basename(path.rstrip("/\\")) or path)
+            lbl.setStyleSheet("font-weight: 500; font-size: 12px; color: #18181b;")
+            crow.addWidget(lbl)
+            x_btn = QPushButton("×")
+            x_btn.setFixedSize(18, 18)
+            x_btn.setCursor(Qt.PointingHandCursor)
+            x_btn.setToolTip(i18n.t("Remove"))
+            x_btn.setStyleSheet("""
+                QPushButton {
+                    border: none;
+                    background: transparent;
+                    color: #71717a;
+                    font-size: 15px;
+                    font-weight: bold;
+                    padding: 0;
+                }
+                QPushButton:hover {
+                    color: #dc2626;
+                }
+            """)
+            x_btn.clicked.connect(lambda *_, p=path: self._remove_home_attachment(p))
+            crow.addWidget(x_btn)
+            self._home_attachments_flow.addWidget(chip)
+        self._home_attachments_bar.setVisible(bool(self._home_attachments))
+
+    def _remove_home_attachment(self, path: str):
+        if path in self._home_attachments:
+            self._home_attachments.remove(path)
+            self._render_home_attachments()
+
+    def _submit_home_task(self):
+        text = self._prompt_input.text().strip()
+        paths = list(self._home_attachments)
+        self._prompt_input.clear()
+        self._home_attachments.clear()
+        self._render_home_attachments()
+        self.task_submitted.emit(text, paths)
+        self.describe_task.emit()
+
+    def get_prompt_text(self) -> str:
+        return self._prompt_input.text().strip()
+
+    def clear_prompt(self):
+        self._prompt_input.clear()
+
+    def get_attachments(self) -> list[str]:
+        return list(self._home_attachments)
+
+    def clear_attachments(self):
+        self._home_attachments.clear()
+        self._render_home_attachments()
 
     def _try_chips_row(self) -> QHBoxLayout:
         row = QHBoxLayout()

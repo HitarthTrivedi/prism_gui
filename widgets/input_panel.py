@@ -193,16 +193,15 @@ class _AttachmentChip(QFrame):
         size = size_label(self.path)
 
         self.setObjectName("attachmentChip")
-        is_dark = theme.is_dark() if hasattr(theme, "is_dark") else True
-        bg = theme.NEUTRAL[800] if is_dark else theme.NEUTRAL[100]
         self.setStyleSheet(f"""
             QFrame#attachmentChip {{
-                background-color: {bg};
-                border: 1px solid {theme.BORDER};
+                background-color: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.14);
                 border-radius: 8px;
             }}
             QFrame#attachmentChip:hover {{
-                border-color: {theme.ACCENT};
+                border-color: rgba(0, 0, 0, 0.35);
+                background-color: #fafafa;
             }}
         """)
 
@@ -215,30 +214,30 @@ class _AttachmentChip(QFrame):
         row.addWidget(icon_lbl)
 
         name_lbl = QLabel(name)
-        name_lbl.setStyleSheet(f"font-weight: 500; font-size: 12px; color: {theme.TEXT};")
+        name_lbl.setStyleSheet("font-weight: 500; font-size: 12px; color: #18181b;")
         row.addWidget(name_lbl)
 
         if size:
             size_lbl = QLabel(f"· {size}")
-            size_lbl.setStyleSheet(f"font-size: 11px; color: {theme.NEUTRAL[500]};")
+            size_lbl.setStyleSheet("font-size: 11px; color: #71717a;")
             row.addWidget(size_lbl)
 
         close_btn = QPushButton("×")
         close_btn.setFixedSize(18, 18)
         close_btn.setCursor(Qt.PointingHandCursor)
         close_btn.setToolTip(i18n.t("Remove this file"))
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
+        close_btn.setStyleSheet("""
+            QPushButton {
                 border: none;
                 background: transparent;
-                color: {theme.NEUTRAL[500]};
-                font-size: 14px;
+                color: #71717a;
+                font-size: 15px;
                 font-weight: bold;
                 padding: 0;
-            }}
-            QPushButton:hover {{
-                color: {theme.ERR};
-            }}
+            }
+            QPushButton:hover {
+                color: #dc2626;
+            }
         """)
         close_btn.clicked.connect(lambda *_: self.removed.emit(self.path))
         row.addWidget(close_btn)
@@ -262,16 +261,15 @@ class _FolderAttachmentChip(QFrame):
         count = len(files)
 
         self.setObjectName("attachmentChip")
-        is_dark = theme.is_dark() if hasattr(theme, "is_dark") else True
-        bg = theme.NEUTRAL[800] if is_dark else theme.NEUTRAL[100]
         self.setStyleSheet(f"""
             QFrame#attachmentChip {{
-                background-color: {bg};
-                border: 1px solid {theme.BORDER};
+                background-color: #ffffff;
+                border: 1px solid rgba(0, 0, 0, 0.14);
                 border-radius: 8px;
             }}
             QFrame#attachmentChip:hover {{
-                border-color: {theme.ACCENT};
+                border-color: rgba(0, 0, 0, 0.35);
+                background-color: #fafafa;
             }}
         """)
 
@@ -284,29 +282,29 @@ class _FolderAttachmentChip(QFrame):
         row.addWidget(icon_lbl)
 
         name_lbl = QLabel(name)
-        name_lbl.setStyleSheet(f"font-weight: 500; font-size: 12px; color: {theme.TEXT};")
+        name_lbl.setStyleSheet("font-weight: 500; font-size: 12px; color: #18181b;")
         row.addWidget(name_lbl)
 
         count_lbl = QLabel(f"· {count} files" if count != 1 else "· 1 file")
-        count_lbl.setStyleSheet(f"font-size: 11px; color: {theme.NEUTRAL[500]};")
+        count_lbl.setStyleSheet("font-size: 11px; color: #71717a;")
         row.addWidget(count_lbl)
 
         close_btn = QPushButton("×")
         close_btn.setFixedSize(18, 18)
         close_btn.setCursor(Qt.PointingHandCursor)
         close_btn.setToolTip(i18n.t("Remove this folder"))
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
+        close_btn.setStyleSheet("""
+            QPushButton {
                 border: none;
                 background: transparent;
-                color: {theme.NEUTRAL[500]};
-                font-size: 14px;
+                color: #71717a;
+                font-size: 15px;
                 font-weight: bold;
                 padding: 0;
-            }}
-            QPushButton:hover {{
-                color: {theme.ERR};
-            }}
+            }
+            QPushButton:hover {
+                color: #dc2626;
+            }
         """)
         close_btn.clicked.connect(lambda *_: self.removed.emit(self.folder_path))
         row.addWidget(close_btn)

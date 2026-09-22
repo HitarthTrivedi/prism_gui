@@ -498,6 +498,7 @@ class MainWindow(QMainWindow):
 
         self.home_panel.describe_task.connect(
             lambda: self._handle_command("workbench"))
+        self.home_panel.task_submitted.connect(self._on_home_task_submitted)
         self.home_panel.open_addon.connect(self._handle_command)
         self.home_panel.open_history.connect(lambda: self._handle_command("runs"))
         self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
@@ -1258,10 +1259,27 @@ class MainWindow(QMainWindow):
         self.settings_panel.reject()
         self._handle_command(key)
 
+    def _on_home_task_submitted(self, text: str, paths: list):
+        for p in paths:
+            self._attach_path(p)
+        if text:
+            self.input_panel.set_query_text(text)
+        self._handle_command("workbench")
+
     def _handle_command(self, key: str):
         if key == "home":
             self._show_screen("home")
         elif key == "workbench":
+            # If Home had text or attachments, transfer them over
+            if hasattr(self, "home_panel"):
+                home_text = self.home_panel.get_prompt_text()
+                home_paths = self.home_panel.get_attachments()
+                for p in home_paths:
+                    self._attach_path(p)
+                self.home_panel.clear_attachments()
+                if home_text:
+                    self.input_panel.set_query_text(home_text)
+                    self.home_panel.clear_prompt()
             # "New task" clears the bench; Home → "Describe a task" lands on
             # whatever is already there, because someone who came back to
             # finish a sentence has not asked to lose it.
