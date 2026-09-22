@@ -324,7 +324,11 @@ class HistoryDialog(PrismDialog):
             return
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
         # A follow-up needs something to follow up: a run that saved stage
-        # output, links, or add-on details.
+        # output, links, or add-on details. NOT `record.get("query")` --
+        # that is the user's original request, present on every saved run
+        # including a planning failure that produced nothing at all, so it
+        # made this check true unconditionally and the button showed on
+        # every run in History (see tests/test_followup_session.py).
         has_output = bool(
             any(v for v in (record.get("responses") or {}).values())
             or record.get("links")
