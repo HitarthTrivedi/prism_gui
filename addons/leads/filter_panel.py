@@ -25,9 +25,9 @@ from __future__ import annotations
 from PySide6.QtCore import QAbstractAnimation, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOption, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractButton, QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOption,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 import i18n
@@ -532,13 +532,30 @@ class _ChipBox(QWidget):
 
 
 class _Input(QLineEdit):
-    """A facet's input. Escape empties it, the way every typeahead does."""
+    """A facet's input. Escape empties it, the way every typeahead does.
+
+    setMaxLength (120, _MAX_LEN) is right for typing one value, and wrong
+    for pasting a list -- 193 company names from a customer's own sheet
+    (the case this exists for) is thousands of characters, silently cut to
+    120 by Qt before any code here ever sees it. A paste that carries a
+    comma is a list, not a value someone is about to keep typing, so it
+    never touches the length-capped buffer at all: `pasted` carries the
+    whole clipboard text straight to the panel. A paste with no comma is
+    one value and behaves exactly as it always has."""
+    pasted = Signal(str)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape and self.text():
             self.clear()
             return
         super().keyPressEvent(event)
+
+    def paste(self):
+        text = QApplication.clipboard().text()
+        if "," in text:
+            self.pasted.emit(text)
+            return
+        super().paste()
 
 
 class _Row(QFrame):
@@ -959,6 +976,7 @@ class FilterPanel(QWidget):
             editor = _ChipEditor(i18n.t(_PLACEHOLDERS[name]), self)
             editor.input.textChanged.connect(lambda _t, n=name: self._refresh_rows(n))
             editor.input.returnPressed.connect(lambda n=name: self._enter(n))
+            editor.input.pasted.connect(lambda text, n=name: self._bulk_paste(n, text))
             for row in editor.rows:
                 row.includeRequested.connect(
                     lambda n=name, r=row: self._pick(n, r, "include"))
@@ -1057,6 +1075,11 @@ class FilterPanel(QWidget):
         if name in _PLACE_FACETS:
             self._enter_place(name, typed)
             return
+        if name not in CLOSED_FACETS and "," in typed:
+            # Typed (not pasted -- see _Input.pasted for that) but still a
+            # list: "Acme, Beta, Gamma" then Enter. Same rule either way.
+            if self._add_list(name, typed):
+                return
         if not editor.values:
             return
         if name not in CLOSED_FACETS:
@@ -1064,6 +1087,30 @@ class FilterPanel(QWidget):
             if typed.casefold() in {v.casefold() for v in facet.include + facet.exclude}:
                 return      # already chosen: never quietly add the next suggestion
         self._add(name, editor.values[0], "include")
+
+    def _bulk_paste(self, name: str, text: str) -> None:
+        """A paste that carried a comma, straight from the clipboard, never
+        length-capped by the input it landed in (see _Input.pasted)."""
+        if name in _PLACE_FACETS:
+            self._enter_place(name, text)
+            return
+        if name in CLOSED_FACETS:
+            return          # picked from a fixed list; a pasted list isn't
+        self._add_list(name, text)
+
+    def _add_list(self, name: str, text: str) -> bool:
+        """"Acme Ltd, Beta Corp, …" -> every name its own chip, one edit.
+        Company, job-title, industry and keyword facets only (locations and
+        company_hq read commas their own way, via read_place_text; seniority
+        and functions pick from a fixed list, so a typed comma there is
+        punctuation someone is still typing past, not a separator).
+        True if it added anything, so a caller can fall back to the
+        single-value path on a comma that was not really a list of names."""
+        values = [v for v in (_clean(p) for p in text.split(",")) if v]
+        if len(values) < 2:
+            return False
+        self._add_many(name, [(v, "include") for v in values])
+        return True
 
     def _enter_place(self, name: str, typed: str) -> None:
         """Enter in Location / Company HQ: the text is read as places. A known

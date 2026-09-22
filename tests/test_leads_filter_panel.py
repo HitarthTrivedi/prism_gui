@@ -82,6 +82,15 @@ class _PanelCase(unittest.TestCase):
     def chip_view(self, name):
         return [(c.label(), c.side) for c in self.chips(name)]
 
+    def paste_in(self, name, text):
+        """What Ctrl+V (or the context menu, or a middle-click paste)
+        actually triggers on a QLineEdit -- the paste() slot _Input
+        overrides, not setText()."""
+        ed = self.editor(name)
+        QApplication.clipboard().setText(text)
+        ed.input.paste()
+        return ed
+
 
 class IncludeExclude(_PanelCase):
     def test_exclude_from_a_suggestion_row(self):
@@ -130,6 +139,93 @@ class IncludeExclude(_PanelCase):
             QTest.keyClick(self.editor(name).input, Qt.Key_Return)
         self.assertEqual(self.p.active_count(), 0)
         self.assertEqual(self.changes.n, 0)
+
+
+class PastingAList(_PanelCase):
+    """22-Sep-2026: a customer's own company-research sheet is 193 names,
+    and "Current company" (like Job title, Industry, Keywords) took one
+    typed value at a time — the input's own 120-character cap meant even
+    one comma-separated paste lost everything past the first two or three
+    names, silently. _Input.insertFromMimeData routes a pasted list around
+    that cap entirely; _enter reads the same comma when it's typed rather
+    than pasted, for the same result either way."""
+
+    def test_a_comma_pasted_list_becomes_one_chip_per_name(self):
+        self.paste_in("companies", "Acme Ltd, Beta Corp, Gamma Inc")
+        self.assertEqual(self.p.spec().companies.include,
+                         ["Acme Ltd", "Beta Corp", "Gamma Inc"])
+        self.assertEqual(self.changes.n, 1)          # one edit, not three
+        self.assertEqual(self.editor("companies").input.text(), "")
+
+    def test_the_same_list_typed_then_enter_does_the_same_thing(self):
+        ed = self.type_in("companies", "Acme Ltd, Beta Corp, Gamma Inc")
+        QTest.keyClick(ed.input, Qt.Key_Return)
+        self.assertEqual(self.p.spec().companies.include,
+                         ["Acme Ltd", "Beta Corp", "Gamma Inc"])
+        self.assertEqual(self.changes.n, 1)
+
+    def test_the_paste_ignores_the_per_value_length_cap(self):
+        # 5+ KB, the shape of the sheet that started this -- 193 real
+        # company names -- run through the 50-per-side product cap
+        # (prospector.filters._MAX_VALUES) rather than the input's own
+        # 120-character one, which is what silently ate everything past
+        # the first two or three names before this fix.
+        names = [f"Company Number {i} Pvt. Ltd." for i in range(1, 194)]
+        blob = ", ".join(names)
+        self.assertGreater(len(blob), 4000)
+        self.paste_in("companies", blob)
+        self.assertEqual(len(self.p.spec().companies.include), 50)
+        self.assertEqual(self.p.spec().companies.include[0], names[0])
+        self.assertEqual(self.changes.n, 1)
+
+    def test_a_paste_with_no_comma_is_unaffected_single_value_paste(self):
+        # The ordinary case -- one company copied from somewhere -- must
+        # still behave exactly as it did: land in the box, wait for Enter.
+        self.paste_in("companies", "Acme Ltd")
+        self.assertEqual(self.editor("companies").input.text(), "Acme Ltd")
+        self.assertEqual(self.p.spec().companies.include, [])
+        self.assertEqual(self.changes.n, 0)
+
+    def test_duplicates_and_already_chosen_names_are_skipped(self):
+        self.paste_in("companies", "Acme Ltd, Acme Ltd, Beta Corp")
+        self.paste_in("companies", "Beta Corp, Gamma Inc")
+        self.assertEqual(self.p.spec().companies.include,
+                         ["Acme Ltd", "Beta Corp", "Gamma Inc"])
+
+    def test_pasting_into_a_closed_facet_is_a_no_op(self):
+        # Seniority picks from a fixed list; a pasted list of free text
+        # isn't a thing there, and must not crash or half-apply.
+        self.paste_in("seniority", "owner, founder, director")
+        self.assertEqual(self.p.spec().seniority.include, [])
+        self.assertEqual(self.changes.n, 0)
+
+    def test_a_name_that_itself_contains_a_comma_is_a_known_limitation(self):
+        # The real sheet that started this had 3 of 193 "company names" that
+        # were actually a fallback description with a street address baked
+        # in ("Ringer / directory-listed manufacturing company at 917/3,
+        # GIDC Estate") -- not real company names, an artifact of whatever
+        # research tool produced the sheet. There is no reliable way to
+        # tell "a comma inside one name" from "a comma between two names"
+        # without the kind of place-hierarchy gazetteer read_place_text
+        # uses for locations (Hyderabad, Pakistan is one place; India, UAE
+        # is two) -- nothing equivalent exists for company names, and
+        # building one is out of proportion to three placeholder entries.
+        # Documented here as accepted, not silently "fixed" into something
+        # worse later.
+        self.paste_in("companies", "Acme Ltd, Ringer at 917/3, GIDC Estate")
+        self.assertEqual(self.p.spec().companies.include,
+                         ["Acme Ltd", "Ringer at 917/3", "GIDC Estate"])
+
+    def test_pasting_into_a_place_facet_reads_every_place(self):
+        # Locations already understands a comma list (read_place_text) --
+        # pasting just has to reach it unshortened, the same as companies.
+        # "UAE" resolves to the gazetteer's own spelling, same as typing it
+        # and pressing Enter would (test_typed_text_takes_the_listed_spelling).
+        self.paste_in("locations", "India, UAE, Germany")
+        spec = self.p.spec()
+        self.assertEqual(set(spec.locations.include),
+                         {"India", "United Arab Emirates", "Germany"})
+        self.assertEqual(self.changes.n, 1)
 
 
 class PlacesAreRead(_PanelCase):
