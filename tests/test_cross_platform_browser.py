@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import inspect
+import itertools
 import os
 import sys
 import tempfile
@@ -391,23 +392,31 @@ class TheDeliverableIsWhatComesBack(unittest.TestCase):
 class EveryStageIsLookedAtForFiles(unittest.TestCase):
     """Harvesting used to run on six stages only. A tool asked on a research
     or summary step for "an Excel of this" made one and Prism walked past.
-    Now every stage gets a free look, and a real wait only when the page
-    shows a link or the reply says a file is coming."""
+    Now every stage gets a short, capped look — some agents append the file
+    card after their text with no filename anywhere in it, so a zero-cost
+    probe alone still missed them (see 7987d18) — and only a hint in the
+    reply's own words earns the much longer real wait."""
 
     def _driver(self, links: int):
         d = _FakeDriver([])
         d.execute_script = lambda script, *a: links
         return d
 
-    def test_a_text_stage_with_no_sign_of_a_file_costs_nothing(self):
+    def test_a_text_stage_with_no_sign_of_a_file_stays_within_the_short_cap(self):
         d = self._driver(0)
+        slept = []
         with mock.patch.object(automation, "_harvest_files") as harvest, \
                 mock.patch.object(automation.time, "sleep",
-                                  side_effect=AssertionError("slept")):
+                                  side_effect=lambda s: slept.append(s)), \
+                mock.patch.object(automation.time, "time",
+                                  side_effect=itertools.count(0, 1)):
             out = automation._harvest_stage_files(
                 d, {}, "research", ["Here are the three suppliers I found."])
         self.assertEqual(out, [])
         harvest.assert_not_called()
+        # No hint and nothing on the page: bounded by the short grace
+        # window, never escalated to the long hinted-file wait.
+        self.assertLessEqual(sum(slept), 8)
 
     def test_a_link_on_the_page_is_harvested_on_any_stage(self):
         d = self._driver(1)
