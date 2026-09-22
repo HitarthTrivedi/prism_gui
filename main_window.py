@@ -1211,8 +1211,10 @@ class MainWindow(QMainWindow):
         self._task_runs = []
         self._queue_stopped = False
         self._auto_run = False
+        self.attachments = []
+        self.files_panel.set_attached([])
         self.input_panel.reset()
-        self.input_panel.set_context(self.attachments)
+        self.input_panel.set_context([])
         self.agents_panel.clear()
         self.files_panel.clear_mentions()
         self.output_panel.set_finished(False)
@@ -1378,7 +1380,7 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, i18n.t("Reel"), err)
             return
-        ReelDialog(self.cfg, self.attachments, self).exec()
+        ReelDialog(self.cfg, [], self).exec()
 
     def _open_motion(self):
         # Same licence feature as Reel/Studio — Motion is the same "media"
@@ -1394,7 +1396,7 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, "Motion Graphics", err)
             return
-        MotionDialog(self.cfg, self.attachments, self).exec()
+        MotionDialog(self.cfg, [], self).exec()
 
     def _open_whatsapp(self):
         # WhatsApp is a rail add-on now, like Gerber/BOM/STEP -- see
@@ -1528,7 +1530,7 @@ class MainWindow(QMainWindow):
                 "`brew install libredwg` on macOS. A .dxf needs neither."
                 f"\n\nDetail: {err}")
             return
-        dlg = BoqDialog(self.cfg, self.attachments, self)
+        dlg = BoqDialog(self.cfg, [], self)
         dlg.exec()
         # A BOQ runs in its own dialog and never touches the main workbench's
         # completion path, so the post-completion follow-up was never offered
@@ -1560,7 +1562,7 @@ class MainWindow(QMainWindow):
             return
         # Same dialog as BOQ, in BOM mode — it measures the drawing identically
         # and writes a parts list instead of a quantities schedule.
-        dlg = BoqDialog(self.cfg, self.attachments, self, mode="bom")
+        dlg = BoqDialog(self.cfg, [], self, mode="bom")
         dlg.exec()
         self._offer_followup_for_dialog(
             f"{dlg._doc} — {getattr(dlg, 'request', '')}",
@@ -1583,7 +1585,7 @@ class MainWindow(QMainWindow):
                 self, "Gerber",
                 f"The Gerber add-on could not load: {err}")
             return
-        GerberDialog(self.cfg, self.attachments, self).exec()
+        GerberDialog(self.cfg, [], self).exec()
 
     def _open_step(self):
         # STEP is its own add-on since 2026-09-10 -- see addons/step/addon.py.
@@ -1601,7 +1603,7 @@ class MainWindow(QMainWindow):
                 "models:\n\n    pip install cadquery\n\n"
                 f"Detail: {err}")
             return
-        StepDialog(self.cfg, self.attachments, self).exec()
+        StepDialog(self.cfg, [], self).exec()
         # A run finished in the dialog must show on the screen behind it.
         self.step_panel.refresh()
 
@@ -1609,7 +1611,7 @@ class MainWindow(QMainWindow):
         # Front door first, like BOQ/Email: the rail switches screens, and the
         # screen's button opens the workbench. Gated on the "leads" feature.
         self._authorized_then("leads", "addon",
-                              lambda: self._show_screen("leads"))
+                               lambda: self._show_screen("leads"))
 
     def _open_leads_dialog(self):
         LeadsDialog(self.cfg, self).exec()
@@ -1618,7 +1620,7 @@ class MainWindow(QMainWindow):
 
     def _open_email(self):
         self._authorized_then("email", "addon",
-                              lambda: self._show_screen("email"))
+                               lambda: self._show_screen("email"))
 
     def _open_email_dialog(self, mode: str = "one"):
         if not email_config.can_send(self.cfg):
@@ -1627,7 +1629,7 @@ class MainWindow(QMainWindow):
                 return
             self.cfg = dlg.cfg
             self.email_panel.cfg = self.cfg
-        EmailComposeDialog(self.cfg, self.attachments, self,
+        EmailComposeDialog(self.cfg, [], self,
                            mode=mode if isinstance(mode, str) else "one").exec()
         # A send that just went out must be on the screen behind the window.
         self.email_panel.refresh()
@@ -2182,11 +2184,22 @@ class MainWindow(QMainWindow):
             self._run_pipeline()
             return
         total = len(self._task_queue)
+        # If the research guardrail added a research step, surface that in the
+        # status bar so the user knows why the step appeared.
+        research_data = routing.get("research") or {}
+        if (isinstance(research_data, dict) and research_data.get("needed")
+                and research_data.get("questions")
+                and agents_cfg.get("research")):
+            extra = i18n.t(
+                " · Prism added Look things up because your task needs research."
+            )
+        else:
+            extra = ""
         self.statusBar().showMessage(
-            "Steps ready — drop any you don't want, then Start the work."
+            "Steps ready — drop any you don't want, then Start the work." + extra
             if total <= 1 else
             f"Steps ready for task 1 of {total}. Start the work and Prism will "
-            f"run all {total} in order.", 8000)
+            f"run all {total} in order." + extra, 10000)
 
     def _on_route_failed(self, error: str):
         if self.sender() is not self._active_plan_worker:
@@ -2229,6 +2242,7 @@ class MainWindow(QMainWindow):
         # Pressing Start the work commits the whole queue, not just the plan on
         # screen. From here every later task plans and runs without stopping.
         self._auto_run = True
+        self.agents_panel.ensure_prompts()
         run_agents = self.agents_panel.selected_agents()
         # The ordered form of the same plan. A dict keyed by stage cannot
         # express order, and cannot hold the same stage twice — which is why
@@ -2971,6 +2985,11 @@ class MainWindow(QMainWindow):
         licensing.report_usage(getattr(self, "_run_id", ""))
         self._save_run(responses, links)
         self._record_task_run()
+        # Clear the input bar's attachment chips so they don't carry forward to
+        # a new task or appear while the user browses other modules.  The actual
+        # list (self.attachments) is kept: _offer_followup picks it up, and
+        # _reset_for_new_task() clears it when the user starts something fresh.
+        self.input_panel.set_context([])
 
         if stopped:
             # Stop means stop the lot. Pressing it to escape one bad task and

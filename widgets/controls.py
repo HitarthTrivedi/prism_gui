@@ -48,7 +48,7 @@ from widgets import icons
 # The smallest a thing you can click is allowed to be. Every interactive
 # component in this module asserts it, because a 24px row is reachable with a
 # mouse on a desk and is not reachable with a trackpad on a train.
-MIN_TARGET = 28
+MIN_TARGET = theme.BTN_HEIGHT_SM   # 28px — from theme spacing scale
 
 
 def add_password_visibility(edit: QLineEdit):
@@ -335,8 +335,10 @@ class Card(QFrame):
         )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
 
-    def body(self, margins=(20, 20, 20, 20), spacing: int = 0) -> QVBoxLayout:
+    def body(self, margins=None, spacing: int = 0) -> QVBoxLayout:
         """The card's own column, inset past the stripe."""
+        if margins is None:
+            margins = (theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD)
         col = QVBoxLayout(self)
         top = margins[1] + (3 if self._stripe else 0)
         col.setContentsMargins(margins[0], top, margins[2], margins[3])
@@ -800,9 +802,9 @@ class ToolChip(QAbstractButton):
         # rows it sits on are already white cards, so a second hairline inside
         # one only added noise. Hover lifts the fill instead of the border.
         hovered = self.underMouse()
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(theme.c(theme.NEUTRAL[200] if hovered else theme.WELL))
-        painter.drawRoundedRect(QRectF(rect), theme.R_CONTROL,
+        painter.setPen(QPen(theme.c(theme.HAIRLINE), 1))
+        painter.setBrush(theme.c(theme.NEUTRAL[200] if hovered else theme.NEUTRAL[100]))
+        painter.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), theme.R_CONTROL,
                                 theme.R_CONTROL)
 
         badge = QRectF(self._PAD_L, (rect.height() - self.BADGE) / 2,
@@ -1614,6 +1616,7 @@ class EmptyState(QWidget):
         root.setSpacing(0)
 
         self.card = Card(radius=18)
+        self.card.setMinimumHeight(160)
         outer = self.card.body((theme.SPACE_5, theme.SPACE_5,
                                 theme.SPACE_5, theme.SPACE_5), spacing=0)
         outer.addStretch(1)

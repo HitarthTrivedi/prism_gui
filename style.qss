@@ -589,8 +589,8 @@ QPushButton, #secondaryBtn {
     background: rgba(255, 255, 255, 0.85);
     border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 8px;
-    padding: 6px 14px;
-    min-height: 18px;
+    padding: 5px 16px;
+    min-height: 28px;
     font-family: "Barlow";
     font-size: 13px;
     font-weight: 600;
@@ -626,13 +626,13 @@ QPushButton:disabled, #secondaryBtn:disabled {
    rewrites flat hexes and cannot see into a qlineargradient's stops. */
 #primaryBtn, #primary {
     background: #09090b;
-    border: 2px solid #09090b;
+    border: 1px solid #09090b;
     border-radius: 8px;
     color: #ffffff;
-    padding: 8px 17px;
-    min-height: 18px;
-    font-family: "Barlow Condensed";
-    font-size: 15px;
+    padding: 6px 20px;
+    min-height: 34px;
+    font-family: "Barlow";
+    font-size: 13px;
     font-weight: 600;
 }
 
@@ -1183,6 +1183,11 @@ QListWidget::item:selected {
     background: rgba(255, 255, 255, 0.75);
     border: 1px solid rgba(0, 0, 0, 0.14);
     border-radius: 8px;
+    padding: 6px 14px;
+    min-height: 20px;
+    font-family: "Barlow";
+    font-size: 13px;
+    font-weight: 600;
     color: #09090b;
 }
 
@@ -1447,16 +1452,20 @@ QRadioButton:focus {
 QRadioButton::indicator {
     width: 16px;
     height: 16px;
-    border: 1px solid rgba(0, 0, 0, 0.25);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.65);
+    border: 1.5px solid rgba(0, 0, 0, 0.30);
+    border-radius: 9px;
+    background: #ffffff;
 }
 
-QRadioButton::indicator:hover { border-color: #09090b; }
+QRadioButton::indicator:hover {
+    border-color: #09090b;
+}
 
 QRadioButton::indicator:checked {
-    border: 5px solid #09090b;
-    background: #ffffff;
+    border: 1.5px solid #09090b;
+    background: qradialgradient(cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
+                                stop: 0 #09090b, stop: 0.45 #09090b,
+                                stop: 0.50 transparent, stop: 1 transparent);
 }
 
 QRadioButton:disabled { color: #a1a1aa; }

@@ -79,17 +79,16 @@ class GuidePanel(Page):
 
     def header_actions(self):
         return [
-            C.button(i18n.t("AI tools"), "secondary", icon_name="grid",
-                     on_click=lambda: self.navigate.emit("catalog")),
             C.button(i18n.t("Start a task"), "primary", icon_name="plus",
                      on_click=lambda: self.navigate.emit("workbench")),
         ]
 
     def build(self):
+        self._col.setContentsMargins(0, 0, 0, 48)
         self._col.addWidget(C.SectionHeader(
             i18n.t("What happens when you start a task"),
             i18n.t("Five steps, always in this order.")))
-        flow = C.CardGrid(min_col_width=186)
+        flow = C.CardGrid(min_col_width=150, max_columns=5)
         flow.add_all([self._step_card(i + 1, icon, title, body)
                       for i, (icon, title, body) in enumerate(self.STEPS)])
         self._col.addWidget(flow)
@@ -118,6 +117,8 @@ class GuidePanel(Page):
 
     def _step_card(self, index: int, icon: str, title: str, body: str):
         card = C.Card()
+        card.setMinimumHeight(130)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
         top = QHBoxLayout()
@@ -132,6 +133,8 @@ class GuidePanel(Page):
 
     def _note_card(self, icon: str, title: str, body: str):
         card = C.Card()
+        card.setMinimumHeight(120)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
         top = QHBoxLayout()

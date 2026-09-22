@@ -222,7 +222,15 @@ def runs_dir(mid: str, cfg: dict | None = None) -> str:
     """
     if _is_solo(mid, cfg):
         return paths.user_dir("runs")
-    return member_dir(mid, cfg, "runs")
+    md = member_dir(mid, cfg, "runs")
+    try:
+        if not os.path.isdir(md) or not any(f.startswith("run_") for f in os.listdir(md)):
+            fallback = paths.user_dir("runs")
+            if os.path.isdir(fallback) and any(f.startswith("run_") for f in os.listdir(fallback)):
+                return fallback
+    except OSError:
+        pass
+    return md
 
 
 def files_dir(mid: str, cfg: dict | None = None) -> str:

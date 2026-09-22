@@ -47,13 +47,8 @@ class GerberDialog(PrismDialog):
                    "measured off the files themselves."),
             icon="grid", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle("Gerber — PCB fabrication data")
-        self.resize(820, 780)
-        # Lower than before now that the body scrolls (scrollable=True) — a
-        # fixed, non-scrolling height is what let the measured-results box
-        # (260px) plus the write-up box (100px) plus everything above them
-        # outgrow the window and get compressed into illegibility instead of
-        # just scrolling, once a job was actually measured.
-        self.setMinimumSize(620, 480)
+        self.resize(940, 780)
+        self.setMinimumSize(880, 540)
         self.cfg = cfg
         self.gerber = CB.get_gerber()
 
@@ -211,7 +206,7 @@ class GerberDialog(PrismDialog):
         self.result.setMinimumHeight(100)
         root.addWidget(self.result)
 
-        self.clean_btn = self.button(i18n.t("Clean outside the border"),
+        self.clean_btn = self.button(i18n.t("Clean Outline"),
                                      "secondary", icon_name="file", small=True)
         self.clean_btn.setToolTip(i18n.t(
             "Remove everything that lies outside the board outline and save "
@@ -220,7 +215,7 @@ class GerberDialog(PrismDialog):
         self.clean_btn.clicked.connect(self._clean)
         self.footer.add_utility(self.clean_btn)
 
-        self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
+        self.open_btn = self.button(i18n.t("Open Browser"), "secondary",
                                     icon_name="external", small=True,
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
@@ -237,7 +232,7 @@ class GerberDialog(PrismDialog):
             "After generating: an agent writes the reply or quotation from "
             "the measured numbers — the files still never leave"))
         self.footer.add_utility(self.run_btn)
-        self.fill_ai_btn = self.button(i18n.t("Fill the rest with AI"),
+        self.fill_ai_btn = self.button(i18n.t("Fill with AI"),
                                        "secondary", icon_name="pencil",
                                        small=True, on_click=self._ai_fill)
         self.fill_ai_btn.setEnabled(False)

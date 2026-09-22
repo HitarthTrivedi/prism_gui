@@ -53,12 +53,8 @@ class LeadsPanel(QWidget):
         # at all, so it must not sit past two buttons they were afraid to press.
         self.help_btn = C.icon_button("help", i18n.t("What's on this screen (F1)"),
                                       on_click=self.toggle_help)
-        self.help_btn.setFocusPolicy(Qt.StrongFocus)   # Tab reaches it
         self.header = C.PageHeader(
-            i18n.t(self.TITLE), i18n.t(self.BLURB), [
-                self.help_btn,
-                C.button(i18n.t("AI tools"), "tertiary", icon_name="grid",
-                         on_click=lambda: self.navigate.emit("agents"))])
+            i18n.t(self.TITLE), i18n.t(self.BLURB), [self.help_btn])
         root.addWidget(self.header)
         self._body = QWidget()
         self._body_lay = QVBoxLayout(self._body)

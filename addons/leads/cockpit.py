@@ -159,8 +159,8 @@ class _LeadCard(QFrame):
 # in this table now means something (a status, a fit band) or nothing at all.
 _AVATAR_FILL = theme.NEUTRAL[200]
 _AVATAR_TEXT = theme.NEUTRAL[700]
-_RAIL_W = 320          # the rail's default width; 300 cut every job title
-_RAIL_MIN = 260        # a drag on the rail's edge stays between these
+_RAIL_W = 340          # the rail's default width
+_RAIL_MIN = 280        # a drag on the rail's edge stays between these
 _RAIL_MAX = 520
 _DRAWER_W = 360        # the dossier drawer: its default width, and its width floating
 _DRAWER_MIN = 320

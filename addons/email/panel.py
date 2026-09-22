@@ -56,7 +56,7 @@ class EmailPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        self.header = C.PageHeader(i18n.t("Email spamming"), "", list(self._actions))
+        self.header = C.PageHeader(i18n.t("Email Outreach"), "", list(self._actions))
         root.addWidget(self.header)
 
         self._scroll = QScrollArea()

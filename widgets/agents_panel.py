@@ -244,6 +244,30 @@ def _makes_copy(kind: str) -> str:
     return ""
 
 
+def default_prompt_for_stage(stage: str, query: str = "") -> str:
+    """Generate a sensible, stage-tailored prompt from the user's task request."""
+    q = query.strip() if query else "the task"
+    if stage == "research":
+        return f"Research and gather facts, sources, data, and background on: {q}"
+    if stage == "brains":
+        return f"Think through, analyze, and outline a detailed plan and solution for: {q}"
+    if stage == "leads":
+        return f"Find relevant contacts, companies, leads, and sources for: {q}"
+    if stage == "content":
+        return f"Write comprehensive, high-quality content and documentation for: {q}"
+    if stage == "visual":
+        return f"Create visual concepts, image prompts, or diagrams for: {q}"
+    if stage == "presentation":
+        return f"Create an outline and slide-by-slide structure for a presentation on: {q}"
+    if stage == "development":
+        return f"Write clean, complete code and technical implementation for: {q}"
+    if stage == "media":
+        return f"Create a structured video reel script and visual scenes for: {q}"
+    if stage == "audio":
+        return f"Write a voiceover script and narration for: {q}"
+    return f"Complete the {stage} stage for: {q}"
+
+
 class PlanRow(QFrame):
     """One step: number, marker, icon, name, the real prompt, tool, status —
     and the six controls that make the plan an editable object rather than a
@@ -315,15 +339,15 @@ class PlanRow(QFrame):
         self.number.setStyleSheet(
             f"font-family: '{theme.FONT_HEADING}'; font-size: 15px;"
             f" font-weight: 600; color: {theme.NEUTRAL_350};")
-        top.addWidget(self.number)
+        top.addWidget(self.number, alignment=Qt.AlignVCenter)
 
         self.mark = StepMark(included)
         self.mark.setToolTip(i18n.t("Click to leave this step out of the run"))
-        top.addWidget(self.mark)
+        top.addWidget(self.mark, alignment=Qt.AlignVCenter)
 
         self.glyph = QLabel()
         self.glyph.setPixmap(icons.pixmap(icon_name, 18, theme.ACCENT))
-        top.addWidget(self.glyph)
+        top.addWidget(self.glyph, alignment=Qt.AlignVCenter)
 
         text = QVBoxLayout()
         text.setSpacing(2)
@@ -360,7 +384,7 @@ class PlanRow(QFrame):
         engine = QVBoxLayout()
         engine.setContentsMargins(0, 0, 0, 0)
         engine.setSpacing(2)
-        engine.setAlignment(Qt.AlignRight)
+        engine.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         engine.addWidget(self.chip, alignment=Qt.AlignRight)
         # What choosing this engine actually costs you: the tool's price band,
         # how long it usually takes to answer, and the timeout Prism will
@@ -374,7 +398,7 @@ class PlanRow(QFrame):
 
         self.badge = C.StatusBadge("queued" if included else "skipped",
                                    focusable=False)
-        top.addWidget(self.badge, alignment=Qt.AlignTop)
+        top.addWidget(self.badge, alignment=Qt.AlignVCenter)
         root.addLayout(top)
 
         # ── line 2: why Prism suggests a different tool ────────────────────
@@ -694,7 +718,13 @@ class PlanRow(QFrame):
     def toggle(self) -> None:
         """The person switched this step on or off — see left_out_stages()."""
         self._touched = True
-        self.set_included(not self._included)
+        new_state = not self._included
+        if new_state and not self._questions:
+            prompt = default_prompt_for_stage(self.stage, self._query)
+            self.set_questions([prompt])
+            self._origin = ORIGIN_YOURS
+            self._apply_skin()
+        self.set_included(new_state)
         self.toggled.emit()
 
     def title(self) -> str:
@@ -1252,6 +1282,15 @@ class AgentsPanel(QWidget):
         self._extras = [(stage, tool, list(step[2]) if len(step) > 2 else list(qs))
                         for (stage, tool, qs), step in zip(self._extras, rest)] \
             + list(self._extras[len(rest):])
+
+    def ensure_prompts(self) -> None:
+        """Ensure every checked row has a prompt before execution."""
+        for row in self._rows:
+            if row.is_checked() and row.selected_agent() and not row.questions():
+                prompt = default_prompt_for_stage(row.stage, self._query)
+                row.set_questions([prompt])
+                row._origin = ORIGIN_YOURS
+                row._apply_skin()
 
     def unprompted_steps(self) -> list:
         """Titles of the steps that are ticked to run but carry no prompt.

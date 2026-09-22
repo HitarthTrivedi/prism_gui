@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import identity
+import paths
 import roles as R
 import theme
 import workspace
@@ -261,13 +262,18 @@ class HistoryDialog(PrismDialog):
         runs_dir = workspace.runs_dir(who["mid"], self.cfg)
         names = []
         if os.path.isdir(runs_dir):
-            # Only run records. The same folder also holds artefacts a run
-            # produced — reel scene specs, BOQ quantity CSVs — and those are
-            # not runs; listing them broke History the moment /reel wrote its
-            # first spec beside a run file.
             names = sorted((n for n in os.listdir(runs_dir)
                             if n.startswith("run_") and n.endswith(".json")),
                            reverse=True)
+        if not names:
+            fb = paths.user_dir("runs")
+            if os.path.isdir(fb):
+                fb_names = sorted((n for n in os.listdir(fb)
+                                   if n.startswith("run_") and n.endswith(".json")),
+                                  reverse=True)
+                if fb_names:
+                    runs_dir = fb
+                    names = fb_names
         if not names:
             self.runs.setEnabled(False)
             self._current_reel = ""

@@ -7,9 +7,9 @@ from addons.manifest import WARN, RAIL, HOME, Addon, Offer
 
 MANIFEST = Addon(
     key="email",
-    label="Email spamming",
+    label="Email Outreach",
     feature="email",
-    tip="Draft & send an email from attached files",
+    tip="Draft & send personalized emails from attached files",
     blurb="Draft & send, your account",
     icon="mail",
     tone=WARN,

@@ -298,6 +298,7 @@ class AddonRow(QPushButton):
         self._locked = False
         self._current = False
         self._raw_label = label
+        display_label = "Email Inquiries" if label == "Email inquiry automation" else label
 
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 0, 6, 0)
@@ -308,7 +309,7 @@ class AddonRow(QPushButton):
         self._chip.setAlignment(Qt.AlignCenter)
         self._chip.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         row.addWidget(self._chip)
-        self._label = _Elided(label)
+        self._label = _Elided(display_label)
         row.addWidget(self._label, stretch=1)
         # Drawn only when locked. It keeps its 14px of width either way so the
         # names in the shelf stay on one left edge whatever the licence says.
@@ -455,7 +456,7 @@ class Sidebar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
-        self.setFixedWidth(240)
+        self.setFixedWidth(260)
         self._collapsed = False
         self.setAttribute(Qt.WA_StyledBackground, False)
 
@@ -1355,7 +1356,7 @@ class Sidebar(QFrame):
             self._collapsed = collapsed
 
         c = self._collapsed
-        self.setFixedWidth(72 if c else 240)
+        self.setFixedWidth(72 if c else 260)
         self.setProperty("collapsed", c)
         self.style().unpolish(self)
         self.style().polish(self)

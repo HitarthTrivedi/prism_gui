@@ -221,6 +221,25 @@ SPACE_5 = 20                    # inside a card, edge to content
 SPACE_6 = 28                    # page padding
 SPACE_7 = 40                    # between major regions of a page
 
+# Golden Ratio (phi ≈ 1.618) & 8pt-Grid Spacing Matrix Tokens
+SPACE_XXS = SPACE_1             # 4px - micro-spacing, badges, icon gaps
+SPACE_XS = SPACE_2              # 8px - base unit, compact paddings
+SPACE_SM = SPACE_3              # 12px - field vertical padding, tight gaps
+SPACE_MD = SPACE_4              # 16px - standard card inner padding, dialog padding
+SPACE_LG = 24                   # 24px - section gap (~16 * 1.5)
+SPACE_XL = SPACE_7              # 40px - major container separation (~24 * 1.618)
+SPACE_2XL = 64                  # 64px - page lateral gutters and top breathing margins
+
+# Component Sizing Matrix Tokens
+BTN_HEIGHT_SM = 28              # Small utility button
+BTN_HEIGHT_MD = 34              # Standard / Secondary button
+BTN_HEIGHT_LG = 40              # Primary / Hero button
+
+RADIUS_SM = R_CHIP              # 6px - chips, pills, tags
+RADIUS_MD = R_CONTROL           # 8px - buttons, inputs
+RADIUS_LG = 10                  # 10px - standard cards
+RADIUS_XL = R_CARD              # 12px - dialogs, modal panels
+
 # The four page-layout constants every screen uses, named so a panel does not
 # have to remember which SPACE step the scaffold called for.
 PAGE_PAD = SPACE_6              # 28 — page edge to content, every screen
@@ -456,12 +475,11 @@ def role_stylesheet(qss: str, hue: int) -> str:
     return qss
 
 
-# ── helpers for painted widgets ─────────────────────────────────────────────
 def c(hex_or_role: str, alpha: float = 1.0) -> QColor:
     """QColor from a token, optionally at partial alpha."""
-    col = qcolor(hex_or_role)               # QColor() alone cannot read rgba() tokens
+    col = qcolor(hex_or_role)
     if alpha < 1.0:
-        col.setAlphaF(alpha)
+        col.setAlphaF(col.alphaF() * alpha)
     return col
 
 

@@ -94,6 +94,7 @@ class HistoryPanel(Page):
 
     TITLE = "History"
     BLURB = "Every past run, re-rendered out of its stored record."
+    RELOAD_ON_SHOW = True               # always re-read runs when screen opens
 
     open_run = Signal(str)              # path of the run record
     runs_changed = Signal()             # runs were deleted; Home must re-read
@@ -231,7 +232,12 @@ class HistoryPanel(Page):
                 groups.append((bucket, []))
             groups[-1][1].append((run, state))
 
-        folding = want == "all" and not query
+        # When there are no completed or failed runs, the whole history is
+        # "never started" — showing a single folded row for every group makes
+        # the screen look completely empty, so the user thinks history is broken.
+        # In this case skip the fold so each attempt is individually visible.
+        has_real_runs = counts["completed"] > 0 or counts["failed"] > 0
+        folding = want == "all" and not query and has_real_runs
         for bucket, items in groups:
             self._list_col.addWidget(C.SectionHeader(
                 i18n.t(bucket),

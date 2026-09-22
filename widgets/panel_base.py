@@ -640,8 +640,6 @@ class AddonFrontDoor(Page):
 
     def header_actions(self):
         return [
-            C.button(i18n.t("AI tools"), "secondary", icon_name="grid",
-                     on_click=lambda: self.navigate.emit("agents")),
             C.button(i18n.t(self.ACTION), "primary",
                      icon_name=self.ACTION_ICON,
                      on_click=self.opened.emit),
@@ -728,17 +726,6 @@ class AddonFrontDoor(Page):
                           for i, (icon, title, body) in enumerate(self.STEPS)])
             self._col.addWidget(grid)
 
-        roles = self.tool_roles()
-        if roles:
-            self._col.addWidget(C.SectionHeader(
-                i18n.t("Which of your tools it uses"),
-                i18n.t("Picked from your own list, by a fixed rule. The "
-                       "add-on will not run without them.")))
-            grid = C.CardGrid(min_col_width=300)
-            grid.add_all([self._role_card(icon, title, note, tool)
-                          for icon, title, note, tool in roles])
-            self._col.addWidget(grid)
-
         if self.PLACEHOLDERS:
             self._col.addWidget(C.SectionHeader(
                 i18n.t("What you can ask for"),
@@ -768,6 +755,8 @@ class AddonFrontDoor(Page):
 
     def _example_card(self, text: str, note: str) -> QWidget:
         card = C.Card()
+        card.setMinimumHeight(120)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
         top = QHBoxLayout()
@@ -823,6 +812,8 @@ class AddonFrontDoor(Page):
 
     def _step_card(self, index: int, icon: str, title: str, body: str):
         card = C.Card()
+        card.setMinimumHeight(120)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
         top = QHBoxLayout()

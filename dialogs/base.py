@@ -161,8 +161,8 @@ class DialogFooter(QFrame):
             f" border: none; border-top: 1px solid {theme.HAIRLINE}; }}")
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
-                               theme.PAGE_PAD, theme.SPACE_3)
+        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_MD,
+                               theme.PAGE_PAD, theme.SPACE_MD)
         row.setSpacing(theme.SPACE_2)
 
         self._left = QHBoxLayout()
@@ -268,7 +268,7 @@ class PrismDialog(QDialog):
         self._content.setObjectName("dialogBody")
         self.body = QVBoxLayout(self._content)
         self.body.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
-                                     theme.PAGE_PAD, theme.SPACE_5)
+                                     theme.PAGE_PAD, theme.SPACE_5 + 16)
         self.body.setSpacing(body_spacing)
 
         if scrollable:

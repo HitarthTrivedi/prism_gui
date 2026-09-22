@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 
 import core_bridge as CB
 import identity
+import paths
 import workspace
 
 
@@ -28,13 +29,19 @@ def _run_files(cfg: dict, mid: str = "") -> list[str]:
     """Newest-first paths of the member's saved run records."""
     who = mid or identity.viewing()["mid"]
     folder = workspace.runs_dir(who, cfg)
-    if not os.path.isdir(folder):
-        return []
-    # Only run records. The same folder also holds artefacts a run produced —
-    # reel scene specs, BOQ quantity CSVs — and those are not runs.
-    names = sorted((n for n in os.listdir(folder)
-                    if n.startswith("run_") and n.endswith(".json")),
-                   reverse=True)
+    names = []
+    if os.path.isdir(folder):
+        names = sorted((n for n in os.listdir(folder)
+                        if n.startswith("run_") and n.endswith(".json")),
+                       reverse=True)
+    if not names:
+        fb = paths.user_dir("runs")
+        if os.path.isdir(fb):
+            names = sorted((n for n in os.listdir(fb)
+                            if n.startswith("run_") and n.endswith(".json")),
+                           reverse=True)
+            if names:
+                folder = fb
     return [os.path.join(folder, n) for n in names]
 
 
