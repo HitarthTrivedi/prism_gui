@@ -279,14 +279,14 @@ _FONT_DIR = paths.resource("assets", "fonts")
 # that already construct QFont(family, points).
 TYPE = {
     # level          family         px  weight  colour
-    "PAGE_TITLE": (FONT_HEADING,    24,   600,  "#09090b"),
-    "SECTION":    (FONT_HEADING,    18,   600,  "#09090b"),
-    "CARD_TITLE": (FONT_HEADING,    15,   600,  "#09090b"),
-    "BODY":       (FONT_BODY,       14,   400,  "#18181b"),
-    "SUPPORT":    (FONT_BODY,       13,   400,  "#3f3f46"),
-    "META":       (FONT_BODY,       12,   500,  "#71717a"),
-    "LABEL":      (FONT_HEADING,    11,   600,  "#52525b"),
-    "MONO":       (FONT_MONO,       12,   500,  "#18181b"),
+    "PAGE_TITLE": (FONT_HEADING,    26,   600,  "#09090b"),
+    "SECTION":    (FONT_HEADING,    20,   600,  "#09090b"),
+    "CARD_TITLE": (FONT_HEADING,    16,   600,  "#09090b"),
+    "BODY":       (FONT_BODY,       15,   400,  "#18181b"),
+    "SUPPORT":    (FONT_BODY,       14,   400,  "#3f3f46"),
+    "META":       (FONT_BODY,       13,   500,  "#71717a"),
+    "LABEL":      (FONT_HEADING,    12,   600,  "#52525b"),
+    "MONO":       (FONT_MONO,       13,   500,  "#18181b"),
 }
 
 # The same eight as flat constants, for `from theme import T_BODY`.

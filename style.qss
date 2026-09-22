@@ -91,7 +91,7 @@
 
 * {
     font-family: "Barlow", "Inter", system-ui, -apple-system, "Segoe UI", "Ubuntu", "DejaVu Sans", sans-serif;
-    font-size: 14px;
+    font-size: 15px;
     color: #09090b;
 }
 
@@ -292,7 +292,7 @@ QToolTip {
     border-radius: 8px;
     padding: 8px 11px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #27272a;
 }
@@ -324,7 +324,7 @@ QToolTip {
     border-radius: 8px;
     padding: 6px 11px;
     font-family: "Barlow";
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #3f3f46;
 }
@@ -356,7 +356,7 @@ QToolTip {
 
 #navSection {
     font-family: "Barlow Condensed";
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     color: rgba(0, 0, 0, 0.45);
     padding: 2px 4px;
@@ -372,7 +372,7 @@ QToolTip {
 }
 
 #railMuted {
-    font-size: 12px;
+    font-size: 13px;
     color: rgba(0, 0, 0, 0.45);
     background: transparent;
 }
@@ -387,7 +387,7 @@ QToolTip {
     color: #09090b;
     font-family: "Barlow Condensed";
     font-weight: 600;
-    font-size: 15px;
+    font-size: 16px;
     padding: 8px 10px;
     text-align: center;
 }
@@ -414,14 +414,14 @@ QToolTip {
 #railProfile:hover { background: rgba(0, 0, 0, 0.04); }
 
 #railProfileName {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #09090b;
     background: transparent;
 }
 
 #railProfileRole {
-    font-size: 12px;
+    font-size: 13px;
     color: #71717a;
     background: transparent;
 }
@@ -442,26 +442,26 @@ QToolTip {
    controls.kicker(); QSS cannot express it. */
 #kick, #colHead {
     font-family: "Barlow Condensed";
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #52525b;
 }
 
 #kickMuted {
     font-family: "Barlow Condensed";
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #71717a;
 }
 
 /* PAGE_TITLE — one per screen. */
-#h1, #h2 { font-family: "Barlow Condensed"; font-size: 24px; font-weight: 600; color: #09090b; }
+#h1, #h2 { font-family: "Barlow Condensed"; font-size: 26px; font-weight: 600; color: #09090b; }
 #card #h1, #card #h2 { color: #09090b; }
 /* SECTION — the heading above a group of cards. */
-#h3, #h4 { font-family: "Barlow Condensed"; font-size: 18px; font-weight: 600; color: #09090b; }
+#h3, #h4 { font-family: "Barlow Condensed"; font-size: 20px; font-weight: 600; color: #09090b; }
 #card #h3, #card #h4 { color: #09090b; }
 /* CARD_TITLE — the name of a thing. */
-#h5, #h6 { font-family: "Barlow Condensed"; font-size: 15px; font-weight: 600; color: #09090b; }
+#h5, #h6 { font-family: "Barlow Condensed"; font-size: 16px; font-weight: 600; color: #09090b; }
 #card #h5, #card #h6 { color: #09090b; }
 
 /* The dashboard's big condensed figure — "12", "₹8.4L", "58%". A metric is a
@@ -469,14 +469,14 @@ QToolTip {
 #stat {
     font-family: "Barlow Condensed";
     font-weight: 600;
-    font-size: 24px;
+    font-size: 26px;
     color: #09090b;
 }
 
 #statSm {
     font-family: "Barlow Condensed";
     font-weight: 600;
-    font-size: 18px;
+    font-size: 20px;
     color: #09090b;
 }
 
@@ -486,7 +486,7 @@ QToolTip {
 
 /* META — timestamps, durations, counts. */
 #meta, #dim {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #71717a;
 }
@@ -505,7 +505,7 @@ QToolTip {
    that appears nowhere else. If it is the only place the user can read it, it
    is #meta. */
 #faint {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #98989b;
 }
@@ -513,7 +513,7 @@ QToolTip {
 /* SUPPORT — sentences under a title, and the standard control label. #lead was
    15px and is the same role at the same job, so it lands here too. */
 #body, #lead, #support {
-    font-size: 13px;
+    font-size: 14px;
     color: #5d5d60;
 }
 
@@ -521,7 +521,7 @@ QToolTip {
    theme.FONT_MONO_STACK for why. */
 #mono {
     font-family: "JetBrains Mono", "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #424244;
 }
@@ -531,7 +531,7 @@ QToolTip {
     border: 1px dashed rgba(0, 0, 0, 0.10);
     border-radius: 12px;
     padding: 12px;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #5d5d60;
 }
@@ -592,7 +592,7 @@ QPushButton, #secondaryBtn {
     padding: 5px 16px;
     min-height: 28px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #09090b;
 }
@@ -632,7 +632,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 6px 20px;
     min-height: 34px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
 }
 
@@ -673,7 +673,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 5px 8px;
     min-height: 18px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
 }
 
@@ -703,7 +703,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     border-radius: 6px;
     color: #18181b;
     font-family: "Barlow";
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     padding: 4px 6px;
     min-height: 18px;
@@ -730,7 +730,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 6px 13px;
     min-height: 18px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
 }
 
@@ -763,7 +763,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
 
 /* SECONDARY at the small step. */
 #smallBtn {
-    font-size: 12px;
+    font-size: 13px;
     padding: 5px 11px;
     border-radius: 6px;
 }
@@ -823,7 +823,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 5px 13px;
     min-height: 18px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #09090b;
 }
@@ -871,7 +871,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 6px 15px;
     min-height: 18px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #5d5d60;
 }
@@ -894,7 +894,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     padding: 6px 10px;
     min-height: 18px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #424244;
     text-align: left;
@@ -958,7 +958,7 @@ QListWidget:focus {
     border-bottom: 2px solid transparent;
     border-radius: 0;
     padding: 0;
-    font-size: 15px;
+    font-size: 16px;
     color: #09090b;
 }
 
@@ -998,7 +998,7 @@ QComboBox {
     padding: 6px 32px 6px 12px;
     min-height: 20px;
     color: #09090b;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
 }
 
@@ -1145,13 +1145,13 @@ QListWidget::item:selected {
 
 /* The 1 Describe → 2 Plan → 3 Run breadcrumb. */
 #stepCur {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: #09090b;
 }
 
 #stepOff {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #71717a;
 }
@@ -1167,14 +1167,14 @@ QListWidget::item:selected {
 
 #pageTitle {
     font-family: "Barlow Condensed";
-    font-size: 24px;
+    font-size: 26px;
     font-weight: 600;
     color: #09090b;
     background: transparent;
 }
 
 #pageSubtitle {
-    font-size: 13px;
+    font-size: 14px;
     color: #3f3f46;
     background: transparent;
 }
@@ -1186,7 +1186,7 @@ QListWidget::item:selected {
     padding: 6px 14px;
     min-height: 20px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #09090b;
 }
@@ -1203,14 +1203,14 @@ QListWidget::item:selected {
 
 #sectionTitle {
     font-family: "Barlow Condensed";
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
     color: #09090b;
     background: transparent;
 }
 
 #sectionSubtitle {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #3f3f46;
     background: transparent;
@@ -1262,7 +1262,7 @@ QListWidget::item:selected {
    a "success" chip blue-on-green while a plain QLabel wearing the same object
    name got the right ink from here. */
 #tagAccent, #tagOutline, #tagNeutral, #tagWarn, #tagErr, #tagOk {
-    font-size: 11px;
+    font-size: 12px;
     padding: 3px 11px;
     border-radius: 999px;
 }
@@ -1280,7 +1280,7 @@ QListWidget::item:selected {
     border: none;
     border-radius: 8px;
     padding: 12px;
-    font-size: 13px;
+    font-size: 14px;
     color: #5d5d60;
 }
 
@@ -1367,7 +1367,7 @@ QTabBar::tab {
     padding: 6px 15px;
     margin: 0 4px 4px 0;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: #5d5d60;
 }
@@ -1416,7 +1416,7 @@ QHeaderView::section {
     border: none;
     border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding: 9px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #e2e8f0;
 }
@@ -1542,7 +1542,7 @@ QProgressBar {
     height: 18px;
     min-height: 18px;
     text-align: center;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #ffffff;
 }
@@ -1588,7 +1588,7 @@ QGroupBox {
     margin-top: 14px;
     padding-top: 14px;
     font-family: "Barlow Condensed";
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
 }
 
@@ -1636,7 +1636,7 @@ QStatusBar {
     background: rgba(15, 17, 23, 0.75);
     color: #cbd5e1;
     border-top: 1px solid rgba(255, 255, 255, 0.10);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 QStatusBar::item { border: none; }
@@ -1697,7 +1697,7 @@ QTableView#registerTable QHeaderView::section:horizontal {
     border-bottom: 1px solid rgba(0, 0, 0, 0.10);
     padding: 0 10px 8px 10px;
     font-family: 'Barlow Condensed';
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.7px;
     color: #98989b;
@@ -1888,7 +1888,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #homeSearchInput {
     background: transparent;
     border: none;
-    font-size: 13px;
+    font-size: 14px;
     color: #09090b;
 }
 
@@ -1897,7 +1897,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 6px;
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #52525b;
 }
@@ -1933,7 +1933,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #heroPromptInput {
     background: transparent;
     border: none;
-    font-size: 15px;
+    font-size: 16px;
     color: #09090b;
     padding: 4px 0px;
 }
@@ -1943,7 +1943,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 999px;
     padding: 5px 12px;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #27272a;
 }
@@ -1972,7 +1972,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border: 1px solid rgba(0, 0, 0, 0.07);
     border-radius: 999px;
     padding: 4px 12px;
-    font-size: 12px;
+    font-size: 13px;
     color: #27272a;
 }
 
@@ -1994,7 +1994,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border-radius: 999px;
     padding: 7px 16px;
     font-weight: 600;
-    font-size: 13px;
+    font-size: 14px;
 }
 
 #tourPlayBtn:hover {

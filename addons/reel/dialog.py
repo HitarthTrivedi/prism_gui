@@ -158,6 +158,7 @@ class ReelDialog(PrismDialog):
             choice_col.addWidget(why)
         self._studio_ok = studio_ok
         root.addWidget(choice)
+        root.addSpacing(theme.SPACE_3)
 
         self.voiceover_check = QCheckBox(
             i18n.t("Create an ElevenLabs voice-over from the reel script"), self)
@@ -169,6 +170,7 @@ class ReelDialog(PrismDialog):
             "Prism sends the written voice-over to ElevenLabs, downloads "
             "the audio, and mixes it into the client footage with sidechain ducking."))
         root.addWidget(self.voiceover_check)
+        root.addSpacing(theme.SPACE_1)
 
         self.caption_note = C.meta(i18n.t(
             "Client-footage edits feature dynamic motion graphics captions, "

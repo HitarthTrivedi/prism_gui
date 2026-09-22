@@ -749,8 +749,8 @@ class ToolChip(QAbstractButton):
         self._tools = list(tools)
         self._suggested = suggested
         self._current = current or (self._tools[0] if self._tools else "")
-        self._font = QFont(theme.FONT_BODY, 10)
-        self._badge_font = QFont(theme.FONT_HEADING, 9)
+        self._font = QFont(theme.FONT_BODY, 11)
+        self._badge_font = QFont(theme.FONT_HEADING, 10)
         self._badge_font.setWeight(QFont.DemiBold)
         self.clicked.connect(self._open_menu)
         self._resize_to_text()
