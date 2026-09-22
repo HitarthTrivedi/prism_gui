@@ -598,31 +598,6 @@ class HomePanel(QWidget):
                                   theme.PAGE_PAD, theme.SPACE_2)
         layout.setSpacing(theme.SPACE_3)
 
-        # Search Pill
-        search_pill = QFrame()
-        search_pill.setObjectName("homeSearchPill")
-        search_pill.setCursor(Qt.PointingHandCursor)
-        pill_layout = QHBoxLayout(search_pill)
-        pill_layout.setContentsMargins(10, 4, 10, 4)
-        pill_layout.setSpacing(theme.SPACE_2)
-
-        search_icon = QLabel()
-        search_icon.setPixmap(icons.pixmap("search", 15, theme.NEUTRAL[400]))
-        pill_layout.addWidget(search_icon)
-
-        self._search_input = QLineEdit()
-        self._search_input.setObjectName("homeSearchInput")
-        self._search_input.setPlaceholderText(i18n.t("Search anything..."))
-        self._search_input.returnPressed.connect(self.open_history.emit)
-        pill_layout.addWidget(self._search_input, stretch=1)
-
-        kbd = QLabel("⌘ K")
-        kbd.setObjectName("homeKbdBadge")
-        pill_layout.addWidget(kbd)
-
-        search_pill.mousePressEvent = lambda e: self._search_input.setFocus()
-        layout.addWidget(search_pill, stretch=1)
-
         layout.addStretch(1)
 
         # Right actions: Sun (theme) | Bell (notifications) | Date | Profile
@@ -775,12 +750,12 @@ class HomePanel(QWidget):
 
         greet_stack = QVBoxLayout()
         greet_stack.setContentsMargins(0, 0, 0, 0)
-        greet_stack.setSpacing(0)
+        greet_stack.setSpacing(2)
 
         salutation = QLabel(f"{_greeting()},")
         salutation.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 16px; "
-            f"font-weight: 500; color: {theme.NEUTRAL[500]};"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 22px; "
+            f"font-weight: 600; color: #3f3f46;"
         )
         greet_stack.addWidget(salutation)
 
@@ -789,24 +764,24 @@ class HomePanel(QWidget):
             who = "there"
         name_lbl = QLabel(f"{who},")
         name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_HEADING}'; font-size: 32px; "
-            f"font-weight: 700; color: {theme.TEXT};"
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 44px; "
+            f"font-weight: 700; color: #09090b; line-height: 1.1;"
         )
         C.track(name_lbl, -0.02)
         greet_stack.addWidget(name_lbl)
 
         sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
         sub_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 14px; "
-            f"color: {theme.NEUTRAL[500]};"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
+            f"font-weight: 500; color: #52525b;"
         )
         greet_stack.addWidget(sub_lbl)
         greet_row.addLayout(greet_stack, stretch=1)
 
         motto = QLabel(i18n.t("Less work.\nMore possibilities."))
         motto.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
-            f"font-style: italic; color: {theme.NEUTRAL[400]}; line-height: 1.2;"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 15px; "
+            f"font-style: italic; color: #71717a; line-height: 1.3;"
         )
         motto.setAlignment(Qt.AlignRight | Qt.AlignTop)
         greet_row.addWidget(motto)
@@ -1160,10 +1135,10 @@ class HomePanel(QWidget):
 
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
-        title = C.heading(i18n.t("Add-ons"), 4)
+        title = C.heading(i18n.t("Add-ons"), 3)
         head.addWidget(title, stretch=1)
 
-        manage_btn = C.button(i18n.t("Manage"), "secondary", small=True,
+        manage_btn = C.button(i18n.t("Manage"), "secondary", small=False,
                               on_click=lambda: self.open_addon.emit("catalog"))
         head.addWidget(manage_btn)
         col.addLayout(head)
@@ -1198,6 +1173,7 @@ class HomePanel(QWidget):
         browse_btn = QPushButton(f"+ {i18n.t('Browse Add-ons')}")
         browse_btn.setObjectName("chipBtn")
         browse_btn.setCursor(Qt.PointingHandCursor)
+        browse_btn.setStyleSheet("font-size: 14px; font-weight: 600; padding: 6px 14px;")
         browse_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
         foot.addWidget(browse_btn)
 
@@ -1205,6 +1181,7 @@ class HomePanel(QWidget):
 
         guide_link = C.button(f"{i18n.t('Explore all add-ons')} →", "link",
                               on_click=lambda: self.open_addon.emit("catalog"))
+        guide_link.setStyleSheet("font-size: 14px; font-weight: 600;")
         foot.addWidget(guide_link)
         col.addLayout(foot)
 
@@ -1228,29 +1205,30 @@ class _ToolTile(QFrame):
         self.setObjectName("toolTile")
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(86)
         status_text = "Built-in" if builtin else "Not connected"
         self.setAccessibleName(f"{name} ({status_text})")
 
         tile_col = QVBoxLayout(self)
-        tile_col.setContentsMargins(4, 8, 4, 6)
-        tile_col.setSpacing(3)
+        tile_col.setContentsMargins(6, 10, 6, 8)
+        tile_col.setSpacing(theme.SPACE_1)
         tile_col.setAlignment(Qt.AlignCenter)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(icons.tool_logo(glyph, 24))
+        icon_lbl.setPixmap(icons.tool_logo(glyph, 28))
         icon_lbl.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(icon_lbl)
 
         name_lbl = QLabel(name)
         name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 11px; "
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
             f"font-weight: 600; color: {theme.TEXT};"
         )
         name_lbl.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(name_lbl)
 
         dot = QLabel("●")
-        dot.setStyleSheet(f"font-size: 8px; color: {theme.OK if builtin else theme.NEUTRAL[400]};")
+        dot.setStyleSheet(f"font-size: 10px; color: {theme.OK if builtin else theme.NEUTRAL[400]};")
         dot.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(dot)
 

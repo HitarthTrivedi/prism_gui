@@ -280,7 +280,7 @@ QToolTip {
 
 #brand {
     font-family: "Barlow Condensed";
-    font-size: 18px;
+    font-size: 21px;
     font-weight: 700;
     color: #09090b;
 }
@@ -290,9 +290,9 @@ QToolTip {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 8px 11px;
+    padding: 8px 12px;
     font-family: "Barlow";
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: #27272a;
 }
@@ -322,9 +322,9 @@ QToolTip {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 6px 11px;
+    padding: 7px 12px;
     font-family: "Barlow";
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: #3f3f46;
 }
@@ -356,12 +356,12 @@ QToolTip {
 
 #navSection {
     font-family: "Barlow Condensed";
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
-    color: rgba(0, 0, 0, 0.45);
-    padding: 2px 4px;
+    color: rgba(0, 0, 0, 0.50);
+    padding: 3px 4px;
     background: transparent;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
 }
 
 #railRule {
@@ -372,7 +372,7 @@ QToolTip {
 }
 
 #railMuted {
-    font-size: 13px;
+    font-size: 13.5px;
     color: rgba(0, 0, 0, 0.45);
     background: transparent;
 }
@@ -387,8 +387,8 @@ QToolTip {
     color: #09090b;
     font-family: "Barlow Condensed";
     font-weight: 600;
-    font-size: 16px;
-    padding: 8px 10px;
+    font-size: 17px;
+    padding: 9px 12px;
     text-align: center;
 }
 
@@ -414,14 +414,14 @@ QToolTip {
 #railProfile:hover { background: rgba(0, 0, 0, 0.04); }
 
 #railProfileName {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: #09090b;
     background: transparent;
 }
 
 #railProfileRole {
-    font-size: 13px;
+    font-size: 13.5px;
     color: #71717a;
     background: transparent;
 }
