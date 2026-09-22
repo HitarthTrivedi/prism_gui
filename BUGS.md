@@ -1,8 +1,9 @@
 # Prism — Known Bugs & Gaps
 
 **Status:** living document. Everything here was found by *running the product* —
-the BOQ pipeline end-to-end (24-08-2026) and the Reel pipeline end-to-end
-(25-08-2026), both on Windows 11, source checkout, real logins.
+the BOQ pipeline end-to-end (24-08-2026), the Reel pipeline end-to-end
+(25-08-2026), and live reel + Leads sheet-import runs (22-09-2026), all on
+Windows 11, source checkout, real logins.
 
 Severity: 🔴 breaks a run · 🟠 degrades output or trust · 🟡 cosmetic/UX.
 
@@ -149,14 +150,33 @@ test that pins it; none is a rule that lives in a sentence.
 - **Fix (b):** embed a ₹-capable font in PDF/DOCX generation; keep
   `encoding="utf-8"` on every `open()`/stream in the engine.
 
-### 2. Claude submit does not fire (selector drift) 🔴
+### 2. Claude submit does not fire (selector drift) 🔴 — recurred 22-09, deeper fix in
 - **Symptom:** engine types the prompt into claude.ai, enters its
   "waiting up to 600s" loop — but the message is still sitting unsent in the
   composer. A human had to click the send arrow to unblock both the BOQ write
   stage and the Reel retry.
-- **Fix:** drive the send *button* on Claude's current UI instead of trusting
-  Enter; after submitting, verify the composer emptied before entering the
-  wait loop; if not, retry the click.
+- **Fix (as originally written here):** drive the send *button* on Claude's
+  current UI instead of trusting Enter; after submitting, verify the composer
+  emptied before entering the wait loop; if not, retry the click. **This is
+  implemented** (`automation.py`'s `_prompt_was_sent`, click-then-Enter-then-
+  retry-once) — and the symptom still recurred, live, twice, 22-09-2026, on
+  ChatGPT as well as Claude.
+- **Deeper cause found 22-09:** the first tool call in a run always worked;
+  every call after it — either tool, on retry, on a different tab — failed
+  the same way. `_text_landed` can only prove the raw DOM has the text, not
+  that the page's OWN framework has registered it; a composer that only just
+  became present (a fresh "New chat", or straight off navigation) can accept
+  typed text before React finishes wiring it up, so the click or Enter that
+  follows raises nothing and changes nothing. Neither agent set its own
+  `page_wait`, so both ran on `_GENERIC`'s 4s default — the thinnest of any
+  agent in the registry (every other one that sets its own is 8-14s).
+- **Fix (22-09, on `main`):** `page_wait` raised to 10s for both ChatGPT and
+  Claude; a short settle added between "text confirmed landed" and the
+  submit attempt. This is a best-supported hypothesis, not a proven root
+  cause — there was no way to attach to the live, authenticated browser
+  session that hit it. **Needs a live run to confirm closed**, not just a
+  clean test suite (every test touching `agents.py`/`automation.py` already
+  passed before this without catching either occurrence).
 
 ### 3. Artifact/file responses are invisible to the scraper 🟡 — mostly FIXED 10-09 (1.5.4)
 - **Symptom:** Claude produced the best BOQ of the day as a **DOCX artifact in
@@ -258,6 +278,72 @@ test that pins it; none is a rule that lives in a sentence.
   `docs/architecture/09-boundaries.md` §5.
 - **Fix:** record a checksum of the three sources at publish time and compare
   it in CI, so a drift is a red build rather than a quiet regression.
+
+### 13. Support's AI assistant was simplified; its tests still test the old design 🟡
+- **Found:** 22-09-2026, re-running the suite after rebasing through 4f65dfd
+  ("feat: update UI components, dialogs, widgets, tests, and lang files").
+- **Not a bug** — `widgets/support_panel.py`'s `_start_ai` is now a documented
+  no-op: *"AI is always on in the simplified design"*, replacing an earlier
+  button-gated, staged design (`_ai_btn`, `_unsolved`, `_stage`, none of
+  which exist any more, under any name). A reasonable product simplification.
+- **Symptom:** ~13 tests in `tests/test_support.py`
+  (`HelpRoutesAreAlwaysAvailable`, `TheTranscriptStaysReadable`,
+  `TheAssistantTier`) still assert the removed button/stage system and fail
+  with `AttributeError` against attributes that were never renamed, just
+  deleted along with the design they belonged to.
+- **Fix:** rewrite that suite against the actual current flow. Not done here
+  — it needs the new flow's intended behaviour confirmed by whoever designed
+  it, not guessed from the code by someone auditing it after the fact.
+
+### 14. Two features shipped with tests but no implementation behind them 🟡
+- **Found:** 22-09-2026, same rebase as #13.
+- **`PreviewDialog(path, kind, demo_mode=...)`** — `tests/test_preview_dialog.py`
+  (`test_demo_video_constructs_without_header_actions`,
+  `test_header_actions_and_close_work_in_both_modes`) construct it with a
+  `demo_mode` kwarg the real `__init__` does not accept
+  (`TypeError: unexpected keyword argument 'demo_mode'`), and reference
+  `dlg.header.actions_row` / `.close_btn` / `_wire_player` / `_stop_playback`,
+  none of which exist yet. Almost certainly meant for the new "Watch demo
+  video" card on Home (`widgets/home_panel.py`'s `_play_demo`) — but that
+  code calls the ordinary `open_preview()` today, with none of the above, so
+  clicking it works, it just opens the full preview chrome rather than a
+  stripped single-close-button mode. Not a live bug, an unfinished one.
+- **`HomePanel._make_tool_tile` / `ShelfHost`** — `tests/test_dashboard_tools.py`
+  (new file, 4f65dfd) tests a row of tool tiles that does not exist:
+  `AttributeError: type object 'HomePanel' has no attribute
+  '_make_tool_tile'. Did you mean: '_make_addon_tile'?` — the existing,
+  different method it suggests is not a typo fix, it is a different feature.
+- **Fix:** finish whichever of these is still wanted, or delete the tests for
+  whichever is not. Not done here — inventing either implementation would be
+  guessing at a design nobody described.
+
+### 15. Three more regressions from the same batch, not yet root-caused 🟠
+- **Found:** 22-09-2026, same rebase as #13/#14. Confirmed genuine (pass on
+  the pre-batch commit, fail after it), not investigated further.
+  - `tests/test_gates.py::UpdateBanner::test_check_for_updates_lands_in_both_places`
+    and `::test_settings_offers_check_for_updates` — likely the Settings
+    rewrite (`widgets/settings_panel.py`, -364/+162 lines in 4f65dfd) moved
+    or dropped the "Check for updates" text these look for.
+  - `tests/test_i18n.py::Packs::test_every_pack_key_is_in_the_catalogue`.
+  - `tests/test_motion_studio.py::TheLocalServer::test_bad_requests`.
+- **Fix:** not attempted — flagging rather than guessing three more times in
+  one night.
+
+### 16. A failed browser stage can fall back to a tool nobody ever logged into 🟠
+- **Found:** 22-09-2026, watching a live run fail over ChatGPT → Claude →
+  Jasper. Jasper's tab sat on its login page for the run; a second live run
+  the same evening had it crash the chromedriver process outright instead.
+- **Cause:** `agents.alternatives_for()` tries tools the person has actually
+  configured first (reasonable — "they chose them, which almost always means
+  they are signed in"), then falls through to *the rest of the stage's
+  category, registry order, with no check the tool is usable at all*. Its
+  own comment's assumption — "a signed-out alternative fails exactly as fast
+  as the tool it is replacing" — does not hold: an unauthenticated tab does
+  not fail fast, it sits out the full wait cap (or worse, per the second run).
+- **Fix (proposed, not made — needs a product call, not a guess):** drop the
+  second tier; only ever fall back to a tool the person has configured
+  somewhere. Simple, but it is a real behaviour change (never try anything
+  outside what's already set up) that should be a yes, not an assumption.
 
 ---
 
