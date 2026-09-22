@@ -333,7 +333,6 @@ class HistoryDialog(PrismDialog):
             or record.get("boq")
             or record.get("gerber")
             or record.get("email")
-            or record.get("query")
         )
         self._current_record = record if has_output else None
         self.follow_up_btn.setVisible(has_output)

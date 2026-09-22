@@ -1105,19 +1105,34 @@ class HomePanel(QWidget):
 
         return card
 
-    def _make_addon_tile(self, name: str, logo_key: str, nav_key: str) -> QWidget:
-        tile = QFrame()
-        tile.setObjectName("toolTile")
-        tile.setCursor(Qt.PointingHandCursor)
-        tile.mousePressEvent = lambda e: self.open_addon.emit(nav_key)
+    @staticmethod
+    def _make_tool_tile(host, name: str, glyph: str, builtin: bool, route: str) -> QWidget:
+        return _ToolTile(host, name, glyph, builtin, route)
 
-        tile_col = QVBoxLayout(tile)
+    def _make_addon_tile(self, name: str, logo_key: str, nav_key: str) -> QWidget:
+        return self._make_tool_tile(self, name, logo_key, True, nav_key)
+
+
+class _ToolTile(QFrame):
+    """Tool launcher tile with full keyboard navigation and accessible state."""
+
+    def __init__(self, host, name: str, glyph: str, builtin: bool, route: str, parent=None):
+        super().__init__(parent)
+        self.host = host
+        self.route = route
+        self.setObjectName("toolTile")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setCursor(Qt.PointingHandCursor)
+        status_text = "Built-in" if builtin else "Not connected"
+        self.setAccessibleName(f"{name} ({status_text})")
+
+        tile_col = QVBoxLayout(self)
         tile_col.setContentsMargins(4, 8, 4, 6)
         tile_col.setSpacing(3)
         tile_col.setAlignment(Qt.AlignCenter)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(icons.tool_logo(logo_key, 24))
+        icon_lbl.setPixmap(icons.tool_logo(glyph, 24))
         icon_lbl.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(icon_lbl)
 
@@ -1130,8 +1145,19 @@ class HomePanel(QWidget):
         tile_col.addWidget(name_lbl)
 
         dot = QLabel("●")
-        dot.setStyleSheet(f"font-size: 8px; color: {theme.OK};")
+        dot.setStyleSheet(f"font-size: 8px; color: {theme.OK if builtin else theme.NEUTRAL[400]};")
         dot.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(dot)
 
-        return tile
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.host.open_addon.emit(self.route)
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self.host.open_addon.emit(self.route)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+

@@ -198,6 +198,7 @@ class SettingsPanel(QDialog):
     rename_requested = Signal()      # set the display name on a solo copy
     tour_requested = Signal()
     licence_changed = Signal()       # seat released, or a version check landed
+    wallpaper_changed = Signal(str)  # emitted when custom background changes
     # "Check for updates" finished its round trip. Emitted FROM the licensing
     # worker thread (licensing.refresh's on_done); Qt queues it back to this
     # thread, which is the whole reason it is a Signal and not a callback.
@@ -281,6 +282,8 @@ class SettingsPanel(QDialog):
 
     def show_section(self, key: str):
         """Jump straight to a section inside the open settings dialog."""
+        if key == "diagnostics":
+            key = "more"
         keys = {k for k, _l, _g, _b in SECTIONS}
         self._section = key if key in keys else "licence"
         self.refresh()
@@ -1402,6 +1405,10 @@ class SettingsPanel(QDialog):
             i18n.t("The background image is dynamically blurred and sampled by all cards and the left navigation rail. "
                    "You can select any image or photo on your computer."),
             level="SUPPORT", wrap=True))
+        current_bg = (self.cfg.get("custom_bg") or "").strip()
+        status_text = (os.path.basename(current_bg) if current_bg and os.path.exists(current_bg)
+                       else i18n.t("Default Prism wallpaper"))
+        cw.addWidget(C.label(f"{i18n.t('Active wallpaper')}: {status_text}", level="META"))
         cw.addWidget(self._buttons([
             C.button(i18n.t("Choose custom wallpaper…"), "primary",
                      on_click=self._choose_wallpaper),
@@ -1416,27 +1423,31 @@ class SettingsPanel(QDialog):
             self, i18n.t("Select dashboard wallpaper"), suggested,
             "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
         if path:
-            win = self.window()
-            if hasattr(win, "set_wallpaper"):
-                win.set_wallpaper(path)
+            self.wallpaper_changed.emit(path)
+            target = self.parent() or self.window()
+            if hasattr(target, "set_wallpaper") and target is not self:
+                target.set_wallpaper(path)
             self.cfg["custom_bg"] = path
             try:
                 CB.config.save(self.cfg)
             except Exception:
                 pass
+            self.refresh()
             QMessageBox.information(
                 self, i18n.t("Wallpaper"),
                 i18n.t("Dashboard wallpaper updated successfully."))
 
     def _reset_wallpaper(self):
-        win = self.window()
-        if hasattr(win, "set_wallpaper"):
-            win.set_wallpaper("")
+        self.wallpaper_changed.emit("")
+        target = self.parent() or self.window()
+        if hasattr(target, "set_wallpaper") and target is not self:
+            target.set_wallpaper("")
         self.cfg["custom_bg"] = ""
         try:
             CB.config.save(self.cfg)
         except Exception:
             pass
+        self.refresh()
         QMessageBox.information(
             self, i18n.t("Wallpaper"),
             i18n.t("Dashboard wallpaper reset to default."))
@@ -1644,8 +1655,11 @@ class SettingsPanel(QDialog):
             (i18n.t("Email us"), app_meta.SUPPORT_EMAIL),
             (i18n.t("Call us"), app_meta.SUPPORT_PHONE),
             (i18n.t("Website"), app_meta.WEBSITE),
-            (i18n.t("Version"), app_meta.VERSION),
+            (i18n.t("Version"), self._version_row()),
         ]))
+        update_card = self._update_card()
+        if update_card is not None:
+            col.addWidget(update_card)
         
         # Legal links
         col.addWidget(self._buttons([

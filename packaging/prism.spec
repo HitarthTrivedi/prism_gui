@@ -313,6 +313,19 @@ hiddenimports = _engine_modules() + _addon_modules() + [
     "cryptography.hazmat.primitives.ciphers.aead",
 ]
 
+# Audio RMS calculation for wakeword: stdlib audioop on Python < 3.13,
+# audioop-lts on Python >= 3.13.
+try:
+    import audioop  # noqa: F401
+    hiddenimports.append("audioop")
+except ImportError:
+    pass
+try:
+    import audioop_lts  # noqa: F401
+    hiddenimports.append("audioop_lts")
+except ImportError:
+    pass
+
 # The Google Drive libraries are imported lazily inside integrations/gdrive.py,
 # so the analyser never sees them. Added only when they are actually installed
 # on the build machine: a build without them still ships, with the Drive picker

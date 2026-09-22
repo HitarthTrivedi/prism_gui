@@ -179,11 +179,144 @@ class _StarterRow(QFrame):
         self._emit()
         super().mousePressEvent(event)
 
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
-            self._emit()
-            return
-        super().keyPressEvent(event)
+
+class _AttachmentChip(QFrame):
+    removed = Signal(str)
+    activated = Signal(str)
+
+    def __init__(self, att: dict, parent=None):
+        super().__init__(parent)
+        self.att = att
+        self.path = att.get("path") or ""
+        name = att.get("name") or os.path.basename(self.path)
+        kind = att.get("kind") or "file"
+        size = size_label(self.path)
+
+        self.setObjectName("attachmentChip")
+        is_dark = theme.is_dark() if hasattr(theme, "is_dark") else True
+        bg = theme.NEUTRAL[800] if is_dark else theme.NEUTRAL[100]
+        self.setStyleSheet(f"""
+            QFrame#attachmentChip {{
+                background-color: {bg};
+                border: 1px solid {theme.BORDER};
+                border-radius: 8px;
+            }}
+            QFrame#attachmentChip:hover {{
+                border-color: {theme.ACCENT};
+            }}
+        """)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 4, 8, 4)
+        row.setSpacing(6)
+
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(icons.pixmap("folder" if kind == "folder" else "file", 14, theme.ACCENT))
+        row.addWidget(icon_lbl)
+
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(f"font-weight: 500; font-size: 12px; color: {theme.TEXT};")
+        row.addWidget(name_lbl)
+
+        if size:
+            size_lbl = QLabel(f"· {size}")
+            size_lbl.setStyleSheet(f"font-size: 11px; color: {theme.NEUTRAL[500]};")
+            row.addWidget(size_lbl)
+
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setToolTip(i18n.t("Remove this file"))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {theme.NEUTRAL[500]};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                color: {theme.ERR};
+            }}
+        """)
+        close_btn.clicked.connect(lambda *_: self.removed.emit(self.path))
+        row.addWidget(close_btn)
+
+        self.setToolTip(self.path or name)
+
+    def mouseDoubleClickEvent(self, event):
+        if self.path:
+            self.activated.emit(self.path)
+        super().mouseDoubleClickEvent(event)
+
+
+class _FolderAttachmentChip(QFrame):
+    removed = Signal(str)
+    activated = Signal(str)
+
+    def __init__(self, folder_path: str, files: list, parent=None):
+        super().__init__(parent)
+        self.folder_path = folder_path
+        name = os.path.basename(folder_path.rstrip("/\\")) or folder_path
+        count = len(files)
+
+        self.setObjectName("attachmentChip")
+        is_dark = theme.is_dark() if hasattr(theme, "is_dark") else True
+        bg = theme.NEUTRAL[800] if is_dark else theme.NEUTRAL[100]
+        self.setStyleSheet(f"""
+            QFrame#attachmentChip {{
+                background-color: {bg};
+                border: 1px solid {theme.BORDER};
+                border-radius: 8px;
+            }}
+            QFrame#attachmentChip:hover {{
+                border-color: {theme.ACCENT};
+            }}
+        """)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 4, 8, 4)
+        row.setSpacing(6)
+
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(icons.pixmap("folder", 14, theme.ACCENT))
+        row.addWidget(icon_lbl)
+
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(f"font-weight: 500; font-size: 12px; color: {theme.TEXT};")
+        row.addWidget(name_lbl)
+
+        count_lbl = QLabel(f"· {count} files" if count != 1 else "· 1 file")
+        count_lbl.setStyleSheet(f"font-size: 11px; color: {theme.NEUTRAL[500]};")
+        row.addWidget(count_lbl)
+
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setToolTip(i18n.t("Remove this folder"))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {theme.NEUTRAL[500]};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                color: {theme.ERR};
+            }}
+        """)
+        close_btn.clicked.connect(lambda *_: self.removed.emit(self.folder_path))
+        row.addWidget(close_btn)
+
+        self.setToolTip(f"{folder_path}\n({count} files attached — double-click to open folder)")
+
+    def mouseDoubleClickEvent(self, event):
+        if self.folder_path:
+            self.activated.emit(self.folder_path)
+        super().mouseDoubleClickEvent(event)
 
 
 class InputPanel(Card):
@@ -192,6 +325,8 @@ class InputPanel(Card):
     mic_toggle_clicked = Signal()
     attach_file_clicked = Signal()
     attach_folder_clicked = Signal()
+    detach_requested = Signal(str)
+    detach_folder_requested = Signal(str)
     queue_changed = Signal(int)     # how many tasks are queued behind this one
     attachment_activated = Signal(str)   # a path the user asked to open
 
@@ -266,7 +401,14 @@ class InputPanel(Card):
         self.hint.layout().itemAt(1).widget().setObjectName("meta")
         self.hint.layout().itemAt(1).widget().setWordWrap(True)
         self.content.addWidget(self.hint)
-        self.content.addSpacing(theme.SPACE_3)
+        self.content.addSpacing(theme.SPACE_2)
+
+        # ── attached files bar (stuck right under the message bar) ────────────
+        self.attachments_bar = QWidget(self)
+        self._attachments_flow = C.FlowLayout(self.attachments_bar, margin=0, h_space=6, v_space=6)
+        self.attachments_bar.setVisible(False)
+        self.content.addWidget(self.attachments_bar)
+        self.content.addSpacing(theme.SPACE_2)
 
         # ── the queue ────────────────────────────────────────────────────────
         # Tasks the user lined up before starting. Prism plans and runs them in
@@ -465,21 +607,57 @@ class InputPanel(Card):
     def set_context(self, attachments: list):
         """The files this task will be run against, on the Describe surface
         itself rather than only inside a 44px collapsed rail."""
+        items = list(attachments or [])
+
+        # 1. Update the attachment chips bar (stuck right near the message bar)
+        while self._attachments_flow.count():
+            item = self._attachments_flow.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        folders = {}
+        loose = []
+        for att in items:
+            folder = att.get("from_dir")
+            if folder:
+                folders.setdefault(folder, []).append(att)
+            else:
+                loose.append(att)
+
+        for folder_path, files in folders.items():
+            chip = _FolderAttachmentChip(folder_path, files)
+            chip.removed.connect(self.detach_folder_requested.emit)
+            chip.activated.connect(self.attachment_activated.emit)
+            self._attachments_flow.addWidget(chip)
+
+        for att in loose:
+            chip = _AttachmentChip(att)
+            chip.removed.connect(self.detach_requested.emit)
+            chip.activated.connect(self.attachment_activated.emit)
+            self._attachments_flow.addWidget(chip)
+
+        self.attachments_bar.setVisible(bool(items) and not self._compact)
+
+        # 2. Also keep context_box updated for full context details
         while self._context_layout.count():
             item = self._context_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        items = list(attachments or [])
         for att in items[:4]:
             name = att.get("name") or os.path.basename(att.get("path") or "")
             bits = [b for b in (kind_label(att), size_label(att.get("path"))) if b]
             if att.get("truncated"):
                 bits.append(i18n.t("first part only"))
+            p = att.get("path") or ""
+            drop = C.icon_button("x", i18n.t("Remove this file"),
+                                 lambda *_, path=p: self.detach_requested.emit(path))
+            drop.setFixedSize(26, 26)
             row = C.FileItem(name, " · ".join(bits),
-                             "folder" if att.get("kind") == "folder" else "file")
-            row.setToolTip(att.get("path") or name)
+                             "folder" if att.get("kind") == "folder" else "file",
+                             actions=[drop])
+            row.setToolTip(p or name)
             row.activated.connect(
-                lambda p=att.get("path") or "": self.attachment_activated.emit(p))
+                lambda *_, path=p: self.attachment_activated.emit(path))
             self._context_layout.addWidget(row)
         extra = len(items) - 4
         if extra > 0:
@@ -581,6 +759,7 @@ class InputPanel(Card):
         if on:
             self.queue_box.setVisible(False)
             self.status.setVisible(False)
+            self.attachments_bar.setVisible(False)
             self.context_box.setVisible(False)
         else:
             # Visibility only. Calling _render_queue() here tore down and
@@ -588,6 +767,7 @@ class InputPanel(Card):
             # set_state on each keystroke, that meant deleteLater() churn on the
             # whole queue for every character typed.
             self.queue_box.setVisible(bool(self._queue))
+            self.attachments_bar.setVisible(self._attachments_flow.count() > 0)
             self.context_box.setVisible(self._context_layout.count() > 0)
             self._autosize()
 

@@ -543,7 +543,9 @@ class SupportPanel(QWidget):
     def __init__(self, cfg: dict | None = None, parent=None):
         super().__init__(parent)
         self.cfg = cfg or {}
+        self._stage = "triage"
         self._seen: list[str] = []
+        self._unsolved: list[str] = []
         self._log: list[tuple[str, str]] = []
         self._live: list[QWidget] = []
         self._worker = None
@@ -752,6 +754,11 @@ class SupportPanel(QWidget):
             i18n.t("Need to speak to someone?"), role="meta", wrap=True)
         row.addWidget(self._foot_note, stretch=1)
 
+        self._ai_btn = C.button(i18n.t(" Ask the assistant"), "secondary",
+                                small=True, on_click=self._start_ai)
+        icons.button_icon(self._ai_btn, "bulb", 14, theme.ACCENT)
+        row.addWidget(self._ai_btn)
+
         self._meeting_btn = C.button(i18n.t(" Book a meeting"), "secondary",
                                      small=True, on_click=self._book_meeting)
         icons.button_icon(self._meeting_btn, "clock", 14, theme.ACCENT)
@@ -762,10 +769,15 @@ class SupportPanel(QWidget):
         icons.button_icon(self._contact_btn, "mail", 14, theme.TEXT)
         row.addWidget(self._contact_btn)
 
+        self._refresh_escalation()
         return bar
 
     def _refresh_escalation(self):
-        """No-op in the simplified design — buttons are always enabled."""
+        """Keep routing buttons in sync with conversation stage."""
+        if hasattr(self, "_ai_btn"):
+            self._ai_btn.setEnabled(self._stage != "ai")
+        if hasattr(self, "_contact_btn"):
+            self._contact_btn.setEnabled(True)
 
     # ── the transcript ────────────────────────────────────────────────────
     def _say(self, widget: QWidget, scroll: bool = True):
@@ -907,6 +919,7 @@ class SupportPanel(QWidget):
             self._options([again])
             return
 
+        self._unsolved.append(qid)
         nearby = [q for q in KB.related_to(qid) if q.qid not in self._seen]
         if nearby:
             self._bot(i18n.t("Sorry about that. These are close to it — one "
@@ -933,18 +946,58 @@ class SupportPanel(QWidget):
         self._entry.clear()
         self._retire_menus()
         self._me(text)
-        # Always go directly to AI — no tier-gating, no KB search triage.
-        self._ask_ai(text)
+        if self._stage == "ai":
+            self._ask_ai(text)
+            return
+
+        hits = [q for q in KB.search(text) if q.qid not in self._seen]
+        if hits:
+            self._bot(i18n.t("Here's the closest I have:"))
+            buttons = []
+            for question in hits:
+                btn = _Choice(question.text, "chevron-right")
+                btn.clicked.connect(
+                    lambda _=False, q=question.qid: self._show_answer(q))
+                buttons.append(btn)
+            none = _Choice(i18n.t("None of these is what I meant"), "x",
+                           muted=True)
+            none.clicked.connect(lambda t=text: self._no_answer(t))
+            buttons.append(none)
+            self._options(buttons)
+        else:
+            self._no_answer(text)
 
     def _no_answer(self, text: str):
-        """Forward to AI when a KB answer isn't selected."""
+        self._unsolved.append(text)
         self._retire_menus()
-        self._ask_ai(text)
+        self._bot(i18n.t(
+            "I don't have a written answer for that. You can ask the assistant "
+            "below or contact the team."))
 
     # ── AI assistant ──────────────────────────────────────────────────────
     def _start_ai(self):
-        """No-op — AI is always on in the simplified design."""
-        pass
+        if not self.cfg.get("api_key"):
+            self._bot(i18n.t(
+                "The assistant needs the free key Prism uses to work out your "
+                "tasks, and there isn't one saved on this computer yet. You "
+                "can still contact our team with the button beside this "
+                "one."))
+            go = _chip(i18n.t("Add the key in Settings"), "key")
+            go.clicked.connect(lambda: self.command_requested.emit("key"))
+            self._options([go])
+            return
+        self._stage = "ai"
+        self._refresh_escalation()
+        self._entry.setPlaceholderText(
+            i18n.t("Tell the assistant what's happening…"))
+        self._head.set_subtitle(i18n.t(
+            "The assistant answers from Prism's own help. If it doesn't know, "
+            "it will say so — then use Contact the team."))
+        self._bot(i18n.t(
+            "Right — I'm the assistant. Tell me what's happening in your own "
+            "words, including anything you've already tried, and I'll work "
+            "through it with you."))
+        self._entry.setFocus()
 
     def _ask_ai(self, text: str):
         if self._worker is not None:
@@ -1109,8 +1162,10 @@ class SupportPanel(QWidget):
             item = self._thread_box.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._stage = "triage"
         self._live = []
         self._seen = []
+        self._unsolved = []
         self._log = []
         self._thinking = None
         self._entry.setEnabled(True)

@@ -24,10 +24,43 @@ import os
 import sys
 import io
 import wave
+import contextlib
 from PySide6.QtCore import Signal
 
 import core_bridge as CB
 from workers import _Worker
+
+
+@contextlib.contextmanager
+def _silence_alsa():
+    """Silence ALSA / JACK library C-level stderr noise on Linux during device scan."""
+    if os.name == "nt":
+        yield
+        return
+    try:
+        from ctypes import CFUNCTYPE, c_char_p, c_int, cdll
+        c_error_handler = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)(lambda *_: None)
+        asound = cdll.LoadLibrary("libasound.so.2")
+        asound.snd_lib_error_set_handler(c_error_handler)
+    except Exception:
+        pass
+    try:
+        devnull = os.open(os.devnull, os.O_RDWR)
+        saved_stderr = os.dup(2)
+        os.dup2(devnull, 2)
+    except Exception:
+        saved_stderr = None
+    try:
+        yield
+    finally:
+        if saved_stderr is not None:
+            try:
+                os.dup2(saved_stderr, 2)
+                os.close(saved_stderr)
+                os.close(devnull)
+            except Exception:
+                pass
+
 
 # audioop was deleted from the stdlib in Python 3.13 (PEP 594), and pyaudio is
 # an optional extra that needs PortAudio on the box. Neither may be present —
@@ -46,6 +79,29 @@ _CHUNK_SECONDS = 2.0
 _SILENCE_RMS = 300   # crude energy floor — tune per microphone if it misfires
 
 
+def _calc_rms(data: bytes) -> int:
+    """Calculate 16-bit PCM RMS energy. Uses audioop when available, with a
+    pure-Python fallback so Python 3.13 never drops voice input even if
+    audioop-lts has not yet been installed."""
+    if audioop is not None:
+        try:
+            return audioop.rms(data, 2)
+        except Exception:
+            pass
+    if not data:
+        return 0
+    n = len(data) // 2
+    if n == 0:
+        return 0
+    import struct
+    import math
+    try:
+        samples = struct.unpack(f"<{n}h", data[:n * 2])
+        return int(math.isqrt(sum(s * s for s in samples) // n))
+    except Exception:
+        return 0
+
+
 def install_hint() -> str:
     """The command that actually works on THIS machine.
 
@@ -53,19 +109,17 @@ def install_hint() -> str:
     platform, so a Linux or Windows user was told to run a macOS package
     manager they do not have. One place, so they cannot drift again.
     """
+    pkg = "pyaudio" if sys.version_info < (3, 13) else "pyaudio audioop-lts"
     if sys.platform == "darwin":
-        return "brew install portaudio && pip install pyaudio"
+        return f"brew install portaudio && pip install {pkg}"
     if os.name == "nt":
-        return "pip install pyaudio"
-    return "sudo apt install portaudio19-dev && pip install pyaudio"
+        return f"pip install {pkg}"
+    return f"sudo apt install portaudio19-dev && pip install {pkg}"
 
 
 def available() -> tuple[bool, str]:
     """(usable, why not). Checked before the listener is started so the reason
     lands in the UI rather than in a traceback nobody sees."""
-    if audioop is None:
-        return False, ("This build has no audio support (Python 3.13 removed "
-                       "the audioop module — install 'audioop-lts').")
     try:
         import pyaudio  # noqa: F401
     except ImportError:
@@ -115,10 +169,11 @@ class WakeWordListener(_Worker):
     def run(self):
         import pyaudio
         try:
-            pa = pyaudio.PyAudio()
-            stream = pa.open(format=pyaudio.paInt16, channels=1,
-                             rate=CB.voice.SAMPLE_RATE, input=True,
-                             frames_per_buffer=CB.voice.CHUNK)
+            with _silence_alsa():
+                pa = pyaudio.PyAudio()
+                stream = pa.open(format=pyaudio.paInt16, channels=1,
+                                 rate=CB.voice.SAMPLE_RATE, input=True,
+                                 frames_per_buffer=CB.voice.CHUNK)
         except Exception as e:
             self.error.emit(f"Microphone unavailable: {e}")
             return
@@ -133,7 +188,7 @@ class WakeWordListener(_Worker):
                         break
                     data = stream.read(CB.voice.CHUNK, exception_on_overflow=False)
                     frames.append(data)
-                    if audioop.rms(data, 2) > _SILENCE_RMS:
+                    if _calc_rms(data) > _SILENCE_RMS:
                         loud = True
                 if not loud or not frames:
                     continue

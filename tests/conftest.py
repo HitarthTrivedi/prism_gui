@@ -198,13 +198,14 @@ def _the_suite_must_not_touch_the_real_home():
             lost.append(f"{len(gone)} saved run(s) DELETED: {gone[:5]}")
         if added:
             lost.append(f"{len(added)} run(s) written into the real folder")
-    raise AssertionError(
-        "The suite wrote to the developer's own ~/.prism:\n  - "
-        + "\n  - ".join(lost)
-        + "\nA test must operate on a temp directory. Note that passing "
-          "cfg['runs_dir'] does NOT isolate dashboard_data._run_files, and "
-          "that a licensing daemon thread outliving its patch will write "
-          "wherever user_dir() points when it finishes.")
+    if lost:
+        raise AssertionError(
+            "The suite wrote to the developer's own ~/.prism:\n  - "
+            + "\n  - ".join(lost)
+            + "\nA test must operate on a temp directory. Note that passing "
+              "cfg['runs_dir'] does NOT isolate dashboard_data._run_files, and "
+              "that a licensing daemon thread outliving its patch will write "
+              "wherever user_dir() points when it finishes.")
 
 
 @pytest.fixture(autouse=True)

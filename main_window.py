@@ -284,9 +284,11 @@ class MainWindow(QMainWindow):
     reel_refine_requested = Signal(str, dict)
 
     def set_wallpaper(self, path: str):
+        self.cfg["custom_bg"] = path
         central = self.centralWidget()
         if hasattr(central, "set_background"):
             central.set_background(path)
+        self.update()
 
     def __init__(self):
         super().__init__()
@@ -516,6 +518,7 @@ class MainWindow(QMainWindow):
         # they have to be told rather than waiting for the ten-minute timer to
         # notice the licence has gone.
         self.settings_panel.licence_changed.connect(self.refresh_licence_ui)
+        self.settings_panel.wallpaper_changed.connect(self.set_wallpaper)
         self.history_panel.open_run.connect(self._open_run_record)
         # Deleting runs changes what Home's activity list and its counters
         # add up to, and Home is already built by then -- it re-reads from
@@ -1144,6 +1147,10 @@ class MainWindow(QMainWindow):
         self.input_panel.mic_toggle_clicked.connect(self._toggle_mic)
         self.input_panel.attach_file_clicked.connect(self._attach_file_dialog)
         self.input_panel.attach_folder_clicked.connect(self._attach_folder_dialog)
+        self.input_panel.detach_requested.connect(self._detach)
+        self.input_panel.detach_folder_requested.connect(self._detach_folder)
+        self.input_panel.attachment_activated.connect(
+            lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)) if p else None)
         self.input_panel.queue_changed.connect(self._on_queue_changed)
 
         self.files_panel.mention_accepted.connect(self._accept_mention)
@@ -1197,6 +1204,7 @@ class MainWindow(QMainWindow):
         self._queue_stopped = False
         self._auto_run = False
         self.input_panel.reset()
+        self.input_panel.set_context(self.attachments)
         self.agents_panel.clear()
         self.files_panel.clear_mentions()
         self.output_panel.set_finished(False)
@@ -1749,6 +1757,10 @@ class MainWindow(QMainWindow):
                 # The engine still gets the flat list — it uploads files, not
                 # folders — so this is presentation only.
                 added = [{**a, "from_dir": path} for a in CB.files.attach_dir(path)]
+                if not added:
+                    self.statusBar().showMessage(
+                        i18n.t("Folder contains no supported files to attach."), 4000)
+                    return
             else:
                 added = [CB.files.attach(path)]
         except Exception as e:                          # noqa: BLE001
@@ -1765,6 +1777,7 @@ class MainWindow(QMainWindow):
         self.attachments.extend(fresh)
         try:
             self.files_panel.set_attached(self.attachments)
+            self.input_panel.set_context(self.attachments)
             self._sync_context_rail()
         except Exception as e:                          # noqa: BLE001
             # The read succeeded; only the drawing failed. Say so rather than
@@ -1852,6 +1865,7 @@ class MainWindow(QMainWindow):
     def _detach(self, path: str):
         self.attachments = [a for a in self.attachments if a["path"] != path]
         self.files_panel.set_attached(self.attachments)
+        self.input_panel.set_context(self.attachments)
         self._sync_context_rail()
 
     def _detach_folder(self, folder: str):
@@ -1865,6 +1879,7 @@ class MainWindow(QMainWindow):
         removed = len(self.attachments) - len(keep)
         self.attachments = keep
         self.files_panel.set_attached(self.attachments)
+        self.input_panel.set_context(self.attachments)
         self._sync_context_rail()
         if removed:
             where = os.path.basename(folder.rstrip(os.sep))
@@ -1880,6 +1895,7 @@ class MainWindow(QMainWindow):
         count = len(self.attachments)
         self.attachments = []
         self.files_panel.set_attached(self.attachments)
+        self.input_panel.set_context(self.attachments)
         self._sync_context_rail()
         self.statusBar().showMessage(
             (i18n.t("Detached the one attached file.") if count == 1
@@ -1940,8 +1956,12 @@ class MainWindow(QMainWindow):
         self.input_panel.set_query_text(intent.get("task") or intent.get("cleaned") or "")
         self.pending_mentions = []
         self.files_panel.clear_mentions()
-        for desc in intent.get("files") or []:
-            self._resolve_mention(desc)
+        files = intent.get("files") or []
+        if files:
+            self.input_panel.append_status(
+                i18n.t("Searching for mentioned folder(s) and file(s)…"))
+            for desc in files:
+                self._resolve_mention(desc)
 
     def _resolve_mention(self, description: str):
         worker = FindWorker(description, self.cfg)
@@ -1954,9 +1974,24 @@ class MainWindow(QMainWindow):
             self.pending_mentions[index]["path"] = path
             self.pending_mentions[index]["kind"] = kind
             self.files_panel.add_mention(index, description, path or "", kind or "?")
+            if path and os.path.exists(path):
+                self._attach_path(path)
+                name = os.path.basename(path.rstrip("/\\"))
+                self.input_panel.append_status(
+                    i18n.t("Attached {kind} “{name}” from voice.").format(
+                        kind=kind or "item", name=name))
+            else:
+                self.input_panel.append_status(
+                    i18n.t("Could not find “{desc}” on disk. Use “Add file” or “Add folder” to attach it.").format(
+                        desc=description))
+
+        def on_failed(err: str):
+            self.files_panel.add_mention(index, description, "", "?")
+            self.input_panel.append_status(
+                i18n.t("Could not locate “{desc}”: {err}").format(desc=description, err=err))
 
         worker.done.connect(on_done)
-        worker.failed.connect(lambda e: self.files_panel.add_mention(index, description, "", "?"))
+        worker.failed.connect(on_failed)
         self._workers.append(worker)
         worker.start()
 
