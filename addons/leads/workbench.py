@@ -967,6 +967,14 @@ class LeadsWorkbench(QWidget):
         # Apollo's own "Import contacts" accepts exactly this) has a contact
         # signal and goes through load() normally instead -- has_contact_signal
         # is deliberately broader than "has a Name column" for this reason.
+        #
+        # 22-Sep-2026, checked directly against Apollo's own docs (Import a
+        # CSV of Accounts): its equivalent step is "Check the companies
+        # where you want to find prospects. Then, click Find People" — a
+        # reviewable tick-list, not the whole batch going in unread. Prism
+        # has no persistent Companies screen to put that on, so
+        # CompanyPickDialog is the same choice right here, before the batch
+        # ever reaches _filters.
         from prospector import sheet as _sheet
         sheet_companies = False
         if self._mode != "icp" and self._path:
@@ -986,14 +994,32 @@ class LeadsWorkbench(QWidget):
                     "filters or has been searched. Choose a different sheet "
                     "to bring in more."))
                 return
+            # Apollo's own words for this step (Import a CSV of Accounts):
+            # "Check the companies where you want to find prospects. Then,
+            # click Find People." -- a deliberate, reviewable choice, not
+            # every imported row going in unasked. See CompanyPickDialog.
+            from addons.leads.dialog import CompanyPickDialog
+            from PySide6.QtWidgets import QDialog as _QDialog
+            picker = CompanyPickDialog(batch, self)
+            if picker.exec() != _QDialog.Accepted:
+                self._status.setText(i18n.t(
+                    "Cancelled — nothing was added to Find people. Press "
+                    "the button again when you're ready."))
+                return                                    # offset NOT advanced
+            self._sheet_company_offset = start + len(batch)
+            picked = picker.checked()
+            if not picked:
+                self._status.setText(i18n.t(
+                    "Nothing was ticked, so nothing was added to Find "
+                    "people. Press the button again for the next batch."))
+                return
             # Never search this sheet's companies against the
             # automation-vertical defaults -- see _company_search_spec.
             # Setting it on _filters (not a hidden batch_spec) is the whole
             # point: it is now what Find people itself will search with,
             # in plain sight, editable like anything typed in by hand.
             batch_spec = _company_search_spec(spec)
-            batch_spec.companies.include = list(batch)
-            self._sheet_company_offset = start + len(batch)
+            batch_spec.companies.include = list(picked)
             self._filters.set_spec(batch_spec)
             self._set_mode("icp")
             more = self._sheet_company_offset < len(companies)
@@ -1011,7 +1037,7 @@ class LeadsWorkbench(QWidget):
                     "people to search — switch back to Import a sheet "
                     "and press it again afterwards for the rest."
                 )
-            ).format(n=len(batch)))
+            ).format(n=len(picked)))
             return
         if self._mode == "icp":
             self._set_running(True)
@@ -1700,11 +1726,27 @@ class LeadsWorkbench(QWidget):
         # hand the owner a button that only leads to the same 403.
         if self._apollo_blocked:
             self._src_apollo.setEnabled(False)
-        # The cockpit's bulk bar starts sends and verifies too. Disabling the bar
-        # itself holds its buttons off even when _refresh_bulk re-arms them.
+        # The bulk bar's six ACTION buttons start sends and verifies too —
+        # another background job while this one is still going. "Clear" and
+        # "Select all" are not: pure local selection state, nothing they do
+        # touches a running worker, and disabling the whole bar caught them
+        # anyway — live report, 22-Sep-2026, a customer pressed "Clear"
+        # mid-run and it did genuinely nothing (worse, it *looked* enabled
+        # the whole time — QPushButton#bulkLink has no :disabled rule of
+        # its own; see style fix above — so there was no way to tell a
+        # disabled control from a broken one). Disabling only the buttons
+        # that actually need it fixes both: the real bug (Clear was blocked
+        # for no reason) and the visible one (it no longer needs to LOOK
+        # disabled, because it just isn't).
         cockpit = getattr(self, "_cockpit", None)
         if cockpit is not None:
-            cockpit.leads._bulk.setEnabled(not running)
+            for b in cockpit.leads._bulk_actions():
+                b.setEnabled(not running)
+            if not running:
+                # Each button's real, selection-driven state — not just
+                # unconditionally back on, which would offer "Qualify" with
+                # nothing left to qualify.
+                cockpit.leads._refresh_bulk()
         if not running:
             self._refresh_prepare()
             self._send_btn.setEnabled(bool(self._pending(self._drafts)))

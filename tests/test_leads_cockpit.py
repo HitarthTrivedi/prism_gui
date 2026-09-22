@@ -311,16 +311,19 @@ class TableFeel(unittest.TestCase):
         self.assertTrue(all(c._table.item(r, 0).checkState() == Qt.Unchecked
                             for r in range(c._table.rowCount())))
 
-    def test_clear_and_select_all_actually_look_disabled_while_a_run_holds_them(self):
+    def test_clear_and_select_all_would_still_look_disabled_if_ever_disabled(self):
         # Live report, 22-Sep-2026: a customer pressed "Clear" while a
-        # background search held the bulk bar disabled (workbench._set_running
-        # disables cockpit.leads._bulk for exactly this reason) and nothing
-        # happened -- correctly, the bar really was off-limits mid-run -- but
-        # "Clear" and "Select all" are QPushButton#bulkLink, a MORE SPECIFIC
-        # selector than the bar's plain "QPushButton:disabled" rule, so
-        # without a "#bulkLink:disabled" rule of its own they kept rendering
-        # in the same clickable accent-blue regardless of setEnabled(False).
-        # A customer had no way to tell a dead-looking click from a real bug.
+        # background search held the whole bulk bar disabled
+        # (workbench._set_running used to disable cockpit.leads._bulk
+        # outright) and nothing happened, with no visible sign why — "Clear"
+        # and "Select all" are QPushButton#bulkLink, a MORE SPECIFIC selector
+        # than the bar's plain "QPushButton:disabled" rule, so without a
+        # "#bulkLink:disabled" rule of its own they kept rendering in the
+        # same clickable accent-blue regardless of setEnabled(False). The
+        # real fix was to stop disabling them at all (see
+        # ClearAndSelectAllStayUsableDuringARun below) — this rule stays as
+        # a second line of defence, so if anything ever disables them again
+        # it will at least be honest about it.
         c = self.c
         qss = c._bulk_bar_w.styleSheet()
         self.assertIn("QPushButton#bulkLink:disabled", qss)
@@ -1477,17 +1480,22 @@ class ASheetImportThatFoundNobody(_Workbench):
 
 
 class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
-    """22-Sep-2026, twice over. First: rather than tell the owner a
+    """22-Sep-2026, three times over. First: rather than tell the owner a
     company-only sheet needs a different screen, its companies were made to
     go straight into a real Find-people SEARCH, MAX_FACET_VALUES (the same
     real cap a person pasting a list into the filter panel hits) at a time.
     Second, the same day: that ran the search on its own, unasked — an
     owner who only picked a company list did not thereby ask Prism to spend
-    Exa credits on it. Importing this kind of sheet now only ever LOADS —
-    its companies (and a suggested decision-maker seniority) land as
-    ordinary, visible, editable chips on the Find people tab, exactly as if
-    the owner had pasted the list in by hand, and nothing is searched until
-    Find people is pressed on its own, as a separate, informed decision."""
+    Exa credits on it. Third: checked directly against how Apollo's own
+    "Import a CSV of Accounts" does this same handoff — "Check the
+    companies where you want to find prospects. Then, click Find People" —
+    and added the same reviewable choice here (CompanyPickDialog) rather
+    than trusting the whole batch went in unread. Importing this kind of
+    sheet now only ever LOADS — a reviewed, tickable batch of its companies
+    (and a suggested decision-maker seniority) land as ordinary, visible,
+    editable chips on the Find people tab, exactly as if the owner had
+    pasted the list in by hand, and nothing is searched until Find people
+    is pressed on its own, as a separate, informed decision."""
 
     def _sheet(self, name, companies, header="Company Name"):
         import openpyxl
@@ -1499,11 +1507,26 @@ class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
         wbf.save(path)
         return path
 
-    def _workbench(self, path, cfg=None):
+    def _workbench(self, path, cfg=None, accept_picker=True):
         _FakeSourceWorker.made = []
         orig = self._WB.SourceWorker
         self.addCleanup(setattr, self._WB, "SourceWorker", orig)
         self._WB.SourceWorker = _FakeSourceWorker
+        # CompanyPickDialog is a real, modal QDialog — .exec() would block
+        # a headless test forever waiting for a click nobody sends. Patch
+        # only the modal loop itself, the same way test_preview_dialog.py
+        # does for its own dialogs: everything else (the checkbox list,
+        # .checked()) runs for real, built from the real batch it is
+        # handed, so a test that unchecks one still exercises the real
+        # widget, not a stand-in for it.
+        from unittest import mock
+        from PySide6.QtWidgets import QDialog
+        from addons.leads.dialog import CompanyPickDialog
+        patcher = mock.patch.object(
+            CompanyPickDialog, "exec",
+            return_value=(QDialog.Accepted if accept_picker else QDialog.Rejected))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         wb = self._WB.LeadsWorkbench(cfg if cfg is not None else {"exa_api_key": "k"})
         wb._set_mode("sheet")
         wb._path = path
@@ -1560,6 +1583,70 @@ class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
         self.assertEqual(len(_FakeSourceWorker.made), 1)
         spec = _FakeSourceWorker.made[0].kwargs["spec"]
         self.assertEqual(spec["companies"]["include"], ["Acme Tooling", "Beta Corp"])
+
+    def test_the_batch_is_shown_for_review_before_anything_is_added(self):
+        # Apollo's own step, matched directly: the owner sees the batch and
+        # ticks which of it they actually want, same as the filter panel's
+        # own chips would let them do by removing one afterwards — just
+        # asked up front instead.
+        path = self._sheet("review.xlsx", ["Acme Tooling", "Beta Corp", "Gamma Inc"])
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(wb._filters.spec().companies.include,
+                         ["Acme Tooling", "Beta Corp", "Gamma Inc"])   # all ticked by default
+
+    def test_cancelling_the_review_adds_nothing_and_does_not_consume_the_batch(self):
+        path = self._sheet("cancelled.xlsx", ["Acme Tooling", "Beta Corp"])
+        wb = self._workbench(path, accept_picker=False)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(wb._filters.spec().companies.include, [])
+        self.assertEqual(wb._mode, "sheet")                # never switched tabs
+        self.assertEqual(wb._sheet_company_offset, 0)      # free to try again
+        self.assertIn("Cancelled", wb._status.text())
+
+    def test_unticking_a_company_in_the_review_leaves_it_out(self):
+        from unittest import mock
+        from PySide6.QtCore import Qt as _Qt
+        from addons.leads.dialog import CompanyPickDialog
+        path = self._sheet("partial.xlsx",
+                           ["Acme Tooling", "Beta Corp", "Gamma Inc"])
+        wb = self._workbench(path)
+        # The picker's own .exec() is already patched to auto-accept; hook
+        # its construction to untick one company, the way a real click on
+        # its checkbox would, before that accept happens.
+        real_init = CompanyPickDialog.__init__
+
+        def _uncheck_beta(self, companies, parent=None):
+            real_init(self, companies, parent)
+            for i in range(self._list.count()):
+                if self._list.item(i).text() == "Beta Corp":
+                    self._list.item(i).setCheckState(_Qt.Unchecked)
+
+        with mock.patch.object(CompanyPickDialog, "__init__", _uncheck_beta):
+            wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(wb._filters.spec().companies.include,
+                         ["Acme Tooling", "Gamma Inc"])
+        self.assertEqual(wb._sheet_company_offset, 3)       # the batch is still spent
+
+    def test_unticking_everything_adds_nothing_but_still_spends_the_batch(self):
+        path = self._sheet("none_picked.xlsx", ["Acme Tooling"])
+        wb = self._workbench(path)
+        from unittest import mock
+        from PySide6.QtCore import Qt as _Qt
+        from addons.leads.dialog import CompanyPickDialog
+        real_init = CompanyPickDialog.__init__
+
+        def _uncheck_all(self, companies, parent=None):
+            real_init(self, companies, parent)
+            for i in range(self._list.count()):
+                self._list.item(i).setCheckState(_Qt.Unchecked)
+
+        with mock.patch.object(CompanyPickDialog, "__init__", _uncheck_all):
+            wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(_FakeSourceWorker.made, [])
+        self.assertEqual(wb._mode, "sheet")                 # nothing to review, stayed put
+        self.assertEqual(wb._sheet_company_offset, 1)
+        self.assertIn("Nothing was ticked", wb._status.text())
 
     def test_a_big_sheet_is_loaded_max_facet_values_at_a_time(self):
         from prospector.filters import MAX_FACET_VALUES
@@ -1952,6 +2039,90 @@ class QualifySelected(_Workbench):
         self.assertIsNone(kw.get("skip"))            # they belong to this session
         self.assertEqual(kw["roles"], ["Plant Head"])
         self.assertEqual(len(done[0][0].dossiers), 3)
+
+
+class ClearAndSelectAllStayUsableDuringARun(_Workbench):
+    """22-Sep-2026, the real fix behind the "Clear doesn't work" report:
+    workbench._set_running(True) used to disable cockpit.leads._bulk
+    outright — the whole bulk bar — while ANY background job (a search, a
+    verify pass, a qualify pass…) was running. That correctly holds off the
+    six action buttons, which would each start ANOTHER job on top of the
+    one already going. It also, as collateral, held off "Clear" and "Select
+    all" — pure local selection state that touches no running worker and
+    had no reason to be blocked at all. A customer pressed "Clear" mid-run,
+    watched it do nothing, and had no way to know it wasn't just broken
+    (compounded by the styling gap fixed just above — it didn't even LOOK
+    disabled). Now only the six action buttons are held off; "Clear" and
+    "Select all" work in every state."""
+
+    def _leads_only_run(self, wb, n=4):
+        from prospector.engine import RunResult
+        leads = [Lead(name=f"P{i}", title="Plant Head", company=f"Co {i}",
+                      email=f"p{i}@x.com", fit_score=60 + i) for i in range(n)]
+        res = RunResult(dossiers=[], total_in_sheet=n, signal_source="",
+                        all_leads=leads)
+        wb._start_export = lambda *a, **k: None
+        wb._next_mode = "icp_leads_only"
+        wb._next_params = {"mode": "icp_leads_only", "roles": ["Plant Head"],
+                           "offer": "Automation retrofits"}
+        wb._jobs = 1
+        wb._on_prepared(res, [])
+        return leads
+
+    def _tick(self, cockpit, leads):
+        for r in range(cockpit._table.rowCount()):
+            if cockpit._dossier_at(r).lead in leads:
+                cockpit._table.item(r, 0).setCheckState(Qt.Checked)
+
+    def test_the_six_action_buttons_are_held_off_mid_run(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        leads = self._leads_only_run(wb)
+        cockpit = wb._cockpit.leads
+        self._tick(cockpit, leads)
+        wb._set_running(True)
+        for b in cockpit._bulk_actions():
+            self.assertFalse(b.isEnabled(), b.text())
+
+    def test_clear_and_select_all_are_not_touched_by_a_run(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        leads = self._leads_only_run(wb)
+        cockpit = wb._cockpit.leads
+        self._tick(cockpit, leads)
+        wb._set_running(True)
+        self.assertTrue(cockpit._bulk_clear.isEnabled())
+        self.assertTrue(cockpit._sel_all.isEnabled())
+
+    def test_pressing_clear_mid_run_actually_clears(self):
+        # The real bug, reproduced and fixed: this used to leave
+        # cockpit.selected() at 4 no matter how many times "Clear" was
+        # clicked, because the button was disabled underneath a normal-
+        # looking face.
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        leads = self._leads_only_run(wb)
+        cockpit = wb._cockpit.leads
+        self._tick(cockpit, leads)
+        wb._set_running(True)
+        self.assertEqual(len(cockpit.selected()), 4)
+        cockpit._bulk_clear.click()
+        self.assertEqual(cockpit.selected(), [])
+
+    def test_the_action_buttons_come_back_selection_correct_not_blindly_on(self):
+        # _set_running(False) must not just flip every action button back
+        # on — "Qualify" with nothing ticked, or nothing left to qualify,
+        # has to stay off exactly as _refresh_bulk would already say.
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        self._leads_only_run(wb)
+        cockpit = wb._cockpit.leads
+        wb._set_running(True)
+        wb._set_running(False)
+        for b in cockpit._bulk_actions():
+            self.assertFalse(b.isEnabled(), b.text())    # nothing is ticked
+        leads = [d.lead for d in
+                [cockpit._dossier_at(r) for r in range(cockpit._table.rowCount())]]
+        self._tick(cockpit, leads[:2])
+        wb._set_running(True)
+        wb._set_running(False)
+        self.assertTrue(cockpit._b_verify.isEnabled())    # 2 ticked, now real again
 
 
 class _FakeEmailWorker(_FakeSourceWorker):
