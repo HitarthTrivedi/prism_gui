@@ -1489,6 +1489,33 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._path = path
         return wb
 
+    def test_choosing_a_company_only_sheet_relabels_the_button_to_find_people(self):
+        # 22-09-2026, the follow-up to the follow-up: a customer pressed a
+        # button that said "Load the sheet" and was startled to watch it go
+        # off and run a live, paid Exa search instead — reasonably, since
+        # that copy was written for a real contacts sheet that needs no
+        # search at all. _choose_file must relabel the button the moment
+        # it can tell which kind of file this is, not just leave the
+        # contacts-sheet wording sitting on a company-only search.
+        path = self._sheet("companies.xlsx", ["Acme Tooling", "Beta Corp"])
+        wb = self._workbench(path)                 # sets wb._path directly
+        self.assertEqual(wb._prepare.text(), "Load the sheet")  # not yet told
+        wb._update_prepare_labels()                 # what _choose_file calls
+        self.assertEqual(wb._prepare.text(), "Find people")
+        self.assertEqual(wb._prepare_all.text(), "Find and prepare")
+
+    def test_a_real_contacts_sheet_keeps_load_the_sheet(self):
+        path = os.path.join(self._tmp, "contacts.xlsx")
+        import openpyxl
+        wbf = openpyxl.Workbook()
+        wbf.active.append(["Name", "Company", "Email"])
+        wbf.active.append(["Jane Doe", "Acme Tooling", "jane@acme.example"])
+        wbf.save(path)
+        wb = self._workbench(path)
+        wb._update_prepare_labels()
+        self.assertEqual(wb._prepare.text(), "Load the sheet")
+        self.assertEqual(wb._prepare_all.text(), "Load and prepare")
+
     def test_a_small_sheet_searches_every_company_in_one_press(self):
         path = self._sheet("small.xlsx", [f"Company {i}" for i in range(1, 6)])
         wb = self._workbench(path)

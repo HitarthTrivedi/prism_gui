@@ -667,16 +667,40 @@ class LeadsWorkbench(QWidget):
         # so the switch would be a lie sitting there in sheet mode.
         for w in (self._skip_seen, self._skip_meta):
             w.setVisible(mode == "icp")
-        # The same two runs either way — list people cheaply, or spend on them —
-        # but a sheet is not "found", it is loaded, and an owner who just picked
-        # a file should not be told Prism is off to find people.
-        if mode == "sheet":
-            self._prepare.setText(i18n.t("Load the sheet"))
-            self._prepare_all.setText(i18n.t("Load and prepare"))
-        else:
+        self._update_prepare_labels()
+        self._refresh_prepare()
+
+    def _update_prepare_labels(self):
+        """The same two runs either way — list people cheaply, or spend on
+        them — but a sheet with real contacts in it is not "found", it is
+        loaded, and an owner who just picked a file should not be told
+        Prism is off to find people.
+
+        22-09-2026: that reasoning stops holding for a company-only sheet.
+        There is no name, e-mail or LinkedIn to load row by row — the only
+        useful thing "Load the sheet" can do with one is exactly what
+        "Find people" does, a live Exa search per company (see
+        _on_prepare's sheet_companies branch), and a customer who pressed
+        something worded "Load" was startled to watch it go source people
+        instead. Label it for what it is going to do, not what a plain
+        contacts sheet would have done."""
+        if self._mode == "icp":
             self._prepare.setText(i18n.t("Find people"))
             self._prepare_all.setText(i18n.t("Find and prepare"))
-        self._refresh_prepare()
+            return
+        sheet_companies = False
+        if self._path:
+            from prospector import sheet as _sheet
+            try:
+                sheet_companies = not _sheet.has_contact_signal(self._path)
+            except Exception:
+                sheet_companies = False
+        if sheet_companies:
+            self._prepare.setText(i18n.t("Find people"))
+            self._prepare_all.setText(i18n.t("Find and prepare"))
+        else:
+            self._prepare.setText(i18n.t("Load the sheet"))
+            self._prepare_all.setText(i18n.t("Load and prepare"))
 
     # ── fold the setup away once a list is on screen ─────────────────────────
     def _toggle_setup(self):
@@ -850,6 +874,7 @@ class LeadsWorkbench(QWidget):
         self._path = path
         self._sheet_company_offset = 0
         self._file_lbl.setText(os.path.basename(path))
+        self._update_prepare_labels()
         self._refresh_prepare()
 
     def _choose_claims(self):
@@ -1799,6 +1824,7 @@ class LeadsWorkbench(QWidget):
         if params.get("sheet_path"):
             self._path = params["sheet_path"]
             self._file_lbl.setText(os.path.basename(self._path))
+            self._update_prepare_labels()
         if (isinstance(params.get("filters"), dict)
                 or any(params.get(k) for k in ("industries", "roles", "location"))):
             self._filters.set_spec(SearchSpec.from_params(params))
