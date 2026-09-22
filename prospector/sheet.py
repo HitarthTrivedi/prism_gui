@@ -211,6 +211,28 @@ def load(path: str, sheet: str | None = None) -> list[Lead]:
     return out
 
 
+def has_name_column(path: str, sheet: str | None = None) -> bool:
+    """Whether any sheet's header has a column load() would read as a
+    person's NAME (see _ALIASES) — the header check alone, no row work.
+
+    load() returning nothing is ambiguous: an empty sheet and a sheet
+    of real data with no name/contact column both come back as `[]`,
+    and look identical to a customer as "the sheet had nobody in it".
+    They are not the same problem — a company-research export (Company
+    Name, Industry, City, Website …) has real rows, every one of them
+    skipped for lacking a name column, not for lacking people worth
+    importing. False here is the caller's cue to say which one happened.
+    """
+    reader = _read_xlsx if path.lower().endswith((".xlsx", ".xlsm")) else _read_csv
+    want = _norm(sheet) if sheet else None
+    for sname, header, _rows in reader(path):
+        if want and want not in _norm(sname):
+            continue
+        if "name" in _column_map(header):
+            return True
+    return False
+
+
 def sheet_names(path: str) -> list[str]:
     if not path.lower().endswith((".xlsx", ".xlsm")):
         return [os.path.splitext(os.path.basename(path))[0]]

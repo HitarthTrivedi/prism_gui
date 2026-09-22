@@ -1355,6 +1355,75 @@ class ALeadsOnlyRunShowsItsPeople(_Workbench):
         self.assertTrue(wb._export_btn.isEnabled())
 
 
+class ASheetImportThatFoundNobody(_Workbench):
+    """22-Sep-2026: a company-research export (Company Name, Industry, City…,
+    never a person) went into Import a sheet and came back with nothing — a
+    real, successful run, since sheet.py correctly skips a row with no name
+    column. On screen that read as the button doing nothing: "0 ready to
+    send" before the click, "0 ready to send" after. The empty state now
+    says which of the two things happened."""
+
+    def _empty_run(self):
+        from prospector.engine import RunResult
+        return RunResult(dossiers=[], total_in_sheet=0, signal_source="",
+                         all_leads=[])
+
+    def test_a_sheet_with_no_name_column_says_so(self):
+        import openpyxl
+        path = os.path.join(self._tmp, "companies.xlsx")
+        wb_file = openpyxl.Workbook()
+        wb_file.active.append(["Company Name", "Industry Category", "City"])
+        wb_file.active.append(["Acme Tooling", "Packaging Machinery", "Vadodara"])
+        wb_file.save(path)
+
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("sheet")
+        wb._path = path
+        wb._show_result(self._empty_run(), [])
+
+        empty = wb._cockpit.leads._empty
+        self.assertIn("no name column", empty.title.text())
+        self.assertIn("name", empty.body.text().lower())
+        self.assertTrue(empty.body.text().strip())
+
+    def test_a_real_leads_sheet_that_just_has_nobody_new_keeps_the_default(self):
+        # Same empty RunResult, but the FILE itself has a name column — the
+        # sheet is fine, this run simply found nobody (everyone in it was
+        # filtered or already seen). Must not claim the sheet is the problem.
+        import openpyxl
+        path = os.path.join(self._tmp, "leads.xlsx")
+        wb_file = openpyxl.Workbook()
+        wb_file.active.append(["Name", "Company", "Email"])
+        wb_file.save(path)   # header only — genuinely nobody in it
+
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("sheet")
+        wb._path = path
+        wb._show_result(self._empty_run(), [])
+
+        empty = wb._cockpit.leads._empty
+        self.assertNotIn("no name column", empty.title.text())
+        self.assertEqual(empty.title.text(), self._WB.i18n.t("No leads yet"))
+
+    def test_icp_mode_is_never_told_it_needs_a_name_column(self):
+        # An empty Find-people run has nothing to do with a sheet at all;
+        # the sheet-specific message must only ever fire in sheet mode.
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("icp")
+        wb._show_result(self._empty_run(), [])
+        self.assertNotIn("no name column", wb._cockpit.leads._empty.title.text())
+
+    def test_a_missing_or_unreadable_file_does_not_crash_the_message(self):
+        # has_name_column() itself can raise (a deleted file, a locked one);
+        # _show_result must still put something sane on screen rather than
+        # let the exception through.
+        wb = self._WB.LeadsWorkbench({})
+        wb._set_mode("sheet")
+        wb._path = os.path.join(self._tmp, "does-not-exist.xlsx")
+        wb._show_result(self._empty_run(), [])   # must not raise
+        self.assertTrue(wb._cockpit.leads._empty.title.text())
+
+
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""
     made: list = []

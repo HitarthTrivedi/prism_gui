@@ -949,6 +949,33 @@ class LeadsWorkbench(QWidget):
                     n=len(res.all_leads)),
                 i18n.t("Their sheet is saved — open it under Lists. Tick rows to "
                        "find their e-mails, or to qualify and draft."))
+        elif (self._mode == "sheet" and self._path and not res.dossiers
+              and not getattr(res, "all_leads", None)):
+            # A totally empty result from a sheet import is ambiguous: an
+            # empty file and a real file with no name column both come back
+            # with nothing, and the default "No leads yet" tells the owner
+            # to do what they just did. Say which one actually happened —
+            # "the sheet importer found no name column" was a click that
+            # looked like it did nothing (see the 22-Sep-2026 report: a
+            # company-research export, no person/name column anywhere,
+            # read as zero people rather than a file that needed a name
+            # column it didn't have).
+            from prospector import sheet as _sheet
+            try:
+                has_name = _sheet.has_name_column(self._path)
+            except Exception:                               # noqa: BLE001
+                has_name = True    # unsure beats a wrong claim
+            if has_name:
+                self._cockpit.set_empty_text()
+            else:
+                self._cockpit.set_empty_text(
+                    i18n.t("This sheet has no name column Prism recognises"),
+                    i18n.t("Prism looks for a column with each person's name "
+                           "(Name, Full name, Contact…) and skips any row "
+                           "without one — every row in this sheet was "
+                           "skipped. If it only lists companies, it needs a "
+                           "“find people at these companies” step "
+                           "first, not Import a sheet."))
         else:
             self._cockpit.set_empty_text()
         self._cockpit.set_dossiers(res.dossiers, self._drafts,
