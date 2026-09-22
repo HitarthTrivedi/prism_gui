@@ -13,7 +13,7 @@ want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import os
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
-from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
@@ -263,7 +263,11 @@ class DashboardCentral(QWidget):
             x = (self.width() - pw) // 2
             y = (self.height() - ph) // 2
             painter.drawPixmap(x, y, self._cached_pixmap)
-            painter.fillRect(self.rect(), QColor(255, 255, 255, 22))
+            grad = QLinearGradient(0, 0, 0, self.height())
+            grad.setColorAt(0.0, QColor(255, 255, 255, 75))
+            grad.setColorAt(0.45, QColor(255, 255, 255, 45))
+            grad.setColorAt(1.0, QColor(255, 255, 255, 30))
+            painter.fillRect(self.rect(), grad)
         else:
             painter.fillRect(self.rect(), QColor("#09090b"))
 

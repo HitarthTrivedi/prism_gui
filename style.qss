@@ -488,33 +488,20 @@ QToolTip {
 #meta, #dim {
     font-size: 13px;
     font-weight: 500;
-    color: #71717a;
+    color: #3f3f46;
 }
 
-/* The greyest step — "· this week", the suffix after a count. Was #b7b7ba,
-   which is 2.0:1 on a card: present in the file and invisible on the screen.
-
-   THE ONE TEXT ROLE IN THIS FILE THAT DOES NOT CLEAR AA. At 2.9:1 it is
-   deliberately below the 4.5:1 every other role holds, because the muted stack
-   needs three distinguishable steps (#body 6.6 · #meta 4.3 · #faint 2.9) and
-   the third one cannot be both distinct and compliant.
-
-   So the rule for using it: #faint is for text that repeats something already
-   legible somewhere else on the same surface — the "· this week" after a
-   labelled figure, the "· 3 files" after a named row. Never put a fact here
-   that appears nowhere else. If it is the only place the user can read it, it
-   is #meta. */
+/* The secondary metadata step — guaranteed high contrast on any wallpaper. */
 #faint {
     font-size: 13px;
     font-weight: 500;
-    color: #98989b;
+    color: #52525b;
 }
 
-/* SUPPORT — sentences under a title, and the standard control label. #lead was
-   15px and is the same role at the same job, so it lands here too. */
+/* SUPPORT — sentences under a title, and the standard control label. */
 #body, #lead, #support {
     font-size: 14px;
-    color: #5d5d60;
+    color: #18181b;
 }
 
 /* MONO — ids, keys, device codes, paths. No mono face is vendored; see
@@ -1902,26 +1889,35 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     color: #52525b;
 }
 
+#topBarPill {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 999px;
+}
+
 #homeIconBtn {
-    background: transparent;
-    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.70);
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 999px;
     padding: 6px;
+    color: #09090b;
 }
 
 #homeIconBtn:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.22);
 }
 
 #homeProfileBtn {
-    background: transparent;
-    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.70);
+    border: 1px solid rgba(0, 0, 0, 0.10);
     border-radius: 999px;
     padding: 2px 6px 2px 2px;
 }
 
 #homeProfileBtn:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.22);
 }
 
 #heroPromptCard {

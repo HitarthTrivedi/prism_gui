@@ -283,9 +283,9 @@ TYPE = {
     "SECTION":    (FONT_HEADING,    20,   600,  "#09090b"),
     "CARD_TITLE": (FONT_HEADING,    16,   600,  "#09090b"),
     "BODY":       (FONT_BODY,       15,   400,  "#18181b"),
-    "SUPPORT":    (FONT_BODY,       14,   400,  "#3f3f46"),
-    "META":       (FONT_BODY,       13,   500,  "#71717a"),
-    "LABEL":      (FONT_HEADING,    12,   600,  "#52525b"),
+    "SUPPORT":    (FONT_BODY,       14,   400,  "#18181b"),
+    "META":       (FONT_BODY,       13,   500,  "#3f3f46"),
+    "LABEL":      (FONT_HEADING,    12,   600,  "#27272a"),
     "MONO":       (FONT_MONO,       13,   500,  "#18181b"),
 }
 

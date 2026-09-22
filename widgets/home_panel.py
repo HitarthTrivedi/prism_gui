@@ -600,29 +600,34 @@ class HomePanel(QWidget):
 
         layout.addStretch(1)
 
-        # Right actions: Sun (theme) | Bell (notifications) | Date | Profile
+        # Right actions encapsulated in a frosted glass capsule for 100% contrast on any wallpaper
+        top_pill = QFrame()
+        top_pill.setObjectName("topBarPill")
+        pill_layout = QHBoxLayout(top_pill)
+        pill_layout.setContentsMargins(6, 4, 6, 4)
+        pill_layout.setSpacing(theme.SPACE_2)
+
         sun_btn = QPushButton()
         sun_btn.setObjectName("homeIconBtn")
-        sun_btn.setIcon(icons.icon("sun", 18, theme.NEUTRAL[600]))
-        sun_btn.setFixedSize(32, 32)
+        sun_btn.setIcon(icons.icon("sun", 18, theme.NEUTRAL[800]))
+        sun_btn.setFixedSize(30, 30)
         sun_btn.setToolTip(i18n.t("Toggle theme"))
-        layout.addWidget(sun_btn)
+        pill_layout.addWidget(sun_btn)
 
         bell_btn = QPushButton()
         bell_btn.setObjectName("homeIconBtn")
-        bell_btn.setIcon(icons.icon("bell", 18, theme.NEUTRAL[600]))
-        bell_btn.setFixedSize(32, 32)
+        bell_btn.setIcon(icons.icon("bell", 18, theme.NEUTRAL[800]))
+        bell_btn.setFixedSize(30, 30)
         bell_btn.setToolTip(i18n.t("Notifications"))
-        layout.addWidget(bell_btn)
+        pill_layout.addWidget(bell_btn)
 
         date_str = datetime.now().strftime("%a, %d %b %Y")
         date_lbl = QLabel(date_str)
         date_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
-            f"color: {theme.NEUTRAL[500]}; font-weight: 500;"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
+            f"color: #09090b; font-weight: 600; padding: 0 4px;"
         )
-        layout.addWidget(date_lbl)
-        layout.addSpacing(theme.SPACE_1)
+        pill_layout.addWidget(date_lbl)
 
         self._profile_btn = QPushButton()
         self._profile_btn.setObjectName("homeProfileBtn")
@@ -631,15 +636,17 @@ class HomePanel(QWidget):
         prof_layout.setContentsMargins(2, 2, 4, 2)
         prof_layout.setSpacing(4)
 
-        self._avatar = C.Avatar("", 28)
+        self._avatar = C.Avatar("", 26)
         prof_layout.addWidget(self._avatar)
 
         chev = QLabel()
-        chev.setPixmap(icons.pixmap("chevron-down", 12, theme.NEUTRAL[500]))
+        chev.setPixmap(icons.pixmap("chevron-down", 12, theme.NEUTRAL[800]))
         prof_layout.addWidget(chev)
 
         self._profile_btn.clicked.connect(self._on_profile_clicked)
-        layout.addWidget(self._profile_btn)
+        pill_layout.addWidget(self._profile_btn)
+
+        layout.addWidget(top_pill)
 
         return bar
 
@@ -755,7 +762,7 @@ class HomePanel(QWidget):
         salutation = QLabel(f"{_greeting()},")
         salutation.setStyleSheet(
             f"font-family: '{theme.FONT_BODY}'; font-size: 22px; "
-            f"font-weight: 600; color: #3f3f46;"
+            f"font-weight: 700; color: #09090b;"
         )
         greet_stack.addWidget(salutation)
 
@@ -765,7 +772,7 @@ class HomePanel(QWidget):
         name_lbl = QLabel(f"{who},")
         name_lbl.setStyleSheet(
             f"font-family: '{theme.FONT_HEADING}'; font-size: 44px; "
-            f"font-weight: 700; color: #09090b; line-height: 1.1;"
+            f"font-weight: 800; color: #000000; line-height: 1.1;"
         )
         C.track(name_lbl, -0.02)
         greet_stack.addWidget(name_lbl)
@@ -773,18 +780,21 @@ class HomePanel(QWidget):
         sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
         sub_lbl.setStyleSheet(
             f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
-            f"font-weight: 500; color: #52525b;"
+            f"font-weight: 600; color: #09090b;"
         )
         greet_stack.addWidget(sub_lbl)
         greet_row.addLayout(greet_stack, stretch=1)
 
-        motto = QLabel(i18n.t("Less work.\nMore possibilities."))
+        motto = QLabel(i18n.t("Less work. More possibilities."))
         motto.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 15px; "
-            f"font-style: italic; color: #71717a; line-height: 1.3;"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
+            f"font-weight: 600; color: #09090b; "
+            f"background: rgba(255, 255, 255, 0.85); "
+            f"border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 999px; "
+            f"padding: 6px 14px;"
         )
-        motto.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        greet_row.addWidget(motto)
+        motto.setAlignment(Qt.AlignCenter)
+        greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)
         left_col.addLayout(greet_row)
 
         left_col.addWidget(self._prompt_card())
