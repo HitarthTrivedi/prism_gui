@@ -147,7 +147,14 @@ def _company_search_spec(spec: SearchSpec) -> SearchSpec:
     Any OTHER seniority/job-title choice the owner made is respected.
     Industries is cleared regardless — with real companies named, it has
     no effect on the query Exa is sent (filters._queries' company branch
-    never reads it) and only exists here as unused bookkeeping."""
+    never reads it) and only exists here as unused bookkeeping.
+
+    22-09-2026, later: this used to feed a search _on_prepare ran right
+    away. It now feeds self._filters.set_spec() instead — the owner sees
+    these exact companies and this exact seniority as ordinary, editable
+    chips on the Find people tab, and nothing is searched until Find
+    people is pressed on purpose. The computation is the same; only what
+    happens with it changed."""
     stale_titles = list(_DEFAULT_ROLES.split("\n"))
     out = spec.copy()
     out.industries.include = []
@@ -304,12 +311,11 @@ class LeadsWorkbench(QWidget):
         self._announce_export = False
         self._opened_autosave = False
         # A chosen sheet with no name column is read as COMPANIES instead
-        # (see _on_prepare) -- one filtered search per "Load the sheet"
-        # press, up to prospector.filters._MAX_VALUES names at a time. This
-        # is how far into that list the last press got to; a new file choice
-        # resets it (_choose_file).
+        # (see _on_prepare) -- one batch loaded into Find people's own
+        # filters per press, up to prospector.filters._MAX_VALUES names at a
+        # time. This is how far into that list the last press got to; a new
+        # file choice resets it (_choose_file).
         self._sheet_company_offset = 0
-        self._sheet_batch_note = ""
         # How many background jobs (prepare / verify / send / export) are running.
         # A count, not a flag: an export finishing must not re-enable Send while a
         # send started from the bulk bar is still going — two sends would mail the
@@ -676,17 +682,22 @@ class LeadsWorkbench(QWidget):
         loaded, and an owner who just picked a file should not be told
         Prism is off to find people.
 
-        22-09-2026: that reasoning stops holding for a company-only sheet.
-        There is no name, e-mail or LinkedIn to load row by row — the only
-        useful thing "Load the sheet" can do with one is exactly what
-        "Find people" does, a live Exa search per company (see
-        _on_prepare's sheet_companies branch), and a customer who pressed
-        something worded "Load" was startled to watch it go source people
-        instead. Label it for what it is going to do, not what a plain
-        contacts sheet would have done."""
+        22-09-2026, twice over. First: for a company-only sheet, "Load the
+        sheet" silently ran a live, paid Exa search — there is no name,
+        e-mail or LinkedIn to load row by row, so it was labelled "Find
+        people" instead, honestly. Second, the same day: importing a sheet
+        is not the same request as searching with it — an owner who picked
+        a company list did not thereby ask Prism to go spend Exa credits on
+        it unasked. A sheet only ever LOADS now; see _on_prepare's
+        sheet_companies branch, which puts the batch into Find people's own
+        filters and stops there. Only Find people itself — pressed as its
+        own, separate, informed decision — ever searches. The secondary
+        "…and prepare" button has nothing to run before that search has
+        even happened, so it is hidden rather than mislabelled."""
         if self._mode == "icp":
             self._prepare.setText(i18n.t("Find people"))
             self._prepare_all.setText(i18n.t("Find and prepare"))
+            self._prepare_all.setVisible(True)
             return
         sheet_companies = False
         if self._path:
@@ -696,11 +707,12 @@ class LeadsWorkbench(QWidget):
             except Exception:
                 sheet_companies = False
         if sheet_companies:
-            self._prepare.setText(i18n.t("Find people"))
-            self._prepare_all.setText(i18n.t("Find and prepare"))
+            self._prepare.setText(i18n.t("Add companies to Find people"))
+            self._prepare_all.setVisible(False)
         else:
             self._prepare.setText(i18n.t("Load the sheet"))
             self._prepare_all.setText(i18n.t("Load and prepare"))
+            self._prepare_all.setVisible(True)
 
     # ── fold the setup away once a list is on screen ─────────────────────────
     def _toggle_setup(self):
@@ -933,16 +945,28 @@ class LeadsWorkbench(QWidget):
         # zero people out of it (nothing identifies a person on any row),
         # which used to be the whole story: the sheet loaded, found
         # nobody, and looked exactly like the button had done nothing (see
-        # the 22-Sep-2026 report). Now that sheet becomes the search: its
-        # companies go into the SAME "Current company" filter Find people
-        # already has, MAX_FACET_VALUES at a time (that cap is a real
-        # product limit -- unbounded companies is unbounded Exa queries --
-        # not something to route around), one press per batch. A sheet
-        # with Company + Email columns and no separate Name column (real,
-        # if thin, contacts -- Apollo's own "Import contacts" accepts
-        # exactly this) has a contact signal and goes through load()
-        # normally instead -- has_contact_signal is deliberately broader
-        # than "has a Name column" for this reason.
+        # the 22-Sep-2026 report).
+        #
+        # 22-Sep-2026, later the same day: the first fix made THAT sheet
+        # become the search outright, on the strength of one press — and an
+        # owner who had only asked Prism to read a spreadsheet of company
+        # names watched it go spend live Exa credits unasked, searching on
+        # criteria (Owner/Founder/Chief/Director — see
+        # _COMPANY_SEARCH_SENIORITY) it had never shown him. Importing a
+        # sheet is not the same request as searching with it. A company-only
+        # sheet now only ever LOADS: its companies go into the SAME
+        # "Current company" filter Find people already has, MAX_FACET_VALUES
+        # at a time (that cap is a real product limit -- unbounded companies
+        # is unbounded Exa queries -- not something to route around), one
+        # batch per press — visible, editable filter chips, on the Find
+        # people tab, same as anyone typing or pasting a company list in
+        # themselves. Nothing is searched until Find people is pressed as
+        # its own, separate, informed decision — the same button, doing the
+        # same thing, an ICP search always did. A sheet with Company + Email
+        # columns and no separate Name column (real, if thin, contacts --
+        # Apollo's own "Import contacts" accepts exactly this) has a contact
+        # signal and goes through load() normally instead -- has_contact_signal
+        # is deliberately broader than "has a Name column" for this reason.
         from prospector import sheet as _sheet
         sheet_companies = False
         if self._mode != "icp" and self._path:
@@ -952,13 +976,43 @@ class LeadsWorkbench(QWidget):
                 pass    # unreadable -- fall through to the normal sheet
                         # path below, which will read it again and fail
                         # the same way _on_failed already handles
-        if self._mode == "icp" or sheet_companies:
-            missing = self._missing_key()
-            if missing:
-                self._keys_box.setVisible(True)
-                self._status.setText(missing)
+        if sheet_companies:
+            companies = _sheet.load_companies(self._path)
+            start = self._sheet_company_offset
+            batch = companies[start:start + MAX_FACET_VALUES]
+            if not batch:
+                self._status.setText(i18n.t(
+                    "Every company in this sheet is already in Find people's "
+                    "filters or has been searched. Choose a different sheet "
+                    "to bring in more."))
                 return
-        self._sheet_batch_note = ""
+            # Never search this sheet's companies against the
+            # automation-vertical defaults -- see _company_search_spec.
+            # Setting it on _filters (not a hidden batch_spec) is the whole
+            # point: it is now what Find people itself will search with,
+            # in plain sight, editable like anything typed in by hand.
+            batch_spec = _company_search_spec(spec)
+            batch_spec.companies.include = list(batch)
+            self._sheet_company_offset = start + len(batch)
+            self._filters.set_spec(batch_spec)
+            self._set_mode("icp")
+            more = self._sheet_company_offset < len(companies)
+            self._status.setText((
+                i18n.t(
+                    "{n} companies from the sheet are in Find people's "
+                    "filters below — Owner, Founder, Chief and Director "
+                    "titles by default. Review them, then press Find "
+                    "people to search."
+                ) if not more else
+                i18n.t(
+                    "{n} companies from the sheet are in Find people's "
+                    "filters below — Owner, Founder, Chief and Director "
+                    "titles by default. Review them, then press Find "
+                    "people to search — switch back to Import a sheet "
+                    "and press it again afterwards for the rest."
+                )
+            ).format(n=len(batch)))
+            return
         if self._mode == "icp":
             self._set_running(True)
             self._status.setText(i18n.t("Finding people (no e-mails, no Groq)…")
@@ -972,39 +1026,6 @@ class LeadsWorkbench(QWidget):
                 exclude_domains=self._seller_domains(), leads_only=leads_only,
                 sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
                 spec=spec.to_dict(), source=self._source, emails=emails)
-            self._worker.blocked.connect(self._on_source_blocked)
-        elif sheet_companies:
-            companies = _sheet.load_companies(self._path)
-            start = self._sheet_company_offset
-            batch = companies[start:start + MAX_FACET_VALUES]
-            if not batch:
-                self._status.setText(i18n.t(
-                    "Every company in this sheet has already been searched. "
-                    "Choose a different sheet to search more."))
-                return
-            # Never touch the visible ICP filters, and never search this
-            # sheet's companies against the automation-vertical defaults —
-            # see _company_search_spec.
-            batch_spec = _company_search_spec(spec)
-            batch_spec.companies.include = list(batch)
-            self._sheet_company_offset = start + len(batch)
-            if self._sheet_company_offset < len(companies):
-                self._sheet_batch_note = i18n.t(
-                    "Searched {done} of {total} companies from the sheet — "
-                    "press Load the sheet again for the rest."
-                ).format(done=self._sheet_company_offset, total=len(companies))
-            self._set_running(True)
-            self._status.setText(i18n.t(
-                "This sheet has no name column — finding people at its "
-                "{n} companies instead…").format(n=len(batch)))
-            self._worker = SourceWorker(
-                [], [], offer, self.cfg,
-                target=self._target.value(), limit=self._limit.value(),
-                verify_limit=self._verify_limit.value(),
-                sender=self._sender(), claims=claims,
-                exclude_domains=self._seller_domains(), leads_only=leads_only,
-                sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
-                spec=batch_spec.to_dict(), source=self._source, emails=emails)
             self._worker.blocked.connect(self._on_source_blocked)
         else:
             self._set_running(True)
@@ -1081,13 +1102,6 @@ class LeadsWorkbench(QWidget):
         self._session_mode = self._next_mode
         self._run_params = dict(self._next_params)
         self._show_result(res, drafts)
-        if self._sheet_batch_note:
-            # More companies from this sheet are still unsearched — said
-            # after _show_result's own summary, not instead of it.
-            text = self._summary.text()
-            self._summary.setText(
-                (text + "   ·   " if text else "") + self._sheet_batch_note)
-            self._sheet_batch_note = ""
         if idle:
             self._set_running(False)
         self._save_session()
@@ -1120,10 +1134,11 @@ class LeadsWorkbench(QWidget):
             # back with nothing, and the default "No leads yet" tells the
             # owner to do what they just did. Say which one actually
             # happened — this is mostly a defensive fallback now (a normal
-            # "Load the sheet" press on a company-only sheet runs the
-            # search in _on_prepare instead of reaching this with nothing),
-            # reached by an old saved session from before that existed, or
-            # has_contact_signal itself failing to read the file here too.
+            # press on a company-only sheet loads its companies into Find
+            # people's filters in _on_prepare instead of ever reaching this
+            # with nothing), reached by an old saved session from before
+            # that existed, or has_contact_signal itself failing to read
+            # the file here too.
             from prospector import sheet as _sheet
             try:
                 has_contact = _sheet.has_contact_signal(self._path)
@@ -1138,9 +1153,10 @@ class LeadsWorkbench(QWidget):
                     i18n.t("Prism looks for a column that identifies a "
                            "person — Name, Email or LinkedIn — and skips "
                            "any row without one; every row in this sheet "
-                           "was skipped. If it only lists companies, "
-                           "press Load the sheet again to search for "
-                           "people at them."))
+                           "was skipped. If it only lists companies, press "
+                           "“Add companies to Find people” to bring them "
+                           "into Find people's filters, then search from "
+                           "there."))
         else:
             self._cockpit.set_empty_text()
         self._cockpit.set_dossiers(res.dossiers, self._drafts,

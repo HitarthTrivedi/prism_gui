@@ -1302,7 +1302,16 @@ class LeadsCockpit(QWidget):
             f"QFrame#bulkBar QPushButton#bulkLink{{background:transparent;border:none;"
             f"color:{theme.ACCENT};padding:5px 6px;font-size:13px;font-weight:600;}}"
             f"QFrame#bulkBar QPushButton#bulkLink:hover{{color:{theme.ACCENT_RAMP[700]};"
-            f"text-decoration:underline;}}")
+            f"text-decoration:underline;}}"
+            # "Clear" and "Select all" are #bulkLink, a more specific selector
+            # than the plain QPushButton:disabled rule above, so without this
+            # they kept their normal accent-blue "still clickable" colour while
+            # _set_running(True) had genuinely disabled the whole bar under
+            # them (live report, 22-Sep-2026: a customer pressed "Clear"
+            # while a background search was running, saw nothing happen, and
+            # had no way to tell it wasn't just broken).
+            f"QFrame#bulkBar QPushButton#bulkLink:disabled{{color:{theme.NEUTRAL[400]};"
+            f"text-decoration:none;}}")
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(theme.SPACE_4, 10, theme.SPACE_4, 10)
         lay.setSpacing(theme.SPACE_2)

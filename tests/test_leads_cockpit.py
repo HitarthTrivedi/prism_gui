@@ -311,6 +311,20 @@ class TableFeel(unittest.TestCase):
         self.assertTrue(all(c._table.item(r, 0).checkState() == Qt.Unchecked
                             for r in range(c._table.rowCount())))
 
+    def test_clear_and_select_all_actually_look_disabled_while_a_run_holds_them(self):
+        # Live report, 22-Sep-2026: a customer pressed "Clear" while a
+        # background search held the bulk bar disabled (workbench._set_running
+        # disables cockpit.leads._bulk for exactly this reason) and nothing
+        # happened -- correctly, the bar really was off-limits mid-run -- but
+        # "Clear" and "Select all" are QPushButton#bulkLink, a MORE SPECIFIC
+        # selector than the bar's plain "QPushButton:disabled" rule, so
+        # without a "#bulkLink:disabled" rule of its own they kept rendering
+        # in the same clickable accent-blue regardless of setEnabled(False).
+        # A customer had no way to tell a dead-looking click from a real bug.
+        c = self.c
+        qss = c._bulk_bar_w.styleSheet()
+        self.assertIn("QPushButton#bulkLink:disabled", qss)
+
     def test_a_narrow_bulk_bar_folds_again_every_time_it_comes_back(self):
         """The fold was measured while the bar was still hidden, so it came
         back unfolded — and at an unchanged width no Resize put it right: Qt
@@ -1462,12 +1476,18 @@ class ASheetImportThatFoundNobody(_Workbench):
         self.assertTrue(wb._cockpit.leads._empty.title.text())
 
 
-class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
-    """22-Sep-2026, the follow-up: rather than tell the owner a company-only
-    sheet needs a different screen, "Load the sheet" now IS that screen for
-    it -- its companies go into a real Find-people search, MAX_FACET_VALUES
-    (the same real cap a person pasting a list into the filter panel hits)
-    at a time, one press per batch, until the sheet is exhausted."""
+class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
+    """22-Sep-2026, twice over. First: rather than tell the owner a
+    company-only sheet needs a different screen, its companies were made to
+    go straight into a real Find-people SEARCH, MAX_FACET_VALUES (the same
+    real cap a person pasting a list into the filter panel hits) at a time.
+    Second, the same day: that ran the search on its own, unasked — an
+    owner who only picked a company list did not thereby ask Prism to spend
+    Exa credits on it. Importing this kind of sheet now only ever LOADS —
+    its companies (and a suggested decision-maker seniority) land as
+    ordinary, visible, editable chips on the Find people tab, exactly as if
+    the owner had pasted the list in by hand, and nothing is searched until
+    Find people is pressed on its own, as a separate, informed decision."""
 
     def _sheet(self, name, companies, header="Company Name"):
         import openpyxl
@@ -1489,20 +1509,19 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._path = path
         return wb
 
-    def test_choosing_a_company_only_sheet_relabels_the_button_to_find_people(self):
+    def test_choosing_a_company_only_sheet_relabels_the_button(self):
         # 22-09-2026, the follow-up to the follow-up: a customer pressed a
         # button that said "Load the sheet" and was startled to watch it go
-        # off and run a live, paid Exa search instead — reasonably, since
-        # that copy was written for a real contacts sheet that needs no
-        # search at all. _choose_file must relabel the button the moment
-        # it can tell which kind of file this is, not just leave the
-        # contacts-sheet wording sitting on a company-only search.
+        # off and run a live, paid Exa search instead. _choose_file must
+        # relabel the button the moment it can tell which kind of file this
+        # is — and, since this press only ever loads now, not promise a
+        # search either. The secondary button has nothing to do yet.
         path = self._sheet("companies.xlsx", ["Acme Tooling", "Beta Corp"])
         wb = self._workbench(path)                 # sets wb._path directly
         self.assertEqual(wb._prepare.text(), "Load the sheet")  # not yet told
         wb._update_prepare_labels()                 # what _choose_file calls
-        self.assertEqual(wb._prepare.text(), "Find people")
-        self.assertEqual(wb._prepare_all.text(), "Find and prepare")
+        self.assertEqual(wb._prepare.text(), "Add companies to Find people")
+        self.assertTrue(wb._prepare_all.isHidden())
 
     def test_a_real_contacts_sheet_keeps_load_the_sheet(self):
         path = os.path.join(self._tmp, "contacts.xlsx")
@@ -1515,49 +1534,63 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._update_prepare_labels()
         self.assertEqual(wb._prepare.text(), "Load the sheet")
         self.assertEqual(wb._prepare_all.text(), "Load and prepare")
+        self.assertFalse(wb._prepare_all.isHidden())
 
-    def test_a_small_sheet_searches_every_company_in_one_press(self):
+    def test_a_small_sheet_loads_every_company_in_one_press_and_never_searches(self):
         path = self._sheet("small.xlsx", [f"Company {i}" for i in range(1, 6)])
         wb = self._workbench(path)
         wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(len(_FakeSourceWorker.made), 1)
-        spec = _FakeSourceWorker.made[0].kwargs["spec"]
-        self.assertEqual(spec["companies"]["include"],
+        self.assertEqual(_FakeSourceWorker.made, [])       # nothing searched
+        self.assertEqual(wb._filters.spec().companies.include,
                          [f"Company {i}" for i in range(1, 6)])
         self.assertEqual(wb._sheet_company_offset, 5)
-        # A worker that never runs must never claim it found something --
-        # "Load the sheet" costs nothing extra beyond the search itself.
+        self.assertEqual(wb._mode, "icp")                   # switched to review
         self.assertTrue(wb._status.text())
 
-    def test_a_big_sheet_is_read_max_facet_values_at_a_time(self):
+    def test_pressing_find_people_afterwards_is_the_real_search(self):
+        # The whole point: loading is one press, searching is a separate,
+        # deliberate one — the exact same button an ordinary ICP search
+        # already uses, now sitting in front of the owner with the sheet's
+        # companies already in its filters.
+        path = self._sheet("small.xlsx", ["Acme Tooling", "Beta Corp"])
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")     # load
+        self.assertEqual(_FakeSourceWorker.made, [])
+        wb._on_prepare(leads_only=True, emails="later")     # now in icp mode
+        self.assertEqual(len(_FakeSourceWorker.made), 1)
+        spec = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(spec["companies"]["include"], ["Acme Tooling", "Beta Corp"])
+
+    def test_a_big_sheet_is_loaded_max_facet_values_at_a_time(self):
         from prospector.filters import MAX_FACET_VALUES
         n = MAX_FACET_VALUES * 2 + 10          # three uneven batches
         path = self._sheet("big.xlsx", [f"Company {i}" for i in range(1, n + 1)])
         wb = self._workbench(path)
         seen = []
+        sizes = []
         for _ in range(3):
-            wb._jobs = 0                        # the previous press "finished"
+            wb._set_mode("sheet")               # back to Import a sheet, as a
+                                                 # customer would between batches
             wb._on_prepare(leads_only=True, emails="later")
-        sizes = [len(c.kwargs["spec"]["companies"]["include"])
-                for c in _FakeSourceWorker.made]
+            batch = wb._filters.spec().companies.include
+            sizes.append(len(batch))
+            seen.extend(batch)
         self.assertEqual(sizes, [MAX_FACET_VALUES, MAX_FACET_VALUES, 10])
-        for c in _FakeSourceWorker.made:
-            seen.extend(c.kwargs["spec"]["companies"]["include"])
         # Every company covered exactly once across the three presses —
         # no gaps, no repeats.
         self.assertEqual(seen, [f"Company {i}" for i in range(1, n + 1)])
         self.assertEqual(wb._sheet_company_offset, n)
+        self.assertEqual(_FakeSourceWorker.made, [])        # still never searched
 
-    def test_a_fourth_press_once_the_sheet_is_exhausted_searches_nothing(self):
+    def test_a_fourth_press_once_the_sheet_is_exhausted_loads_nothing(self):
         from prospector.filters import MAX_FACET_VALUES
         path = self._sheet("exact.xlsx",
                            [f"Company {i}" for i in range(1, MAX_FACET_VALUES + 1)])
         wb = self._workbench(path)
         wb._on_prepare(leads_only=True, emails="later")
-        wb._jobs = 0
+        wb._set_mode("sheet")
         wb._on_prepare(leads_only=True, emails="later")    # nothing left
-        self.assertEqual(len(_FakeSourceWorker.made), 1)   # no second worker
-        self.assertIn("already been searched", wb._status.text())
+        self.assertIn("already", wb._status.text())
 
     def test_choosing_a_different_sheet_restarts_the_batch_from_zero(self):
         path_a = self._sheet("a.xlsx", ["A1", "A2", "A3"])
@@ -1565,12 +1598,11 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._on_prepare(leads_only=True, emails="later")
         self.assertEqual(wb._sheet_company_offset, 3)
         path_b = self._sheet("b.xlsx", ["B1", "B2"])
+        wb._set_mode("sheet")
         wb._path = path_b
         wb._sheet_company_offset = 0            # what _choose_file does
-        wb._jobs = 0
         wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(_FakeSourceWorker.made[-1].kwargs["spec"]
-                         ["companies"]["include"], ["B1", "B2"])
+        self.assertEqual(wb._filters.spec().companies.include, ["B1", "B2"])
 
     def test_forward_filled_company_blocks_are_read_like_a_contacts_sheet(self):
         # sheet.py's own reason to forward-fill Company down a block applies
@@ -1586,9 +1618,8 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wbf.save(path)
         wb = self._workbench(path)
         wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(
-            _FakeSourceWorker.made[0].kwargs["spec"]["companies"]["include"],
-            ["Acme Tooling", "Beta Corp"])
+        self.assertEqual(wb._filters.spec().companies.include,
+                         ["Acme Tooling", "Beta Corp"])
 
     def test_a_sheet_that_has_names_is_not_treated_as_companies(self):
         # The ordinary sheet-import path (workers.ProspectorWorker) must be
@@ -1604,23 +1635,18 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         self.assertEqual(_FakeSourceWorker.made, [])   # SourceWorker never ran
         self.assertIsInstance(wb._worker, self._WB.ProspectorWorker)
 
-    def test_the_offer_and_other_run_settings_still_reach_the_search(self):
-        path = self._sheet("small2.xlsx", ["Only Co"])
-        wb = self._workbench(path)
-        wb._offer.setPlainText("Automation retrofits for packaging lines")
-        wb._on_prepare(leads_only=True, emails="later")
-        worker = _FakeSourceWorker.made[0]
-        self.assertEqual(worker.args[2], "Automation retrofits for packaging lines")
-
-    def test_a_missing_exa_key_is_refused_before_a_worker_starts(self):
+    def test_no_key_is_needed_just_to_load_companies_into_filters(self):
+        # Loading costs nothing — only the search the owner presses
+        # separately, afterwards, does — so no key is asked for here.
         path = self._sheet("needs_key.xlsx", ["Only Co"])
         wb = self._workbench(path, cfg={})            # no exa_api_key
         wb._on_prepare(leads_only=True, emails="later")
         self.assertEqual(_FakeSourceWorker.made, [])
-        self.assertIn("Exa API key", wb._status.text())
-        self.assertEqual(wb._sheet_company_offset, 0)   # nothing was consumed
+        self.assertEqual(wb._filters.spec().companies.include, ["Only Co"])
+        self.assertEqual(wb._sheet_company_offset, 1)
+        self.assertNotIn("Exa API key", wb._status.text())
 
-    def test_untouched_default_filters_search_broad_seniority_not_one_vertical(self):
+    def test_untouched_default_filters_load_broad_seniority_not_one_vertical(self):
         # Live report, 22-Sep-2026: a real 193-company run came back with
         # "No people came back" on every batch — not because Exa found
         # nobody, but because a fresh workbench's default job titles are
@@ -1633,10 +1659,10 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         path = self._sheet("default_filters.xlsx", ["Only Co"])
         wb = self._workbench(path)            # untouched: still _default_spec()
         wb._on_prepare(leads_only=True, emails="later")
-        spec = _FakeSourceWorker.made[0].kwargs["spec"]
-        self.assertEqual(spec["job_titles"]["include"], [])
-        self.assertEqual(spec["industries"]["include"], [])
-        self.assertEqual(spec["seniority"]["include"],
+        spec = wb._filters.spec()
+        self.assertEqual(spec.job_titles.include, [])
+        self.assertEqual(spec.industries.include, [])
+        self.assertEqual(spec.seniority.include,
                          list(self._WB._COMPANY_SEARCH_SENIORITY))
 
     def test_filters_the_owner_actually_set_are_respected(self):
@@ -1648,8 +1674,7 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._filters.set_spec(self._WB.SearchSpec.from_dict(
             {"job_titles": {"include": ["Purchase Head"]}}))
         wb._on_prepare(leads_only=True, emails="later")
-        spec = _FakeSourceWorker.made[0].kwargs["spec"]
-        self.assertEqual(spec["job_titles"]["include"], ["Purchase Head"])
+        self.assertEqual(wb._filters.spec().job_titles.include, ["Purchase Head"])
 
     def test_stale_titles_are_overridden_even_if_something_else_touched_the_spec(self):
         # The actual bug behind the live report even after the seniority
@@ -1666,9 +1691,9 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         spec.locations.exclude = ["India"]   # unrelated field, touched
         wb._filters.set_spec(spec)
         wb._on_prepare(leads_only=True, emails="later")
-        got = _FakeSourceWorker.made[0].kwargs["spec"]
-        self.assertEqual(got["job_titles"]["include"], [])
-        self.assertEqual(got["seniority"]["include"],
+        got = wb._filters.spec()
+        self.assertEqual(got.job_titles.include, [])
+        self.assertEqual(got.seniority.include,
                          list(self._WB._COMPANY_SEARCH_SENIORITY))
 
     def test_empty_titles_with_the_owners_own_seniority_keeps_that_seniority(self):
@@ -1680,8 +1705,7 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         wb._filters.set_spec(self._WB.SearchSpec.from_dict(
             {"seniority": {"include": ["vp"]}}))
         wb._on_prepare(leads_only=True, emails="later")
-        got = _FakeSourceWorker.made[0].kwargs["spec"]
-        self.assertEqual(got["seniority"]["include"], ["vp"])
+        self.assertEqual(wb._filters.spec().seniority.include, ["vp"])
 
     def test_a_managing_director_ceo_or_founder_is_not_filtered_out(self):
         # Live report, 22-Sep-2026: a real 50-company batch came back with
@@ -1698,8 +1722,7 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         path = self._sheet("titles.xlsx", ["Only Co"])
         wb = self._workbench(path)
         wb._on_prepare(leads_only=True, emails="later")
-        spec_dict = _FakeSourceWorker.made[0].kwargs["spec"]
-        spec = self._WB.SearchSpec.from_dict(spec_dict)
+        spec = wb._filters.spec()
         for title in ("Managing Director", "CEO", "Chairman", "President",
                       "Founder", "Co-Founder", "Founder & CEO",
                       "Director", "Owner"):
