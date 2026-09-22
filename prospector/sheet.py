@@ -233,6 +233,42 @@ def has_name_column(path: str, sheet: str | None = None) -> bool:
     return False
 
 
+def load_companies(path: str, sheet: str | None = None) -> list[str]:
+    """Every distinct company named in the workbook — the read a sheet with
+    no name column (has_name_column() is False) falls back to.
+
+    Reuses leads_from_sheet's own forward-fill: a block-formatted export
+    (LinkedIn Data.xlsx's shape, see the module docstring) leaves Company
+    blank on every row but the block's first, and the same carry-down that
+    keeps a contact's company also keeps a company-only row's. De-duplicated
+    case-insensitively, first spelling wins, in the order the sheet has
+    them — the same rule _values() uses for a filter's own chip list, since
+    that is almost always where this goes next (addons.leads.workbench,
+    the "current company" filter)."""
+    reader = _read_xlsx if path.lower().endswith((".xlsx", ".xlsm")) else _read_csv
+    want = _norm(sheet) if sheet else None
+    out, seen = [], set()
+    for sname, header, rows in reader(path):
+        if want and want not in _norm(sname):
+            continue
+        cm = _column_map(header)
+        ci = cm.get("company")
+        if ci is None:
+            continue
+        carry = ""
+        for r in rows:
+            cell = (str(r[ci]).strip() if ci < len(r) and r[ci] is not None else "")
+            company = cell or carry
+            carry = company
+            if not company:
+                continue
+            key = company.casefold()
+            if key not in seen:
+                seen.add(key)
+                out.append(company)
+    return out
+
+
 def sheet_names(path: str) -> list[str]:
     if not path.lower().endswith((".xlsx", ".xlsm")):
         return [os.path.splitext(os.path.basename(path))[0]]

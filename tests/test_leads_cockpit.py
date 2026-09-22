@@ -1424,6 +1424,138 @@ class ASheetImportThatFoundNobody(_Workbench):
         self.assertTrue(wb._cockpit.leads._empty.title.text())
 
 
+class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
+    """22-Sep-2026, the follow-up: rather than tell the owner a company-only
+    sheet needs a different screen, "Load the sheet" now IS that screen for
+    it -- its companies go into a real Find-people search, MAX_FACET_VALUES
+    (the same real cap a person pasting a list into the filter panel hits)
+    at a time, one press per batch, until the sheet is exhausted."""
+
+    def _sheet(self, name, companies, header="Company Name"):
+        import openpyxl
+        path = os.path.join(self._tmp, name)
+        wbf = openpyxl.Workbook()
+        wbf.active.append([header, "Industry"])
+        for c in companies:
+            wbf.active.append([c, "Packaging Machinery"])
+        wbf.save(path)
+        return path
+
+    def _workbench(self, path, cfg=None):
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self.addCleanup(setattr, self._WB, "SourceWorker", orig)
+        self._WB.SourceWorker = _FakeSourceWorker
+        wb = self._WB.LeadsWorkbench(cfg if cfg is not None else {"exa_api_key": "k"})
+        wb._set_mode("sheet")
+        wb._path = path
+        return wb
+
+    def test_a_small_sheet_searches_every_company_in_one_press(self):
+        path = self._sheet("small.xlsx", [f"Company {i}" for i in range(1, 6)])
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(len(_FakeSourceWorker.made), 1)
+        spec = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(spec["companies"]["include"],
+                         [f"Company {i}" for i in range(1, 6)])
+        self.assertEqual(wb._sheet_company_offset, 5)
+        # A worker that never runs must never claim it found something --
+        # "Load the sheet" costs nothing extra beyond the search itself.
+        self.assertTrue(wb._status.text())
+
+    def test_a_big_sheet_is_read_max_facet_values_at_a_time(self):
+        from prospector.filters import MAX_FACET_VALUES
+        n = MAX_FACET_VALUES * 2 + 10          # three uneven batches
+        path = self._sheet("big.xlsx", [f"Company {i}" for i in range(1, n + 1)])
+        wb = self._workbench(path)
+        seen = []
+        for _ in range(3):
+            wb._jobs = 0                        # the previous press "finished"
+            wb._on_prepare(leads_only=True, emails="later")
+        sizes = [len(c.kwargs["spec"]["companies"]["include"])
+                for c in _FakeSourceWorker.made]
+        self.assertEqual(sizes, [MAX_FACET_VALUES, MAX_FACET_VALUES, 10])
+        for c in _FakeSourceWorker.made:
+            seen.extend(c.kwargs["spec"]["companies"]["include"])
+        # Every company covered exactly once across the three presses —
+        # no gaps, no repeats.
+        self.assertEqual(seen, [f"Company {i}" for i in range(1, n + 1)])
+        self.assertEqual(wb._sheet_company_offset, n)
+
+    def test_a_fourth_press_once_the_sheet_is_exhausted_searches_nothing(self):
+        from prospector.filters import MAX_FACET_VALUES
+        path = self._sheet("exact.xlsx",
+                           [f"Company {i}" for i in range(1, MAX_FACET_VALUES + 1)])
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        wb._jobs = 0
+        wb._on_prepare(leads_only=True, emails="later")    # nothing left
+        self.assertEqual(len(_FakeSourceWorker.made), 1)   # no second worker
+        self.assertIn("already been searched", wb._status.text())
+
+    def test_choosing_a_different_sheet_restarts_the_batch_from_zero(self):
+        path_a = self._sheet("a.xlsx", ["A1", "A2", "A3"])
+        wb = self._workbench(path_a)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(wb._sheet_company_offset, 3)
+        path_b = self._sheet("b.xlsx", ["B1", "B2"])
+        wb._path = path_b
+        wb._sheet_company_offset = 0            # what _choose_file does
+        wb._jobs = 0
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(_FakeSourceWorker.made[-1].kwargs["spec"]
+                         ["companies"]["include"], ["B1", "B2"])
+
+    def test_forward_filled_company_blocks_are_read_like_a_contacts_sheet(self):
+        # sheet.py's own reason to forward-fill Company down a block applies
+        # here too — a company-research export grouped under one heading,
+        # blank on every row after the first, is a common export shape.
+        path = os.path.join(self._tmp, "blocked.xlsx")
+        import openpyxl
+        wbf = openpyxl.Workbook()
+        wbf.active.append(["Company", "Note"])
+        wbf.active.append(["Acme Tooling", "primary contact unlisted"])
+        wbf.active.append(["", "secondary site"])
+        wbf.active.append(["Beta Corp", "new lead"])
+        wbf.save(path)
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(
+            _FakeSourceWorker.made[0].kwargs["spec"]["companies"]["include"],
+            ["Acme Tooling", "Beta Corp"])
+
+    def test_a_sheet_that_has_names_is_not_treated_as_companies(self):
+        # The ordinary sheet-import path (workers.ProspectorWorker) must be
+        # completely unaffected by any of this.
+        import openpyxl
+        path = os.path.join(self._tmp, "has_names.xlsx")
+        wbf = openpyxl.Workbook()
+        wbf.active.append(["Name", "Company"])
+        wbf.active.append(["Jane Doe", "Acme Tooling"])
+        wbf.save(path)
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(_FakeSourceWorker.made, [])   # SourceWorker never ran
+        self.assertIsInstance(wb._worker, self._WB.ProspectorWorker)
+
+    def test_the_offer_and_other_run_settings_still_reach_the_search(self):
+        path = self._sheet("small2.xlsx", ["Only Co"])
+        wb = self._workbench(path)
+        wb._offer.setPlainText("Automation retrofits for packaging lines")
+        wb._on_prepare(leads_only=True, emails="later")
+        worker = _FakeSourceWorker.made[0]
+        self.assertEqual(worker.args[2], "Automation retrofits for packaging lines")
+
+    def test_a_missing_exa_key_is_refused_before_a_worker_starts(self):
+        path = self._sheet("needs_key.xlsx", ["Only Co"])
+        wb = self._workbench(path, cfg={})            # no exa_api_key
+        wb._on_prepare(leads_only=True, emails="later")
+        self.assertEqual(_FakeSourceWorker.made, [])
+        self.assertIn("Exa API key", wb._status.text())
+        self.assertEqual(wb._sheet_company_offset, 0)   # nothing was consumed
+
+
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""
     made: list = []

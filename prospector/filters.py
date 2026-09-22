@@ -181,6 +181,10 @@ LOCATION_SUGGESTIONS = (
 
 _MAX_VALUES = 50          # per side of a facet
 _MAX_LEN = 120            # per value
+# Public alias: a caller outside this module (addons.leads.workbench, batching
+# a company-only sheet import into runs this size) reads the real limit
+# instead of a second "50" that could quietly drift from this one.
+MAX_FACET_VALUES = _MAX_VALUES
 _SPLIT = re.compile(r"[\n,;]")
 
 

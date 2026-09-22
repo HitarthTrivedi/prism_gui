@@ -34,7 +34,7 @@ import core_bridge as CB
 import i18n
 import theme
 from widgets import controls as C
-from prospector.filters import SearchSpec
+from prospector.filters import MAX_FACET_VALUES, SearchSpec
 from addons.leads import saved_searches
 from addons.leads.filter_panel import (
     HELP_KEYS as _FILTER_HELP_KEYS, FilterPanel, reveal_in_scroll, static_suggest,
@@ -244,6 +244,13 @@ class LeadsWorkbench(QWidget):
         self._blocked_key = ""
         self._announce_export = False
         self._opened_autosave = False
+        # A chosen sheet with no name column is read as COMPANIES instead
+        # (see _on_prepare) -- one filtered search per "Load the sheet"
+        # press, up to prospector.filters._MAX_VALUES names at a time. This
+        # is how far into that list the last press got to; a new file choice
+        # resets it (_choose_file).
+        self._sheet_company_offset = 0
+        self._sheet_batch_note = ""
         # How many background jobs (prepare / verify / send / export) are running.
         # A count, not a flag: an export finishing must not re-enable Send while a
         # send started from the bulk bar is still going — two sends would mail the
@@ -782,6 +789,7 @@ class LeadsWorkbench(QWidget):
         if not path:
             return
         self._path = path
+        self._sheet_company_offset = 0
         self._file_lbl.setText(os.path.basename(path))
         self._refresh_prepare()
 
@@ -835,6 +843,32 @@ class LeadsWorkbench(QWidget):
             "limit": self._limit.value(), "verify_limit": self._verify_limit.value(),
             "claims_path": self._claims_path, "include_earlier": include_earlier,
         }
+        # A sheet with no name column (has_name_column() False) is a list of
+        # COMPANIES, not people -- a research export, not a contacts sheet.
+        # load() correctly reads zero people out of it (nothing to qualify),
+        # which used to be the whole story: the sheet loaded, found nobody,
+        # and looked exactly like the button had done nothing (see the
+        # 22-Sep-2026 report). Now that sheet becomes the search: its
+        # companies go into the SAME "Current company" filter Find people
+        # already has, MAX_FACET_VALUES at a time (that cap is a real
+        # product limit -- unbounded companies is unbounded Exa queries --
+        # not something to route around), one press per batch.
+        from prospector import sheet as _sheet
+        sheet_companies = False
+        if self._mode != "icp" and self._path:
+            try:
+                sheet_companies = not _sheet.has_name_column(self._path)
+            except Exception:                                   # noqa: BLE001
+                pass    # unreadable -- fall through to the normal sheet
+                        # path below, which will read it again and fail
+                        # the same way _on_failed already handles
+        if self._mode == "icp" or sheet_companies:
+            missing = self._missing_key()
+            if missing:
+                self._keys_box.setVisible(True)
+                self._status.setText(missing)
+                return
+        self._sheet_batch_note = ""
         if self._mode == "icp":
             self._set_running(True)
             self._status.setText(i18n.t("Finding people (no e-mails, no Groq)…")
@@ -848,6 +882,36 @@ class LeadsWorkbench(QWidget):
                 exclude_domains=self._seller_domains(), leads_only=leads_only,
                 sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
                 spec=spec.to_dict(), source=self._source, emails=emails)
+            self._worker.blocked.connect(self._on_source_blocked)
+        elif sheet_companies:
+            companies = _sheet.load_companies(self._path)
+            start = self._sheet_company_offset
+            batch = companies[start:start + MAX_FACET_VALUES]
+            if not batch:
+                self._status.setText(i18n.t(
+                    "Every company in this sheet has already been searched. "
+                    "Choose a different sheet to search more."))
+                return
+            batch_spec = spec.copy()          # never touch the visible ICP filters
+            batch_spec.companies.include = list(batch)
+            self._sheet_company_offset = start + len(batch)
+            if self._sheet_company_offset < len(companies):
+                self._sheet_batch_note = i18n.t(
+                    "Searched {done} of {total} companies from the sheet — "
+                    "press Load the sheet again for the rest."
+                ).format(done=self._sheet_company_offset, total=len(companies))
+            self._set_running(True)
+            self._status.setText(i18n.t(
+                "This sheet has no name column — finding people at its "
+                "{n} companies instead…").format(n=len(batch)))
+            self._worker = SourceWorker(
+                [], [], offer, self.cfg,
+                target=self._target.value(), limit=self._limit.value(),
+                verify_limit=self._verify_limit.value(),
+                sender=self._sender(), claims=claims,
+                exclude_domains=self._seller_domains(), leads_only=leads_only,
+                sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
+                spec=batch_spec.to_dict(), source=self._source, emails=emails)
             self._worker.blocked.connect(self._on_source_blocked)
         else:
             self._set_running(True)
@@ -924,6 +988,13 @@ class LeadsWorkbench(QWidget):
         self._session_mode = self._next_mode
         self._run_params = dict(self._next_params)
         self._show_result(res, drafts)
+        if self._sheet_batch_note:
+            # More companies from this sheet are still unsearched — said
+            # after _show_result's own summary, not instead of it.
+            text = self._summary.text()
+            self._summary.setText(
+                (text + "   ·   " if text else "") + self._sheet_batch_note)
+            self._sheet_batch_note = ""
         if idle:
             self._set_running(False)
         self._save_session()
