@@ -1624,6 +1624,38 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         spec = _FakeSourceWorker.made[0].kwargs["spec"]
         self.assertEqual(spec["job_titles"]["include"], ["Purchase Head"])
 
+    def test_stale_titles_are_overridden_even_if_something_else_touched_the_spec(self):
+        # The actual bug behind the live report even after the seniority
+        # fix landed: the original gate compared the WHOLE spec against
+        # _default_spec() byte-for-byte, so ANY other field differing —
+        # here, a location someone typed into Find people at some earlier
+        # point the same session — silently kept the stale automation-
+        # vertical job titles with no sign anything had gone wrong. The
+        # only thing that should matter is whether the TITLES are still
+        # the ones this path must not use.
+        path = self._sheet("touched_elsewhere.xlsx", ["Only Co"])
+        wb = self._workbench(path)
+        spec = wb._filters.spec()
+        spec.locations.exclude = ["India"]   # unrelated field, touched
+        wb._filters.set_spec(spec)
+        wb._on_prepare(leads_only=True, emails="later")
+        got = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(got["job_titles"]["include"], [])
+        self.assertEqual(got["seniority"]["include"],
+                         list(self._WB._COMPANY_SEARCH_SENIORITY))
+
+    def test_empty_titles_with_the_owners_own_seniority_keeps_that_seniority(self):
+        # Empty job titles (not the stale default, just nothing) with the
+        # owner's OWN seniority choice already set must not be clobbered
+        # by the company-search default.
+        path = self._sheet("own_seniority.xlsx", ["Only Co"])
+        wb = self._workbench(path)
+        wb._filters.set_spec(self._WB.SearchSpec.from_dict(
+            {"seniority": {"include": ["vp"]}}))
+        wb._on_prepare(leads_only=True, emails="later")
+        got = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(got["seniority"]["include"], ["vp"])
+
 
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""

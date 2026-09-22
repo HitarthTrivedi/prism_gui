@@ -115,25 +115,38 @@ _COMPANY_SEARCH_SENIORITY = ("owner", "director")
 
 def _company_search_spec(spec: SearchSpec) -> SearchSpec:
     """The base a company-only-sheet search asks with, unless the owner has
-    customised Find people themselves — checked by comparing against
-    _default_spec(), not by mode, so a customised ICP spec is respected even
-    though the owner is sitting in Import a sheet when they press the button.
+    customised Find people's job titles or seniority themselves.
 
     _default_spec()'s titles are ONE vertical: "Head of Digital
     Transformation", "Automation Head". A company sheet can be any industry
     at all, and asking Exa for exactly those titles at, say, a small
     Vadodara pharma-machinery manufacturer finds nobody — not because
     there is nobody there, but because that specific title is not a role a
-    company that size has. Owner / Founder / C-suite / Director / Head
-    reaches a real decision-maker almost anywhere, and the sheet already
-    named the industry by naming the companies — asking Exa for it again on
-    top would only narrow a search that is already as scoped as it can be."""
-    if spec.to_dict() != _default_spec().to_dict():
-        return spec.copy()          # the owner set this on purpose — keep it
+    company that size has (proved live, 22-09-2026: the same companies,
+    called through the real pipeline with just Owner/Director instead,
+    returned real people with real LinkedIn profiles in seconds). Owner /
+    Director reaches a real decision-maker almost anywhere, and the sheet
+    already named the industry by naming the companies — asking Exa for it
+    again on top would only narrow a search that is already as scoped as
+    it can be.
+
+    22-09-2026: originally gated on the WHOLE spec being byte-for-byte
+    _default_spec() — any other field differing (a saved search touched
+    earlier the same session, a restored run, anything) silently kept the
+    stale automation-vertical titles with no sign anything had gone
+    wrong. Gated on the one thing that actually matters instead: are the
+    job titles still exactly the ones this sheet-search path must not use.
+    Any OTHER seniority/job-title choice the owner made is respected.
+    Industries is cleared regardless — with real companies named, it has
+    no effect on the query Exa is sent (filters._queries' company branch
+    never reads it) and only exists here as unused bookkeeping."""
+    stale_titles = list(_DEFAULT_ROLES.split("\n"))
     out = spec.copy()
-    out.job_titles.include = []
     out.industries.include = []
-    out.seniority.include = list(_COMPANY_SEARCH_SENIORITY)
+    if not out.job_titles.include or out.job_titles.include == stale_titles:
+        out.job_titles.include = []
+        if not out.seniority.include and not out.functions.include:
+            out.seniority.include = list(_COMPANY_SEARCH_SENIORITY)
     return out
 
 
