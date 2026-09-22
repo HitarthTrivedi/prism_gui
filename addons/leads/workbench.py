@@ -102,7 +102,15 @@ def _default_spec() -> SearchSpec:
 # Decision-maker levels broad enough to reach a real person at almost any
 # company, whatever it makes — unlike _DEFAULT_ROLES, which names one
 # specific vertical (digital-transformation / automation heads).
-_COMPANY_SEARCH_SENIORITY = ("owner", "founder", "c_suite", "director", "head")
+#
+# Two, not five: _queries() asks Exa once per (role, company) PAIR, so
+# every extra seniority word here multiplies every batch's real query
+# count, not adds to it — five names meant 250 real searches for one
+# 50-company batch, not the ~50 a customer would reasonably expect from
+# "50 companies". "Owner" reaches a small manufacturer; "Director" reaches
+# a larger one (this sheet has both, "Acme Tooling" beside "Sun
+# Pharmaceutical Industries Limited") — two terms, not the whole ladder.
+_COMPANY_SEARCH_SENIORITY = ("owner", "director")
 
 
 def _company_search_spec(spec: SearchSpec) -> SearchSpec:
