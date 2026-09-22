@@ -38,11 +38,23 @@ def outside_filters(filtered, top: int = 3) -> tuple:
     return sum(counts.values()), words
 
 
-def _nobody_left(skipped: int, filtered, source: str = "exa") -> str:
+def _nobody_left(skipped: int, filtered, source: str = "exa",
+                 query_errors: int = 0, queries_used: int = 0) -> str:
     """Why a search ended with nobody, naming what the owner can change: the
     filters that turned people away, the Net-new switch, or the search width.
     The last line names the database that was asked, because "check your
-    balance" is only actionable when it says whose."""
+    balance" is only actionable when it says whose.
+
+    22-Sep-2026: that last line used to be the ONLY answer for a genuine
+    zero-match search AND for a search where every call to the database
+    itself failed (a bad or expired key, an empty balance, the service
+    down) — prospector.source's own _exa_people distinguishes the two
+    (`None` = the call failed, `[]` = it answered with nothing) and counts
+    both in `stats`, but nothing downstream READ query_errors, so "check
+    your balance" was a guess dressed as the only message, every time,
+    whether the account was fine or not. Reported live three times the
+    same evening on a sheet with well-known companies that should have
+    been easy to find someone for — exactly the shape this was blind to."""
     total, words = outside_filters(filtered)
     already = (f" {skipped} more were already pulled in an earlier session — turn "
                "off “Net new only” to include them." if skipped else "")
@@ -52,10 +64,20 @@ def _nobody_left(skipped: int, filtered, source: str = "exa") -> str:
     if skipped:
         return (f"Everyone this search found ({skipped}) was already pulled in an "
                 "earlier session. Widen the filters, or turn off “Net new only”.")
+    db = "Apollo" if source == "apollo" else "Exa"
+    if queries_used and query_errors >= queries_used:
+        # Not a guess: every single call to the database failed outright —
+        # this is what a bad/expired key or an empty balance looks like,
+        # told apart from a real zero-match search.
+        return (f"Every one of the {queries_used} searches to {db} failed — "
+                f"this points at your {db} API key or balance, not the "
+                f"filters. Check it under Keys & claims before trying again.")
+    note = (f" ({query_errors} of {queries_used} searches to {db} failed — "
+            f"worth checking your {db} key or balance too)"
+            if query_errors else "")
     if source == "apollo":
-        return ("No people came back from Apollo — widen the filters, or check "
-                "your Apollo plan.")
-    return "No people came back — widen the filters, or check your Exa balance."
+        return f"No people came back from Apollo — widen the filters, or check your Apollo plan.{note}"
+    return f"No people came back — widen the filters, or check your Exa balance.{note}"
 
 
 def _plan_refusal(exc, apollo) -> str:
@@ -489,7 +511,10 @@ class SourceWorker(_Worker):
             filtered = dict(stats.get("filtered") or {})
             unverified = int(stats.get("company_unverified") or 0)
             if not leads:
-                self.failed.emit(_nobody_left(skipped, filtered, self.source))
+                self.failed.emit(_nobody_left(
+                    skipped, filtered, self.source,
+                    query_errors=int(stats.get("query_errors") or 0),
+                    queries_used=int(stats.get("queries_used") or 0)))
                 return
             if self.emails == "later":
                 # Finding PEOPLE is cheap — the searches are all it costs.

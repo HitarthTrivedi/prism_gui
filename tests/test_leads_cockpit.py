@@ -823,6 +823,43 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertIn("412 were outside them (380 location, 32 job title)", text)
         self.assertIn("Net new only", _nobody_left(12, {}))
 
+    def test_every_search_failing_names_the_key_not_the_filters(self):
+        # 22-Sep-2026: reported live three times on a sheet with well-known
+        # companies that should have been easy to find someone for.
+        # _exa_people distinguishes "the call failed" (None) from "it
+        # answered with nothing" ([]) and source.py counts both, but
+        # nothing downstream read query_errors before this — every one of
+        # these calls failing (a bad key, no balance) produced the exact
+        # same "widen the filters" text as a genuine zero-match search.
+        from addons.leads.workers import _nobody_left
+        text = _nobody_left(0, {}, "exa", query_errors=100, queries_used=100)
+        self.assertIn("Every one of the 100 searches to Exa failed", text)
+        self.assertIn("key or balance", text)
+        self.assertNotIn("widen the filters", text)   # not a filters problem
+
+    def test_some_searches_failing_gets_a_note_not_a_false_certainty(self):
+        # A few failures do not prove the account is broken — the rest may
+        # genuinely have found nobody. Named, not hidden, but not claimed
+        # as the definite cause the all-failed case is.
+        from addons.leads.workers import _nobody_left
+        text = _nobody_left(0, {}, "exa", query_errors=3, queries_used=100)
+        self.assertIn("No people came back", text)
+        self.assertIn("3 of 100 searches to Exa failed", text)
+
+    def test_zero_query_errors_is_unchanged(self):
+        from addons.leads.workers import _nobody_left
+        text = _nobody_left(0, {}, "exa", query_errors=0, queries_used=100)
+        self.assertEqual(text,
+                         "No people came back — widen the filters, or check your Exa balance.")
+        # And the default (no stats passed at all) behaves the same way.
+        self.assertEqual(_nobody_left(0, {}, "exa"), text)
+
+    def test_apollo_names_apollo_not_exa_when_every_search_fails(self):
+        from addons.leads.workers import _nobody_left
+        text = _nobody_left(0, {}, "apollo", query_errors=10, queries_used=10)
+        self.assertIn("Every one of the 10 searches to Apollo failed", text)
+        self.assertNotIn("Exa", text)
+
     def test_save_search_keeps_the_filters_and_shows_a_card(self):
         from addons.leads import saved_searches
         wb = self._WB.LeadsWorkbench({})
