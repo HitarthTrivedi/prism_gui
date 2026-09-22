@@ -1216,8 +1216,7 @@ class SectionHeader(QWidget):
         self.setObjectName("sectionHeader")
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.SPACE_4, theme.SPACE_2,
-                               theme.SPACE_4, theme.SPACE_2)
+        row.setContentsMargins(4, theme.SPACE_3, 4, theme.SPACE_1)
         row.setSpacing(theme.SPACE_3)
 
         col = QVBoxLayout()
@@ -1251,44 +1250,6 @@ class SectionHeader(QWidget):
         row.addLayout(self.actions_row)
         for widget in actions or []:
             self.actions_row.addWidget(widget)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        r = QRectF(self.rect())
-        radius = 12.0
-
-        clip = QPainterPath()
-        clip.addRoundedRect(r, radius, radius)
-        painter.setClipPath(clip)
-
-        central = self.window().findChild(QWidget, "central")
-        if central and hasattr(central, "get_blurred_pixmap"):
-            blurred = central.get_blurred_pixmap()
-            if blurred and not blurred.isNull():
-                pos = central.mapFromGlobal(self.mapToGlobal(QPoint(0, 0)))
-                src_rect = QRect(pos.x(), pos.y(), int(r.width()), int(r.height()))
-                painter.drawPixmap(r.toRect(), blurred, src_rect)
-
-        # Frosted glass pill fill
-        glass_grad = QLinearGradient(QPointF(r.left(), r.top()),
-                                     QPointF(r.left(), r.bottom()))
-        glass_grad.setColorAt(0.0, QColor(255, 255, 255, 205))
-        glass_grad.setColorAt(1.0, QColor(255, 255, 255, 165))
-        painter.setBrush(QBrush(glass_grad))
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(r, radius, radius)
-
-        # Specular border
-        border_grad = QLinearGradient(
-            QPointF(r.left(), r.top()), QPointF(r.right(), r.bottom()))
-        border_grad.setColorAt(0.0, QColor(255, 255, 255, 240))
-        border_grad.setColorAt(0.5, QColor(255, 255, 255, 140))
-        border_grad.setColorAt(1.0, QColor(0, 0, 0, 20))
-        painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QBrush(border_grad), 1.0))
-        painter.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
     def set_subtitle(self, text: str):
         self.subtitle.setText(text)

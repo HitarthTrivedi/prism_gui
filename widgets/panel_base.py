@@ -680,17 +680,10 @@ class AddonFrontDoor(Page):
     # -- build ------------------------------------------------------------
     def build(self):
         runs = self._recent()
-        self._col.addWidget(self._banner(runs))
-
-        # Activity first — it is the only part of this screen that changes,
-        # and on a module somebody uses weekly it is the reason they came.
-        # The two static sections then sit UNDER it and carry the rest of the
-        # page height, which is what stops a screen with one run from being
-        # one row over a 400px grey field.
-        self._col.addWidget(C.SectionHeader(
-            i18n.t("Recent runs"),
-            i18n.t("Read back out of the stored records, same as History.")))
         if runs:
+            self._col.addWidget(C.SectionHeader(
+                i18n.t("Recent runs"),
+                i18n.t("Read back out of the stored records, same as History.")))
             card = C.Card()
             col = card.body((0, 0, 0, 0), spacing=0)
             for i, run in enumerate(runs):
@@ -701,40 +694,76 @@ class AddonFrontDoor(Page):
                     lambda p=run.get("path", ""): p and self.open_run.emit(p))
                 col.addWidget(row)
             self._col.addWidget(card)
-        else:
-            # The shared EmptyState, but added WITHOUT a stretch factor. It
-            # still centres itself in the height it is given; it is simply not
-            # given four hundred pixels of it, because there are two sections
-            # of real content underneath that use the space better than a
-            # centred sentence would. One sentence for all three add-ons, and
-            # it names this screen's own primary button rather than pointing
-            # vaguely "above" — the header action is the only primary here, so
-            # the empty state carries no second button of its own.
-            self._col.addWidget(C.EmptyState(
-                self.ICON, i18n.t("Nothing yet"),
-                i18n.t(self.DETAIL) + " " + i18n.t(
-                    "Use “{action}” at the top of this screen to start one."
-                ).format(action=i18n.t(self.ACTION))))
 
         if self.STEPS:
             self._col.addWidget(C.SectionHeader(
                 i18n.t("How it works"),
-                i18n.t("Every step happens on this machine unless it says "
-                       "otherwise.")))
-            grid = C.CardGrid(min_col_width=246)
-            grid.add_all([self._step_card(i + 1, icon, title, body)
-                          for i, (icon, title, body) in enumerate(self.STEPS)])
-            self._col.addWidget(grid)
+                i18n.t("Fast, automated workflow from drawing to finished document.")))
+            self._col.addWidget(self._steps_card(self.STEPS))
 
         if self.PLACEHOLDERS:
             self._col.addWidget(C.SectionHeader(
                 i18n.t("What you can ask for"),
-                i18n.t("The same examples the dialog itself offers.")))
-            asks = C.CardGrid(min_col_width=310)
-            asks.add_all([self._example_card(text, note)
-                          for text, note in self.PLACEHOLDERS])
-            self._col.addWidget(asks)
+                i18n.t("Click an example or type your own prompt in the dialog.")))
+            self._col.addWidget(self._examples_card(self.PLACEHOLDERS))
         self._col.addStretch(1)
+
+    def _steps_card(self, steps: list) -> QWidget:
+        card = C.Card()
+        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                         theme.CARD_PAD, theme.CARD_PAD), spacing=0)
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_4)
+        for i, (icon, title, body) in enumerate(steps):
+            if i:
+                row.addWidget(C.hairline(vertical=True))
+            step_box = QVBoxLayout()
+            step_box.setContentsMargins(theme.SPACE_2, 0, theme.SPACE_2, 0)
+            step_box.setSpacing(theme.SPACE_2)
+
+            top = QHBoxLayout()
+            top.setSpacing(theme.SPACE_2)
+            top.addWidget(C.IconPad(icon, self.HUE or theme.ACCENT, 26,
+                                    theme.R_CONTROL, 13))
+            top.addWidget(C.kicker(f"{i + 1:02d}"), stretch=1)
+            step_box.addLayout(top)
+
+            step_box.addWidget(C.label(i18n.t(title), level="CARD_TITLE", size=14, weight=600, wrap=True))
+            step_box.addWidget(C.label(i18n.t(body), level="META", size=12, colour=theme.NEUTRAL[600], wrap=True))
+            step_box.addStretch(1)
+
+            row.addLayout(step_box, stretch=1)
+        col.addLayout(row)
+        return card
+
+    def _examples_card(self, placeholders: list) -> QWidget:
+        card = C.Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_2,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        for i, (text, note) in enumerate(placeholders):
+            if i:
+                col.addWidget(C.hairline())
+            row = QHBoxLayout()
+            row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+            row.setSpacing(theme.SPACE_3)
+
+            icon = C.IconPad("mic", self.HUE or theme.ACCENT, 28,
+                            theme.R_CONTROL, 14)
+            row.addWidget(icon, alignment=Qt.AlignTop)
+
+            stack = QVBoxLayout()
+            stack.setSpacing(2)
+            stack.addWidget(C.label(f"“{i18n.t(text)}”", level="CARD_TITLE", size=14, weight=600, wrap=True))
+            if note:
+                stack.addWidget(C.label(i18n.t(note), level="META", size=13, colour=theme.NEUTRAL[600], wrap=True))
+            row.addLayout(stack, stretch=1)
+
+            btn = C.button(i18n.t("Try this"), "secondary", small=True,
+                           on_click=self.opened.emit)
+            row.addWidget(btn, alignment=Qt.AlignVCenter)
+
+            col.addLayout(row)
+        return card
 
     def _role_card(self, icon: str, title: str, note: str,
                    tool: str) -> QWidget:

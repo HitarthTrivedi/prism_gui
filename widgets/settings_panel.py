@@ -206,7 +206,7 @@ class SettingsPanel(QDialog):
 
     # The modal is deliberately compact: the category list is a navigation
     # aid, not a second page competing with the details beside it.
-    NAV_W = 190
+    NAV_W = 210
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -214,8 +214,8 @@ class SettingsPanel(QDialog):
         self.setObjectName("settingsDialog")
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setWindowModality(Qt.ApplicationModal)
-        self.setMinimumSize(680, 500)
-        self.resize(860, 660)
+        self.setMinimumSize(720, 520)
+        self.resize(920, 680)
         self.setStyleSheet(
             f"#settingsDialog {{ background: #ffffff;"
             f" border: 1px solid {theme.HAIRLINE};"
@@ -265,10 +265,10 @@ class SettingsPanel(QDialog):
         outer.setSpacing(0)
         
         self._container = QWidget()
-        self._container.setMaximumWidth(700)
+        self._container.setMaximumWidth(740)
         
         self._col = QVBoxLayout(self._container)
-        self._col.setContentsMargins(0, 0, 0, 56)
+        self._col.setContentsMargins(0, theme.SPACE_3, 0, 56)
         self._col.setSpacing(theme.CARD_GAP)
         
         outer.addWidget(self._container)
@@ -334,6 +334,7 @@ class SettingsPanel(QDialog):
         page(self._col)
         if not self._claims_height:
             self._col.addStretch(1)
+        self._scroll.verticalScrollBar().setValue(0)
 
     def _who(self) -> str:
         """The line under the page title: whose copy this is, and on what
@@ -393,6 +394,7 @@ class SettingsPanel(QDialog):
                           colour=theme.ACCENT_RAMP[700])
         support.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._nav.addWidget(support)
+        self._nav.addSpacing(theme.SPACE_2)
         meeting = C.button(
             i18n.t("Request a meeting"), "secondary", small=True,
             on_click=self._request_meeting)
@@ -613,10 +615,11 @@ class SettingsPanel(QDialog):
         col.addWidget(self._head(
             i18n.t("What's included"),
             i18n.t("The add-ons and features your current licence plan covers.")))
-        grid = C.CardGrid(min_col_width=300)
-        for key, name, blurb, have in self._features(state):
-            grid.add(self._feature_card(key, name, blurb, have))
-        col.addWidget(grid)
+        features = self._features(state)
+        if features:
+            col.addWidget(self._features_card(features))
+        else:
+            col.addWidget(self._note(i18n.t("No add-ons or features are registered for this licence.")))
 
 
 
@@ -696,6 +699,39 @@ class SettingsPanel(QDialog):
                         entry.blurb if entry else "",
                         True))
         return out
+
+    def _features_card(self, features: list[tuple[str, str, str, bool]]) -> Card:
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_2,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        for i, (key, name, blurb, have) in enumerate(features):
+            if i:
+                col.addWidget(C.hairline())
+            row = QHBoxLayout()
+            row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+            row.setSpacing(theme.SPACE_3)
+
+            if have:
+                icon = C.IconPad("check", theme.OK, 28, theme.R_CONTROL, 14)
+                pill = Pill(i18n.t("Included"), "ok")
+            else:
+                icon = C.IconPad("lock", theme.NEUTRAL[400], 28, theme.R_CONTROL, 14)
+                pill = Pill(i18n.t("Not in plan"), "quiet")
+
+            row.addWidget(icon, alignment=Qt.AlignTop)
+
+            text_box = QVBoxLayout()
+            text_box.setSpacing(2)
+            title_lbl = C.label(i18n.t(name), level="CARD_TITLE", wrap=True)
+            text_box.addWidget(title_lbl)
+            if blurb:
+                desc_lbl = C.label(i18n.t(blurb), level="META", wrap=True)
+                text_box.addWidget(desc_lbl)
+            row.addLayout(text_box, stretch=1)
+
+            row.addWidget(pill, alignment=Qt.AlignTop)
+            col.addLayout(row)
+        return card
 
     def _feature_card(self, key: str, name: str, blurb: str,
                       have: bool) -> Card:
@@ -822,10 +858,7 @@ class SettingsPanel(QDialog):
             col.addWidget(self._head(
                 i18n.t("Team members"),
                 i18n.t("Everyone this copy has a designation key for.")))
-            grid = C.CardGrid(min_col_width=260)
-            for member in members:
-                grid.add(self._member_card(member))
-            col.addWidget(grid)
+            col.addWidget(self._members_card(members))
 
         if me.get("admin"):
             member_name = QLineEdit()
@@ -910,7 +943,29 @@ class SettingsPanel(QDialog):
                                 name, role_key)
         self._after_save(i18n.t("{name} added.").format(name=name))
 
-
+    def _members_card(self, members: list[dict]) -> Card:
+        import roles as R
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_2,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        for i, member in enumerate(members):
+            if i:
+                col.addWidget(C.hairline())
+            role = R.get(member.get("role") or "")
+            line = QHBoxLayout()
+            line.setContentsMargins(0, theme.SPACE_3 - 1, 0, theme.SPACE_3 - 1)
+            line.setSpacing(theme.SPACE_3)
+            name = member.get("name") or member.get("mid") or "—"
+            line.addWidget(C.Avatar(name, 32))
+            stack = QVBoxLayout()
+            stack.setSpacing(2)
+            stack.addWidget(C.label(name, level="CARD_TITLE", colour=theme.TEXT,
+                                    weight=600))
+            stack.addWidget(C.label(role.label if role else
+                                    (member.get("role") or "—"), level="META"))
+            line.addLayout(stack, stretch=1)
+            col.addLayout(line)
+        return card
 
     def _member_card(self, member: dict) -> Card:
         import roles as R
@@ -975,11 +1030,7 @@ class SettingsPanel(QDialog):
             return   # nothing saved yet — the editor above is the whole page
 
         col.addWidget(self._head(i18n.t("Currently active")))
-        grid = C.CardGrid(min_col_width=300)
-        for stage, tool in picked:
-            grid.add(self._agent_card(categories.get(stage, {}), stage, tool,
-                                      tool in premium))
-        col.addWidget(grid)
+        col.addWidget(self._agents_list_card(picked, categories, premium))
 
         # "Which tools you'll sign into" is a direct consequence of which
         # tools you picked, so it belongs beside the pick rather than on the
@@ -990,10 +1041,7 @@ class SettingsPanel(QDialog):
                 i18n.t("Where 'Open login tabs' will take you"),
                 i18n.t("One tab per tool you have picked, opened in Prism's "
                        "own Chrome profile so the sign-in sticks.")))
-            site_grid = C.CardGrid(min_col_width=300)
-            for tool, url in sites:
-                site_grid.add(self._site_card(tool, url))
-            col.addWidget(site_grid)
+            col.addWidget(self._sites_card(sites))
 
         col.addWidget(self._buttons([
             C.button(i18n.t("Open the AI tools screen"), "secondary",
@@ -1113,6 +1161,34 @@ class SettingsPanel(QDialog):
         self.cfg["premium"] = [name for name, box in boxes.items()
                                if box.isChecked()]
         self._after_save(i18n.t("Saved."))
+
+    def _agents_list_card(self, picked, categories, premium) -> Card:
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_2,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        for i, (stage, tool) in enumerate(picked):
+            if i:
+                col.addWidget(C.hairline())
+            meta = categories.get(stage, {})
+            paid = tool in premium
+            row = QHBoxLayout()
+            row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+            row.setSpacing(theme.SPACE_3)
+            if tool:
+                row.addWidget(C.ToolBadge(tool, 28), alignment=Qt.AlignTop)
+            stack = QVBoxLayout()
+            stack.setSpacing(2)
+            stack.addWidget(C.label(tool or i18n.t("Not picked"), level="CARD_TITLE"))
+            stack.addWidget(C.kicker(i18n.t(meta.get("label", stage.title()))))
+            if meta.get("desc"):
+                stack.addWidget(C.label(i18n.t(meta["desc"]), level="META", wrap=True))
+            row.addLayout(stack, stretch=1)
+            row.addWidget(Pill(i18n.t("Paid") if paid else i18n.t("Free"),
+                               "accent" if paid else "quiet")
+                          if tool else Pill(i18n.t("Skipped"), "quiet"),
+                          alignment=Qt.AlignTop)
+            col.addLayout(row)
+        return card
 
     def _agent_card(self, meta: dict, stage: str, tool: str | None,
                     paid: bool) -> Card:
@@ -1362,6 +1438,26 @@ class SettingsPanel(QDialog):
         implementation of this lookup (also used by MainWindow's Login tabs
         and the wizard)."""
         return CB.resolved_agents(dict(self.cfg.get("agents") or {}))
+
+    def _sites_card(self, sites: list[tuple[str, str]]) -> Card:
+        card = Card()
+        col = card.body((theme.CARD_PAD, theme.SPACE_2,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        for i, (tool, url) in enumerate(sites):
+            if i:
+                col.addWidget(C.hairline())
+            row = QHBoxLayout()
+            row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+            row.setSpacing(theme.SPACE_3)
+            row.addWidget(C.ToolBadge(tool, 28), alignment=Qt.AlignTop)
+            stack = QVBoxLayout()
+            stack.setSpacing(2)
+            stack.addWidget(C.label(tool, level="CARD_TITLE"))
+            if url:
+                stack.addWidget(self._path(url))
+            row.addLayout(stack, stretch=1)
+            col.addLayout(row)
+        return card
 
     def _site_card(self, tool: str, url: str) -> Card:
         card = Card()

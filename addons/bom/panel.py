@@ -24,24 +24,20 @@ class BomPanel(AddonFrontDoor):
 
     STEPS = [
         ("paperclip", "Attach the drawing",
-         "A DXF or PDF general-arrangement drawing — or nothing at all, a "
-         "written description of the assembly works on its own."),
+         "Upload a GA drawing (DXF/PDF) or describe the assembly."),
         ("chart", "Prism measures the parts",
-         "Part counts, cut lengths and plate areas are taken locally by "
-         "Prism's own geometry engine. No AI sees the drawing at this step."),
-        ("file", "You get a checkable CSV",
-         "Every measured figure is written to a CSV before anything is "
-         "generated, so you can audit the take-off."),
-        ("pencil", "Then the BOM is written up",
-         "The measured parts go to your writing tool, which turns them into a "
-         "grouped Bill of Materials with materials and grades."),
+         "Part counts, cut lengths, and plate areas are measured locally."),
+        ("file", "Audit the take-off",
+         "Review verified part quantities in a clean, checkable CSV."),
+        ("pencil", "Export Bill of Materials",
+         "Outputs an organized BOM grouped by material, grade, and size."),
     ]
 
     PLACEHOLDERS = [
         ("Parts list to fabricate this over-band magnetic separator",
-         "Attach the GA drawing and Prism measures the parts."),
+         "Measures your GA drawing to extract plate sizes, beam lengths, and hardware."),
         ("BOM for one 36x24 jaw crusher, 100 TPH",
-         "No drawing needed — the parts come out of the words."),
+         "Generates a complete fabrication parts list directly from specifications."),
     ]
 
     def build(self):

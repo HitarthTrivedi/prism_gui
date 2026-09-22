@@ -24,33 +24,20 @@ class BoqPanel(AddonFrontDoor):
 
     STEPS = [
         ("paperclip", "Attach the drawing",
-         "A DXF, a PDF, or nothing at all — a written description of what is "
-         "needed works on its own."),
+         "Upload a CAD drawing (DXF/PDF) or enter a written description."),
         ("chart", "Prism measures it",
-         "Counts and lengths are taken locally by Prism's own geometry "
-         "engine. No AI sees the drawing at this step."),
-        ("file", "You get a checkable CSV",
-         "Every measured figure is written to a CSV before anything is "
-         "generated, so you can audit the numbers."),
+         "Counts, lengths, and areas are calculated automatically."),
         ("file", "Attach a sample BOQ too",
-         "Add one of your own BOQs (Word, Excel or PDF) and the writer "
-         "makes that document — its sections, columns, numbering and "
-         "wording — filled with this drawing's numbers."),
-        ("pencil", "Then it is written up",
-         "The measured numbers and your sample go to your writing tool. "
-         "The drawing itself never leaves this machine."),
-        ("grid", "Price it, if you like",
-         "Attach your own rate list and the measured lines are priced by "
-         "arithmetic — rates, amounts, GST, a grand total — and saved as an "
-         "Excel sheet with live formulas. No AI touches a number."),
+         "Upload your past BOQ (Excel/Word) to match your company's format."),
+        ("grid", "Price & export",
+         "Generates itemized quantities and priced Excel sheets with live formulas."),
     ]
 
     PLACEHOLDERS = [
         ("BOQ for CCTV, cabling and fibre for this site",
-         "Attach the drawing and Prism measures it. Attach one of your "
-         "past BOQs as well and the result comes out in that format."),
-        ("materials to build one 36x24 jaw crusher, 100 TPH",
-         "No drawing needed — the quantities come out of the words."),
+         "Measures your CAD drawing and matches formatting to your past BOQs."),
+        ("Materials to build one 36x24 jaw crusher, 100 TPH",
+         "Generates an itemized Bill of Quantities directly from your prompt."),
     ]
 
     def build(self):

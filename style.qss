@@ -876,25 +876,36 @@ QPushButton:disabled, #secondaryBtn:disabled {
 /* TERTIARY, full-width and left-aligned — the Settings section list. */
 #secBtn {
     background: transparent;
-    border: 2px solid transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
-    padding: 6px 10px;
-    min-height: 18px;
+    padding: 7px 12px;
+    min-height: 20px;
     font-family: "Barlow";
     font-size: 14px;
     font-weight: 500;
-    color: #424244;
+    color: #3f3f46;
     text-align: left;
 }
 
-#secBtn:hover { background: rgba(0, 0, 0, 0.02); }
-#secBtn:pressed { background: rgba(0, 0, 0, 0.10); }
-#secBtn:focus { border-color: #09090b; }
-#secBtn:disabled { color: #b7b7ba; }
+#secBtn:hover {
+    background: rgba(0, 0, 0, 0.035);
+    color: #09090b;
+}
+#secBtn:pressed {
+    background: rgba(0, 0, 0, 0.08);
+}
+#secBtn:focus {
+    border-color: rgba(0, 0, 0, 0.15);
+}
+#secBtn:disabled {
+    color: #a1a1aa;
+}
 
 #secBtn[cur="true"] {
-    background: rgba(0, 0, 0, 0.04);
+    background: rgba(0, 0, 0, 0.065);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     color: #09090b;
+    font-weight: 600;
 }
 
 /* ── inputs ──────────────────────────────────────────────────────────────

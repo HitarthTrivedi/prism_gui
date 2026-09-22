@@ -962,7 +962,7 @@ class AgentsPanel(QWidget):
         self.budget.setVisible(has and bool(self.budget.text()))
         self.intent.setVisible(has and bool(self.intent_text.text()))
         self.empty_state.setVisible(not has)
-        self.toolkit.setVisible(not has and self.toolkit_grid.count() > 0)
+        self.toolkit.setVisible(False)
         self._tail.setVisible(has)
 
     # ── the toolkit shown on an empty bench ───────────────────────────────

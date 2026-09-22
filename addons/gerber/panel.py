@@ -21,24 +21,20 @@ class GerberPanel(AddonFrontDoor):
 
     STEPS = [
         ("paperclip", "Drop the job",
-         "A .zip or .rar exactly as the customer sent it. Nothing has to be "
-         "unpacked or renamed first."),
+         "Attach the customer .zip or .rar Gerber archive directly."),
         ("chart", "Measured on this machine",
-         "Board size, track width and spacing, drill sizes and counts — read "
-         "out of the Gerber files by Prism itself."),
+         "Board size, track width, spacing, and drill counts are extracted."),
         ("lock", "The design never leaves",
-         "Only the measured numbers are handed to the AI stage. The Gerber "
-         "files are never attached to anything."),
-        ("pencil", "Then a quote or a spec",
-         "Ask for a fabrication note, a price breakdown or a customer reply "
-         "— written from the numbers alone."),
+         "Only measured numbers are processed — Gerber files stay private."),
+        ("pencil", "Quote or spec",
+         "Generates ready-to-send fabrication notes, price breakdowns, or replies."),
     ]
 
     PLACEHOLDERS = [
-        ("reply with our price for 500 pieces",
-         "Optional. Say what to do with the numbers once they are measured "
-         "— or leave it blank and just take the five figures. Measuring "
-         "starts the moment the file lands, either way."),
+        ("Reply with our price for 500 pieces",
+         "Generates a priced fabrication quote from measured PCB specifications."),
+        ("Fabrication note & PCB inspection summary",
+         "Summarizes board size, track width/spacing, and drill counts for manufacturing."),
     ]
 
     def build(self):
