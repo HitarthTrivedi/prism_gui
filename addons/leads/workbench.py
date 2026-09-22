@@ -99,6 +99,36 @@ def _default_spec() -> SearchSpec:
     })
 
 
+# Decision-maker levels broad enough to reach a real person at almost any
+# company, whatever it makes — unlike _DEFAULT_ROLES, which names one
+# specific vertical (digital-transformation / automation heads).
+_COMPANY_SEARCH_SENIORITY = ("owner", "founder", "c_suite", "director", "head")
+
+
+def _company_search_spec(spec: SearchSpec) -> SearchSpec:
+    """The base a company-only-sheet search asks with, unless the owner has
+    customised Find people themselves — checked by comparing against
+    _default_spec(), not by mode, so a customised ICP spec is respected even
+    though the owner is sitting in Import a sheet when they press the button.
+
+    _default_spec()'s titles are ONE vertical: "Head of Digital
+    Transformation", "Automation Head". A company sheet can be any industry
+    at all, and asking Exa for exactly those titles at, say, a small
+    Vadodara pharma-machinery manufacturer finds nobody — not because
+    there is nobody there, but because that specific title is not a role a
+    company that size has. Owner / Founder / C-suite / Director / Head
+    reaches a real decision-maker almost anywhere, and the sheet already
+    named the industry by naming the companies — asking Exa for it again on
+    top would only narrow a search that is already as scoped as it can be."""
+    if spec.to_dict() != _default_spec().to_dict():
+        return spec.copy()          # the owner set this on purpose — keep it
+    out = spec.copy()
+    out.job_titles.include = []
+    out.industries.include = []
+    out.seniority.include = list(_COMPANY_SEARCH_SENIORITY)
+    return out
+
+
 def _suggest(facet: str, text: str) -> list:
     """The filter panel's typeahead. Places come from prospector.places (every
     country, region, state and city it knows) ahead of the starter list, which
@@ -892,7 +922,10 @@ class LeadsWorkbench(QWidget):
                     "Every company in this sheet has already been searched. "
                     "Choose a different sheet to search more."))
                 return
-            batch_spec = spec.copy()          # never touch the visible ICP filters
+            # Never touch the visible ICP filters, and never search this
+            # sheet's companies against the automation-vertical defaults —
+            # see _company_search_spec.
+            batch_spec = _company_search_spec(spec)
             batch_spec.companies.include = list(batch)
             self._sheet_company_offset = start + len(batch)
             if self._sheet_company_offset < len(companies):

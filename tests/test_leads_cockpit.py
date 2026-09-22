@@ -1555,6 +1555,37 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         self.assertIn("Exa API key", wb._status.text())
         self.assertEqual(wb._sheet_company_offset, 0)   # nothing was consumed
 
+    def test_untouched_default_filters_search_broad_seniority_not_one_vertical(self):
+        # Live report, 22-Sep-2026: a real 193-company run came back with
+        # "No people came back" on every batch — not because Exa found
+        # nobody, but because a fresh workbench's default job titles are
+        # ONE vertical ("Head of Digital Transformation", automation heads
+        # at automobile/steel/mining companies), silently reused for
+        # companies that are none of those. A small Vadodara pharma-
+        # machinery manufacturer has an owner; it does not have a "Head of
+        # Digital Transformation", and asking for exactly that title found
+        # nobody at any of them.
+        path = self._sheet("default_filters.xlsx", ["Only Co"])
+        wb = self._workbench(path)            # untouched: still _default_spec()
+        wb._on_prepare(leads_only=True, emails="later")
+        spec = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(spec["job_titles"]["include"], [])
+        self.assertEqual(spec["industries"]["include"], [])
+        self.assertEqual(spec["seniority"]["include"],
+                         list(self._WB._COMPANY_SEARCH_SENIORITY))
+
+    def test_filters_the_owner_actually_set_are_respected(self):
+        # The opposite case: the owner switched to Find people, set their
+        # own titles, then went back to Import a sheet. That choice is
+        # deliberate and must not be silently overridden.
+        path = self._sheet("custom_filters.xlsx", ["Only Co"])
+        wb = self._workbench(path)
+        wb._filters.set_spec(self._WB.SearchSpec.from_dict(
+            {"job_titles": {"include": ["Purchase Head"]}}))
+        wb._on_prepare(leads_only=True, emails="later")
+        spec = _FakeSourceWorker.made[0].kwargs["spec"]
+        self.assertEqual(spec["job_titles"]["include"], ["Purchase Head"])
+
 
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""
