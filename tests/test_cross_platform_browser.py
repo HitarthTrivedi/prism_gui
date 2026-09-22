@@ -392,17 +392,27 @@ class TheDeliverableIsWhatComesBack(unittest.TestCase):
 class EveryStageIsLookedAtForFiles(unittest.TestCase):
     """Harvesting used to run on six stages only. A tool asked on a research
     or summary step for "an Excel of this" made one and Prism walked past.
-    Now every stage gets a short, capped look — some agents append the file
-    card after their text with no filename anywhere in it, so a zero-cost
-    probe alone still missed them (see 7987d18) — and only a hint in the
-    reply's own words earns the much longer real wait."""
+    Now every stage gets a look, and only a hint in the reply's own words —
+    or a file already visible on the page — earns the long, patient wait.
+
+    How EXPENSIVE that first look is has moved twice in one evening
+    (cap=0 -> cap=8/grace=4 in 7987d18, catching a file card an agent
+    appends with no filename anywhere in it -> back to cap=0 in 8c4b89f,
+    because that caught more at the cost of the same wait on every
+    plain-text stage of every run). Both are legitimate answers to a real
+    trade-off, so this does not pin an exact number — it pins the contract
+    that survives either answer (no signal costs nothing REAL, i.e. it
+    never reaches the long hinted-file wait) and puts a generous ceiling on
+    the short look so a future regression to something actually expensive
+    still fails, without this test needing rewriting every time that
+    number is retuned again."""
 
     def _driver(self, links: int):
         d = _FakeDriver([])
         d.execute_script = lambda script, *a: links
         return d
 
-    def test_a_text_stage_with_no_sign_of_a_file_stays_within_the_short_cap(self):
+    def test_a_text_stage_with_no_sign_of_a_file_costs_nothing_real(self):
         d = self._driver(0)
         slept = []
         with mock.patch.object(automation, "_harvest_files") as harvest, \
@@ -414,9 +424,11 @@ class EveryStageIsLookedAtForFiles(unittest.TestCase):
                 d, {}, "research", ["Here are the three suppliers I found."])
         self.assertEqual(out, [])
         harvest.assert_not_called()
-        # No hint and nothing on the page: bounded by the short grace
-        # window, never escalated to the long hinted-file wait.
-        self.assertLessEqual(sum(slept), 8)
+        # Not "== 0": that pins today's cap number and breaks on the next
+        # deliberate retune. A short, capped look (single digits) is the
+        # other legitimate answer; anything reaching double digits is not
+        # a "short chance" any more, on every plain-text stage, every run.
+        self.assertLess(sum(slept), 10)
 
     def test_a_link_on_the_page_is_harvested_on_any_stage(self):
         d = self._driver(1)

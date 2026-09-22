@@ -317,17 +317,17 @@ test that pins it; none is a rule that lives in a sentence.
   whichever is not. Not done here — inventing either implementation would be
   guessing at a design nobody described.
 
-### 15. Three more regressions from the same batch, not yet root-caused 🟠
+### 15. One more regression from the same batch, not yet root-caused 🟠
 - **Found:** 22-09-2026, same rebase as #13/#14. Confirmed genuine (pass on
   the pre-batch commit, fail after it), not investigated further.
-  - `tests/test_gates.py::UpdateBanner::test_check_for_updates_lands_in_both_places`
-    and `::test_settings_offers_check_for_updates` — likely the Settings
-    rewrite (`widgets/settings_panel.py`, -364/+162 lines in 4f65dfd) moved
-    or dropped the "Check for updates" text these look for.
   - `tests/test_i18n.py::Packs::test_every_pack_key_is_in_the_catalogue`.
-  - `tests/test_motion_studio.py::TheLocalServer::test_bad_requests`.
-- **Fix:** not attempted — flagging rather than guessing three more times in
-  one night.
+- **Already fixed, incidentally, by a later commit the same evening** (not
+  investigated which one, or why) — no longer worth chasing:
+  `tests/test_gates.py::UpdateBanner` (both) and
+  `tests/test_motion_studio.py::TheLocalServer::test_bad_requests`, all
+  confirmed passing again as of `2981eaa`.
+- **Fix:** not attempted for the one still open — flagging rather than
+  guessing.
 
 ### 16. A failed browser stage can fall back to a tool nobody ever logged into 🟠
 - **Found:** 22-09-2026, watching a live run fail over ChatGPT → Claude →
