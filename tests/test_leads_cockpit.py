@@ -1656,6 +1656,34 @@ class ACompanyOnlySheetSearchesForPeopleAtIts50AtATime(_Workbench):
         got = _FakeSourceWorker.made[0].kwargs["spec"]
         self.assertEqual(got["seniority"]["include"], ["vp"])
 
+    def test_a_managing_director_ceo_or_founder_is_not_filtered_out(self):
+        # Live report, 22-Sep-2026: a real 50-company batch came back with
+        # 2199 people found and 2162 of them thrown out as "outside your
+        # filters (seniority)" — only 37 survived. filters.seniority_of()
+        # reads "Managing Director", "CEO", "Chairman" and "President" as
+        # c_suite, and "Founder"/"Co-Founder" as founder, never as director
+        # or owner (its own docstring says so) — exactly the titles a real
+        # Indian SME's decision-maker carries. The original two-term list
+        # ("owner", "director") asked Exa for those roles AND rejected
+        # anyone whose actual title wasn't literally "Owner" or "Director",
+        # discarding almost everyone a company-sheet search exists to find.
+        from prospector.filters import match_person
+        path = self._sheet("titles.xlsx", ["Only Co"])
+        wb = self._workbench(path)
+        wb._on_prepare(leads_only=True, emails="later")
+        spec_dict = _FakeSourceWorker.made[0].kwargs["spec"]
+        spec = self._WB.SearchSpec.from_dict(spec_dict)
+        for title in ("Managing Director", "CEO", "Chairman", "President",
+                      "Founder", "Co-Founder", "Founder & CEO",
+                      "Director", "Owner"):
+            lead = Lead(name="P", title=title, company="Only Co")
+            self.assertEqual(match_person(spec, lead), "", title)
+        # Still not a decision-maker: an ordinary manager or engineer must
+        # keep being rejected — this widens who counts, not everyone.
+        for title in ("Quality Engineer", "Assistant Manager", "Intern"):
+            lead = Lead(name="P", title=title, company="Only Co")
+            self.assertEqual(match_person(spec, lead), "seniority", title)
+
 
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""

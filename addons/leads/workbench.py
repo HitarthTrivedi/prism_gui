@@ -103,14 +103,22 @@ def _default_spec() -> SearchSpec:
 # company, whatever it makes — unlike _DEFAULT_ROLES, which names one
 # specific vertical (digital-transformation / automation heads).
 #
-# Two, not five: _queries() asks Exa once per (role, company) PAIR, so
-# every extra seniority word here multiplies every batch's real query
-# count, not adds to it — five names meant 250 real searches for one
-# 50-company batch, not the ~50 a customer would reasonably expect from
-# "50 companies". "Owner" reaches a small manufacturer; "Director" reaches
-# a larger one (this sheet has both, "Acme Tooling" beside "Sun
-# Pharmaceutical Industries Limited") — two terms, not the whole ladder.
-_COMPANY_SEARCH_SENIORITY = ("owner", "director")
+# Four, not five, not two. _queries() asks Exa once per (role, company)
+# PAIR, so every extra seniority word here multiplies every batch's real
+# query count: two names meant 100 real searches for one 50-company batch,
+# which a live run (22-09-2026) showed was the wrong cut — filters.
+# seniority_of() reads "Managing Director", "CEO", "Chairman" and
+# "President" as c_suite, and "Founder"/"Co-Founder" as founder, NEVER as
+# director or owner (its own docstring says so). Those are the titles an
+# Indian SME's real decision-maker actually carries — a live 50-company
+# batch came back with 2199 people and match_person() threw out 2162 of
+# them as "outside your filters (seniority)" for exactly this reason, only
+# the bare "Director"/"Owner" title text survived. c_suite and founder are
+# back in; "head" stays out — "Head"/"HOD"/"Leader" catches middle-
+# management noise ("Team Leader") a company-sheet search doesn't want.
+# Four terms is 200 real searches for 50 companies, not the 250 the
+# original five-term version cost.
+_COMPANY_SEARCH_SENIORITY = ("owner", "founder", "c_suite", "director")
 
 
 def _company_search_spec(spec: SearchSpec) -> SearchSpec:
