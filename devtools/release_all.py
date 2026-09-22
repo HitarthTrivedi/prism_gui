@@ -221,9 +221,11 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
     unsigned = os.path.join(work, f"manifest.{platform_tag}.unsigned.json")
     signed = os.path.join(work, f"manifest.{platform_tag}.signed")
     assets_dir = os.path.join(work, f"update-assets-{platform_tag}")
-
-    run(["gh", "run", "download", run_id, "-R", repo,
-        "-n", f"update-assets-{matrix_os}", "-D", assets_dir])
+    if not os.path.isdir(assets_dir) or not os.listdir(assets_dir):
+        run(["gh", "run", "download", run_id, "-R", repo,
+            "-n", f"update-assets-{matrix_os}", "-D", assets_dir])
+    else:
+        print(f"  {assets_dir} already downloaded, reusing local files")
 
     if not force and already_signed(repo, tag, platform_tag):
         # sign_manifest.py's downgrade guard would refuse to re-sign this
@@ -233,9 +235,10 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         # left off (asset upload), not "sign this version again".
         print(f"  manifest.{platform_tag}.signed already on {tag} — "
              f"reusing it, checking assets only")
-        run(["gh", "release", "download", tag, "-R", repo,
-            "-p", f"manifest.{platform_tag}.signed",
-            "-D", work, "--clobber"])
+        if not os.path.exists(signed):
+            run(["gh", "release", "download", tag, "-R", repo,
+                "-p", f"manifest.{platform_tag}.signed",
+                "-D", work, "--clobber"])
     else:
         run(["gh", "release", "download", tag, "-R", repo,
             "-p", f"manifest.{platform_tag}.unsigned.json",
