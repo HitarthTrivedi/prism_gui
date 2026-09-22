@@ -1889,36 +1889,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     color: #52525b;
 }
 
-#topBarPill {
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 999px;
-}
 
-#homeIconBtn {
-    background: rgba(255, 255, 255, 0.70);
-    border: 1px solid rgba(0, 0, 0, 0.10);
-    border-radius: 999px;
-    padding: 6px;
-    color: #09090b;
-}
-
-#homeIconBtn:hover {
-    background: #ffffff;
-    border-color: rgba(0, 0, 0, 0.22);
-}
-
-#homeProfileBtn {
-    background: rgba(255, 255, 255, 0.70);
-    border: 1px solid rgba(0, 0, 0, 0.10);
-    border-radius: 999px;
-    padding: 2px 6px 2px 2px;
-}
-
-#homeProfileBtn:hover {
-    background: #ffffff;
-    border-color: rgba(0, 0, 0, 0.22);
-}
 
 #heroPromptCard {
     background: rgba(255, 255, 255, 0.65);

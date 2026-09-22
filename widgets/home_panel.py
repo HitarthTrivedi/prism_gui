@@ -566,10 +566,6 @@ class HomePanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Top Bar ────────────────────────────────────────────────────────
-        self._top_bar_widget = self._build_top_bar()
-        root.addWidget(self._top_bar_widget)
-
         # ── Scrollable Body ─────────────────────────────────────────────────
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -578,7 +574,7 @@ class HomePanel(QWidget):
         self._host = QWidget()
         self._scroll.setWidget(self._host)
         self._col = QVBoxLayout(self._host)
-        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
+        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
                                      theme.PAGE_PAD, theme.PAGE_PAD + 40)
         self._col.setSpacing(theme.CARD_GAP)
         root.addWidget(self._scroll, stretch=1)
@@ -589,69 +585,6 @@ class HomePanel(QWidget):
         _slot.setContentsMargins(0, 0, 0, 0)
 
         self.refresh()
-
-    # ── Top Bar ─────────────────────────────────────────────────────────────
-    def _build_top_bar(self) -> QWidget:
-        bar = QWidget()
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
-                                  theme.PAGE_PAD, theme.SPACE_2)
-        layout.setSpacing(theme.SPACE_3)
-
-        layout.addStretch(1)
-
-        # Right actions encapsulated in a frosted glass capsule for 100% contrast on any wallpaper
-        top_pill = QFrame()
-        top_pill.setObjectName("topBarPill")
-        pill_layout = QHBoxLayout(top_pill)
-        pill_layout.setContentsMargins(6, 4, 6, 4)
-        pill_layout.setSpacing(theme.SPACE_2)
-
-        sun_btn = QPushButton()
-        sun_btn.setObjectName("homeIconBtn")
-        sun_btn.setIcon(icons.icon("sun", 18, theme.NEUTRAL[800]))
-        sun_btn.setFixedSize(30, 30)
-        sun_btn.setToolTip(i18n.t("Toggle theme"))
-        pill_layout.addWidget(sun_btn)
-
-        bell_btn = QPushButton()
-        bell_btn.setObjectName("homeIconBtn")
-        bell_btn.setIcon(icons.icon("bell", 18, theme.NEUTRAL[800]))
-        bell_btn.setFixedSize(30, 30)
-        bell_btn.setToolTip(i18n.t("Notifications"))
-        pill_layout.addWidget(bell_btn)
-
-        date_str = datetime.now().strftime("%a, %d %b %Y")
-        date_lbl = QLabel(date_str)
-        date_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
-            f"color: #09090b; font-weight: 600; padding: 0 4px;"
-        )
-        pill_layout.addWidget(date_lbl)
-
-        self._profile_btn = QPushButton()
-        self._profile_btn.setObjectName("homeProfileBtn")
-        self._profile_btn.setCursor(Qt.PointingHandCursor)
-        prof_layout = QHBoxLayout(self._profile_btn)
-        prof_layout.setContentsMargins(2, 2, 4, 2)
-        prof_layout.setSpacing(4)
-
-        self._avatar = C.Avatar("", 26)
-        prof_layout.addWidget(self._avatar)
-
-        chev = QLabel()
-        chev.setPixmap(icons.pixmap("chevron-down", 12, theme.NEUTRAL[800]))
-        prof_layout.addWidget(chev)
-
-        self._profile_btn.clicked.connect(self._on_profile_clicked)
-        pill_layout.addWidget(self._profile_btn)
-
-        layout.addWidget(top_pill)
-
-        return bar
-
-    def _on_profile_clicked(self):
-        self.open_addon.emit("config")
 
     # ── live run state, pushed in by the window ──────────────────────────
     def set_active(self, runs: list[dict]):
@@ -694,11 +627,11 @@ class HomePanel(QWidget):
 
     # ── refresh ──────────────────────────────────────────────────────────
     def _refresh_identity(self):
-        whole = identity.describe()
-        initial = (whole or "?").strip()[:1].upper()
-        self._avatar.setText(initial)
-        self._avatar.setToolTip(whole)
-        self._profile_btn.setToolTip(whole or i18n.t("Profile"))
+        if hasattr(self, "_avatar") and self._avatar:
+            whole = identity.describe()
+            initial = (whole or "?").strip()[:1].upper()
+            self._avatar.setText(initial)
+            self._avatar.setToolTip(whole)
 
     def refresh(self):
         self._refresh_identity()
