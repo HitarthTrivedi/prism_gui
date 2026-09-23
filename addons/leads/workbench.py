@@ -3,9 +3,18 @@ Leads & Outreach — the workbench widget
 ────────────────────────────────────────
 The whole working surface as one embeddable QWidget, so it can be the full
 in-window screen (addons/leads/panel.py) instead of living inside a modal. It
-carries the search setup (foldable), the dense tabbed cockpit
-(addons/leads/cockpit.py) and every action — prepare, verify, save, export,
-send — with the heavy work off the UI thread (addons/leads/workers.py).
+drives the tabbed cockpit (addons/leads/cockpit.py) — whose People tab is
+Apollo's Find People (23-Sep-2026) — and every action: import, find, verify,
+save, export, send — with the heavy work off the UI thread
+(addons/leads/workers.py).
+
+The People page is everyone Prism holds (addons/leads/pool.py: saved
+contacts and every past run), filtered the moment a filter is clicked, split
+into Total / Net New / Saved and paged 25 at a time — all free. The one
+action that spends is Find new people, which says what it costs and asks
+first. Import ▾ brings a sheet in as contacts or accounts
+(addons/leads/import_wizard.py, contacts.py, imports.py) and never searches:
+the import becomes a filter.
 
 Who a list is for is set as lead FILTERS, Apollo / Sales Navigator style
 (addons/leads/filter_panel.py): every facet includes and excludes, and an
@@ -33,8 +42,10 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
+from dialogs.base import PrismDialog
 from widgets import controls as C
 from prospector.filters import MAX_FACET_VALUES, SearchSpec
+from addons.leads import pool as P
 from addons.leads import saved_searches
 from addons.leads.filter_panel import (
     HELP_KEYS as _FILTER_HELP_KEYS, FilterPanel, reveal_in_scroll, static_suggest,
@@ -42,7 +53,7 @@ from addons.leads.filter_panel import (
 from addons.leads.workers import (LeadsEmailWorker, LeadsExportWorker,
                                   LeadsQualifyWorker, LeadsSendWorker,
                                   LeadsSessionLoadWorker, LeadsVerifyWorker,
-                                  ProspectorWorker, SourceWorker, outside_filters)
+                                  SourceWorker, outside_filters)
 from addons.leads.cockpit import LeadsWorkspace
 
 try:
@@ -50,8 +61,11 @@ try:
 except Exception:                                       # noqa: BLE001
     DEFAULT_OFFER = "what your company sells"
 
-# Pre-filled filters so a first "Find people" run is one click. Editable: each
-# line becomes one include chip (job titles, industries).
+# The owner's own ICP — the first client's buyers — as a STARTER search in
+# Default view ▾ (_STARTERS). It used to be pre-filled in the rail; since the
+# rail filters everyone Prism holds (pool.py), a pre-filled rail hid every
+# held person outside that one vertical, so the page opens empty, as
+# Apollo's does, and this is one pick away. Each line is one include chip.
 _DEFAULT_INDUSTRIES = (
     "Automobile\nAuto Components\nTyre\nSteel Manufacturing\nDie Casting\n"
     "Aerospace & MRO\nDefense\nElectrical & Electronics\n"
@@ -65,20 +79,20 @@ _DEFAULT_ROLES = (
     "Supply Chain / Warehouse / Materials Head")
 
 
+# The "?" walkthrough's keys this widget answers (addons/leads/tour.py) — Find
+# new people and the run line; the filters and the cockpit answer for
+# themselves. Search settings' rows are NOT walked one by one: they live in a
+# window-modal dialog, and a walk that opened it would put the dialog over
+# its own Next button. The toolbar's "Search settings" step says what is in
+# there, and each row carries its own tooltip.
+_HELP_KEYS = frozenset({"btn_find", "notice"})
+
+
 # The Apollo half of the source switch, in two states. Apollo's own API Keys
 # page says its search and match endpoints "aren't included in your Free plan
 # and won't be accessible even with a master key" — so the tooltip says it
 # before a run spends a thread finding out. Functions, not constants: the
 # translation must be looked up when the tooltip is set, not at import.
-# What the "?" walkthrough calls the search's own parts (addons/leads/help.py).
-# Kept as a set so a key meant for the filters or the cockpit is not answered
-# here by accident.
-_HELP_KEYS = frozenset({
-    "source_switch", "mode_switch", "run_target", "run_qualify", "run_verify",
-    "offer", "net_new", "btn_find", "btn_prepare", "keys_box", "notice",
-})
-
-
 def _apollo_tip() -> str:
     return i18n.t("Searching Apollo needs a PAID Apollo plan — the free plan "
                   "has no API access. Exa needs only its own key.")
@@ -92,11 +106,17 @@ def _apollo_blocked_text() -> str:
 
 
 def _default_spec() -> SearchSpec:
-    """A fresh search: the default job titles and industries, anywhere."""
+    """The starter search: the owner's job titles and industries, anywhere."""
     return SearchSpec.from_dict({
         "job_titles": {"include": _DEFAULT_ROLES.split("\n")},
         "industries": {"include": _DEFAULT_INDUSTRIES.split("\n")},
     })
+
+
+# Default view ▾'s starter searches: key → (name, the filters it loads).
+_STARTERS = {
+    "icp": ("Automation & digital leaders in manufacturing", _default_spec),
+}
 
 
 # Decision-maker levels broad enough to reach a real person at almost any
@@ -149,12 +169,10 @@ def _company_search_spec(spec: SearchSpec) -> SearchSpec:
     no effect on the query Exa is sent (filters._queries' company branch
     never reads it) and only exists here as unused bookkeeping.
 
-    22-09-2026, later: this used to feed a search _on_prepare ran right
-    away. It now feeds self._filters.set_spec() instead — the owner sees
-    these exact companies and this exact seniority as ordinary, editable
-    chips on the Find people tab, and nothing is searched until Find
-    people is pressed on purpose. The computation is the same; only what
-    happens with it changed."""
+    23-09-2026: a company sheet is an Account CSV import now (Import ▾ ›
+    Accounts) and nothing is searched until Find new people is pressed —
+    this is what that search asks with, for the batch of the import's
+    companies it covers (_search_spec)."""
     stale_titles = list(_DEFAULT_ROLES.split("\n"))
     out = spec.copy()
     out.industries.include = []
@@ -282,6 +300,23 @@ class _Line(QLabel):
             self._on_change()
 
 
+class _SearchSettings(PrismDialog):
+    """Apollo's "Search settings", Prism's way: what every search on the
+    People page runs with — which database, how far a search goes, how many
+    it qualifies and verifies, what you sell, the keys, the claims file. The
+    workbench owns every control in here (they are its attributes, read by
+    the run exactly as before); this dialog is only where they live, built
+    once and kept, so a setting survives closing it."""
+
+    def __init__(self, parent=None):
+        super().__init__(i18n.t("Search settings"),
+                         i18n.t("What every search on the People page runs with"),
+                         icon="sliders", parent=parent, scrollable=True)
+        self.footer.set_primary(self.button(i18n.t("Done"), "primary",
+                                            on_click=self.accept))
+        self.resize(560, 680)
+
+
 class LeadsWorkbench(QWidget):
     """The full Leads & Outreach surface as one widget — setup, cockpit and all
     the actions. Host it in a panel (full-window) or a dialog; it behaves the
@@ -290,10 +325,25 @@ class LeadsWorkbench(QWidget):
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
         self.cfg = cfg or {}
-        self._mode = "sheet"
+        # One kind of run now: a search. Importing a sheet is Import ▾, and an
+        # old session saved as "sheet" still opens (sessions.MODES).
+        self._mode = "icp"
         self._source = "exa"                # _build_inputs picks by the keys set
-        self._path = ""
         self._claims_path = ""
+        # Find People (addons/leads/pool.py): everyone Prism holds, and how the
+        # page shows them. The pool is saved contacts + every run, one row per
+        # person; the page is it filtered (the rail + Search people), split
+        # (Total / Net New / Saved), sorted and paged, 25 at a time.
+        self._contacts: list = []           # contacts.Contact, as last read
+        self._runs: dict = {}               # session id → (id, when, leads, dossiers, drafts)
+        self._people: list = []             # pool.build(contacts, runs)
+        self._tab = "total"
+        self._sort = "relevance"
+        self._page = 0
+        self._query = ""
+        self._scope = ""                    # a session id: People shows only that run
+        self._accounts: dict = {}           # tuple of import ids → resolve_accounts(...)
+        self._pool_worker = None
         self._drafts = []
         self._draft_by = {}
         self._res = None
@@ -310,12 +360,6 @@ class LeadsWorkbench(QWidget):
         self._blocked_key = ""
         self._announce_export = False
         self._opened_autosave = False
-        # A chosen sheet with no name column is read as COMPANIES instead
-        # (see _on_prepare) -- one batch loaded into Find people's own
-        # filters per press, up to prospector.filters._MAX_VALUES names at a
-        # time. This is how far into that list the last press got to; a new
-        # file choice resets it (_choose_file).
-        self._sheet_company_offset = 0
         # How many background jobs (prepare / verify / send / export) are running.
         # A count, not a flag: an export finishing must not re-enable Send while a
         # send started from the bulk bar is still going — two sends would mail the
@@ -342,7 +386,8 @@ class LeadsWorkbench(QWidget):
         self._build_actions()
         self._build_inputs()
         self._build_results()
-        self._set_mode("icp")
+        self._refresh_prepare()
+        self._refresh_imports()
 
     # ── batch actions (placed by the host) ────────────────────────────────────
     def _build_actions(self):
@@ -360,68 +405,63 @@ class LeadsWorkbench(QWidget):
     def action_buttons(self) -> list:
         return [self._export_btn, self._send_btn]
 
-    # ── the search, mounted at the top of the cockpit's left rail ─────────────
+    # ── what a search runs with: the filters, Find new people, Search settings ─
     def _build_inputs(self):
-        """The list-building search, laid out for the Leads rail — a narrow,
-        scrolling column — instead of a full-width form stacked over the results,
-        which is what crushed every control on a short window."""
-        self._setup_panel = QWidget()
-        col = QVBoxLayout(self._setup_panel)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(theme.SPACE_3)
+        """Apollo's layout (23-Sep-2026):
 
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(theme.SPACE_2)
-        head.addWidget(_kick(i18n.t("Build a list")), 1)
-        self._setup_toggle = C.button(i18n.t("New search"), "secondary",
-                                      small=True, on_click=self._toggle_setup)
-        self._setup_toggle.setVisible(False)          # nothing to fold to yet
-        head.addWidget(self._setup_toggle)
-        col.addLayout(head)
-        self._setup_summary = C.label("", level="SUPPORT", wrap=True)
-        col.addWidget(self._setup_summary)
-        self._setup_summary.setVisible(False)
+          · the filters are the People rail's facets (FilterPanel) —
+            _build_results mounts them under Total / Net New / Saved;
+          · Find new people — the ONE action on the page that spends — sits
+            under them, with what it will cost beside it (the owner's choice:
+            filters are free and instant over the people Prism holds, fetching
+            new ones is a button, never a side effect of a click);
+          · everything else a search runs with — which database, how far it
+            goes, how many to qualify and verify, what you sell, the keys, the
+            claims file — is Search settings, a dialog the toolbar opens.
 
-        # Everything below folds away once a list is on screen.
-        self._setup_details = QWidget()
-        body = QVBoxLayout(self._setup_details)
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(theme.SPACE_3)
+        There is no "Find people / Import a sheet" switch any more: a sheet is
+        Import ▾ at the top of the page, and what it brought in is a filter."""
+        self._filters = FilterPanel(suggest=_suggest)
+        # Empty, as Apollo's page opens: every filter narrows everyone Prism
+        # holds, so a pre-filled one would hide people nobody asked to hide.
+        self._filters.set_spec(SearchSpec())
+        self._filters.changed.connect(self._on_filters_changed)
+        self._filters.saveRequested.connect(self._save_search)
 
-        # Two ways in — a segmented switch that shows which one is on: find
-        # people with the lead filters (Exa people-search → checked against
-        # every filter → real-domain e-mails → qualify → draft), or a sheet
-        # you already have.
-        seg = self._mode_seg = _segment("modeSeg")
-        sl = seg.layout()
-        self._mode_icp = QPushButton(i18n.t("Find people"))
-        self._mode_sheet = QPushButton(i18n.t("Import a sheet"))
-        for b, mode in ((self._mode_icp, "icp"), (self._mode_sheet, "sheet")):
-            b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, m=mode: self._set_mode(m))
-            sl.addWidget(b, 1)
-        body.addWidget(seg)
+        # -- Find new people, at the foot of the rail ---------------------------
+        self._find_panel = QWidget()
+        fp = QVBoxLayout(self._find_panel)
+        fp.setContentsMargins(0, 0, 0, 0)
+        fp.setSpacing(theme.SPACE_1)
+        # Both wired through a lambda: clicked(bool) would otherwise hand its
+        # "checked" False to the first argument and turn the cheap run into
+        # the expensive one.
+        self._prepare = C.button(
+            i18n.t("Find new people"), "primary", icon_name="search",
+            on_click=lambda: self._on_prepare(leads_only=True, emails="later"))
+        self._prepare.setToolTip(i18n.t(
+            "Search for NEW people who match these filters — this spends "
+            "searches (Exa) or credits (Apollo). No e-mail lookups and no Groq: "
+            "tick rows afterwards and press Find e-mails when you want addresses."))
+        fp.addWidget(self._prepare)
+        self._find_meta = C.label("", level="META", wrap=True)
+        fp.addWidget(self._find_meta)
+        # The whole pipeline in one press — find, look up e-mails, qualify,
+        # draft. Research with AI ▸ "Find new people and qualify them" presses
+        # it; it never sits on the rail, which keeps ONE spending button there.
+        self._prepare_all = C.button(
+            i18n.t("Find and prepare"), "secondary", icon_name="mail",
+            on_click=lambda: self._on_prepare(leads_only=False, emails="now"))
+        self._prepare_all.setToolTip(i18n.t(
+            "The whole pipeline in one run: find the people, look up their "
+            "e-mails, qualify the top ones with Groq and draft a message each."))
+        fp.addWidget(self._prepare_all)
+        self._prepare_all.hide()
 
-        # -- sheet mode --------------------------------------------------------
-        self._sheet_box = QWidget()
-        sb = QVBoxLayout(self._sheet_box)
-        sb.setContentsMargins(0, 0, 0, 0)
-        sb.setSpacing(theme.SPACE_1)
-        self._pick = C.button(i18n.t("Choose a sheet…"), "secondary",
-                              icon_name="paperclip", on_click=self._choose_file)
-        sb.addWidget(self._pick)
-        self._file_lbl = C.label(i18n.t("An Excel or CSV export of your leads"),
-                                 level="META", wrap=True)
-        sb.addWidget(self._file_lbl)
-        body.addWidget(self._sheet_box)
+        # -- Search settings: a dialog, built once, opened from the toolbar -----
+        self._settings_dlg = _SearchSettings(self)
+        body = self._settings_dlg.body
 
-        # -- find people: where to search, then the lead filters -----------------
-        self._icp_box = QWidget()
-        ib = QVBoxLayout(self._icp_box)
-        ib.setContentsMargins(0, theme.SPACE_1, 0, 0)
-        ib.setSpacing(0)
         # The same filters, asked of two databases: Exa's web search (an Exa
         # call per industry) or Apollo's own people index (free to search,
         # about a credit per person revealed). Exa is the default and the
@@ -438,33 +478,21 @@ class LeadsWorkbench(QWidget):
         # The rows are kept, not just their controls: the walkthrough points at
         # a whole setting — its name and its control — the way it is read.
         self._source_row = _setting(i18n.t("Search with"), src)
-        ib.addWidget(self._source_row)
-        ib.addSpacing(theme.SPACE_2)
-        self._filters = FilterPanel(suggest=_suggest)
-        self._filters.set_spec(_default_spec())
-        self._filters.changed.connect(self._refresh_prepare)
-        self._filters.saveRequested.connect(self._save_search)
-        ib.addWidget(self._filters)
-        body.addWidget(self._icp_box)
+        body.addWidget(self._source_row)
 
-        # -- run settings (both modes) -----------------------------------------
-        body.addSpacing(theme.SPACE_2)
         body.addWidget(_kick(i18n.t("Run settings")))
-        rows = QVBoxLayout()
-        rows.setContentsMargins(0, 0, 0, 0)
-        rows.setSpacing(theme.SPACE_2)
         self._target = QSpinBox()
         self._target.setRange(20, 2000)
         self._target.setValue(300)
         # Its name and tooltip belong to the source — _set_source writes both.
         self._target_row = _setting(i18n.t("Source up to"), self._target)
-        rows.addWidget(self._target_row)
+        body.addWidget(self._target_row)
         self._limit = QSpinBox()
         self._limit.setRange(1, 500)
         self._limit.setValue(25)
         self._limit.setToolTip(i18n.t("How many leads to qualify this run."))
         self._qualify_row = _setting(i18n.t("Qualify"), self._limit)
-        rows.addWidget(self._qualify_row)
+        body.addWidget(self._qualify_row)
         self._verify_limit = QSpinBox()
         self._verify_limit.setRange(0, 200)
         self._verify_limit.setValue(25)
@@ -472,26 +500,18 @@ class LeadsWorkbench(QWidget):
             "How many hot/warm addresses to check with Hunter. Its free tier is "
             "~50 credits a month, so keep this modest — 0 skips verification."))
         self._verify_row = _setting(i18n.t("Verify (Hunter)"), self._verify_limit)
-        rows.addWidget(self._verify_row)
-        body.addLayout(rows)
+        body.addWidget(self._verify_row)
 
-        offer = QVBoxLayout()
-        offer.setContentsMargins(0, theme.SPACE_1, 0, 0)
-        offer.setSpacing(theme.SPACE_1)
-        offer.addWidget(_field(i18n.t("What you sell")))
+        body.addWidget(_field(i18n.t("What you sell")))
         self._offer = QPlainTextEdit()
         self._offer.setPlainText(DEFAULT_OFFER)
-        self._offer.setFixedHeight(72)
+        self._offer.setFixedHeight(96)
         self._offer.setToolTip(i18n.t("Every lead is qualified against this."))
-        offer.addWidget(self._offer)
-        body.addLayout(offer)
+        body.addWidget(self._offer)
 
-        # Net new only: anyone an earlier session already pulled is skipped,
-        # unless this is turned off to re-work an old list on purpose.
-        net = QVBoxLayout()
-        net.setContentsMargins(0, 0, 0, 0)
-        net.setSpacing(0)
-        self._skip_seen = QCheckBox(i18n.t("Net new only"))
+        # Net new only: a SEARCH skips anyone an earlier session already
+        # pulled, unless this is turned off to re-work an old list on purpose.
+        self._skip_seen = QCheckBox(i18n.t("Only find people no earlier search found"))
         self._skip_seen.setChecked(True)
         self._skip_seen.setStyleSheet(
             f"QCheckBox{{border:none;background:transparent;color:{theme.NEUTRAL[800]};"
@@ -500,41 +520,15 @@ class LeadsWorkbench(QWidget):
             "People are matched by e-mail, LinkedIn link, or name and company. "
             "A search keeps looking until it has the number you asked for in "
             "new people."))
-        net.addWidget(self._skip_seen)
-        self._skip_meta = C.label(i18n.t("Skip anyone pulled in an earlier session"),
+        body.addWidget(self._skip_seen)
+        self._skip_meta = C.label(i18n.t("Anyone an earlier search found is skipped — "
+                                         "they are on the People page already."),
                                   level="META", wrap=True)
         # Under the checkbox's text, not its box: the indicator and its gap.
         self._skip_meta.setContentsMargins(26, 0, 0, 0)
-        net.addWidget(self._skip_meta)
-        body.addLayout(net)
+        body.addWidget(self._skip_meta)
 
-        body.addSpacing(theme.SPACE_1)
-        # Two runs, cheapest first. The primary finds the PEOPLE and stops:
-        # no e-mail lookups, no Groq — so it costs only its searches, and
-        # "Find e-mails" spends on the rows the owner picks afterwards. The
-        # secondary is the whole pipeline, for when they want it in one press.
-        # (This primary replaced "Leads sheet only (no Groq)", which did the
-        # same thing minus the saving.)
-        # Both wired through a lambda: clicked(bool) would otherwise hand its
-        # "checked" False to the first argument and turn the cheap run into
-        # the expensive one.
-        self._prepare = C.button(
-            i18n.t("Find people"), "primary", icon_name="play",
-            on_click=lambda: self._on_prepare(leads_only=True, emails="later"))
-        self._prepare.setToolTip(i18n.t(
-            "Find the people who match your filters and list them. No e-mail "
-            "lookups and no Groq — tick rows and press “Find e-mails” when you "
-            "want addresses."))
-        body.addWidget(self._prepare)
-        self._prepare_all = C.button(
-            i18n.t("Find and prepare"), "secondary", icon_name="mail",
-            on_click=lambda: self._on_prepare(leads_only=False, emails="now"))
-        self._prepare_all.setToolTip(i18n.t(
-            "The whole pipeline in one run: find the people, look up their "
-            "e-mails, qualify the top ones with Groq and draft a message each."))
-        body.addWidget(self._prepare_all)
-
-        # Keys & claims are set once — folded away unless the Exa key is missing.
+        # Keys & claims are set once — folded away unless a key is missing.
         # "&&": a lone & in a button label is eaten as a keyboard mnemonic.
         self._keys_toggle = C.button(i18n.t("Keys & claims").replace("&", "&&"), "link",
                                      icon_name="key", on_click=self._toggle_keys)
@@ -572,6 +566,7 @@ class LeadsWorkbench(QWidget):
             "Agents — free tiers first, so most checks cost nothing."),
             level="META", wrap=True))
         body.addWidget(self._keys_box)
+        body.addStretch(1)
         # A different Apollo key is a different Apollo plan, so typing one lifts
         # a block this key earned.
         self._apollo.textEdited.connect(self._on_apollo_key_typed)
@@ -587,7 +582,14 @@ class LeadsWorkbench(QWidget):
             self._apollo_blocked = _apollo_blocked_text()
         self._set_source("exa")
 
-        col.addWidget(self._setup_details)
+    def _open_settings(self, keys: bool = False) -> None:
+        """Search settings — the toolbar's button. `keys` unfolds the keys box
+        first (a search that could not start for want of one). Window-modal
+        but not blocking (open(), not exec()), so the page keeps drawing
+        behind it and a test can look at it."""
+        if keys:
+            self._keys_box.setVisible(True)
+        self._settings_dlg.open()
 
     def _key(self, name: str) -> str:
         return (self.cfg.get(name) or "").strip()
@@ -621,6 +623,7 @@ class LeadsWorkbench(QWidget):
         tip = i18n.t(self._TARGET_TIP[self._source])
         self._target_row.setToolTip(tip)
         self._target.setToolTip(tip)
+        self._refresh_prepare()             # what Find new people now costs
 
     def _source_name(self) -> str:
         return i18n.t("Apollo") if self._source == "apollo" else i18n.t("Exa")
@@ -661,73 +664,6 @@ class LeadsWorkbench(QWidget):
             "Apollo refused this key — its people search needs a paid Apollo "
             "plan. Switched to Exa; hover Apollo for what it said."))
 
-    def _set_mode(self, mode: str):
-        self._mode = mode
-        self._mode_sheet.setChecked(mode == "sheet")
-        self._mode_icp.setChecked(mode == "icp")
-        self._sheet_box.setVisible(mode == "sheet")
-        self._icp_box.setVisible(mode == "icp")
-        self._target_row.setVisible(mode == "icp")   # a sheet brings its own people
-        # "Net new only" is about a SEARCH not re-finding people. A sheet is
-        # never cut against it (the file is the owner's own choice, row by row),
-        # so the switch would be a lie sitting there in sheet mode.
-        for w in (self._skip_seen, self._skip_meta):
-            w.setVisible(mode == "icp")
-        self._update_prepare_labels()
-        self._refresh_prepare()
-
-    def _update_prepare_labels(self):
-        """The same two runs either way — list people cheaply, or spend on
-        them — but a sheet with real contacts in it is not "found", it is
-        loaded, and an owner who just picked a file should not be told
-        Prism is off to find people.
-
-        22-09-2026, twice over. First: for a company-only sheet, "Load the
-        sheet" silently ran a live, paid Exa search — there is no name,
-        e-mail or LinkedIn to load row by row, so it was labelled "Find
-        people" instead, honestly. Second, the same day: importing a sheet
-        is not the same request as searching with it — an owner who picked
-        a company list did not thereby ask Prism to go spend Exa credits on
-        it unasked. A sheet only ever LOADS now; see _on_prepare's
-        sheet_companies branch, which puts the batch into Find people's own
-        filters and stops there. Only Find people itself — pressed as its
-        own, separate, informed decision — ever searches. The secondary
-        "…and prepare" button has nothing to run before that search has
-        even happened, so it is hidden rather than mislabelled."""
-        if self._mode == "icp":
-            self._prepare.setText(i18n.t("Find people"))
-            self._prepare_all.setText(i18n.t("Find and prepare"))
-            self._prepare_all.setVisible(True)
-            return
-        sheet_companies = False
-        if self._path:
-            from prospector import sheet as _sheet
-            try:
-                sheet_companies = not _sheet.has_contact_signal(self._path)
-            except Exception:
-                sheet_companies = False
-        if sheet_companies:
-            self._prepare.setText(i18n.t("Add companies to Find people"))
-            self._prepare_all.setVisible(False)
-        else:
-            self._prepare.setText(i18n.t("Load the sheet"))
-            self._prepare_all.setText(i18n.t("Load and prepare"))
-            self._prepare_all.setVisible(True)
-
-    # ── fold the setup away once a list is on screen ─────────────────────────
-    def _toggle_setup(self):
-        self._fold_setup(not self._setup_details.isVisible())
-
-    def _fold_setup(self, open_: bool):
-        """Open the setup, or fold it to a one-line summary so the dense cockpit
-        fills the window. The toggle shows only once there's a run to return to."""
-        self._setup_details.setVisible(open_)
-        self._setup_toggle.setVisible(True)
-        self._setup_toggle.setText(i18n.t("Done") if open_
-                                   else i18n.t("New search"))
-        self._setup_summary.setText("" if open_ else self._setup_line())
-        self._setup_summary.setVisible(not open_)
-
     def _toggle_keys(self):
         self._keys_box.setVisible(self._keys_box.isHidden())
 
@@ -736,89 +672,149 @@ class LeadsWorkbench(QWidget):
         if notice is not None and summary is not None:
             notice.setVisible(not (self._status.isHidden() and summary.isHidden()))
 
-    def _setup_line(self) -> str:
-        """The current setup in a few words, for the folded header."""
-        if self._mode == "icp":
-            # Which database the run asked matters as much as the filters —
-            # the same filters cost nothing on Exa and credits on Apollo.
-            return i18n.t("{source} · {filters} · qualify {q}").format(
-                source=self._source_name(),
-                filters=self._filters.spec().summary(), q=self._limit.value())
-        name = os.path.basename(self._path) if self._path else i18n.t("No sheet chosen")
-        return i18n.t("{name} · qualify {q} · verify {v}").format(
-            name=name, q=self._limit.value(), v=self._verify_limit.value())
+    def _search_spec(self):
+        """(spec, companies, note, marks) for the paid search the rail's
+        filters ask — or (None, [], why, {}) when they ask nobody.
+
+        An Account CSV import is a list of COMPANIES: the search asks Exa for
+        people at the next MAX_FACET_VALUES of them (_account_batch — Exa
+        pairs every role with every company, so an unbounded list is
+        unbounded searches; the batch is a real product limit), and with no
+        job title or seniority of the owner's own, it asks for the
+        decision-makers (_company_search_spec). `marks` is how far each import
+        will have been searched, for _on_prepare to record once the search
+        starts. A Contact CSV import is people already held: nothing to
+        search for."""
+        spec = self._filters.spec()
+        companies, note, marks = [], "", {}
+        if spec.account_imports:
+            companies, marks, note = self._account_batch(spec.account_imports)
+            if not companies:
+                return None, [], i18n.t(
+                    "The chosen account import holds no companies."), {}
+            spec = _company_search_spec(spec)
+            spec.companies.include = list(companies)
+            spec.account_imports = []
+        spec.contact_imports = []           # people already held — not a search term
+        if not spec.is_searchable():
+            return None, [], i18n.t(
+                "Add a job title, seniority or function — a search needs someone "
+                "to look for."), {}
+        return spec, companies, note, marks
+
+    def _account_batch(self, import_ids):
+        """(companies, marks, note): the next MAX_FACET_VALUES companies of the
+        chosen Account CSV imports, each import walked on from where its last
+        search stopped (imports.mark_searched — on disk, so a restart does
+        not pay for the same companies twice), a company already searched in
+        another of them skipped. `marks` is {import id: searched up to} once
+        this batch is asked. When every company has been searched, the batch
+        starts again from the first, and the note says so — the confirmation
+        before the search repeats it."""
+        from addons.leads import imports as IM
+        folder = self._imports_dir()
+        records = [r for r in (IM.get(folder, i) for i in import_ids)
+                   if r is not None and r["kind"] == "accounts"]
+        total = sum(len(r["companies"]) for r in records)
+        done = sum(r["searched"] for r in records)
+        restart = bool(total) and done >= total
+
+        def name_of(c) -> str:
+            return (c.get("name") or c.get("domain") or "").strip()
+
+        seen = set()
+        if not restart:                     # what earlier batches already asked
+            for r in records:
+                seen.update(name_of(c).casefold() for c in r["companies"][:r["searched"]])
+        companies, walked = [], 0
+        marks = {r["id"]: 0 for r in records} if restart else {}
+        for r in records:
+            start = 0 if restart else r["searched"]
+            upto = start
+            for i in range(start, len(r["companies"])):
+                if len(companies) >= MAX_FACET_VALUES:
+                    break
+                name = name_of(r["companies"][i])
+                upto = i + 1
+                if name and name.casefold() not in seen:
+                    seen.add(name.casefold())
+                    companies.append(name)
+            walked += upto - start
+            if upto != start:
+                marks[r["id"]] = upto
+        first = (0 if restart else done) + 1
+        note = i18n.t("companies {a}–{b} of {n} from the import").format(
+            a=first, b=first + walked - 1, n=total)
+        if restart:
+            note += " · " + i18n.t("every company was searched before — this starts "
+                                   "again from the first")
+        return companies, marks, note
+
+    def _estimate(self, spec) -> int:
+        """How many Exa searches the first pass of this search will make."""
+        try:
+            from prospector import filters as F
+            return len(F.plan(spec))
+        except Exception:                                   # noqa: BLE001
+            return 0
 
     def _refresh_prepare(self):
-        if self._mode == "icp":
-            # A search needs someone to look for — a title, a function or a
-            # seniority; every other filter is optional.
-            ok = self._filters.spec().is_searchable()
+        """Find new people: armed when the filters ask for somebody, with what
+        it will cost under it — the owner approves every credit (23-Sep-2026)."""
+        spec, _companies, note, _marks = self._search_spec()
+        ok = spec is not None
+        # Never re-armed mid-run: the filters stay live while a search runs,
+        # and an edit to them must not hand back a button a job is holding.
+        self._prepare.setEnabled(ok and not self._jobs)
+        self._prepare_all.setEnabled(ok and not self._jobs)
+        if not ok:
+            self._find_meta.setText(note)
+            return
+        if self._source == "apollo":
+            text = i18n.t("Searches Apollo — about a credit per person revealed")
         else:
-            ok = bool(self._path)
-        self._prepare.setEnabled(ok)
-        self._prepare_all.setEnabled(ok)
+            n = self._estimate(spec)
+            text = (i18n.t("About {n} Exa searches").format(n=n) if n
+                    else i18n.t("Searches Exa"))
+        if note:
+            text += " · " + note
+        self._find_meta.setText(text)
+
+    def _find_prepare_ready(self):
+        """(ok, why) for Research with AI ▸ "Find new people and qualify
+        them" — the whole pipeline, armed when Find new people is."""
+        if self._jobs:
+            return False, i18n.t("Wait for the current job to finish.")
+        return self._prepare_all.isEnabled(), self._find_meta.text()
 
     # ── the guided walkthrough points at these ────────────────────────────────
     def help_targets(self) -> dict:
-        """The search's parts the "?" tour can ring, by the key it asks for:
-        the widgets already in the rail, never a copy of them. A part that is
-        not on screen right now — the source switch while a sheet is being
-        imported, the notice line before a run has said anything — is left out,
-        and the tour skips that step. The lead filters answer for themselves
-        (FilterPanel.help_targets), and so does the cockpit."""
-        out = {
-            "source_switch": self._source_row,
-            "mode_switch": self._mode_seg,
-            "run_target": self._target_row,
-            "run_qualify": self._qualify_row,
-            "run_verify": self._verify_row,
-            "offer": self._offer,
-            "net_new": self._skip_seen,
-            "btn_find": self._prepare,
-            "btn_prepare": self._prepare_all,
-            # Folded away once a key is set, so point at what opens it instead.
-            "keys_box": (self._keys_box if not self._keys_box.isHidden()
-                         else self._keys_toggle),
-            "notice": self._notice,
-        }
-        return {k: w for k, w in out.items() if w is not None and w.isVisibleTo(self)}
+        """The parts the "?" tour can ring, by the key it asks for: the real
+        widgets, never a copy — Find new people, and the run line once it has
+        something to say. A part not on screen right now is left out, and
+        the tour skips that step. The filters and the cockpit answer for
+        themselves."""
+        out = {"btn_find": self._prepare, "notice": self._notice}
+        return {k: w for k, w in out.items() if w.isVisibleTo(self)}
 
     def help_reveal(self, key: str) -> None:
-        """Make one part reachable: the Leads tab, the rail unfolded, the setup
-        unfolded, the keys box open, the rail scrolled to it. It starts no run,
-        changes no filter and writes no config — an owner who walks the tour
-        comes back to exactly the search they had.
+        """Make one part reachable: the People tab, and its rail unfolded and
+        scrolled to. It starts no run, changes no filter and writes no config
+        — an owner who walks the tour comes back to exactly the search they
+        had.
 
-        The lead filters' keys are answered here too, for the unfolding only.
-        They sit in this search, in the cockpit's rail, and the filter panel
-        can neither see that rail nor bring it back: with Hide filters on, every
-        facet step was skipped and the walk opened on the run line."""
+        The lead filters' keys are answered here too, for the unfolding only:
+        they sit in the People rail, which the filter panel can neither see
+        nor bring back — with Hide filters on, every facet step was skipped."""
         if key not in _HELP_KEYS and key not in _FILTER_HELP_KEYS:
             return
-        self._cockpit.help_reveal("tab_leads")      # the rail is in the Leads tab
+        self._cockpit.help_reveal("tab_people")     # the rail is on the People tab
         if key == "notice":
             return                                  # over the tabs, not in the rail
         self._cockpit.leads.set_filters_shown(True)  # Hide filters folds it away
-        if self._setup_details.isHidden():
-            self._fold_setup(True)                  # it was folded to one line
-        if key == "keys_box" and self._keys_box.isHidden():
-            self._keys_box.setVisible(True)         # what "Keys & claims" opens
         widget = self.help_targets().get(key)
         if widget is not None:
             reveal_in_scroll(widget)
-
-    def help_snapshot(self) -> dict:
-        """The two folds a reveal opens: the setup and the keys box."""
-        return {"setup_hidden": self._setup_details.isHidden(),
-                "keys_hidden": self._keys_box.isHidden()}
-
-    def help_restore(self, snap: dict) -> None:
-        if not isinstance(snap, dict):
-            return
-        if snap.get("setup_hidden") != self._setup_details.isHidden():
-            self._fold_setup(not snap.get("setup_hidden"))
-        if snap.get("keys_hidden") != self._keys_box.isHidden():
-            self._keys_box.setVisible(not snap.get("keys_hidden"))
 
     # ── the tabbed cockpit ────────────────────────────────────────────────────
     def _build_results(self):
@@ -839,13 +835,18 @@ class LeadsWorkbench(QWidget):
         self._summary = _Line("SUPPORT", on_change=self._sync_notice)
         self._summary.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         nl.addWidget(self._status, 1)
+        # An opened session narrows People to its own people; this widens it.
+        self._scope_btn = C.button(i18n.t("Show everyone"), "link",
+                                   on_click=self.clear_scope)
+        self._scope_btn.hide()
+        nl.addWidget(self._scope_btn)
         nl.addWidget(self._summary, 1)
         self._notice.setVisible(False)
         self._root.addWidget(self._notice)
-        # The workspace: Leads · Lists · Saved searches · Sequences · Analytics.
-        # The search is mounted in the Leads tab's left rail (above the refine
-        # filters), so it scrolls with the rail instead of stacking above the
-        # results and crushing them on a short window.
+        # The workspace: People · Sessions · Lists · Saved searches · Sequences
+        # · Analytics. People is Apollo's Find People: the filters are its
+        # rail's facets, Find new people sits under them, and the page shows
+        # the pool — every person Prism holds — filtered as you click.
         self._cockpit = LeadsWorkspace(leads_folder=self._autosave_dir(),
                                        sessions_folder=self._sessions_dir(),
                                        searches_folder=self._searches_dir())
@@ -858,7 +859,21 @@ class LeadsWorkbench(QWidget):
         self._cockpit.exportRequested.connect(self._export_selected)
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
         self._cockpit.qualifyRequested.connect(self._qualify_selected)
-        self._cockpit.set_search_panel(self._setup_panel)
+        self._cockpit.saveContactsRequested.connect(self._save_contacts)
+        self._cockpit.importRequested.connect(self._import)
+        self._cockpit.tabChanged.connect(self._on_tab)
+        self._cockpit.pageRequested.connect(self._on_page)
+        self._cockpit.sortChanged.connect(self._on_sort)
+        self._cockpit.queryChanged.connect(self._on_query)
+        self._cockpit.settingsRequested.connect(lambda: self._open_settings())
+        self._cockpit.saveSearchRequested.connect(self._save_search)
+        self._cockpit.findPrepareRequested.connect(self._prepare_all.click)
+        self._cockpit.starterPicked.connect(self.use_starter)
+        self._cockpit.leads.set_find_prepare_ready(self._find_prepare_ready)
+        self._cockpit.leads.set_starters(
+            [(key, i18n.t(name)) for key, (name, _make) in _STARTERS.items()])
+        self._cockpit.set_search_panel(self._filters)
+        self._cockpit.set_find_panel(self._find_panel)
         frame = QFrame()
         frame.setObjectName("leadsFrame")
         frame.setAttribute(Qt.WA_StyledBackground, True)
@@ -876,19 +891,314 @@ class LeadsWorkbench(QWidget):
         if getattr(self, "_cockpit", None) is not None:
             self._cockpit.refresh_lists()
 
-    # ── file pickers ─────────────────────────────────────────────────────────
-    def _choose_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Choose a leads sheet"), "",
-            "Leads (*.xlsx *.xlsm *.csv)")
-        if not path:
-            return
-        self._path = path
-        self._sheet_company_offset = 0
-        self._file_lbl.setText(os.path.basename(path))
-        self._update_prepare_labels()
-        self._refresh_prepare()
+    # ── Find People: the pool, and the page over it ──────────────────────────
+    def _contacts_dir(self) -> str:
+        """This member's saved contacts (Apollo's Saved), beside their Leads
+        sessions (see _sessions_dir). Tests patch this method."""
+        try:
+            import identity
+            import workspace
+            return workspace.member_dir(identity.current()["mid"], self.cfg,
+                                        "leads", "contacts")
+        except Exception:                                   # noqa: BLE001
+            import paths
+            return paths.user_dir("leads", "contacts")
 
+    def _imports_dir(self) -> str:
+        """This member's CSV imports (the two CSV-import filters' values),
+        beside their Leads sessions. Tests patch this method."""
+        try:
+            import identity
+            import workspace
+            return workspace.member_dir(identity.current()["mid"], self.cfg,
+                                        "leads", "imports")
+        except Exception:                                   # noqa: BLE001
+            import paths
+            return paths.user_dir("leads", "imports")
+
+    def _refresh_imports(self) -> None:
+        """Hand the rail's two CSV-import facets the imports there are."""
+        from addons.leads import imports as IM
+        folder = self._imports_dir()
+        self._filters.set_imports(IM.list_imports(folder, "contacts"),
+                                  IM.list_imports(folder, "accounts"))
+        self._accounts = {}
+
+    def reload_pool(self) -> None:
+        """Read every saved contact and every past run, off the UI thread, and
+        put the page back over them (_on_pool_loaded)."""
+        from addons.leads.workers import LeadsPoolWorker
+        self._pool_worker = LeadsPoolWorker(self._contacts_dir(), self._sessions_dir())
+        self._pool_worker.done.connect(self._on_pool_loaded)
+        self._pool_worker.failed.connect(
+            lambda msg: self._status.setText(
+                i18n.t("Couldn't read everyone Prism has found: {err}").format(err=msg)))
+        self._pool_worker.start()
+
+    def _on_pool_loaded(self, contacts, runs):
+        self._contacts = list(contacts or ())
+        loaded = {r[0]: r for r in runs or ()}
+        # The run on screen keeps ITS objects: the workers verify, enrich and
+        # qualify those leads in place, and a copy read from disk would not
+        # see it happen.
+        if self._res is not None:
+            loaded[self._session_id] = self._run_tuple()
+        self._runs = loaded
+        self._rebuild_pool()
+
+    def _run_tuple(self):
+        """The run on screen as a pool run: (id, when, leads, dossiers,
+        drafts, params) — params so the pool knows what its search was
+        steered by (pool._steering)."""
+        created = ""
+        current = self._runs.get(self._session_id)
+        if current is not None:
+            created = current[1]
+        return (self._session_id, created or datetime.datetime.now().astimezone()
+                .isoformat(timespec="seconds"),
+                list(getattr(self._res, "all_leads", None) or []),
+                list(self._res.dossiers or []), list(self._drafts),
+                dict(self._run_params))
+
+    def _rebuild_pool(self) -> None:
+        self._people = P.build(self._contacts, self._runs.values())
+        self._refilter()
+
+    def _accounts_for(self, spec) -> dict:
+        """pool.resolve_accounts for the chosen Account CSV imports, cached
+        per choice — a click re-filters the pool, it should not re-read the
+        imports file every time."""
+        key = tuple(sorted(spec.account_imports))
+        if not key:
+            return {}
+        if key not in self._accounts:
+            from addons.leads import imports as IM
+            self._accounts[key] = P.resolve_accounts(
+                IM.companies_of(self._imports_dir(), key))
+        return self._accounts[key]
+
+    def _refilter(self, keep_page: bool = False) -> None:
+        """The page: the pool filtered (rail + Search people), split into
+        Total / Net New / Saved, sorted, and the chosen page of 25 shown."""
+        if not keep_page:
+            self._page = 0
+        spec = self._filters.spec()
+        people = self._people
+        if self._scope:
+            people = [p for p in people if self._scope in p.sessions]
+        matched = P.filter_people(people, spec, accounts=self._accounts_for(spec),
+                                  query=self._query)
+        tabs = P.split(matched)
+        counts = {k: len(v) for k, v in tabs.items()}
+        rows = P.sort_people(tabs.get(self._tab, tabs["total"]), self._sort)
+        info = P.page(rows, self._page)
+        self._page = info["page"]
+        if not self._people:
+            empty = None                    # the cockpit's own "No people yet"
+        elif not rows:
+            from addons.leads.cockpit import _NO_MATCH_BODY, _NO_MATCH_TITLE
+            empty = (_NO_MATCH_TITLE, _NO_MATCH_BODY)
+        else:
+            empty = None
+        self._cockpit.leads.set_empty_text()
+        self._cockpit.set_people(info["rows"], info, counts, empty)
+        self._cockpit.leads.set_filter_count(spec.active_count())
+
+    def _on_filters_changed(self):
+        self._refresh_prepare()
+        self._refilter()
+
+    def _on_tab(self, key: str):
+        self._tab = key if key in ("total", "net_new", "saved") else "total"
+        self._refilter()
+
+    def _on_page(self, index: int):
+        self._page = max(0, int(index))
+        self._refilter(keep_page=True)
+
+    def _on_sort(self, key: str):
+        self._sort = key if key in P.SORTS else "relevance"
+        self._refilter()
+
+    def _on_query(self, text: str):
+        self._query = (text or "").strip()
+        self._refilter()
+
+    def clear_scope(self) -> None:
+        """Back to everyone, from one run's people (an opened session)."""
+        self._scope_btn.hide()
+        if self._scope:
+            self._scope = ""
+            self._status.setText("")
+            self._refilter()
+
+    # ── Apollo's "Save": people become contacts ──────────────────────────────
+    def _keep_as_contacts(self, leads, via: str) -> bool:
+        """Save these people as contacts — Apollo's rule that acting on
+        someone (exporting them, sequencing them, finding their e-mail) saves
+        them, and the one place such an action's result outlives a run that is
+        not the one on screen. Their newest fields are written over the saved
+        record. True when the page was rebuilt. Never raises into the UI."""
+        leads = [l for l in leads or () if l is not None]
+        if not leads:
+            return False
+        try:
+            from addons.leads import contacts as CT
+            from prospector.identity import keys_of
+            CT.save(self._contacts_dir(), leads, via=via, update=True)
+        except Exception as e:                              # noqa: BLE001
+            self._status.setText(str(e) or i18n.t("Couldn't save these contacts."))
+            return False
+        # In memory, the SAME Lead objects become the contacts — not copies
+        # read back from disk — so a row on screen stays the object the
+        # workers verify and enrich in place, and the page stays consistent.
+        # Someone already saved gets the new fields in memory too, as the
+        # file just did (contacts.merge), or a filter would read the old ones.
+        by_key: dict = {}
+        for c in self._contacts:
+            for key in keys_of(c.lead):
+                by_key.setdefault(key, c)
+        when = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        for lead in leads:
+            keys = keys_of(lead)
+            if not keys:
+                continue
+            hit = next((by_key[k] for k in keys if k in by_key), None)
+            if hit is None:
+                hit = CT.Contact(lead=lead, saved_at=when, updated_at=when, via=[via])
+                self._contacts.append(hit)
+            elif hit.lead is not lead:
+                CT.merge(hit.lead, lead)
+            for key in keys:
+                by_key.setdefault(key, hit)
+        self._rebuild_pool_keep_page()
+        return True
+
+    def _rebuild_pool_keep_page(self) -> None:
+        self._people = P.build(self._contacts, self._runs.values())
+        self._refilter(keep_page=True)
+
+    def _save_contacts(self, dossiers):
+        """The action bar's Save."""
+        leads = [getattr(d, "lead", None) for d in dossiers or ()]
+        leads = [l for l in leads if l is not None]
+        if not leads:
+            return
+        self._keep_as_contacts(leads, "save")
+        self._status.setText(i18n.t("Saved {n} as contacts — they're under Saved now.")
+                             .format(n=len(leads)))
+
+    # ── Import ▾ ──────────────────────────────────────────────────────────────
+    def _import(self, kind: str):
+        """Import ▾ — the wizard, then the stores. Nothing is searched: the
+        import becomes a value of its CSV-import filter, and that filter is
+        applied so the owner sees what came in (removing it is one click)."""
+        if self._jobs:
+            self._status.setText(i18n.t(
+                "Wait for the current job to finish, then import."))
+            return
+        from PySide6.QtWidgets import QDialog
+        from addons.leads.import_wizard import ImportWizard
+        wizard = ImportWizard(kind, start_dir=self._autosave_dir(), parent=self)
+        if wizard.exec() != QDialog.Accepted:
+            return
+        self._run_import(wizard.result())
+
+    def _run_import(self, result: dict):
+        """Write one wizard's result: the import record (imports.py) and, for
+        contacts, the people themselves (contacts.py, tagged with the import).
+        Then show them: the new import's filter applied, the Total tab."""
+        from addons.leads import contacts as CT
+        from addons.leads import imports as IM
+        kind = result.get("kind")
+        if kind == "contacts":
+            # Ranked on the way in, as a loaded sheet always was: the cheap,
+            # local fit off the title and what you sell — no API, no credit —
+            # so Relevance means something and the FIT column is not all 0.
+            from prospector import triage
+            unscored = [l for l in result.get("leads") or ()
+                        if not getattr(l, "fit_score", 0)]
+            if unscored:
+                triage.rank(unscored, self._offer.toPlainText().strip() or DEFAULT_OFFER,
+                            self._filters.spec().role_terms())
+        try:
+            if kind == "contacts":
+                header = IM.create(
+                    self._imports_dir(), name=result["name"], kind="contacts",
+                    source=result.get("path", ""), sheet=result.get("sheet", ""),
+                    mapping=result.get("mapping"), settings=result.get("settings"),
+                    counts={"rows": result.get("rows", 0),
+                            "skipped": result.get("skipped", 0)})
+                settings = result.get("settings") or {}
+                got = CT.save(self._contacts_dir(), result.get("leads") or [],
+                              via="import", import_id=header["id"],
+                              update=bool(settings.get("update_existing", True)))
+                IM.update_counts(self._imports_dir(), header["id"], {
+                    "rows": result.get("rows", 0), "skipped": result.get("skipped", 0),
+                    "added": got["added"], "updated": got["updated"] + got["tagged"]})
+                self._contacts = CT.list_contacts(self._contacts_dir())
+                said = i18n.t("Imported {n} contacts from {file}").format(
+                    n=got["added"] + got["updated"] + got["tagged"], file=result["name"])
+                facet = "contact_imports"
+            else:
+                header = IM.create(
+                    self._imports_dir(), name=result["name"], kind="accounts",
+                    source=result.get("path", ""), sheet=result.get("sheet", ""),
+                    mapping=result.get("mapping"),
+                    counts={"rows": result.get("rows", 0),
+                            "skipped": result.get("skipped", 0)},
+                    companies=result.get("companies") or [])
+                said = i18n.t("Imported {n} companies from {file} — press Find new "
+                              "people to search for people at them.").format(
+                    n=header.get("n_companies", 0), file=result["name"])
+                facet = "account_imports"
+        except (IM.StoreError, CT.StoreError, ValueError) as e:
+            QMessageBox.warning(self, i18n.t("Import"), str(e))
+            return
+        if result.get("skipped"):
+            said += " · " + i18n.t("{k} rows skipped").format(k=result["skipped"])
+        # Show what came in, the way Apollo's import opens its people: that
+        # import's filter and nothing else ("Hide Filters 1") — a job title
+        # left on the rail would hide most of a sheet that never had one. The
+        # pool first, so the one re-filter the spec change causes sees them.
+        self._people = P.build(self._contacts, self._runs.values())
+        self._refresh_imports()
+        spec = SearchSpec()
+        setattr(spec, facet, [header["id"]])
+        self._tab = "total"
+        self._cockpit.leads.set_tab("total")
+        self._scope = ""
+        self._cockpit.show_people_tab()
+        self._filters.set_spec(spec)        # → _on_filters_changed → _refilter
+        self._status.setText(said)
+        settings = result.get("settings") or {}
+        leads = result.get("leads") or []
+        if kind == "contacts" and settings.get("add_to_list") and leads:
+            self._write_import_list(leads, settings.get("list_name") or result["name"])
+        if kind == "contacts" and settings.get("find_emails"):
+            missing = [l for l in leads if not (l.email or "").strip()]
+            if missing:
+                self._find_emails(self._placeholders(missing))
+
+    def _placeholders(self, leads) -> list:
+        """Leads as the display-only dossiers the bulk actions take."""
+        from prospector.models import Dossier
+        from addons.leads.cockpit import UNQUALIFIED
+        return [Dossier(lead=l, verdict="", generated_at="", status=UNQUALIFIED,
+                        score=int(getattr(l, "fit_score", 0) or 0)) for l in leads]
+
+    def _write_import_list(self, leads, name: str) -> None:
+        safe = re.sub(r"[^\w .-]+", "", os.path.splitext(name.strip())[0]) or "list"
+        path = os.path.join(self._autosave_dir(), f"{safe}.csv")
+        try:
+            self._write_leads_csv(self._placeholders(leads), path)
+        except OSError as e:
+            self._status.setText(i18n.t("Couldn't write the list {path}: {err}")
+                                 .format(path=path, err=e))
+            return
+        self._cockpit.refresh_lists()
+
+    # ── file pickers ─────────────────────────────────────────────────────────
     def _choose_claims(self):
         path, _ = QFileDialog.getOpenFileName(
             self, i18n.t("Approved value claims — one per line"), "",
@@ -900,9 +1210,18 @@ class LeadsWorkbench(QWidget):
 
     # ── prepare ──────────────────────────────────────────────────────────────
     def _on_prepare(self, leads_only: bool = True, emails: str = "later"):
-        """Start a run. The defaults are the primary button's: find the people,
-        leave the e-mails and Groq for the actions on the rows that come back.
-        "Find and prepare" passes leads_only=False, emails="now"."""
+        """Find new people — the one action on the People page that spends.
+        The defaults are Find new people's own: find the people, leave the
+        e-mails and Groq for the actions on the rows that come back. Research
+        with AI ▸ "Find new people and qualify them" passes leads_only=False,
+        emails="now".
+
+        It searches with the rail's filters, and says what that costs before
+        it runs (the owner approves every credit — _confirm_search). An
+        Account CSV import among them is searched MAX_FACET_VALUES companies
+        at a time (_search_spec); the batch only counts as searched once the
+        search actually starts. A sheet is never read here any more: that is
+        Import ▾, and what it brought in is a filter."""
         if self._jobs:
             return
         from prospector import reach
@@ -912,165 +1231,89 @@ class LeadsWorkbench(QWidget):
         # wipe them.
         self._save_search_key("exa_api_key", self._exa.text().strip())
         self._save_search_key("apollo_api_key", self._apollo.text().strip())
-        if self._mode == "icp":
-            missing = self._missing_key()
-            if missing:
-                self._keys_box.setVisible(True)
-                self._status.setText(missing)
+        missing = self._missing_key()
+        if missing:
+            self._status.setText(missing)
+            self._open_settings(keys=True)
+            return
+        spec, companies, note, marks = self._search_spec()
+        if spec is None:
+            self._status.setText(note)
+            return
+        if not self._confirm_search(spec, companies, note):
+            return
+        filters = self._filters.spec()
+        if marks:
+            # Counted as searched once the search starts — kept on disk, so
+            # the next press (or the next launch) asks the next companies.
+            from addons.leads import imports as IM
+            try:
+                for import_id, upto in marks.items():
+                    IM.mark_searched(self._imports_dir(), import_id, upto)
+            except IM.StoreError as e:
+                self._status.setText(str(e))
                 return
+            self._refresh_imports()
         claims = reach.load_claims(self._claims_path)
         offer = self._offer.toPlainText().strip() or DEFAULT_OFFER
         include_earlier = not self._skip_seen.isChecked()
-        spec = self._filters.spec()
-        if self._mode == "icp" and not spec.is_searchable():
-            return
-        if self._mode != "icp" and not self._path:
-            return
         legacy = spec.legacy_params()
         # What this run was asked — saved with its session (no keys, no cfg).
-        # The filters travel as their dict; the legacy industries / roles /
+        # The filters travel as the RAIL's (a reopened run puts the account
+        # import back, not 50 company chips); the legacy industries / roles /
         # location beside them keep a session label and an older build reading.
-        self._next_mode = (("icp_leads_only" if leads_only else "icp")
-                           if self._mode == "icp" else "sheet")
+        self._next_mode = "icp_leads_only" if leads_only else "icp"
         self._next_params = {
-            "mode": self._next_mode, "sheet_path": self._path,
-            **legacy, "filters": spec.to_dict(), "source": self._source,
-            "target": self._target.value(), "offer": offer,
+            "mode": self._next_mode, **legacy, "filters": filters.to_dict(),
+            "source": self._source, "target": self._target.value(), "offer": offer,
             "limit": self._limit.value(), "verify_limit": self._verify_limit.value(),
             "claims_path": self._claims_path, "include_earlier": include_earlier,
         }
-        # A sheet with no contact signal (has_contact_signal() False -- no
-        # name, email or LinkedIn column) is a list of COMPANIES, not
-        # people -- a research export, not a contacts sheet. load() reads
-        # zero people out of it (nothing identifies a person on any row),
-        # which used to be the whole story: the sheet loaded, found
-        # nobody, and looked exactly like the button had done nothing (see
-        # the 22-Sep-2026 report).
-        #
-        # 22-Sep-2026, later the same day: the first fix made THAT sheet
-        # become the search outright, on the strength of one press — and an
-        # owner who had only asked Prism to read a spreadsheet of company
-        # names watched it go spend live Exa credits unasked, searching on
-        # criteria (Owner/Founder/Chief/Director — see
-        # _COMPANY_SEARCH_SENIORITY) it had never shown him. Importing a
-        # sheet is not the same request as searching with it. A company-only
-        # sheet now only ever LOADS: its companies go into the SAME
-        # "Current company" filter Find people already has, MAX_FACET_VALUES
-        # at a time (that cap is a real product limit -- unbounded companies
-        # is unbounded Exa queries -- not something to route around), one
-        # batch per press — visible, editable filter chips, on the Find
-        # people tab, same as anyone typing or pasting a company list in
-        # themselves. Nothing is searched until Find people is pressed as
-        # its own, separate, informed decision — the same button, doing the
-        # same thing, an ICP search always did. A sheet with Company + Email
-        # columns and no separate Name column (real, if thin, contacts --
-        # Apollo's own "Import contacts" accepts exactly this) has a contact
-        # signal and goes through load() normally instead -- has_contact_signal
-        # is deliberately broader than "has a Name column" for this reason.
-        #
-        # 22-Sep-2026, checked directly against Apollo's own docs (Import a
-        # CSV of Accounts): its equivalent step is "Check the companies
-        # where you want to find prospects. Then, click Find People" — a
-        # reviewable tick-list, not the whole batch going in unread. Prism
-        # has no persistent Companies screen to put that on, so
-        # CompanyPickDialog is the same choice right here, before the batch
-        # ever reaches _filters.
-        from prospector import sheet as _sheet
-        sheet_companies = False
-        if self._mode != "icp" and self._path:
-            try:
-                sheet_companies = not _sheet.has_contact_signal(self._path)
-            except Exception:                                   # noqa: BLE001
-                pass    # unreadable -- fall through to the normal sheet
-                        # path below, which will read it again and fail
-                        # the same way _on_failed already handles
-        if sheet_companies:
-            companies = _sheet.load_companies(self._path)
-            start = self._sheet_company_offset
-            batch = companies[start:start + MAX_FACET_VALUES]
-            if not batch:
-                self._status.setText(i18n.t(
-                    "Every company in this sheet is already in Find people's "
-                    "filters or has been searched. Choose a different sheet "
-                    "to bring in more."))
-                return
-            # Apollo's own words for this step (Import a CSV of Accounts):
-            # "Check the companies where you want to find prospects. Then,
-            # click Find People." -- a deliberate, reviewable choice, not
-            # every imported row going in unasked. See CompanyPickDialog.
-            from addons.leads.dialog import CompanyPickDialog
-            from PySide6.QtWidgets import QDialog as _QDialog
-            picker = CompanyPickDialog(batch, self)
-            if picker.exec() != _QDialog.Accepted:
-                self._status.setText(i18n.t(
-                    "Cancelled — nothing was added to Find people. Press "
-                    "the button again when you're ready."))
-                return                                    # offset NOT advanced
-            self._sheet_company_offset = start + len(batch)
-            picked = picker.checked()
-            if not picked:
-                self._status.setText(i18n.t(
-                    "Nothing was ticked, so nothing was added to Find "
-                    "people. Press the button again for the next batch."))
-                return
-            # Never search this sheet's companies against the
-            # automation-vertical defaults -- see _company_search_spec.
-            # Setting it on _filters (not a hidden batch_spec) is the whole
-            # point: it is now what Find people itself will search with,
-            # in plain sight, editable like anything typed in by hand.
-            batch_spec = _company_search_spec(spec)
-            batch_spec.companies.include = list(picked)
-            self._filters.set_spec(batch_spec)
-            self._set_mode("icp")
-            more = self._sheet_company_offset < len(companies)
-            self._status.setText((
-                i18n.t(
-                    "{n} companies from the sheet are in Find people's "
-                    "filters below — Owner, Founder, Chief and Director "
-                    "titles by default. Review them, then press Find "
-                    "people to search."
-                ) if not more else
-                i18n.t(
-                    "{n} companies from the sheet are in Find people's "
-                    "filters below — Owner, Founder, Chief and Director "
-                    "titles by default. Review them, then press Find "
-                    "people to search — switch back to Import a sheet "
-                    "and press it again afterwards for the rest."
-                )
-            ).format(n=len(picked)))
-            return
-        if self._mode == "icp":
-            self._set_running(True)
-            self._status.setText(i18n.t("Finding people (no e-mails, no Groq)…")
-                                 if leads_only else i18n.t("Finding people…"))
-            self._worker = SourceWorker(
-                legacy["industries"], legacy["roles"], offer, self.cfg,
-                location=legacy["location"],
-                target=self._target.value(), limit=self._limit.value(),
-                verify_limit=self._verify_limit.value(),
-                sender=self._sender(), claims=claims,
-                exclude_domains=self._seller_domains(), leads_only=leads_only,
-                sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
-                spec=spec.to_dict(), source=self._source, emails=emails)
-            self._worker.blocked.connect(self._on_source_blocked)
-        else:
-            self._set_running(True)
-            self._status.setText(i18n.t("Reading the sheet…"))
-            # limit=0 for the primary: read the sheet, rank it, list it —
-            # nothing spent. A sheet is never cut against earlier sessions
-            # (workers.ProspectorWorker says why), so the export of the run
-            # before comes back whole.
-            self._worker = ProspectorWorker(
-                self._path, offer, self.cfg,
-                limit=0 if leads_only else self._limit.value(),
-                verify_limit=self._verify_limit.value(),
-                sender=self._sender(), claims=claims,
-                exclude_domains=self._seller_domains())
+        self._set_running(True)
+        self._status.setText(i18n.t("Finding people (no e-mails, no Groq)…")
+                             if leads_only else i18n.t("Finding people…"))
+        self._worker = SourceWorker(
+            legacy["industries"], legacy["roles"], offer, self.cfg,
+            location=legacy["location"],
+            target=self._target.value(), limit=self._limit.value(),
+            verify_limit=self._verify_limit.value(),
+            sender=self._sender(), claims=claims,
+            exclude_domains=self._seller_domains(), leads_only=leads_only,
+            sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
+            spec=spec.to_dict(), source=self._source, emails=emails)
+        self._worker.blocked.connect(self._on_source_blocked)
         self._worker.progress.connect(self._status.setText)
         self._worker.done.connect(self._on_prepared)
         self._worker.failed.connect(self._on_failed)
         self._job_started()
         self._worker.start()
+
+    def _confirm_search(self, spec, companies, note: str) -> bool:
+        """"This will run about 200 Exa searches — go?" before a search
+        spends anything (23-Sep-2026: the owner approves every credit). Says
+        what it searches for when the owner did not say it himself — an
+        account import with no title or seniority asks for the decision-
+        makers. Tests patch this."""
+        if self._source == "apollo":
+            cost = i18n.t("It searches Apollo — about one Apollo credit for each "
+                          "person revealed, up to {n}.").format(n=self._target.value())
+        else:
+            cost = i18n.t("It will run about {n} Exa searches.").format(
+                n=self._estimate(spec))
+        lines = [cost]
+        if companies:
+            lines.append(i18n.t("It looks at {what}.").format(what=note))
+            own = self._filters.spec()
+            if not own.job_titles.include and not own.seniority.include \
+                    and not own.functions.include:
+                lines.append(i18n.t(
+                    "With no job title or seniority set, it asks for Owners, "
+                    "Founders, Chiefs and Directors."))
+        answer = QMessageBox.question(
+            self, i18n.t("Find new people"), "\n\n".join(lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
 
     def _save_search_key(self, name: str, value: str):
         """Keep one search key in the config, and in this window's cfg."""
@@ -1127,6 +1370,7 @@ class LeadsWorkbench(QWidget):
             self._session_id = ""
         self._session_mode = self._next_mode
         self._run_params = dict(self._next_params)
+        self._page = 0                      # a new search starts at its first page
         self._show_result(res, drafts)
         if idle:
             self._set_running(False)
@@ -1140,56 +1384,20 @@ class LeadsWorkbench(QWidget):
             self._start_export(self._autosave_dir(), announce=False)
 
     def _show_result(self, res, drafts):
-        """Put a run on screen — shared by a finished run and an opened session
-        (which must NOT re-export or re-save)."""
+        """Make a run the CURRENT run — a finished one, or an opened session
+        (which must NOT re-export or re-save): what Send all sends, Export
+        sheets writes and Analytics counts, and — joined to the pool — people
+        on the People page. The page shows the pool, not this run alone: what
+        this run found is under Net New, filters and all."""
         self._res = res
         self._drafts = list(drafts or [])
         self._draft_by = {id(d.dossier): d for d in self._drafts}
+        self._cockpit.set_run(res.dossiers, self._drafts)
+        # Always in the pool — even a run whose session id could not be made
+        # (it is on screen; its people must be too).
+        self._runs[self._session_id] = self._run_tuple()
+        self._rebuild_pool_keep_page()
         leads_only = not res.dossiers and bool(getattr(res, "all_leads", None))
-        if leads_only:
-            # There ARE leads — just none qualified — so don't say "No leads yet".
-            self._cockpit.set_empty_text(
-                i18n.t("{n} leads sourced — not qualified").format(
-                    n=len(res.all_leads)),
-                i18n.t("Their sheet is saved — open it under Lists. Tick rows to "
-                       "find their e-mails, or to qualify and draft."))
-        elif (self._mode == "sheet" and self._path and not res.dossiers
-              and not getattr(res, "all_leads", None)):
-            # A totally empty result from a sheet import is ambiguous: an
-            # empty file and a real file with no contact signal both come
-            # back with nothing, and the default "No leads yet" tells the
-            # owner to do what they just did. Say which one actually
-            # happened — this is mostly a defensive fallback now (a normal
-            # press on a company-only sheet loads its companies into Find
-            # people's filters in _on_prepare instead of ever reaching this
-            # with nothing), reached by an old saved session from before
-            # that existed, or has_contact_signal itself failing to read
-            # the file here too.
-            from prospector import sheet as _sheet
-            try:
-                has_contact = _sheet.has_contact_signal(self._path)
-            except Exception:                               # noqa: BLE001
-                has_contact = True    # unsure beats a wrong claim
-            if has_contact:
-                self._cockpit.set_empty_text()
-            else:
-                self._cockpit.set_empty_text(
-                    i18n.t("This sheet has no name, e-mail or LinkedIn "
-                           "column Prism recognises"),
-                    i18n.t("Prism looks for a column that identifies a "
-                           "person — Name, Email or LinkedIn — and skips "
-                           "any row without one; every row in this sheet "
-                           "was skipped. If it only lists companies, press "
-                           "“Add companies to Find people” to bring them "
-                           "into Find people's filters, then search from "
-                           "there."))
-        else:
-            self._cockpit.set_empty_text()
-        self._cockpit.set_dossiers(res.dossiers, self._drafts,
-                                   getattr(res, "all_leads", None))
-        # The setup has done its job — fold it so the dense cockpit fills the
-        # screen. "New search" brings it back.
-        self._fold_setup(False)
         skipped = getattr(res, "skipped_seen", 0) or 0
         if leads_only:
             # What it found and what it did NOT spend — the whole point of the
@@ -1210,11 +1418,13 @@ class LeadsWorkbench(QWidget):
             if apollo:
                 text += "   ·   " + apollo
             self._summary.setText(text)
-        else:
+        elif res.dossiers:
             self._summary.setText(self._run_summary(res, self._drafts))
             self._status.setText(i18n.t(
                 "{n} ready to send — every lead below shows its outcome."
             ).format(n=len(self._pending(self._drafts))))
+        else:
+            self._summary.setText("")
         self._export_btn.setEnabled(bool(res.dossiers or getattr(res, "all_leads", None)))
         self._send_btn.setEnabled(bool(self._pending(self._drafts)))
 
@@ -1241,6 +1451,7 @@ class LeadsWorkbench(QWidget):
                        "Prism can confirm addresses for free."))
             return
         self._set_running(True)
+        self._acted = [d.lead for d in dossiers]
         self._status.setText(i18n.t("Verifying {n} selected…").format(n=len(dossiers)))
         self._verify_worker = LeadsVerifyWorker(dossiers, self.cfg)
         self._verify_worker.progress.connect(lambda i, n, l: self._status.setText(
@@ -1253,10 +1464,11 @@ class LeadsWorkbench(QWidget):
     def _on_verified(self):
         if self._job_done():
             self._set_running(False)
-        if self._res is not None:
-            self._cockpit.set_dossiers(self._res.dossiers, self._drafts,
-                                           getattr(self._res, "all_leads", None))
         self._save_session()                # verify changed each lead's e-mail status
+        # Acting on someone saves them (Apollo) — and it is how a status
+        # checked on someone OUTSIDE the run on screen is kept at all.
+        if not self._keep_as_contacts(getattr(self, "_acted", []), "email"):
+            self._rebuild_pool_keep_page()  # the rows show the new statuses
         self._status.setText(i18n.t("Verification done — statuses updated."))
         # Same deal as Find e-mails: the sheet already on disk is the
         # deliverable, so a status a verify pass just confirmed belongs in it
@@ -1285,6 +1497,7 @@ class LeadsWorkbench(QWidget):
         if not self._confirm_emails(len(leads)):
             return
         self._set_running(True)
+        self._acted = list(leads)
         self._status.setText(i18n.t("Finding e-mails for {n} selected…").format(
             n=len(leads)))
         # No verify_limit: the rail's Verify is a budget for a RUN, which picks
@@ -1324,10 +1537,9 @@ class LeadsWorkbench(QWidget):
         (Verified / Guessed / Catch-all / No email) and the session keeps them,
         so the next thing the owner does starts from what this cost."""
         idle = self._job_done()
-        if self._res is not None:
-            self._cockpit.set_dossiers(self._res.dossiers, self._drafts,
-                                       getattr(self._res, "all_leads", None))
         self._save_session()                # the addresses are the run's value now
+        if not self._keep_as_contacts(getattr(self, "_acted", []), "email"):
+            self._rebuild_pool_keep_page()  # the rows show the new statuses
         if idle:
             self._set_running(False)
         self._status.setText(i18n.t(
@@ -1345,7 +1557,7 @@ class LeadsWorkbench(QWidget):
         """Qualify & draft the checked people the run sourced but never
         qualified — a leads-sheet-only run's whole list, or everyone past a full
         run's Qualify count — right here, instead of re-importing a sheet."""
-        if not dossiers or self._jobs or self._res is None:
+        if not dossiers or self._jobs:
             return
         from addons.leads.cockpit import RETRYABLE
         # Never qualified, or a pass that failed (no key, a Groq error) — a lead
@@ -1362,6 +1574,8 @@ class LeadsWorkbench(QWidget):
             return
         if not self._confirm_qualify(len(leads)):
             return
+        if self._res is None:
+            self._start_empty_run()
         from prospector import reach
         offer = self._offer.toPlainText().strip() or DEFAULT_OFFER
         # Score with the roles the run itself ranked by: a sheet run used none.
@@ -1379,6 +1593,25 @@ class LeadsWorkbench(QWidget):
         self._qualify_worker.failed.connect(self._on_failed)
         self._job_started()
         self._qualify_worker.start()
+
+    def _start_empty_run(self) -> None:
+        """A run to hold what an action produces when none is on screen — the
+        People page shows the pool, so Qualify can be pressed on imported
+        contacts before any search ever ran. Its dossiers and drafts become a
+        session like any run's (sessions.save brings a dossier's lead along)."""
+        from prospector import engine
+        try:
+            from addons.leads import sessions
+            self._session_id = sessions.new_id()
+        except Exception:                                   # noqa: BLE001
+            self._session_id = ""
+        self._session_mode = "icp_leads_only"
+        spec = self._filters.spec()
+        self._run_params = {"mode": "icp_leads_only", **spec.legacy_params(),
+                            "filters": spec.to_dict(), "source": self._source}
+        self._res = engine.RunResult(dossiers=[], total_in_sheet=0, signal_source="",
+                                     all_leads=[])
+        self._drafts, self._draft_by = [], {}
 
     def _confirm_qualify(self, n: int) -> bool:
         """Each lead costs a why-now search and a Groq call, and a free Groq key
@@ -1451,6 +1684,7 @@ class LeadsWorkbench(QWidget):
                 "and try again.").format(path=path, err=e))
             return
         self._cockpit.refresh_lists()      # show it on the Lists tab at once
+        self._keep_as_contacts([d.lead for d in dossiers], "list")
         QMessageBox.information(
             self, i18n.t("Save to list"),
             i18n.t("Saved {n} lead(s) to:\n{path}").format(n=n, path=path))
@@ -1473,9 +1707,17 @@ class LeadsWorkbench(QWidget):
                 "Couldn't write {path}: {err}. If it is open in Excel, close it "
                 "and try again.").format(path=path, err=e))
             return
+        # Apollo: "When you export prospects, Apollo also saves them as contacts."
+        self._keep_as_contacts([d.lead for d in dossiers], "export")
         QMessageBox.information(
             self, i18n.t("Export"),
             i18n.t("Exported {n} lead(s) to:\n{path}").format(n=n, path=path))
+
+    def _draft_for(self, dos):
+        """A row's draft: the current run's, else the one the People page
+        holds for that person (their newest run that drafted for them)."""
+        return (self._draft_by.get(id(dos))
+                or self._cockpit.leads._draft_by.get(id(dos)))
 
     def _write_leads_csv(self, dossiers, path) -> int:
         from addons.leads.cockpit import status_of
@@ -1487,7 +1729,7 @@ class LeadsWorkbench(QWidget):
                 lead = d.lead
                 w.writerow([lead.name, lead.company, lead.title, lead.email,
                             f"{getattr(lead, 'fit_score', 0) or 0:g}",
-                            status_of(d, self._draft_by.get(id(d))), d.verdict])
+                            status_of(d, self._draft_for(d)), d.verdict])
         return len(dossiers)
 
     def _add_to_sequence(self, dossiers):
@@ -1496,7 +1738,7 @@ class LeadsWorkbench(QWidget):
         stop-on-reply engine. Only leads that were drafted can be enrolled."""
         if not dossiers or self._jobs:
             return
-        drafts = [self._draft_by[id(d)] for d in dossiers if id(d) in self._draft_by]
+        drafts = [dr for dr in (self._draft_for(d) for d in dossiers) if dr is not None]
         if not drafts:
             QMessageBox.information(
                 self, i18n.t("Add to sequence"),
@@ -1521,6 +1763,8 @@ class LeadsWorkbench(QWidget):
                    "engine — for now this sends touch 1.").format(
                        n=len(drafts), addr=addr))
         if confirm == QMessageBox.StandardButton.Yes:
+            # Apollo: "Adding prospects to a sequence saves them as contacts."
+            self._keep_as_contacts([dr.dossier.lead for dr in drafts], "sequence")
             self._run_send(drafts)
 
     def _run_summary(self, res, drafts) -> str:
@@ -1628,8 +1872,9 @@ class LeadsWorkbench(QWidget):
         if self._job_done():
             self._set_running(False)
         if getattr(self, "_res", None) is not None:
-            self._cockpit.set_dossiers(self._res.dossiers, self._drafts,
-                                           getattr(self._res, "all_leads", None))
+            # A sent draft reads "Mailed" in Status — and under Email status.
+            self._cockpit.set_run(self._res.dossiers, self._drafts)
+            self._rebuild_pool_keep_page()
         self._save_session()
         self._status.setText(i18n.t("Sent {s}, failed {f}.").format(
             s=len(sent), f=len(failed)))
@@ -1715,12 +1960,13 @@ class LeadsWorkbench(QWidget):
             return ""
 
     def _set_running(self, running: bool, sending: bool = False):
-        for w in (self._pick, self._offer, self._claims, self._limit,
-                  self._verify_limit, self._prepare, self._prepare_all,
-                  self._send_btn, self._export_btn, self._mode_sheet,
-                  self._mode_icp, self._filters, self._target, self._exa,
-                  self._apollo, self._src_apollo, self._src_exa,
-                  self._skip_seen):
+        # The FILTERS stay usable: a running search took its filters when it
+        # started, and browsing the people Prism holds costs nothing — Apollo
+        # never locks its rail either.
+        for w in (self._offer, self._claims, self._limit, self._verify_limit,
+                  self._prepare, self._prepare_all, self._send_btn,
+                  self._export_btn, self._target, self._exa, self._apollo,
+                  self._src_apollo, self._src_exa, self._skip_seen):
             w.setEnabled(not running)
         # …except a source Apollo has already refused: re-enabling it here would
         # hand the owner a button that only leads to the same 403.
@@ -1741,6 +1987,8 @@ class LeadsWorkbench(QWidget):
         cockpit = getattr(self, "_cockpit", None)
         if cockpit is not None:
             for b in cockpit.leads._bulk_actions():
+                if b is cockpit.leads._b_contact:
+                    continue                # Save is a local write, not a job
                 b.setEnabled(not running)
             if not running:
                 # Each button's real, selection-driven state — not just
@@ -1804,8 +2052,12 @@ class LeadsWorkbench(QWidget):
             refresh(self._session_id)
 
     def restore_latest(self):
-        """Bring back the latest session when the screen first opens — read off
-        the UI thread, and dropped if the user has already started something."""
+        """When the screen first opens: everyone Prism holds (the pool — every
+        saved contact and every run), and the latest session as the current
+        run (what Send all and Export sheets act on). Both read off the UI
+        thread; the session is dropped if the user has already started
+        something."""
+        self.reload_pool()
         self._load_session("")
 
     def open_session(self, session_id: str):
@@ -1832,7 +2084,7 @@ class LeadsWorkbench(QWidget):
         # restore) a run the user already finished while this was loading.
         if self._jobs or (not explicit and self._res is not None):
             return
-        self._apply_session(loaded)
+        self._apply_session(loaded, scope=explicit)
 
     def _on_session_load_failed(self, msg):
         explicit = self._restoring not in ("", "latest")
@@ -1843,8 +2095,12 @@ class LeadsWorkbench(QWidget):
             self._status.setText(i18n.t(
                 "Couldn't restore the last session: {err}").format(err=msg))
 
-    def _apply_session(self, loaded: dict):
-        """Put a saved session back exactly as it was — no re-export, no re-save."""
+    def _apply_session(self, loaded: dict, scope: bool = False):
+        """Make a saved session the current run, exactly as it was — no
+        re-export, no re-save. `scope` (a session opened from the Sessions
+        tab) narrows the People page to that run's people, with "Show
+        everyone" on the run line to widen it again; the automatic restore
+        at startup shows everyone."""
         from prospector import engine
         head = loaded.get("header") or {}
         params = loaded.get("params") or {}
@@ -1857,21 +2113,26 @@ class LeadsWorkbench(QWidget):
         self._session_id = head.get("id", "")
         self._session_mode = params.get("mode") or head.get("mode") or "sheet"
         self._run_params = dict(params)
+        self._scope = self._session_id if scope else ""
         self._restore_inputs(params)
         self._show_result(res, loaded.get("drafts") or [])
-        self._status.setText(i18n.t("Opened the session from {when}.").format(
-            when=_when(head.get("created_at", ""))))
+        when = _when(head.get("created_at", ""))
+        self._status.setText(
+            i18n.t("Showing the people from the session of {when}.").format(when=when)
+            if scope else i18n.t("Opened the session from {when}.").format(when=when))
+        self._scope_btn.setVisible(bool(self._scope))
+        if scope:
+            self._cockpit.show_people_tab()
         refresh = getattr(self._cockpit, "refresh_sessions", None)
         if refresh is not None:
             refresh(self._session_id)
 
     def _restore_inputs(self, params: dict):
-        """Put an opened session's search back in the rail, so "New search"
+        """Put an opened session's search back in the rail, so a new search
         starts from what that run asked. A session saved before filters comes
         back as the filters it meant: "Global except india" is Location,
-        excluding India."""
-        mode = params.get("mode") or "sheet"
-        self._set_mode("sheet" if mode == "sheet" else "icp")
+        excluding India. (An old "sheet" session carries no filters; the rail
+        is left as it is.)"""
         # Always the source that run asked — a session saved before Prism could
         # ask Apollo carries none, and can only have been an Exa run. Leaving
         # the rail on its own default (Apollo, whenever that key is set) would
@@ -1879,10 +2140,6 @@ class LeadsWorkbench(QWidget):
         # bills per person.
         self._set_source(params["source"]
                          if params.get("source") in ("apollo", "exa") else "exa")
-        if params.get("sheet_path"):
-            self._path = params["sheet_path"]
-            self._file_lbl.setText(os.path.basename(self._path))
-            self._update_prepare_labels()
         if (isinstance(params.get("filters"), dict)
                 or any(params.get(k) for k in ("industries", "roles", "location"))):
             self._filters.set_spec(SearchSpec.from_params(params))
@@ -1957,8 +2214,10 @@ class LeadsWorkbench(QWidget):
         self._cockpit.refresh_searches()
 
     def use_saved_search(self, search_id: str):
-        """"Use search" on the Saved searches tab: its filters and settings go
-        back in the rail, ready for Find people — never run on their own."""
+        """"Use search" on the Saved searches tab, or a pick from Default view
+        ▾: its filters and settings go back in the rail — the People page
+        filters at once, over everyone Prism holds — and Find new people is
+        there to fetch more. Never run on its own."""
         if self._jobs:
             self._status.setText(i18n.t(
                 "Wait for the current job to finish, then use the search."))
@@ -1978,15 +2237,30 @@ class LeadsWorkbench(QWidget):
             self._offer.setPlainText(settings["offer"])
         if isinstance(settings.get("include_earlier"), bool):
             self._skip_seen.setChecked(not settings["include_earlier"])
-        self._set_mode("icp")
-        if self._setup_details.isHidden():      # folded over a run: open it
-            self._fold_setup(True)
         self._cockpit._select(0)
         self._active_search_id = record["id"]
         self._active_search_filters = record["filters"]
         self._status.setText(i18n.t(
-            "Loaded “{name}” — press Find people to run it.").format(
-                name=record["name"]))
+            "Loaded “{name}” — the people Prism holds are filtered by it; press "
+            "Find new people to search for more.").format(name=record["name"]))
+
+    def use_starter(self, key: str):
+        """A starter search from Default view ▾: its filters in the rail, the
+        page filtered by them at once — like a saved search, never run on
+        its own."""
+        if key not in _STARTERS:
+            return
+        if self._jobs:
+            self._status.setText(i18n.t(
+                "Wait for the current job to finish, then use the search."))
+            return
+        name, make = _STARTERS[key]
+        self._filters.set_spec(make())
+        self._active_search_id, self._active_search_filters = "", None
+        self._cockpit._select(0)
+        self._status.setText(i18n.t(
+            "Loaded “{name}” — the people Prism holds are filtered by it; press "
+            "Find new people to search for more.").format(name=i18n.t(name)))
 
     def _delete_saved_search(self, search_id: str):
         folder = self._searches_dir()

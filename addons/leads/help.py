@@ -55,36 +55,47 @@ _STEP = 20                  # one wheel step in the body, in px
 # them. Order matters: it is the order of a working day, so someone reading
 # top to bottom is also being walked through the screen left to right.
 SECTIONS = (
-    ("The two ways in",
-     "Find people searches Apollo or Exa with the filters you set in the rail "
-     "on the left. It brings back names, titles and companies, and not e-mail "
-     "addresses, because the addresses are the part that costs money.\n"
-     "Import a sheet loads a list you already have, a CSV or XLSX, and works "
-     "it here like any other run.\n"
-     "Both end up in the same table, and nothing is sent to anybody until you "
-     "press Send yourself."),
+    ("The page",
+     "This is Find people, laid out the way Apollo lays it out, over everyone "
+     "Prism already holds — the people you imported, saved, or found with a "
+     "search.\n"
+     "• Import, at the top right, brings a sheet in. People come in as "
+     "contacts, companies as accounts. Nothing is searched: the import becomes "
+     "a filter on the left, and the page shows what came in.\n"
+     "• The filters narrow the page the moment you click them, and cost "
+     "nothing.\n"
+     "• Find new people, under the filters, is the one button that spends. It "
+     "says what the search will cost and asks before it runs.\n"
+     "Nothing is sent to anybody until you press Send yourself."),
 
-    ("The filter rail",
-     "Every filter is a chip you add. Most have an exclude side as well, and "
-     "an exclusion is always obeyed, whatever the search hands back.\n"
-     "• Industry and Keywords only steer the search. They are hints to the "
-     "database, so read a match as likely rather than certain. Their "
-     "exclusions are still enforced here.\n"
+    ("The filters",
+     "Every filter is a chip you add, and most have an exclude side as well. "
+     "The page applies them to everyone Prism holds, and a search applies "
+     "them to everyone it finds.\n"
+     "• Total is everyone who passes. Saved is your contacts among them, Net "
+     "New is everyone else.\n"
+     "• Industry and Keywords only steer a search. They are hints to the "
+     "database, so the people a search found for them stay under them — read "
+     "those as likely rather than certain. Their exclusions are always "
+     "enforced.\n"
      "• Location, Job title, Seniority, Function, Company headcount, Annual "
-     "revenue, Current company, Company HQ and Years in role are enforced "
-     "after the results come back. A person who fails one of them is dropped "
-     "before you ever see the row.\n"
-     "• Net new only means never pull the same person twice. Anybody a past "
-     "run already found is skipped, so a second search on the same filters "
-     "gives you new names, not the old ones again."),
+     "revenue, Current company, Company HQ location and Years in current role "
+     "are checked on every person, on the page and in every search.\n"
+     "• Contact CSV import and Account CSV import show the people an import "
+     "brought in, or the people Prism holds at its companies.\n"
+     "• Only find people no earlier search found, in Search settings, means a "
+     "search never pulls the same person twice. The same filters twice give "
+     "you new names, not the old ones again."),
 
     ("What each thing costs",
      "This is the part worth knowing before you click anything.\n"
-     "• Find people on Exa costs about five cents a search, however many "
+     "• Filtering, sorting and paging the people Prism holds is free, and so "
+     "are Import and Save.\n"
+     "• Find new people on Exa costs about five cents a search, however many "
      "people come back.\n"
-     "• Find people on Apollo is free to search, but each person Apollo hands "
-     "over costs about one Apollo credit. Reveal up to in the rail is the cap, "
-     "so a run left at 300 can spend 300 credits.\n"
+     "• Find new people on Apollo is free to search, but each person Apollo "
+     "hands over costs about one Apollo credit. Reveal up to, in Search "
+     "settings, is the cap, so a search left at 300 can spend 300 credits.\n"
      "• Find e-mails costs one verifier or Apollo credit per person, and it "
      "checks every row you ticked, not a sample of them. That is why it is a "
      "separate button on the rows you tick, and not something a search quietly "
@@ -95,37 +106,38 @@ SECTIONS = (
      "person, after you have read every draft."),
 
     ("The results table",
-     "Every person a run found is listed, whether or not Prism knows anything "
-     "about them yet.\n"
+     "Everyone who passes the filters is listed, twenty-five to a page, "
+     "whether or not Prism knows anything about them yet.\n"
      "• Not qualified means exactly that. Found, not researched. The row is "
      "there so you can pick it.\n"
      "• Fit score is a cheap ranking off the title and the company. It sorts "
      "the list. It is not a promise about anybody.\n"
      "• Status is deliverability, not interest. Verified, Guessed, Catch-all, "
      "Invalid, No email, Mailed.\n"
-     "• Tick rows with the box on the left, or the box in the header for all "
-     "of them. The bulk bar appears with the actions that apply to what you "
-     "ticked, and only to what you ticked.\n"
+     "• Tick rows with the box on the left, or the box in the header for the "
+     "whole page. The action bar appears with the actions that apply to what "
+     "you ticked, and only to what you ticked. Save makes them contacts.\n"
      "• Table and Cards are the same people in two shapes. Click a row to "
      "open the drawer on the right with everything Prism holds on that "
      "person."),
 
     ("The tabs",
-     "• Sessions keeps every run you have done, with its filters and its "
-     "results. Open one and you are back where you left it.\n"
+     "• People is this page — everyone Prism holds, filtered as you click.\n"
+     "• Sessions keeps every search you have run, with its filters and its "
+     "results. Open one to see only its people.\n"
      "• Lists holds the sheets written to disk. Real files, on your machine, "
      "that you can send to anyone.\n"
-     "• Saved searches keeps a set of filters under a name, to run again next "
+     "• Saved searches keeps a set of filters under a name, to use again next "
      "week.\n"
      "• Sequences is the follow-up steps a lead walks through after the first "
      "mail.\n"
-     "• Analytics counts what this run produced. Found, verified, drafted, "
-     "sent."),
+     "• Analytics counts what the last search produced. Found, verified, "
+     "drafted, sent."),
 
     ("How a day goes",
-     "1. Set your filters in the rail.\n"
-     "2. Find people, and read the list that comes back.\n"
-     "3. Tick the ones you actually want.\n"
+     "1. Import a sheet, or set your filters.\n"
+     "2. Find new people, and read the list that comes back.\n"
+     "3. Tick the ones you actually want, and Save them.\n"
      "4. Find e-mails, on those ticked rows only.\n"
      "5. Qualify and draft, so Prism writes an opener for each.\n"
      "6. Read every draft and change whatever needs changing.\n"

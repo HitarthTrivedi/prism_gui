@@ -53,10 +53,12 @@ class TheCopy(unittest.TestCase):
             self.assertLess(len(title), 40, title)      # a heading, not a line
             self.assertGreater(len(body.strip()), 60, title)
 
-    def test_the_two_ways_in_are_both_named(self):
-        body = dict(H.SECTIONS)["The two ways in"]
-        self.assertIn("Find people", body)
-        self.assertIn("Import a sheet", body)
+    def test_the_page_names_import_and_the_one_button_that_spends(self):
+        body = dict(H.SECTIONS)["The page"]
+        self.assertIn("Import", body)
+        self.assertIn("Nothing is searched", body)      # an import never spends
+        self.assertIn("Find new people", body)
+        self.assertIn("the one button that spends", body)
 
     def test_the_costs_name_groq_exa_and_the_apollo_credit(self):
         body = dict(H.SECTIONS)["What each thing costs"]
@@ -76,21 +78,25 @@ class TheCopy(unittest.TestCase):
         from addons.leads.workbench import LeadsWorkbench
         self.assertIn(LeadsWorkbench._TARGET_LABEL["apollo"], body)
 
-    def test_the_filter_rail_separates_steering_from_enforcing(self):
-        body = dict(H.SECTIONS)["The filter rail"]
+    def test_the_filters_separate_steering_from_enforcing(self):
+        body = dict(H.SECTIONS)["The filters"]
         self.assertIn("steer", body)
-        self.assertIn("Net new only", body)
+        self.assertIn("Only find people no earlier search found", body)
         for facet in ("Industry", "Keywords", "Location", "Job title",
                       "Seniority", "Function", "Company headcount",
-                      "Annual revenue", "Current company", "Company HQ",
-                      "Years in role"):
+                      "Annual revenue", "Current company",
+                      "Company HQ location", "Years in current role",
+                      "Contact CSV import",
+                      "Account CSV import"):
             self.assertIn(facet, body, facet)
+        for tab in ("Total", "Net New", "Saved"):
+            self.assertIn(tab, body, tab)
 
     def test_a_day_is_listed_in_order(self):
         body = dict(H.SECTIONS)["How a day goes"]
         where = [body.index(step) for step in
-                 ("Find people", "Tick", "Find e-mails", "Qualify and draft",
-                  "Read every draft", "Send.")]
+                 ("Import a sheet", "Find new people", "Tick", "Find e-mails",
+                  "Qualify and draft", "Read every draft", "Send.")]
         self.assertEqual(where, sorted(where))
 
     def test_the_copy_survives_the_string_extractor(self):

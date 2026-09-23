@@ -22,12 +22,12 @@ wrap (widgets.controls.FlowLayout) instead of clipping.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractAnimation, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractAnimation, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStyle, QStyleOption,
-    QToolButton, QVBoxLayout, QWidget,
+    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QStyle,
+    QStyleOption, QToolButton, QVBoxLayout, QWidget,
 )
 
 import i18n
@@ -35,21 +35,33 @@ import theme
 from widgets import controls as C
 from widgets import icons
 from prospector.filters import (
-    BAND_FACETS, CLOSED_FACETS, FACET_LABELS, GUIDES_ONLY, HEADCOUNT,
-    INDUSTRY_SUGGESTIONS, LOCATION_SUGGESTIONS, REVENUE, TITLE_SUGGESTIONS,
-    YEARS_IN_ROLE, SearchSpec, label_of, parse_location_text, read_place_text,
+    BAND_FACETS, CLOSED_FACETS, EMAIL_STATUS, FACET_LABELS, GUIDES_ONLY,
+    HEADCOUNT, IMPORT_FACETS, INDUSTRY_SUGGESTIONS, LOCAL_FACETS,
+    LOCATION_SUGGESTIONS, REVENUE, TITLE_SUGGESTIONS, YEARS_IN_ROLE, SearchSpec,
+    label_of, parse_location_text, read_place_text,
 )
 
-# The column, top to bottom. "changed_jobs_90d" is the one switch, not a facet.
-_GROUPS = (
-    ("People", ("locations", "job_titles", "seniority", "functions")),
-    ("Company", ("industries", "headcount", "revenue", "companies", "company_hq")),
-    ("Activity", ("years_in_role", "changed_jobs_90d")),
-    ("Keywords", ("keywords",)),
-)
+# Apollo's rail, top to bottom (23-Sep-2026: "copy the entire architecture and
+# interface of apollo"). The facets a search nearly always starts from are
+# always there — Apollo pins Job Titles, Company, Location, Industry — with the
+# two CSV imports beside them, because a sheet the owner brought is where half
+# of his searches start. The rest wait under "More filters" (Apollo's "View
+# 60+ Filters") unless one of them is SET: an active filter is pinned into the
+# rail, the way Apollo shows "Contact CSV Import ×1" once it is applied.
+# "changed_jobs_90d" is the one switch, not a facet.
+_PINNED = ("job_titles", "seniority", "companies", "locations", "industries",
+           "contact_imports", "account_imports")
+_MORE = ("functions", "keywords", "headcount", "revenue", "company_hq",
+         "years_in_role", "changed_jobs_90d", "email_status", "scores")
+_IMPORT_KIND = {"contact_imports": "contacts", "account_imports": "accounts"}
 # Where nearly every search starts, so these two open with the panel.
 _OPEN_AT_START = frozenset({"locations", "job_titles"})
-_BANDS = {"headcount": HEADCOUNT, "revenue": REVENUE, "years_in_role": YEARS_IN_ROLE}
+_BANDS = {"headcount": HEADCOUNT, "revenue": REVENUE, "years_in_role": YEARS_IN_ROLE,
+          "email_status": EMAIL_STATUS}
+# Facets whose editor SHOWS its choices when open (a checked band, a ticked
+# import, the score controls) — their chips hide then (_Section._sync_chips).
+_SHOWS_CHOSEN = frozenset(BAND_FACETS) | frozenset(IMPORT_FACETS) \
+    | frozenset(LOCAL_FACETS) | {"scores"}
 # Bands checked on the company's record (filters.match_company). A company
 # whose size is not on record is let through and counted unverified, and the
 # editor says so — a band reads like a promise otherwise.
@@ -91,11 +103,16 @@ _HELP_FACETS = {
     "facet_company_hq": "company_hq",
     "facet_years": "years_in_role",
     "facet_keywords": "keywords",
+    "facet_contact_imports": "contact_imports",
+    "facet_account_imports": "account_imports",
+    "facet_email_status": "email_status",
+    "facet_scores": "scores",
 }
 # Every key help_targets() can answer. Public because the rail these live in is
 # not this panel's to unfold — the workbench does that for them (help_reveal).
+# ("save_search" left the panel with its button: the page toolbar answers it.)
 HELP_KEYS = frozenset(_HELP_FACETS) | {
-    "filters_head", "count_badge", "clear_all", "save_search",
+    "filters_head", "count_badge", "clear_all", "more_filters",
     "similar_titles", "facet_changed_jobs",
 }
 _REVEAL_PAD = 24         # a revealed target is scrolled this clear of the edge
@@ -185,6 +202,15 @@ def _sheet() -> str:
         f"{small}color:{t.ACCENT_RAMP[700]};}}",
         f"QPushButton#fclearAll:hover{{background:{t.INFO_BG};color:{t.INFO_INK};}}",
         f"QPushButton#fclearAll:focus{{border-color:{t.ACCENT};}}",
+        # "More filters (n)" — Apollo's "View 60+ Filters", a quiet outline
+        f"QPushButton#fmore{{background:{t.CARD};border:1px solid {t.NEUTRAL[300]};"
+        f"{small}padding:3px 10px;color:{t.NEUTRAL[800]};}}",
+        f"QPushButton#fmore:hover{{background:{t.WELL};border-color:{t.NEUTRAL[400]};}}",
+        f"QPushButton#fmore:focus{{border-color:{t.ACCENT};}}",
+        # a CSV import's row: box, file name, what it held
+        f"QLabel#fimportName{{color:{t.TEXT};font-size:13px;font-weight:500;}}",
+        f"QLabel#fimportMeta{{color:{t.NEUTRAL[600]};font-size:11px;}}",
+        f"QCheckBox#fimportBox{{border:none;background:transparent;}}",
         f"QPushButton#fsave{{background:{t.CARD};border:1px solid {t.NEUTRAL[300]};"
         f"{small}padding:3px 10px;color:{t.NEUTRAL[800]};}}",
         f"QPushButton#fsave:hover{{background:{t.WELL};border-color:{t.NEUTRAL[400]};}}",
@@ -700,6 +726,134 @@ class _BandEditor(QWidget):
             btn.setChecked(key in keys)
 
 
+class _ScoreEditor(QWidget):
+    """Apollo's "Scores", Prism's way: the lowest triage fit to keep (the FIT
+    column's number) and "Qualified by Prism only" — the two refine controls
+    the results rail used to carry on its own, now a facet like the rest."""
+
+    def __init__(self, on_floor, on_qualified, parent=None):
+        super().__init__(parent)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 2, 0, theme.SPACE_3)
+        col.setSpacing(theme.SPACE_1)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_2)
+        caption = QLabel(i18n.t("Minimum fit"), self)
+        caption.setObjectName("fsugText")
+        row.addWidget(caption, 1, Qt.AlignVCenter)
+        self.floor = QSpinBox(self)
+        self.floor.setObjectName("ffloor")
+        self.floor.setRange(0, 100)
+        self.floor.setSuffix(" / 100")
+        self.floor.setMinimumWidth(104)
+        self.floor.valueChanged.connect(on_floor)
+        row.addWidget(self.floor, 0, Qt.AlignVCenter)
+        col.addLayout(row)
+        self.qualified = _ToggleRow(
+            i18n.t("Qualified by Prism only"),
+            i18n.t("Only people Prism has researched and scored"), self)
+        self.qualified.switch.clicked.connect(on_qualified)
+        col.addWidget(self.qualified)
+
+    def set_values(self, floor: int, qualified: bool) -> None:
+        self.floor.blockSignals(True)
+        self.floor.setValue(int(floor))
+        self.floor.blockSignals(False)
+        self.qualified.switch.setChecked(bool(qualified))
+
+
+class _ImportRow(_Pressable):
+    """One past import as a tickable row: a box, the file's name (elided — a
+    long export name must not widen the rail) and what it held under it. The
+    whole row answers a click, like a band."""
+
+    toggled = Signal(bool)
+
+    def __init__(self, import_id: str, name: str, meta: str, parent=None):
+        super().__init__(parent)
+        self.import_id = import_id
+        self.setMinimumHeight(C.MIN_TARGET)
+        self.setToolTip(name)
+        self.setAccessibleName(name)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 3, 2, 3)
+        row.setSpacing(theme.SPACE_2)
+        self.box = QCheckBox(self)
+        self.box.setObjectName("fimportBox")
+        self.box.setFocusPolicy(Qt.NoFocus)          # the row is the tab stop
+        row.addWidget(self.box, 0, Qt.AlignTop)
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(0)
+        self.name = _Elided("fimportName", theme.TEXT, self)
+        self.name.set_full(name)
+        self.meta = _Elided("fimportMeta", theme.NEUTRAL[600], self)
+        self.meta.set_full(meta)
+        text.addWidget(self.name)
+        text.addWidget(self.meta)
+        row.addLayout(text, 1)
+        _through(self.box, self.name, self.meta)
+        self.clicked.connect(lambda _=False: self._flip())
+
+    def _flip(self):
+        self.box.setChecked(not self.box.isChecked())
+        self.toggled.emit(self.box.isChecked())
+
+    def set_checked(self, on: bool) -> None:
+        self.box.setChecked(bool(on))
+
+    def is_checked(self) -> bool:
+        return self.box.isChecked()
+
+
+class _ImportEditor(QWidget):
+    """Apollo's "Contact CSV import" / "Account CSV import": every past import
+    of one kind, newest first, each a tick — Apollo's own words, "check one or
+    more CSV import file names". With none yet, a line saying where imports
+    come from: the Import menu at the top of the page, never this rail."""
+
+    def __init__(self, kind: str, on_toggle, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self._on_toggle = on_toggle
+        self.rows: dict = {}                            # import id → _ImportRow
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 2, 0, theme.SPACE_3)
+        col.setSpacing(2)
+        self._list = QVBoxLayout()
+        self._list.setContentsMargins(0, 0, 0, 0)
+        self._list.setSpacing(2)
+        col.addLayout(self._list)
+        what = (i18n.t("No contact imports yet — use Import ▸ Contacts at the top "
+                       "of the page.") if kind == "contacts" else
+                i18n.t("No account imports yet — use Import ▸ Accounts at the top "
+                       "of the page."))
+        self.empty = C.label(what, level="META", wrap=True)
+        col.addWidget(self.empty)
+
+    def set_imports(self, headers, label) -> None:
+        """Rebuild the rows from import headers (imports.list_imports);
+        `label(header)` says what each held ("3 contacts · 22 Sep")."""
+        chosen = {i for i, r in self.rows.items() if r.is_checked()}
+        for row in self.rows.values():
+            row.setParent(None)
+            row.deleteLater()
+        self.rows = {}
+        for header in headers or ():
+            row = _ImportRow(header["id"], header.get("name", ""), label(header), self)
+            row.toggled.connect(lambda on, i=header["id"]: self._on_toggle(i, on))
+            row.set_checked(header["id"] in chosen)
+            self._list.addWidget(row)
+            self.rows[header["id"]] = row
+        self.empty.setVisible(not self.rows)
+
+    def set_chosen(self, ids) -> None:
+        ids = set(ids or ())
+        for import_id, row in self.rows.items():
+            row.set_checked(import_id in ids)
+
+
 class _Section(QWidget):
     """One facet: header, its chips (always visible, Sales-Nav style), and the
     editor that opening the header reveals, over a hairline."""
@@ -708,7 +862,9 @@ class _Section(QWidget):
                  on_flip, on_remove, parent=None):
         super().__init__(parent)
         self.facet = facet
-        self._band = facet in BAND_FACETS
+        # Bands, import lists and the score controls SHOW what is chosen when
+        # open, so their chips hide then — see _sync_chips.
+        self._band = facet in _SHOWS_CHOSEN
         self._open = False
         self._has_chips = False
         col = QVBoxLayout(self)
@@ -825,22 +981,22 @@ class FilterPanel(QWidget):
         self._spec = SearchSpec()
         self._suggest = suggest or static_suggest
         self._sections: dict = {}
+        # What the two CSV-import facets offer: import headers, newest first
+        # (addons/leads/imports.py). The workbench hands them over.
+        self._imports = {name: [] for name in IMPORT_FACETS}
+        self._more_open = False
         self.setStyleSheet(_sheet())
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addLayout(self._build_header())
-        for group, names in _GROUPS:
-            root.addSpacing(theme.SPACE_4)
-            kick = QLabel(i18n.t(group).upper(), self)
-            kick.setObjectName("fgroup")
-            root.addWidget(kick)
-            root.addSpacing(2)
-            for name in names:
-                if name == "changed_jobs_90d":
-                    root.addWidget(self._build_jobs())
-                else:
-                    root.addWidget(self._build_section(name))
+        self._build_hidden()
+        for name in _PINNED + _MORE:
+            if name == "changed_jobs_90d":
+                root.addWidget(self._build_jobs())
+            else:
+                root.addWidget(self._build_section(name))
+        root.addSpacing(theme.SPACE_3)
+        root.addLayout(self._build_footer())
         self._render()
 
     # ── the public surface ────────────────────────────────────────────────────
@@ -876,6 +1032,34 @@ class FilterPanel(QWidget):
         for name in self._sections:
             self._refresh_rows(name)
 
+    def set_imports(self, contacts=(), accounts=()) -> None:
+        """What "Contact CSV import" and "Account CSV import" offer: import
+        headers (addons/leads/imports.list_imports), newest first. A chosen id
+        whose import has since been deleted stays chosen — shown as a deleted
+        import — until the owner removes it: a filter never changes itself."""
+        from addons.leads.imports import label
+        self._imports = {"contact_imports": list(contacts or ()),
+                         "account_imports": list(accounts or ())}
+        for name in IMPORT_FACETS:
+            self._sections[name].editor.set_imports(self._imports[name], label)
+        self._render()
+
+    def import_name(self, name: str, import_id: str) -> str:
+        """The file name an import facet shows for an id ("" when unknown)."""
+        for header in self._imports.get(name, ()):
+            if header.get("id") == import_id:
+                return header.get("name", "")
+        return ""
+
+    def more_open(self) -> bool:
+        return self._more_open
+
+    def set_more_open(self, open_: bool) -> None:
+        """Show or fold the facets under "More filters" (an active one always
+        shows, open or not)."""
+        self._more_open = bool(open_)
+        self._sync_more()
+
     # ── the guided walkthrough points at these ────────────────────────────────
     def help_targets(self) -> dict:
         """The parts the "?" tour can ring, by the key it asks for: a real
@@ -883,10 +1067,11 @@ class FilterPanel(QWidget):
         region of one. Nothing is built here — a step is drawn around the
         control the owner is looking at, not a copy of it."""
         out = {
-            "filters_head": (self, self._head_rect()),
+            # The whole column: Apollo's rail has no title over its facets.
+            "filters_head": self,
             "count_badge": self._badge,
             "clear_all": self._clear_btn,
-            "save_search": self._save_btn,
+            "more_filters": self._more_btn,
             "similar_titles": self._similar,
             "facet_changed_jobs": self._jobs,
         }
@@ -904,69 +1089,102 @@ class FilterPanel(QWidget):
         facet = _HELP_FACETS.get(key)
         if key == "similar_titles":
             facet = "job_titles"            # the box lives in that facet's editor
+        if facet in _MORE or key == "facet_changed_jobs":
+            self.set_more_open(True)        # a folded facet can't be pointed at
         section = self._sections.get(facet)
         if section is not None and not section.is_open():
             section.set_open(True)
-        # The header is a region, so the rail is scrolled to the widget at its
-        # left instead: asked for the whole panel, a scroll area centres it and
-        # the header ends up above the rail's top edge.
-        target = (self._head_kick if key == "filters_head"
+        # Asked for the whole panel, a scroll area centres it and its top ends
+        # up above the rail's edge — so the first facet is what gets scrolled to.
+        target = (self._sections[_PINNED[0]] if key == "filters_head"
                   else self.help_targets().get(key))
         if isinstance(target, QWidget):
             reveal_in_scroll(target)
 
-    def help_snapshot(self) -> frozenset:
-        """The facets that are open. A walk opens all eleven, one step at a
-        time, and an owner who kept two open should get two back."""
-        return frozenset(name for name, section in self._sections.items()
-                         if section.is_open())
+    def help_snapshot(self) -> tuple:
+        """The facets that are open, and whether "More filters" is. A walk
+        opens every facet, one step at a time, and an owner who kept two open
+        should get two back."""
+        return (frozenset(name for name, section in self._sections.items()
+                          if section.is_open()), self._more_open)
 
-    def help_restore(self, open_names) -> None:
-        if open_names is None:
+    def help_restore(self, snapshot) -> None:
+        if snapshot is None:
             return
+        if isinstance(snapshot, tuple):
+            open_names, more = snapshot
+            self.set_more_open(more)
+        else:
+            open_names = snapshot
         for name, section in self._sections.items():
             want = name in open_names
             if section.is_open() != want:
                 section.set_open(want)
 
-    def _head_rect(self) -> QRect:
-        """The header row as a box in the panel's own coordinates. It is a
-        LAYOUT, not a widget, so the box is drawn from what it holds."""
-        rect = QRect()
-        for widget in (self._head_kick, self._badge, self._clear_btn, self._save_btn):
-            if not widget.isHidden():
-                rect = rect.united(widget.geometry())
-        return rect
-
     # ── building ──────────────────────────────────────────────────────────────
-    def _build_header(self) -> QHBoxLayout:
+    def _build_hidden(self) -> None:
+        """Save lives in the page toolbar now — Apollo's "Save as new search"
+        — which clicks this button, so `saveRequested` keeps one source and a
+        caller that clicks it in code still works. Never shown."""
+        self._save_btn = QPushButton(i18n.t("Save search"), self)
+        self._save_btn.setObjectName("fsave")
+        self._save_btn.clicked.connect(lambda _=False: self.saveRequested.emit())
+        self._save_btn.hide()
+
+    def _build_footer(self) -> QHBoxLayout:
+        """Apollo's foot of the rail: "Clear all (n)", then "View 60+ Filters"
+        — here "More filters (n)", which unfolds the facets under it."""
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SPACE_2 - 2)
-        kick = QLabel(i18n.t("Lead filters").upper(), self)
-        kick.setObjectName("fkick")
-        # Kept: the header is a layout, so the walkthrough draws its box from
-        # what it holds (_head_rect).
-        self._head_kick = kick
-        row.addWidget(kick, 0, Qt.AlignVCenter)
-        self._badge = _count_badge("fcount", self)
-        row.addWidget(self._badge, 0, Qt.AlignVCenter)
-        row.addStretch(1)
         self._clear_btn = QPushButton(i18n.t("Clear all"), self)
         self._clear_btn.setObjectName("fclearAll")
         self._clear_btn.clicked.connect(lambda _=False: self.clear())
-        self._save_btn = QPushButton(i18n.t("Save search"), self)
-        self._save_btn.setObjectName("fsave")
-        self._save_btn.setToolTip(i18n.t("Keep these filters to run again later"))
-        self._save_btn.clicked.connect(lambda _=False: self.saveRequested.emit())
-        for btn in (self._clear_btn, self._save_btn):
+        self._badge = _count_badge("fcount", self)
+        self._more_btn = QPushButton(self)
+        self._more_btn.setObjectName("fmore")
+        self._more_btn.clicked.connect(lambda _=False: self.set_more_open(not self._more_open))
+        for btn in (self._clear_btn, self._more_btn):
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.TabFocus)
-            row.addWidget(btn, 0, Qt.AlignVCenter)
+        row.addWidget(self._clear_btn, 0, Qt.AlignVCenter)
+        row.addWidget(self._badge, 0, Qt.AlignVCenter)
+        row.addStretch(1)
+        row.addWidget(self._more_btn, 0, Qt.AlignVCenter)
         return row
 
+    def _more_widget(self, name: str):
+        return self._jobs_box if name == "changed_jobs_90d" else self._sections[name]
+
+    def _sync_more(self) -> None:
+        """A facet under "More filters" shows when the fold is open or when it
+        holds a value — an applied filter is never hidden."""
+        folded = 0
+        for name in _MORE:
+            on = (self._spec.changed_jobs_90d if name == "changed_jobs_90d"
+                  else self._spec.count(name) > 0)
+            show = self._more_open or on
+            self._more_widget(name).setVisible(show)
+            folded += 0 if show else 1
+        self._more_btn.setText(i18n.t("Fewer filters") if self._more_open else
+                               i18n.t("More filters ({n})").format(n=folded))
+        self._more_btn.setVisible(self._more_open or folded > 0)
+
     def _build_section(self, name: str) -> _Section:
-        if name in BAND_FACETS:
+        if name in IMPORT_FACETS or name == "scores":
+            if name == "scores":
+                editor = _ScoreEditor(
+                    lambda value: self._edit(lambda s: setattr(s, "min_fit", int(value))),
+                    lambda on=False: self._set_flag("qualified_only", on), self)
+            else:
+                editor = _ImportEditor(_IMPORT_KIND[name],
+                                       lambda i, on, n=name: self._toggle_import(n, i, on),
+                                       self)
+            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+                               self._flip, self._remove, self)
+            self._sections[name] = section
+            return section
+        if name in BAND_FACETS or name in LOCAL_FACETS:
             note = (i18n.t("Checked against the company's record · unknown sizes "
                            "aren't dropped") if name in _ON_RECORD else "")
             editor = _BandEditor(_BANDS[name],
@@ -1004,6 +1222,7 @@ class FilterPanel(QWidget):
 
     def _build_jobs(self) -> QWidget:
         box = QWidget(self)
+        self._jobs_box = box            # folds under "More filters" (_sync_more)
         col = QVBoxLayout(box)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
@@ -1158,12 +1377,25 @@ class FilterPanel(QWidget):
             return
 
         def change(spec):
-            if name in BAND_FACETS:
+            if name == "scores":
+                if value == "min_fit":
+                    spec.min_fit = 0
+                elif value == "qualified_only":
+                    spec.qualified_only = False
+            elif name in BAND_FACETS or name in IMPORT_FACETS or name in LOCAL_FACETS:
                 setattr(spec, name, [k for k in getattr(spec, name) if k != value])
             else:
                 facet = spec.facet(name)
                 facet.include = [v for v in facet.include if v != value]
                 facet.exclude = [v for v in facet.exclude if v != value]
+        self._edit(change)
+
+    def _toggle_import(self, name: str, import_id: str, on) -> None:
+        def change(spec):
+            chosen = [i for i in getattr(spec, name) if i != import_id]
+            if on:
+                chosen.append(import_id)
+            setattr(spec, name, chosen)
         self._edit(change)
 
     def _band(self, name: str, key: str, on) -> None:
@@ -1180,7 +1412,22 @@ class FilterPanel(QWidget):
     def _render(self) -> None:
         spec = self._spec
         for name, section in self._sections.items():
-            if name in BAND_FACETS:
+            if name == "scores":
+                chips = []
+                if spec.min_fit:
+                    chips.append(("min_fit", i18n.t("Fit {n}+").format(n=spec.min_fit),
+                                  "include", False))
+                if spec.qualified_only:
+                    chips.append(("qualified_only", i18n.t("Qualified only"),
+                                  "include", False))
+                section.set_chips(chips)
+                section.editor.set_values(spec.min_fit, spec.qualified_only)
+            elif name in IMPORT_FACETS:
+                chosen = getattr(spec, name)
+                section.set_chips([(i, self.import_name(name, i) or i18n.t("Deleted import"),
+                                    "include", False) for i in chosen])
+                section.editor.set_chosen(chosen)
+            elif name in BAND_FACETS or name in LOCAL_FACETS:
                 chosen = getattr(spec, name)
                 section.set_chips([(k, i18n.t(label_of(_BANDS[name], k)), "include", False)
                                    for k in chosen])
@@ -1201,10 +1448,11 @@ class FilterPanel(QWidget):
         self._badge.setText(str(total))
         self._badge.setVisible(total > 0)
         self._clear_btn.setVisible(total > 0)
+        self._sync_more()
 
     def _refresh_rows(self, name: str) -> None:
         section = self._sections.get(name)
-        if section is None or name in BAND_FACETS:
+        if section is None or name in _SHOWS_CHOSEN:
             return
         rows, hint = self._suggestions(name, section.editor.input.text())
         section.editor.show_rows(rows, hint)

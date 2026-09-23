@@ -294,6 +294,19 @@ def _build(cls, row: dict, proto, **fixed):
     return cls(**kwargs)
 
 
+def lead_to_row(lead) -> dict:
+    """One Lead as the plain row a session file holds. The saved-contacts store
+    (contacts.py) writes the same row, so a person reads back identically from
+    either file, and a hand-edited one is forgiven the same way."""
+    return {n: _jsonable(getattr(lead, n, None)) for n in _LEAD_FIELDS}
+
+
+def lead_from_row(row):
+    """lead_to_row, reversed — load()'s own forgiving read (unknown keys
+    ignored, a wrong-typed cell defaulted). None for a row that is not a dict."""
+    return _build(Lead, row, _LEAD_PROTO) if isinstance(row, dict) else None
+
+
 # ── the header ────────────────────────────────────────────────────────────────
 
 def _label(mode, params: dict) -> str:

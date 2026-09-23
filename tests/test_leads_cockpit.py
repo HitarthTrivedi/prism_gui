@@ -1,14 +1,18 @@
-"""The Leads & Outreach workspace (addons.leads.cockpit).
+"""The Leads & Outreach workspace — Apollo's Find People (addons.leads.cockpit,
+addons.leads.workbench).
 
-Pure widget behaviour — no pipeline, no workers, no network. Feeds the cockpit
-qualified dossiers and checks the things it exists to get right: it shows every
-lead, the fit slider and status filter hide rows, ticking rows arms the bulk bar
-and the *Requested signals carry exactly the checked (visible) leads, and the
+Widget behaviour first — no pipeline, no workers, no network: the page shows
+exactly the rows it is handed, the Total / Net New / Saved tabs and the pager
+say what they show and ask for what the owner picks, ticking rows arms the
+action bar and the *Requested signals carry exactly the ticked leads, and the
 deliverability status is read correctly per lead. Then the surrounding
-`LeadsWorkspace`: its six tabs, that it re-exposes the cockpit's signals and
-set_dossiers, that Analytics counts this run, and that Lists scans a real folder.
-Last, the workbench around it: the lead filters in the rail, what a Find-people
-run hands its worker, and saved searches — save, use, delete, and a run counted.
+`LeadsWorkspace`: its six tabs, that it re-exposes the cockpit's signals, that
+Analytics counts the run, and that Lists scans a real folder. Last, the
+workbench around it: the People page over everyone Prism holds (the pool —
+instant, free), Import as its own action that never searches, an account
+import searched fifty companies at a time from where it stopped, what a Find
+new people search hands its worker after asking what it may spend, and saved
+searches — save, use, delete, and a run counted.
 """
 from __future__ import annotations
 
@@ -74,24 +78,74 @@ class CockpitBehaviour(unittest.TestCase):
 
     def test_all_leads_shown(self):
         self.assertEqual(self.c._table.rowCount(), 4)
-        self.assertIn("4 of 4", self.c._count_lbl.text())
+        # One run shown straight from its dossiers has no pages to turn.
+        self.assertTrue(self.c._pager.isHidden())
 
-    def test_counters(self):
-        self.assertEqual(self.c._c_new._num.text(), "4")    # none mailed yet
-        self.assertEqual(self.c._c_fit._num.text(), "69")   # (96+80+60+40)/4 = 69
+    def test_the_people_tabs_show_their_counts_and_say_which_was_picked(self):
+        c = self.c
+        c.set_counts({"total": 1234, "net_new": 1200, "saved": 34})
+        self.assertEqual(c._tab_btns["total"].text(), "Total\n1,234")
+        self.assertEqual(c._tab_btns["net_new"].text(), "Net New\n1,200")
+        self.assertEqual(c._tab_btns["saved"].text(), "Saved\n34")
+        self.assertTrue(c._tab_btns["total"].isChecked())
+        got = []
+        c.tabChanged.connect(got.append)
+        c._tab_btns["saved"].click()
+        self.assertEqual((got, c.tab()), (["saved"], "saved"))
+        self.assertTrue(c._tab_btns["saved"].isChecked())
+        self.assertFalse(c._tab_btns["total"].isChecked())
+        c.set_tab("total")                            # the workbench, restoring
+        self.assertEqual(got, ["saved"])              # …without asking again
+        self.assertTrue(c._tab_btns["total"].isChecked())
 
-    def test_fit_slider_hides_low_rows(self):
-        self.c._fit_min.setValue(70)
-        vis = [r for r in range(self.c._table.rowCount())
-               if not self.c._table.isRowHidden(r)]
-        names = {self.c._dossier_at(r).lead.name for r in vis}
-        self.assertEqual(names, {"Kunyi", "Vaibhav"})
-        self.assertIn("2 of 4", self.c._count_lbl.text())
+    def test_a_pooled_page_shows_exactly_its_rows_in_their_order(self):
+        """The workbench sorts and pages the pool; the table must not re-sort
+        what it is handed (a Name sort would otherwise be undone by Fit)."""
+        from addons.leads import pool as P
+        people = [P.Person(lead=d.lead) for d in (self.d4, self.d1, self.d3)]
+        self.c.set_people(people, {"rows": people, "page": 1, "pages": 2,
+                                   "start": 26, "end": 28, "total": 28},
+                          {"total": 28, "net_new": 28, "saved": 0})
+        self.assertEqual([self.c._dossier_at(r).lead.name for r in range(3)],
+                         ["Bad", "Kunyi", "NoMail"])
+        self.assertEqual(self.c._range_lbl.text(), "26 - 28 of 28")
+        self.assertFalse(self.c._pager.isHidden())
+        self.assertTrue(self.c._prev_btn.isEnabled())
+        self.assertFalse(self.c._next_btn.isEnabled())
+        # A person never qualified is a placeholder row, not a dossier.
+        self.assertTrue(all(self.c._dossier_at(r).status == CK.UNQUALIFIED
+                            for r in range(3)))
+        self.assertIs(self.c.person_for(self.c._dossier_at(0)), people[0])
 
-    def test_status_filter_hides(self):
-        self.c._status_boxes["Invalid"].setChecked(False)
+    def test_the_pager_asks_for_the_page_it_wants(self):
+        from addons.leads import pool as P
+        people = [P.Person(lead=d.lead) for d in (self.d1, self.d2)]
+        asked = []
+        self.c.pageRequested.connect(asked.append)
+        self.c.set_people(people, {"rows": people, "page": 1, "pages": 3,
+                                   "start": 26, "end": 27, "total": 52})
+        self.c._next_btn.click()
+        self.c._prev_btn.click()
+        self.c._page_box.activated.emit(2)
+        self.assertEqual(asked, [2, 0, 2])
+        self.assertEqual(self.c._page_box.count(), 3)
+
+    def test_search_people_asks_the_workbench_once_the_typing_stops(self):
+        asked = []
+        self.c.queryChanged.connect(asked.append)
+        self.c._search.setText("  dubai ")
+        self.assertEqual(asked, [])                   # debounced, not per key
+        self.assertTrue(self.c._search_timer.isActive())
+        self.c._search_timer.timeout.emit()           # the debounce, run now
+        self.assertEqual(asked, ["dubai"])
+
+    def test_a_new_page_starts_with_nothing_ticked(self):
         r = self._find(self.d4)
-        self.assertTrue(self.c._table.isRowHidden(r))
+        self.c._table.item(r, 0).setCheckState(Qt.Checked)
+        self.assertEqual(self.c.selected(), [self.d4])
+        self.c.set_dossiers([self.d1, self.d2])      # the next page, a new filter
+        self.assertEqual(self.c.selected(), [])
+        self.assertTrue(self.c._bulk.isHidden())
 
     def test_check_arms_bulk_and_selects(self):
         self.assertFalse(self.c._b_seq.isEnabled())
@@ -109,11 +163,53 @@ class CockpitBehaviour(unittest.TestCase):
         self.c._b_seq.click()
         self.assertEqual(got, [[self.d2]])
 
-    def test_hidden_checked_rows_are_not_selected(self):
-        r = self._find(self.d4)
-        self.c._table.item(r, 0).setCheckState(Qt.Checked)   # check the invalid one
-        self.c._fit_min.setValue(70)                          # now hidden (fit 40)
-        self.assertEqual(self.c.selected(), [])               # excluded while hidden
+    def test_save_makes_the_ticked_people_contacts(self):
+        got = []
+        self.c.saveContactsRequested.connect(got.append)
+        self.assertFalse(self.c._b_contact.isEnabled())
+        self.c._table.item(self._find(self.d3), 0).setCheckState(Qt.Checked)
+        self.assertTrue(self.c._b_contact.isEnabled())
+        self.c._b_contact.click()
+        self.assertEqual(got, [[self.d3]])
+
+    def test_import_asks_for_the_kind_it_was_given(self):
+        got = []
+        self.c.importRequested.connect(got.append)
+        for action in self.c._import_btn.menu().actions():
+            action.trigger()
+        self.assertEqual(got, ["contacts", "accounts"])
+
+    def test_research_with_ai_arms_its_items_as_their_buttons_are(self):
+        """A pick that silently did nothing was 22-Sep's "Nothing changes at
+        all": each item is armed when the menu opens, with the reason on it
+        when it is not."""
+        c = CK.LeadsCockpit()
+        raw = Lead(name="Sourced", title="Head", company="Acme", fit_score=50)
+        c.set_dossiers([self.d1], all_leads=[self.d1.lead, raw])
+        c._research_btn.menu().aboutToShow.emit()
+        self.assertFalse(c._act_qualify.isEnabled())         # nothing ticked
+        self.assertIn("Tick people", c._act_qualify.toolTip())
+        row = next(r for r in range(2) if c._dossier_at(r).lead is raw)
+        c._table.item(row, 0).setCheckState(Qt.Checked)
+        c._research_btn.menu().aboutToShow.emit()
+        self.assertTrue(c._act_qualify.isEnabled())
+        c.set_find_prepare_ready(lambda: (False, "Add a job title first."))
+        c._research_btn.menu().aboutToShow.emit()
+        self.assertFalse(c._act_find_prepare.isEnabled())
+        self.assertEqual(c._act_find_prepare.toolTip(), "Add a job title first.")
+
+    def test_default_view_lists_saved_searches_and_the_starters(self):
+        picked, started = [], []
+        self.c.savedSearchPicked.connect(picked.append)
+        self.c.starterPicked.connect(started.append)
+        self.c.set_saved_searches([{"id": "s1", "name": "Plants"}])
+        self.c.set_starters([("icp", "Automation leaders")])
+        actions = {a.text(): a for a in self.c._views_menu.actions() if a.text()}
+        actions["Plants"].trigger()
+        actions["Automation leaders"].trigger()
+        self.assertEqual((picked, started), (["s1"], ["icp"]))
+        actions["Cards"].trigger()                  # the layouts live here too
+        self.assertEqual(self.c._view, "cards")
 
     def test_drawer_renders_on_select(self):
         r = self._find(self.d1)
@@ -130,8 +226,12 @@ class LayoutStates(unittest.TestCase):
     def test_empty_cockpit_shows_the_empty_state_not_a_grid(self):
         c = CK.LeadsCockpit()
         self.assertEqual(c._view_stack.currentIndex(), 2)
-        self.assertTrue(c._toolbar.isHidden())
         self.assertTrue(c._bulk.isHidden())
+        self.assertTrue(c._pager.isHidden())
+        # The toolbar stays: it holds Import and the filters' switch — the
+        # way from nobody to somebody — and Apollo's never goes away either.
+        self.assertFalse(c._toolbar.isHidden())
+        self.assertFalse(c._import_btn.isHidden())
 
     def test_loading_leads_leaves_the_empty_state(self):
         c = CK.LeadsCockpit()
@@ -160,6 +260,20 @@ class LayoutStates(unittest.TestCase):
         panel = QWidget()
         c.set_search_panel(panel)
         self.assertIs(panel.parentWidget(), c._rail.widget())
+
+    def test_find_new_people_mounts_under_the_filters(self):
+        c = CK.LeadsCockpit()
+        filters, find = QWidget(), QWidget()
+        c.set_search_panel(filters)
+        c.set_find_panel(find)
+        self.assertIs(find.parentWidget(), c._rail.widget())
+        self.assertGreaterEqual(c._find_slot.indexOf(find), 0)
+        self.assertEqual(c._search_slot.indexOf(find), -1)
+        rail = c._rail.widget().layout()
+        # Total / Net New / Saved over the filters, Find new people under them.
+        self.assertIs(rail.itemAt(0).widget(), c._tabs_frame)
+        self.assertIs(rail.itemAt(1).layout(), c._search_slot)
+        self.assertIs(rail.itemAt(2).layout(), c._find_slot)
 
 
 class TableFeel(unittest.TestCase):
@@ -203,19 +317,16 @@ class TableFeel(unittest.TestCase):
         c._body.layout().activate()
         c._split.refresh()
 
-    def test_the_header_checkbox_ticks_only_visible_rows_and_shows_partial(self):
+    def test_the_header_checkbox_ticks_the_page_and_shows_partial(self):
         c = self.c
-        c._fit_min.setValue(70)                       # NoMail (60) and Bad (40) hide
-        self._click_header_box()
-        self.assertEqual(c.selected(), [self.d1, self.d2])
-        self.assertEqual(c._checked, {0, 1})          # the hidden rows stay unticked
-        self.assertEqual(c._table.item(self._row(self.d3), 0).checkState(), Qt.Unchecked)
+        self._click_header_box()                      # none → the whole page
+        self.assertEqual(len(c.selected()), 4)
         self.assertEqual(c._head.check_state(), Qt.Checked)
-        c._fit_min.setValue(0)                        # all four show, two ticked
+        c._table.item(self._row(self.d3), 0).setCheckState(Qt.Unchecked)
         self.assertEqual(c._head.check_state(), Qt.PartiallyChecked)
         self._click_header_box()                      # some → all
         self.assertEqual(len(c.selected()), 4)
-        self.assertEqual(c._head.check_state(), Qt.Checked)
+        self.assertEqual(c._table.item(self._row(self.d3), 0).checkState(), Qt.Checked)
         self._click_header_box()                      # all → none
         self.assertEqual(c.selected(), [])
         self.assertEqual(c._head.check_state(), Qt.Unchecked)
@@ -361,14 +472,16 @@ class TableFeel(unittest.TestCase):
         c._bulk.isVisible = lambda: on_screen[0] and not c._bulk.isHidden()
         c._toolbar.isVisible = lambda: on_screen[0] and not c._toolbar.isHidden()
         c._table.item(self._row(self.d1), 0).setCheckState(Qt.Checked)
-        c._toolbar.setFixedWidth(c._toolbar_need(3))      # no Avg fit, Net-new or "Sort"
-        c._bulk_bar_w.setFixedWidth(c._bulk_need(2))      # Verify and Save in More
+        # Short "Save search", no Table|Cards, Search settings as its icon.
+        c._toolbar.setFixedWidth(c._toolbar_need(3))
+        c._bulk_bar_w.setFixedWidth(c._bulk_need(2))      # Verify and Add to list in More
         c._fit_toolbar()                                  # what their resizes do
         c._fit_bulk()
 
         def folded():
-            return (c._c_fit.isHidden(), c._c_new.isHidden(), c._sort_lbl.isHidden(),
-                    c._b_verify.isHidden(), not c._b_more.isHidden())
+            return (c._save_search_btn.text() == "Save search", c._seg.isHidden(),
+                    c._settings_btn.text() == "", c._b_verify.isHidden(),
+                    not c._b_more.isHidden())
 
         self.assertEqual(folded(), (True,) * 5)
         on_screen[0] = False                              # the Sessions tab is showing
@@ -402,9 +515,6 @@ class TableFeel(unittest.TestCase):
         self.assertEqual(focus.text(), "Plant Head")
         self.assertEqual(focus.data(CK._WHERE_ROLE), "Dubai, United Arab Emirates")
         self.assertIn("Dubai", focus.toolTip())
-        c._search.setText("dubai")
-        c._apply_filters()                                # the debounce, run now
-        self.assertIn("1 of 1", c._count_lbl.text())
 
     def test_the_drawer_docks_when_wide_and_floats_when_narrow(self):
         c = self.c
@@ -450,9 +560,10 @@ class CardGallery(unittest.TestCase):
         self.assertEqual(self.c._table.item(self._row(self.d1), 0).checkState(),
                          Qt.Checked)
 
-    def test_filter_hides_cards_like_rows(self):
-        self.c._fit_min.setValue(70)                     # d3 (60), d4 (40) drop
+    def test_the_cards_follow_the_page(self):
+        self.c.set_dossiers([self.d1, self.d2])          # the next page, a filter
         self.assertEqual(self.c._grid.count(), 2)
+        self.assertEqual(self.c._view, "cards")          # still in cards
 
     def test_table_tick_reflects_on_the_card(self):
         r = self._row(self.d2)
@@ -533,8 +644,10 @@ class ListsTab(unittest.TestCase):
 
 
 class _Workbench(unittest.TestCase):
-    """A workbench that only ever touches temp folders — sheets, sessions and
-    saved searches — plus a finished run to hand it."""
+    """A workbench that only ever touches temp folders — sheets, sessions,
+    saved searches, saved contacts and CSV imports — plus a finished run to
+    hand it. Find new people's "this costs N searches — go?" answers Yes and
+    is recorded (self.asked), so a test never meets a modal box."""
 
     def setUp(self):
         from addons.leads import workbench as WB
@@ -542,17 +655,27 @@ class _Workbench(unittest.TestCase):
         self._tmp = tempfile.mkdtemp()
         self._sessions = tempfile.mkdtemp()
         self._searches = tempfile.mkdtemp()
-        self._orig = WB.LeadsWorkbench._autosave_dir
-        self._orig_sessions = WB.LeadsWorkbench._sessions_dir
-        self._orig_searches = WB.LeadsWorkbench._searches_dir
+        self._contacts = tempfile.mkdtemp()
+        self._imports = tempfile.mkdtemp()
+        self.asked = []
+        self._saved_attrs = {
+            name: getattr(WB.LeadsWorkbench, name)
+            for name in ("_autosave_dir", "_sessions_dir", "_searches_dir",
+                         "_contacts_dir", "_imports_dir", "_confirm_search")}
         WB.LeadsWorkbench._autosave_dir = lambda _self: self._tmp        # no real Documents
         WB.LeadsWorkbench._sessions_dir = lambda _self: self._sessions   # no real workspace
         WB.LeadsWorkbench._searches_dir = lambda _self: self._searches
+        WB.LeadsWorkbench._contacts_dir = lambda _self: self._contacts
+        WB.LeadsWorkbench._imports_dir = lambda _self: self._imports
+
+        def confirm(_self, spec, companies, note):
+            self.asked.append((spec, list(companies), note))
+            return True
+        WB.LeadsWorkbench._confirm_search = confirm
 
     def tearDown(self):
-        self._WB.LeadsWorkbench._autosave_dir = self._orig
-        self._WB.LeadsWorkbench._sessions_dir = self._orig_sessions
-        self._WB.LeadsWorkbench._searches_dir = self._orig_searches
+        for name, value in self._saved_attrs.items():
+            setattr(self._WB.LeadsWorkbench, name, value)
 
     def _run(self):
         """A finished sheet run: two qualified leads, one draft already sent."""
@@ -601,7 +724,11 @@ class WorkbenchAndPanel(_Workbench):
                   if CK.status_of(d, wb._draft_by.get(id(d))) == "Mailed"]
         self.assertEqual(len(mailed), 1)
         self.assertFalse(wb._send_btn.isEnabled())       # nothing left unmailed
-        self.assertEqual(wb._path, "leads.xlsx")
+        # The table shows the session's own objects, so the Mailed tag is
+        # read off the draft the session kept.
+        statuses = {wb._cockpit.leads._table.item(r, CK._C_STATUS).text()
+                    for r in range(2)}
+        self.assertIn("Mailed", statuses)
 
     def test_the_next_run_skips_people_already_pulled(self):
         from addons.leads.workers import _seen_index
@@ -631,6 +758,7 @@ class WorkbenchAndPanel(_Workbench):
         wb = self._WB.LeadsWorkbench({})
         self.assertIsNotNone(wb._cockpit)
         self.assertEqual(len(wb._cockpit._tabs), 6)
+        self.assertEqual(wb._cockpit._tabs[0].text(), "People")
 
     def test_status_line_hides_until_it_has_text(self):
         wb = self._WB.LeadsWorkbench({})
@@ -640,20 +768,32 @@ class WorkbenchAndPanel(_Workbench):
         wb._status.setText("")
         self.assertTrue(wb._status.isHidden())
 
-    def test_setup_folds_and_summarises(self):
-        wb = self._WB.LeadsWorkbench({})
-        self.assertFalse(wb._setup_details.isHidden())  # open before a run
-        self.assertTrue(wb._setup_toggle.isHidden())    # nothing to fold to yet
-        wb._fold_setup(False)
-        self.assertTrue(wb._setup_details.isHidden())
-        self.assertFalse(wb._setup_toggle.isHidden())
-        self.assertIn("qualify", wb._setup_line())
-
-    def test_search_lives_in_the_leads_rail(self):
+    def test_search_settings_is_a_dialog_the_toolbar_opens(self):
+        """Apollo keeps what a search runs with behind "Search settings" — the
+        database, how far it goes, what you sell, the keys — not in the rail
+        over the filters."""
         wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
-        self.assertIs(wb._setup_panel.parentWidget(), wb._cockpit.leads._rail.widget())
-        self.assertEqual(len(wb.action_buttons()), 2)
+        dlg = wb._settings_dlg
+        self.assertFalse(dlg.isVisible())
+        wb._cockpit.leads._settings_btn.click()
+        self.addCleanup(dlg.hide)
+        self.assertTrue(dlg.isVisible())
+        for widget in (wb._source_row, wb._target_row, wb._qualify_row,
+                       wb._verify_row, wb._offer, wb._skip_seen, wb._keys_toggle):
+            self.assertTrue(dlg.isAncestorOf(widget))
         self.assertTrue(wb._keys_box.isHidden())         # key saved → keys folded
+        dlg.hide()
+        wb._open_settings(keys=True)                    # a search short of a key
+        self.assertFalse(wb._keys_box.isHidden())
+
+    def test_the_filters_and_find_new_people_live_in_the_people_rail(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        rail = wb._cockpit.leads._rail.widget()
+        self.assertIs(wb._filters.parentWidget(), rail)
+        self.assertIs(wb._find_panel.parentWidget(), rail)
+        self.assertEqual(wb._prepare.text(), "Find new people")
+        self.assertTrue(wb._prepare_all.isHidden())      # Research with AI's, not the rail's
+        self.assertEqual(len(wb.action_buttons()), 2)
 
     def test_keys_open_when_the_exa_key_is_missing(self):
         wb = self._WB.LeadsWorkbench({})
@@ -708,17 +848,24 @@ class LeadFiltersInTheWorkbench(_Workbench):
             "industries": {"include": ["Tyre", "Steel Manufacturing"]},
             "seniority": {"include": ["head", "director"]}})
 
-    def test_find_people_is_the_default_with_the_default_filters(self):
+    def test_the_rail_opens_empty_and_the_starter_search_is_one_pick_away(self):
+        """Apollo's page opens with no filters. A pre-filled rail filtered
+        everyone Prism holds down to one vertical before the owner had asked
+        for anything; the owner's own ICP is now a starter in Default view."""
         wb = self._WB.LeadsWorkbench({})
+        self.assertEqual(wb._filters.spec().active_count(), 0)
+        self.assertFalse(wb._prepare.isEnabled())       # nobody to look for yet
+        self.assertIn("job title", wb._find_meta.text())
+        wb.use_starter("icp")
         spec = wb._filters.spec()
-        self.assertEqual(wb._mode, "icp")
         self.assertEqual(len(spec.job_titles.include), 6)
         self.assertEqual(len(spec.industries.include), 10)
         self.assertEqual(spec.location_label(), "Anywhere")
         self.assertTrue(wb._prepare.isEnabled())
-        # The folded line names the database the run will ask — with no Apollo
-        # key that is Exa.
-        self.assertTrue(wb._setup_line().startswith("Exa · 6 titles"))
+        self.assertRegex(wb._find_meta.text(), r"About \d+ Exa searches")
+        self.assertIn("Loaded", wb._status.text())
+        wb.use_starter("nonsense")                      # an unknown key moves nothing
+        self.assertEqual(wb._filters.spec(), spec)
 
     def test_place_suggestions_lead_with_places_and_fall_back_to_the_starters(self):
         from unittest import mock
@@ -760,6 +907,10 @@ class LeadFiltersInTheWorkbench(_Workbench):
             wb._on_prepare()
         finally:
             self._WB.SourceWorker = orig
+        # It asked first, naming the searches it would make (23-Sep-2026:
+        # the owner approves every credit).
+        self.assertEqual(len(self.asked), 1)
+        self.assertEqual(self.asked[0][0].to_dict(), spec.to_dict())
         self.assertEqual(len(_FakeSourceWorker.made), 1)
         worker = _FakeSourceWorker.made[0]
         self.assertTrue(worker.started)
@@ -777,19 +928,21 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertEqual(wb._jobs, 1)
 
     def test_the_two_run_buttons_are_the_cheap_run_and_the_whole_pipeline(self):
-        """"Find people" costs its searches and stops; "Find and prepare" is
-        today's run — addresses, Groq, drafts — in one press."""
+        """"Find new people" costs its searches and stops; Research with AI ▸
+        "Find new people and qualify them" is the whole run — addresses,
+        Groq, drafts — in one press."""
         _FakeSourceWorker.made = []
         orig = self._WB.SourceWorker
         self._WB.SourceWorker = _FakeSourceWorker
         try:
             wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
-            self.assertEqual(wb._prepare.text(), "Find people")
+            wb._filters.set_spec(self._spec())
+            self.assertEqual(wb._prepare.text(), "Find new people")
             self.assertEqual(wb._prepare_all.text(), "Find and prepare")
             wb._prepare.click()
             wb._jobs = 0                                  # the run "finished"
             wb._set_running(False)
-            wb._prepare_all.click()
+            wb._cockpit.leads._act_find_prepare.trigger()
         finally:
             self._WB.SourceWorker = orig
         cheap, whole = _FakeSourceWorker.made
@@ -798,33 +951,72 @@ class LeadFiltersInTheWorkbench(_Workbench):
         self.assertEqual((whole.kwargs["emails"], whole.kwargs["leads_only"]),
                          ("now", False))
         self.assertEqual(wb._next_params["mode"], "icp")
+        self.assertEqual(len(self.asked), 2)             # each asked before it spent
 
-    def test_a_sheet_is_loaded_without_groq_and_never_cut_as_already_pulled(self):
-        """The sheet the owner brings back is usually the one Prism exported
-        last run, so "Net new only" — a rule about a SEARCH not re-finding
-        people — must not empty it. The switch is not even shown here."""
-        made = []
+    def test_find_and_qualify_is_armed_only_when_find_new_people_is(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        menu = wb._cockpit.leads._research_btn.menu()
+        act = wb._cockpit.leads._act_find_prepare
+        menu.aboutToShow.emit()
+        self.assertFalse(act.isEnabled())                 # the rail names nobody
+        self.assertIn("job title", act.toolTip())
+        wb._filters.set_spec(self._spec())
+        menu.aboutToShow.emit()
+        self.assertTrue(act.isEnabled())
+        wb._jobs = 1                                      # a search is running
+        menu.aboutToShow.emit()
+        self.assertFalse(act.isEnabled())
+        self.assertIn("Wait", act.toolTip())
 
-        class _FakeProspectorWorker(_FakeSourceWorker):
-            def __init__(self, *a, **kw):
-                super().__init__(*a, **kw)
-                made.append(self)
-
-        orig = self._WB.ProspectorWorker
-        self._WB.ProspectorWorker = _FakeProspectorWorker
+    def test_a_no_to_the_cost_spends_nothing(self):
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        self._WB.LeadsWorkbench._confirm_search = lambda _self, *a: False
         try:
             wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
-            wb._set_mode("sheet")
-            self.assertEqual(wb._prepare.text(), "Load the sheet")
-            self.assertTrue(wb._skip_seen.isHidden())
-            wb._path = os.path.join(self._tmp, "Prism leads.xlsx")
-            wb._refresh_prepare()
-            wb._prepare.click()
+            wb._filters.set_spec(self._spec())
+            wb._on_prepare()
         finally:
-            self._WB.ProspectorWorker = orig
-        self.assertEqual(len(made), 1)
-        self.assertEqual(made[0].kwargs["limit"], 0)      # read and rank only
-        self.assertNotIn("sessions_dir", made[0].kwargs)  # no seen-index at all
+            self._WB.SourceWorker = orig
+        self.assertEqual(_FakeSourceWorker.made, [])
+        self.assertEqual(wb._jobs, 0)
+        self.assertTrue(wb._prepare.isEnabled())
+
+    def test_the_confirmation_names_the_cost_and_who_it_asks_for(self):
+        """The real question, read rather than clicked: the number of Exa
+        searches, and — for companies with nobody named — the decision-makers
+        it will ask for."""
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        confirm = self._saved_attrs["_confirm_search"]     # the real one
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        spec = self._spec()
+        asked = []
+
+        def answer(reply):
+            return lambda *a, **k: asked.append(a[2]) or reply
+
+        # The rail names nobody (an account import alone): it says who.
+        with mock.patch.object(QMessageBox, "question",
+                               side_effect=answer(QMessageBox.StandardButton.No)):
+            ok = confirm(wb, spec, ["Acme Tooling"], "companies 1–1 of 1 from the import")
+        self.assertFalse(ok)
+        self.assertIn(f"about {wb._estimate(spec)} Exa searches", asked[0])
+        self.assertIn("companies 1–1 of 1", asked[0])
+        self.assertIn("Owners, Founders, Chiefs and Directors", asked[0])
+        # The owner named titles himself: no word about who it asks for.
+        wb._filters.set_spec(spec)
+        with mock.patch.object(QMessageBox, "question",
+                               side_effect=answer(QMessageBox.StandardButton.Yes)):
+            self.assertTrue(confirm(wb, spec, [], ""))
+        self.assertNotIn("Owners", asked[1])
+        # Apollo is billed per person revealed, not per search.
+        wb._set_source("apollo")
+        with mock.patch.object(QMessageBox, "question",
+                               side_effect=answer(QMessageBox.StandardButton.Yes)):
+            confirm(wb, spec, [], "")
+        self.assertIn("Apollo credit", asked[2])
 
     def test_the_run_summary_says_who_the_filters_left_out(self):
         wb = self._WB.LeadsWorkbench({})
@@ -838,7 +1030,8 @@ class LeadFiltersInTheWorkbench(_Workbench):
         from addons.leads.workers import _nobody_left
         text = _nobody_left(0, {"location": 380, "job_title": 32})
         self.assertIn("412 were outside them (380 location, 32 job title)", text)
-        self.assertIn("Net new only", _nobody_left(12, {}))
+        self.assertIn("Only find people no earlier search found", _nobody_left(12, {}))
+        self.assertIn("Search settings", _nobody_left(12, {}))
 
     def test_every_search_failing_names_the_key_not_the_filters(self):
         # 22-Sep-2026: reported live three times on a sheet with well-known
@@ -913,7 +1106,6 @@ class LeadFiltersInTheWorkbench(_Workbench):
             settings={"target": 700, "limit": 40, "verify_limit": 5,
                       "include_earlier": True, "offer": "Line retrofits"})
         wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
         wb._cockpit.refresh_searches()
         wb._cockpit._select(3)
         card = wb._cockpit._saved._grid.itemAt(0).widget()
@@ -923,10 +1115,22 @@ class LeadFiltersInTheWorkbench(_Workbench):
                           wb._verify_limit.value()), (700, 40, 5))
         self.assertFalse(wb._skip_seen.isChecked())
         self.assertEqual(wb._offer.toPlainText(), "Line retrofits")
-        self.assertEqual(wb._mode, "icp")
         self.assertIs(wb._cockpit._stack.currentWidget(), wb._cockpit.leads)
         self.assertEqual(wb._active_search_id, record["id"])
-        self.assertIn("Find people", wb._status.text())
+        self.assertIn("Find new people", wb._status.text())
+        self.assertIsNone(wb._worker)                   # used, never run
+
+    def test_default_view_picks_a_saved_search_like_the_tab_does(self):
+        from addons.leads import saved_searches
+        spec = self._spec()
+        record = saved_searches.save(self._searches, "Plants", spec.to_dict())
+        wb = self._WB.LeadsWorkbench({})
+        wb._cockpit.refresh_searches()
+        menu = wb._cockpit.leads._views_menu
+        pick = next(a for a in menu.actions() if a.text() == "Plants")
+        pick.trigger()
+        self.assertEqual(wb._filters.spec(), spec)
+        self.assertEqual(wb._active_search_id, record["id"])
 
     def test_use_search_waits_while_a_job_runs(self):
         from addons.leads import saved_searches
@@ -990,10 +1194,14 @@ class ApolloIsTheOtherDatabase(_Workbench):
             "seniority": {"include": ["owner"]}})
 
     def _prepared(self, wb):
-        """Press Prepare with the worker stubbed out; return it, or None."""
+        """Press Find new people with the worker stubbed out; return it, or
+        None. The rail opens empty, so a test that set no filters of its own
+        searches for this class's."""
         _FakeSourceWorker.made = []
         orig = self._WB.SourceWorker
         self._WB.SourceWorker = _FakeSourceWorker
+        if not wb._filters.spec().is_searchable():
+            wb._filters.set_spec(self._spec())
         try:
             wb._on_prepare()
         finally:
@@ -1015,9 +1223,11 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertTrue(wb._src_apollo.isEnabled())
         self.assertIn("PAID Apollo plan", wb._src_apollo.toolTip())
         self.assertTrue(wb._keys_box.isHidden())            # either key folds it
-        self.assertTrue(wb._setup_line().startswith("Exa · 6 titles"))
+        wb._filters.set_spec(self._spec())
+        self.assertIn("Exa searches", wb._find_meta.text())  # what the press costs
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
+        self.assertIn("credit per person revealed", wb._find_meta.text())
 
     def test_the_apollo_key_is_saved_and_nothing_else_in_the_config_is(self):
         """The rail saves the key it was given by loading the config fresh and
@@ -1359,16 +1569,17 @@ class EverySourcedPersonIsListed(unittest.TestCase):
         self.assertIs(c._dossiers[0], d1)
         self.assertEqual([d.lead for d in c._dossiers], [d1.lead, other])
 
-    def test_qualified_only_hides_the_rest(self):
+    def test_qualified_only_leaves_the_rest_out(self):
+        """"Qualified by Prism only" is a filter now (Fit score, in More
+        filters), over everyone Prism holds — not a switch on one run."""
+        from addons.leads import pool as P
+        from prospector.filters import SearchSpec
         d1 = _dos("Kunyi", 96, "k@x.com", "valid")
-        c = CK.LeadsCockpit()
-        c.set_dossiers([d1], all_leads=[d1.lead, self._lead("A", 60),
-                                        self._lead("B", 70)])
-        c._only_qualified.setChecked(True)
-        shown = [c._dossier_at(r) for r in range(c._table.rowCount())
-                 if not c._table.isRowHidden(r)]
-        self.assertEqual(shown, [d1])
-        self.assertIn("1 of 3", c._count_lbl.text())
+        people = P.build(runs=[("s1", "2026-09-23T10:00:00", [
+            d1.lead, self._lead("A", 60), self._lead("B", 70)], [d1])])
+        shown = P.filter_people(people, SearchSpec(qualified_only=True))
+        self.assertEqual([p.dossier for p in shown], [d1])
+        self.assertEqual(len(P.filter_people(people, SearchSpec())), 3)
 
     def test_an_unqualified_lead_can_be_picked_exported_and_opened(self):
         from PySide6.QtWidgets import QLabel
@@ -1409,390 +1620,307 @@ class ALeadsOnlyRunShowsItsPeople(_Workbench):
         self.assertTrue(wb._export_btn.isEnabled())
 
 
-class ASheetImportThatFoundNobody(_Workbench):
-    """22-Sep-2026: a company-research export (Company Name, Industry, City…,
-    never a person) went into Import a sheet and came back with nothing — a
-    real, successful run, since sheet.py correctly skips a row with no name
-    column. On screen that read as the button doing nothing: "0 ready to
-    send" before the click, "0 ready to send" after. The empty state now
-    says which of the two things happened."""
-
-    def _empty_run(self):
-        from prospector.engine import RunResult
-        return RunResult(dossiers=[], total_in_sheet=0, signal_source="",
-                         all_leads=[])
-
-    def test_a_sheet_with_no_contact_signal_says_so(self):
-        import openpyxl
-        path = os.path.join(self._tmp, "companies.xlsx")
-        wb_file = openpyxl.Workbook()
-        wb_file.active.append(["Company Name", "Industry Category", "City"])
-        wb_file.active.append(["Acme Tooling", "Packaging Machinery", "Vadodara"])
-        wb_file.save(path)
-
-        wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
-        wb._path = path
-        wb._show_result(self._empty_run(), [])
-
-        empty = wb._cockpit.leads._empty
-        self.assertIn("no name, e-mail or LinkedIn column", empty.title.text())
-        self.assertIn("name", empty.body.text().lower())
-        self.assertTrue(empty.body.text().strip())
-
-    def test_a_real_leads_sheet_that_just_has_nobody_new_keeps_the_default(self):
-        # Same empty RunResult, but the FILE itself has a name column — the
-        # sheet is fine, this run simply found nobody (everyone in it was
-        # filtered or already seen). Must not claim the sheet is the problem.
-        import openpyxl
-        path = os.path.join(self._tmp, "leads.xlsx")
-        wb_file = openpyxl.Workbook()
-        wb_file.active.append(["Name", "Company", "Email"])
-        wb_file.save(path)   # header only — genuinely nobody in it
-
-        wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
-        wb._path = path
-        wb._show_result(self._empty_run(), [])
-
-        empty = wb._cockpit.leads._empty
-        self.assertNotIn("no name, e-mail or LinkedIn column", empty.title.text())
-        self.assertEqual(empty.title.text(), self._WB.i18n.t("No leads yet"))
-
-    def test_icp_mode_is_never_told_it_needs_a_contact_signal(self):
-        # An empty Find-people run has nothing to do with a sheet at all;
-        # the sheet-specific message must only ever fire in sheet mode.
-        wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("icp")
-        wb._show_result(self._empty_run(), [])
-        self.assertNotIn("no name, e-mail or LinkedIn column",
-                         wb._cockpit.leads._empty.title.text())
-
-    def test_a_missing_or_unreadable_file_does_not_crash_the_message(self):
-        # has_name_column() itself can raise (a deleted file, a locked one);
-        # _show_result must still put something sane on screen rather than
-        # let the exception through.
-        wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
-        wb._path = os.path.join(self._tmp, "does-not-exist.xlsx")
-        wb._show_result(self._empty_run(), [])   # must not raise
-        self.assertTrue(wb._cockpit.leads._empty.title.text())
+def _contacts_result(tmp, leads, name="Apollo_leads (1).csv", **settings):
+    """What ImportWizard.result() hands back for a contacts import."""
+    return {"kind": "contacts", "path": os.path.join(tmp, name), "name": name,
+            "sheet": "", "mapping": {"Name": "name", "Email": "email"},
+            "rows": len(leads), "skipped": 0,
+            "settings": {"update_existing": True, "add_to_list": False,
+                         "list_name": "", "find_emails": False, **settings},
+            "leads": list(leads)}
 
 
-class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
-    """22-Sep-2026, three times over. First: rather than tell the owner a
-    company-only sheet needs a different screen, its companies were made to
-    go straight into a real Find-people SEARCH, MAX_FACET_VALUES (the same
-    real cap a person pasting a list into the filter panel hits) at a time.
-    Second, the same day: that ran the search on its own, unasked — an
-    owner who only picked a company list did not thereby ask Prism to spend
-    Exa credits on it. Third: checked directly against how Apollo's own
-    "Import a CSV of Accounts" does this same handoff — "Check the
-    companies where you want to find prospects. Then, click Find People" —
-    and added the same reviewable choice here (CompanyPickDialog) rather
-    than trusting the whole batch went in unread. Importing this kind of
-    sheet now only ever LOADS — a reviewed, tickable batch of its companies
-    (and a suggested decision-maker seniority) land as ordinary, visible,
-    editable chips on the Find people tab, exactly as if the owner had
-    pasted the list in by hand, and nothing is searched until Find people
-    is pressed on its own, as a separate, informed decision."""
+def _accounts_result(tmp, names, name="companies.xlsx"):
+    """What ImportWizard.result() hands back for an accounts import."""
+    return {"kind": "accounts", "path": os.path.join(tmp, name), "name": name,
+            "sheet": "Sheet1", "mapping": {"Company Name": "name"},
+            "rows": len(names), "skipped": 0, "settings": {},
+            "companies": [{"name": n} for n in names]}
 
-    def _sheet(self, name, companies, header="Company Name"):
-        import openpyxl
-        path = os.path.join(self._tmp, name)
-        wbf = openpyxl.Workbook()
-        wbf.active.append([header, "Industry"])
-        for c in companies:
-            wbf.active.append([c, "Packaging Machinery"])
-        wbf.save(path)
-        return path
 
-    def _workbench(self, path, cfg=None, accept_picker=True):
+class ImportIsItsOwnAction(_Workbench):
+    """Apollo's People > Import > CSV (23-Sep-2026, "copy the entire
+    architecture and interface of apollo"): importing is an action at the top
+    of the page with a mapping step — never a mode of the search — and it
+    never searches (22-Sep: "sheets are here to load the data from it"). A
+    contacts import saves the people as contacts tagged with the import; an
+    accounts import records the companies. Either way the page then shows
+    what came in: that import's filter, and nothing else."""
+
+    def setUp(self):
+        super().setUp()
         _FakeSourceWorker.made = []
         orig = self._WB.SourceWorker
-        self.addCleanup(setattr, self._WB, "SourceWorker", orig)
         self._WB.SourceWorker = _FakeSourceWorker
-        # CompanyPickDialog is a real, modal QDialog — .exec() would block
-        # a headless test forever waiting for a click nobody sends. Patch
-        # only the modal loop itself, the same way test_preview_dialog.py
-        # does for its own dialogs: everything else (the checkbox list,
-        # .checked()) runs for real, built from the real batch it is
-        # handed, so a test that unchecks one still exercises the real
-        # widget, not a stand-in for it.
+        self.addCleanup(setattr, self._WB, "SourceWorker", orig)
+
+    @staticmethod
+    def _leads(n=3, **kw):
+        return [Lead(name=f"P{i} Shah", title="Purchase Manager", company=f"Co {i}",
+                     email=f"p{i}@co{i}.com", **kw) for i in range(n)]
+
+    def test_import_opens_the_wizard_for_that_kind_and_a_cancel_writes_nothing(self):
         from unittest import mock
         from PySide6.QtWidgets import QDialog
-        from addons.leads.dialog import CompanyPickDialog
-        patcher = mock.patch.object(
-            CompanyPickDialog, "exec",
-            return_value=(QDialog.Accepted if accept_picker else QDialog.Rejected))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        from addons.leads import imports as IM
+        from addons.leads.import_wizard import ImportWizard
+        opened = []
+        wb = self._WB.LeadsWorkbench({})
+        with mock.patch.object(ImportWizard, "exec",
+                               lambda w: opened.append(w.kind) or QDialog.Rejected):
+            for action in wb._cockpit.leads._import_btn.menu().actions():
+                action.trigger()
+        self.assertEqual(opened, ["contacts", "accounts"])
+        self.assertEqual(IM.list_imports(self._imports), [])
+        self.assertEqual(_FakeSourceWorker.made, [])
+
+    def test_a_contacts_import_saves_them_and_shows_only_them(self):
+        from addons.leads import contacts as CT
+        from addons.leads import imports as IM
+        from prospector.filters import SearchSpec
+        wb = self._WB.LeadsWorkbench({})
+        wb._filters.set_spec(SearchSpec.from_dict(
+            {"job_titles": {"include": ["Plant Head"]}}))     # would hide them all
+        wb._run_import(_contacts_result(self._tmp, self._leads()))
+        heads = IM.list_imports(self._imports)
+        self.assertEqual([(h["kind"], h["name"]) for h in heads],
+                         [("contacts", "Apollo_leads (1).csv")])
+        self.assertEqual((heads[0]["counts"]["rows"], heads[0]["counts"]["added"]), (3, 3))
+        saved = CT.list_contacts(self._contacts)
+        self.assertEqual(len(saved), 3)
+        self.assertTrue(all(c.imports == [heads[0]["id"]] for c in saved))
+        # "Hide Filters 1": the import's filter, and the job title is gone.
+        spec = wb._filters.spec()
+        self.assertEqual(spec.contact_imports, [heads[0]["id"]])
+        self.assertEqual(spec.active_count(), 1)
+        ck = wb._cockpit.leads
+        self.assertEqual(ck._table.rowCount(), 3)
+        self.assertEqual(ck._tab_counts, {"total": 3, "net_new": 0, "saved": 3})
+        self.assertIn("Imported 3 contacts from Apollo_leads (1).csv", wb._status.text())
+        self.assertEqual(_FakeSourceWorker.made, [])        # nothing searched
+        self.assertIsNone(wb._worker)
+
+    def test_someone_already_held_is_updated_not_listed_twice(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._leads(1), name="a.csv"))
+        again = self._leads(1)
+        again[0].title = "Head of Purchase"
+        wb._run_import(_contacts_result(self._tmp, again, name="b.csv"))
+        saved = CT.list_contacts(self._contacts)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].lead.title, "Head of Purchase")
+        self.assertEqual(len(saved[0].imports), 2)          # both imports hold her
+        self.assertEqual(wb._cockpit.leads._table.rowCount(), 1)
+        keep = self._leads(1)
+        keep[0].title = "Intern"
+        wb._run_import(_contacts_result(self._tmp, keep, name="c.csv",
+                                        update_existing=False))
+        self.assertEqual(CT.list_contacts(self._contacts)[0].lead.title,
+                         "Head of Purchase")
+
+    def test_find_emails_on_import_asks_for_the_ones_without(self):
+        wb = self._WB.LeadsWorkbench({})
+        made = []
+        wb._find_emails = lambda dossiers: made.append([d.lead.name for d in dossiers])
+        leads = self._leads()
+        leads[1].email = ""
+        leads[2].email = ""
+        wb._run_import(_contacts_result(self._tmp, leads, find_emails=True))
+        self.assertEqual(made, [["P1 Shah", "P2 Shah"]])
+
+    def test_add_to_a_list_writes_the_sheet_the_lists_tab_shows(self):
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._leads(), add_to_list=True,
+                                        list_name="Vadodara buyers"))
+        path = os.path.join(self._tmp, "Vadodara buyers.csv")
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual(CK._csv_rows(path), 3)
+
+    def test_an_accounts_import_records_the_companies_and_searches_nothing(self):
+        from addons.leads import imports as IM
+        wb = self._WB.LeadsWorkbench({})                    # no key at all
+        wb._run_import(_accounts_result(self._tmp, ["Acme Tooling", "Beta Corp"]))
+        heads = IM.list_imports(self._imports, "accounts")
+        self.assertEqual((heads[0]["n_companies"], heads[0]["searched"]), (2, 0))
+        self.assertEqual(wb._filters.spec().account_imports, [heads[0]["id"]])
+        self.assertEqual(wb._filters.spec().active_count(), 1)
+        self.assertEqual(_FakeSourceWorker.made, [])
+        self.assertIn("Find new people", wb._status.text())
+        self.assertNotIn("Exa API key", wb._status.text())
+        # Find new people is armed for them: decision-makers, a batch named.
+        self.assertTrue(wb._prepare.isEnabled())
+        self.assertIn("companies 1–2 of 2 from the import", wb._find_meta.text())
+
+    def test_a_contacts_file_that_is_really_companies_says_so_in_the_wizard(self):
+        """22-Sep-2026: a company-research export (Company Name, Industry,
+        City — never a person) went in as people and nothing came of it. The
+        mapping step now says which import it is."""
+        import openpyxl
+        from addons.leads.import_wizard import ImportWizard
+        path = os.path.join(self._tmp, "companies.xlsx")
+        book = openpyxl.Workbook()
+        book.active.append(["Company Name", "Industry Category", "City"])
+        book.active.append(["Acme Tooling", "Packaging Machinery", "Vadodara"])
+        book.save(path)
+        w = ImportWizard("contacts")
+        self.assertTrue(w.load(path))
+        w._go_next()                                        # to the mapping
+        self.assertFalse(w._next.isEnabled())
+        self.assertIn("looks like a list of companies", w._map_error.text())
+        people = ImportWizard("contacts")
+        book = openpyxl.Workbook()
+        book.active.append(["Name", "Company"])
+        book.active.append(["Jane Doe", "Acme Tooling"])
+        other = os.path.join(self._tmp, "people.xlsx")
+        book.save(other)
+        self.assertTrue(people.load(other))
+        people._go_next()
+        self.assertTrue(people._next.isEnabled())
+        self.assertEqual(people._map_error.text(), "")
+
+
+class AnAccountImportIsSearchedInBatches(_Workbench):
+    """Find new people over an Account CSV import asks Exa for people at its
+    companies — MAX_FACET_VALUES at a time (Exa pairs every role with every
+    company, so an unbounded list is unbounded searches), from where the last
+    search stopped, kept on disk so a restart never pays for the same
+    companies twice. With no job title or seniority of the owner's own it asks
+    for the decision-makers an Indian SME actually has (22-Sep-2026: MD, CEO,
+    Founder, Director, Owner — not one vertical's automation heads)."""
+
+    def setUp(self):
+        super().setUp()
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        self.addCleanup(setattr, self._WB, "SourceWorker", orig)
+
+    def _imported(self, names, cfg=None, name="companies.xlsx"):
         wb = self._WB.LeadsWorkbench(cfg if cfg is not None else {"exa_api_key": "k"})
-        wb._set_mode("sheet")
-        wb._path = path
+        wb._run_import(_accounts_result(self._tmp, names, name=name))
         return wb
 
-    def test_choosing_a_company_only_sheet_relabels_the_button(self):
-        # 22-09-2026, the follow-up to the follow-up: a customer pressed a
-        # button that said "Load the sheet" and was startled to watch it go
-        # off and run a live, paid Exa search instead. _choose_file must
-        # relabel the button the moment it can tell which kind of file this
-        # is — and, since this press only ever loads now, not promise a
-        # search either. The secondary button has nothing to do yet.
-        path = self._sheet("companies.xlsx", ["Acme Tooling", "Beta Corp"])
-        wb = self._workbench(path)                 # sets wb._path directly
-        self.assertEqual(wb._prepare.text(), "Load the sheet")  # not yet told
-        wb._update_prepare_labels()                 # what _choose_file calls
-        self.assertEqual(wb._prepare.text(), "Add companies to Find people")
-        self.assertTrue(wb._prepare_all.isHidden())
+    def _press(self, wb):
+        """Find new people, then the search "finishing" so it can be pressed
+        again; the spec the worker was handed."""
+        before = len(_FakeSourceWorker.made)
+        wb._on_prepare()
+        if len(_FakeSourceWorker.made) == before:
+            return None
+        wb._jobs = 0
+        wb._set_running(False)
+        return _FakeSourceWorker.made[-1].kwargs["spec"]
 
-    def test_a_real_contacts_sheet_keeps_load_the_sheet(self):
-        path = os.path.join(self._tmp, "contacts.xlsx")
-        import openpyxl
-        wbf = openpyxl.Workbook()
-        wbf.active.append(["Name", "Company", "Email"])
-        wbf.active.append(["Jane Doe", "Acme Tooling", "jane@acme.example"])
-        wbf.save(path)
-        wb = self._workbench(path)
-        wb._update_prepare_labels()
-        self.assertEqual(wb._prepare.text(), "Load the sheet")
-        self.assertEqual(wb._prepare_all.text(), "Load and prepare")
-        self.assertFalse(wb._prepare_all.isHidden())
+    def _searched(self):
+        from addons.leads import imports as IM
+        return [h["searched"] for h in IM.list_imports(self._imports, "accounts")]
 
-    def test_a_small_sheet_loads_every_company_in_one_press_and_never_searches(self):
-        path = self._sheet("small.xlsx", [f"Company {i}" for i in range(1, 6)])
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(_FakeSourceWorker.made, [])       # nothing searched
-        self.assertEqual(wb._filters.spec().companies.include,
-                         [f"Company {i}" for i in range(1, 6)])
-        self.assertEqual(wb._sheet_company_offset, 5)
-        self.assertEqual(wb._mode, "icp")                   # switched to review
-        self.assertTrue(wb._status.text())
+    def test_the_first_press_asks_for_the_decision_makers_at_the_first_batch(self):
+        names = [f"Company {i}" for i in range(1, 6)]
+        wb = self._imported(names)
+        spec = self._press(wb)
+        self.assertEqual(spec["companies"]["include"], names)
+        self.assertEqual(spec["seniority"]["include"],
+                         list(self._WB._COMPANY_SEARCH_SENIORITY))
+        self.assertEqual(spec["job_titles"]["include"], [])
+        self.assertEqual(spec["industries"]["include"], [])
+        self.assertEqual(spec["account_imports"], [])       # companies, not the id
+        _spec, companies, note = self.asked[0]
+        self.assertEqual(companies, names)
+        self.assertEqual(note, "companies 1–5 of 5 from the import")
+        # The session keeps the RAIL's filters: the import, not 5 chips.
+        self.assertEqual(wb._next_params["filters"]["account_imports"],
+                         wb._filters.spec().account_imports)
+        self.assertEqual(self._searched(), [5])
 
-    def test_pressing_find_people_afterwards_is_the_real_search(self):
-        # The whole point: loading is one press, searching is a separate,
-        # deliberate one — the exact same button an ordinary ICP search
-        # already uses, now sitting in front of the owner with the sheet's
-        # companies already in its filters.
-        path = self._sheet("small.xlsx", ["Acme Tooling", "Beta Corp"])
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")     # load
-        self.assertEqual(_FakeSourceWorker.made, [])
-        wb._on_prepare(leads_only=True, emails="later")     # now in icp mode
-        self.assertEqual(len(_FakeSourceWorker.made), 1)
-        spec = _FakeSourceWorker.made[0].kwargs["spec"]
+    def test_a_big_import_goes_fifty_at_a_time_and_a_restart_carries_on(self):
+        from prospector.filters import MAX_FACET_VALUES
+        n = MAX_FACET_VALUES * 2 + 10
+        names = [f"Company {i}" for i in range(1, n + 1)]
+        wb = self._imported(names)
+        first = self._press(wb)["companies"]["include"]
+        self.assertEqual(first, names[:MAX_FACET_VALUES])
+        self.assertEqual(self._searched(), [MAX_FACET_VALUES])
+        # A new launch: the position came off disk, not memory.
+        again = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        from addons.leads import imports as IM
+        head = IM.list_imports(self._imports, "accounts")[0]
+        again._filters.set_spec({"account_imports": [head["id"]]})
+        self.assertIn(f"companies {MAX_FACET_VALUES + 1}–{2 * MAX_FACET_VALUES} of {n}",
+                      again._find_meta.text())
+        second = self._press(again)["companies"]["include"]
+        third = self._press(again)["companies"]["include"]
+        self.assertEqual((len(second), len(third)), (MAX_FACET_VALUES, 10))
+        self.assertEqual(first + second + third, names)     # no gaps, no repeats
+        self.assertEqual(self._searched(), [n])
+        self.assertIn("all searched", IM.label(IM.list_imports(self._imports)[0]))
+
+    def test_once_every_company_is_searched_it_says_so_and_starts_again(self):
+        wb = self._imported(["Acme Tooling", "Beta Corp"])
+        self._press(wb)
+        self.assertIn("starts again from the first", wb._find_meta.text())
+        spec = self._press(wb)
         self.assertEqual(spec["companies"]["include"], ["Acme Tooling", "Beta Corp"])
+        self.assertIn("starts again from the first", self.asked[-1][2])
+        self.assertEqual(self._searched(), [2])
 
-    def test_the_batch_is_shown_for_review_before_anything_is_added(self):
-        # Apollo's own step, matched directly: the owner sees the batch and
-        # ticks which of it they actually want, same as the filter panel's
-        # own chips would let them do by removing one afterwards — just
-        # asked up front instead.
-        path = self._sheet("review.xlsx", ["Acme Tooling", "Beta Corp", "Gamma Inc"])
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().companies.include,
-                         ["Acme Tooling", "Beta Corp", "Gamma Inc"])   # all ticked by default
+    def test_a_no_to_the_cost_spends_nothing_and_moves_nothing(self):
+        self._WB.LeadsWorkbench._confirm_search = lambda _self, *a: False
+        wb = self._imported(["Acme Tooling"])
+        self.assertIsNone(self._press(wb))
+        self.assertEqual(self._searched(), [0])             # free to try again
 
-    def test_cancelling_the_review_adds_nothing_and_does_not_consume_the_batch(self):
-        path = self._sheet("cancelled.xlsx", ["Acme Tooling", "Beta Corp"])
-        wb = self._workbench(path, accept_picker=False)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().companies.include, [])
-        self.assertEqual(wb._mode, "sheet")                # never switched tabs
-        self.assertEqual(wb._sheet_company_offset, 0)      # free to try again
-        self.assertIn("Cancelled", wb._status.text())
+    def test_two_imports_share_a_batch_without_asking_twice_for_one_company(self):
+        from addons.leads import imports as IM
+        wb = self._imported(["Acme Tooling", "Beta Corp"], name="a.xlsx")
+        wb._run_import(_accounts_result(self._tmp, ["beta corp", "Gamma Inc"],
+                                        name="b.xlsx"))
+        ids = [h["id"] for h in IM.list_imports(self._imports, "accounts")]
+        wb._filters.set_spec({"account_imports": ids})
+        spec = self._press(wb)
+        got = [c.casefold() for c in spec["companies"]["include"]]
+        self.assertEqual(sorted(got), ["acme tooling", "beta corp", "gamma inc"])
+        self.assertEqual(self._searched(), [2, 2])
 
-    def test_unticking_a_company_in_the_review_leaves_it_out(self):
-        from unittest import mock
-        from PySide6.QtCore import Qt as _Qt
-        from addons.leads.dialog import CompanyPickDialog
-        path = self._sheet("partial.xlsx",
-                           ["Acme Tooling", "Beta Corp", "Gamma Inc"])
-        wb = self._workbench(path)
-        # The picker's own .exec() is already patched to auto-accept; hook
-        # its construction to untick one company, the way a real click on
-        # its checkbox would, before that accept happens.
-        real_init = CompanyPickDialog.__init__
-
-        def _uncheck_beta(self, companies, parent=None):
-            real_init(self, companies, parent)
-            for i in range(self._list.count()):
-                if self._list.item(i).text() == "Beta Corp":
-                    self._list.item(i).setCheckState(_Qt.Unchecked)
-
-        with mock.patch.object(CompanyPickDialog, "__init__", _uncheck_beta):
-            wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().companies.include,
-                         ["Acme Tooling", "Gamma Inc"])
-        self.assertEqual(wb._sheet_company_offset, 3)       # the batch is still spent
-
-    def test_unticking_everything_adds_nothing_but_still_spends_the_batch(self):
-        path = self._sheet("none_picked.xlsx", ["Acme Tooling"])
-        wb = self._workbench(path)
-        from unittest import mock
-        from PySide6.QtCore import Qt as _Qt
-        from addons.leads.dialog import CompanyPickDialog
-        real_init = CompanyPickDialog.__init__
-
-        def _uncheck_all(self, companies, parent=None):
-            real_init(self, companies, parent)
-            for i in range(self._list.count()):
-                self._list.item(i).setCheckState(_Qt.Unchecked)
-
-        with mock.patch.object(CompanyPickDialog, "__init__", _uncheck_all):
-            wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(_FakeSourceWorker.made, [])
-        self.assertEqual(wb._mode, "sheet")                 # nothing to review, stayed put
-        self.assertEqual(wb._sheet_company_offset, 1)
-        self.assertIn("Nothing was ticked", wb._status.text())
-
-    def test_a_big_sheet_is_loaded_max_facet_values_at_a_time(self):
-        from prospector.filters import MAX_FACET_VALUES
-        n = MAX_FACET_VALUES * 2 + 10          # three uneven batches
-        path = self._sheet("big.xlsx", [f"Company {i}" for i in range(1, n + 1)])
-        wb = self._workbench(path)
-        seen = []
-        sizes = []
-        for _ in range(3):
-            wb._set_mode("sheet")               # back to Import a sheet, as a
-                                                 # customer would between batches
-            wb._on_prepare(leads_only=True, emails="later")
-            batch = wb._filters.spec().companies.include
-            sizes.append(len(batch))
-            seen.extend(batch)
-        self.assertEqual(sizes, [MAX_FACET_VALUES, MAX_FACET_VALUES, 10])
-        # Every company covered exactly once across the three presses —
-        # no gaps, no repeats.
-        self.assertEqual(seen, [f"Company {i}" for i in range(1, n + 1)])
-        self.assertEqual(wb._sheet_company_offset, n)
-        self.assertEqual(_FakeSourceWorker.made, [])        # still never searched
-
-    def test_a_fourth_press_once_the_sheet_is_exhausted_loads_nothing(self):
-        from prospector.filters import MAX_FACET_VALUES
-        path = self._sheet("exact.xlsx",
-                           [f"Company {i}" for i in range(1, MAX_FACET_VALUES + 1)])
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        wb._set_mode("sheet")
-        wb._on_prepare(leads_only=True, emails="later")    # nothing left
-        self.assertIn("already", wb._status.text())
-
-    def test_choosing_a_different_sheet_restarts_the_batch_from_zero(self):
-        path_a = self._sheet("a.xlsx", ["A1", "A2", "A3"])
-        wb = self._workbench(path_a)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._sheet_company_offset, 3)
-        path_b = self._sheet("b.xlsx", ["B1", "B2"])
-        wb._set_mode("sheet")
-        wb._path = path_b
-        wb._sheet_company_offset = 0            # what _choose_file does
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().companies.include, ["B1", "B2"])
-
-    def test_forward_filled_company_blocks_are_read_like_a_contacts_sheet(self):
-        # sheet.py's own reason to forward-fill Company down a block applies
-        # here too — a company-research export grouped under one heading,
-        # blank on every row after the first, is a common export shape.
-        path = os.path.join(self._tmp, "blocked.xlsx")
-        import openpyxl
-        wbf = openpyxl.Workbook()
-        wbf.active.append(["Company", "Note"])
-        wbf.active.append(["Acme Tooling", "primary contact unlisted"])
-        wbf.active.append(["", "secondary site"])
-        wbf.active.append(["Beta Corp", "new lead"])
-        wbf.save(path)
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().companies.include,
-                         ["Acme Tooling", "Beta Corp"])
-
-    def test_a_sheet_that_has_names_is_not_treated_as_companies(self):
-        # The ordinary sheet-import path (workers.ProspectorWorker) must be
-        # completely unaffected by any of this.
-        import openpyxl
-        path = os.path.join(self._tmp, "has_names.xlsx")
-        wbf = openpyxl.Workbook()
-        wbf.active.append(["Name", "Company"])
-        wbf.active.append(["Jane Doe", "Acme Tooling"])
-        wbf.save(path)
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(_FakeSourceWorker.made, [])   # SourceWorker never ran
-        self.assertIsInstance(wb._worker, self._WB.ProspectorWorker)
-
-    def test_no_key_is_needed_just_to_load_companies_into_filters(self):
-        # Loading costs nothing — only the search the owner presses
-        # separately, afterwards, does — so no key is asked for here.
-        path = self._sheet("needs_key.xlsx", ["Only Co"])
-        wb = self._workbench(path, cfg={})            # no exa_api_key
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(_FakeSourceWorker.made, [])
-        self.assertEqual(wb._filters.spec().companies.include, ["Only Co"])
-        self.assertEqual(wb._sheet_company_offset, 1)
-        self.assertNotIn("Exa API key", wb._status.text())
-
-    def test_untouched_default_filters_load_broad_seniority_not_one_vertical(self):
-        # Live report, 22-Sep-2026: a real 193-company run came back with
-        # "No people came back" on every batch — not because Exa found
-        # nobody, but because a fresh workbench's default job titles are
-        # ONE vertical ("Head of Digital Transformation", automation heads
-        # at automobile/steel/mining companies), silently reused for
-        # companies that are none of those. A small Vadodara pharma-
-        # machinery manufacturer has an owner; it does not have a "Head of
-        # Digital Transformation", and asking for exactly that title found
-        # nobody at any of them.
-        path = self._sheet("default_filters.xlsx", ["Only Co"])
-        wb = self._workbench(path)            # untouched: still _default_spec()
-        wb._on_prepare(leads_only=True, emails="later")
+    def test_the_owners_own_titles_are_respected(self):
+        wb = self._imported(["Only Co"])
         spec = wb._filters.spec()
-        self.assertEqual(spec.job_titles.include, [])
-        self.assertEqual(spec.industries.include, [])
-        self.assertEqual(spec.seniority.include,
-                         list(self._WB._COMPANY_SEARCH_SENIORITY))
-
-    def test_filters_the_owner_actually_set_are_respected(self):
-        # The opposite case: the owner switched to Find people, set their
-        # own titles, then went back to Import a sheet. That choice is
-        # deliberate and must not be silently overridden.
-        path = self._sheet("custom_filters.xlsx", ["Only Co"])
-        wb = self._workbench(path)
-        wb._filters.set_spec(self._WB.SearchSpec.from_dict(
-            {"job_titles": {"include": ["Purchase Head"]}}))
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().job_titles.include, ["Purchase Head"])
-
-    def test_stale_titles_are_overridden_even_if_something_else_touched_the_spec(self):
-        # The actual bug behind the live report even after the seniority
-        # fix landed: the original gate compared the WHOLE spec against
-        # _default_spec() byte-for-byte, so ANY other field differing —
-        # here, a location someone typed into Find people at some earlier
-        # point the same session — silently kept the stale automation-
-        # vertical job titles with no sign anything had gone wrong. The
-        # only thing that should matter is whether the TITLES are still
-        # the ones this path must not use.
-        path = self._sheet("touched_elsewhere.xlsx", ["Only Co"])
-        wb = self._workbench(path)
-        spec = wb._filters.spec()
-        spec.locations.exclude = ["India"]   # unrelated field, touched
+        spec.job_titles.include = ["Purchase Head"]
         wb._filters.set_spec(spec)
-        wb._on_prepare(leads_only=True, emails="later")
-        got = wb._filters.spec()
-        self.assertEqual(got.job_titles.include, [])
-        self.assertEqual(got.seniority.include,
-                         list(self._WB._COMPANY_SEARCH_SENIORITY))
+        got = self._press(wb)
+        self.assertEqual(got["job_titles"]["include"], ["Purchase Head"])
+        self.assertEqual(got["seniority"]["include"], [])
 
-    def test_empty_titles_with_the_owners_own_seniority_keeps_that_seniority(self):
-        # Empty job titles (not the stale default, just nothing) with the
-        # owner's OWN seniority choice already set must not be clobbered
-        # by the company-search default.
-        path = self._sheet("own_seniority.xlsx", ["Only Co"])
-        wb = self._workbench(path)
-        wb._filters.set_spec(self._WB.SearchSpec.from_dict(
-            {"seniority": {"include": ["vp"]}}))
-        wb._on_prepare(leads_only=True, emails="later")
-        self.assertEqual(wb._filters.spec().seniority.include, ["vp"])
+    def test_the_owners_own_seniority_is_kept(self):
+        wb = self._imported(["Only Co"])
+        spec = wb._filters.spec()
+        spec.seniority.include = ["vp"]
+        wb._filters.set_spec(spec)
+        self.assertEqual(self._press(wb)["seniority"]["include"], ["vp"])
+
+    def test_the_starter_searchs_one_vertical_titles_are_never_used_for_companies(self):
+        """The owner's starter titles name one vertical — digital-
+        transformation and automation heads. Asked of a list of small
+        Vadodara manufacturers they find nobody, so a search over an account
+        import replaces them with the decision-makers, whatever else was
+        touched on the rail."""
+        wb = self._imported(["Only Co"])
+        wb.use_starter("icp")
+        spec = wb._filters.spec()
+        spec.account_imports = self._searched_ids()
+        spec.locations.exclude = ["Pakistan"]               # something else touched
+        wb._filters.set_spec(spec)
+        got = self._press(wb)
+        self.assertEqual(got["job_titles"]["include"], [])
+        self.assertEqual(got["industries"]["include"], [])
+        self.assertEqual(got["seniority"]["include"],
+                         list(self._WB._COMPANY_SEARCH_SENIORITY))
+        self.assertEqual(got["locations"]["exclude"], ["Pakistan"])
+
+    def _searched_ids(self):
+        from addons.leads import imports as IM
+        return [h["id"] for h in IM.list_imports(self._imports, "accounts")]
 
     def test_a_managing_director_ceo_or_founder_is_not_filtered_out(self):
         # Live report, 22-Sep-2026: a real 50-company batch came back with
@@ -1800,26 +1928,227 @@ class ACompanyOnlySheetLoadsIntoFindPeoplesFilters(_Workbench):
         # filters (seniority)" — only 37 survived. filters.seniority_of()
         # reads "Managing Director", "CEO", "Chairman" and "President" as
         # c_suite, and "Founder"/"Co-Founder" as founder, never as director
-        # or owner (its own docstring says so) — exactly the titles a real
-        # Indian SME's decision-maker carries. The original two-term list
-        # ("owner", "director") asked Exa for those roles AND rejected
-        # anyone whose actual title wasn't literally "Owner" or "Director",
-        # discarding almost everyone a company-sheet search exists to find.
-        from prospector.filters import match_person
-        path = self._sheet("titles.xlsx", ["Only Co"])
-        wb = self._workbench(path)
-        wb._on_prepare(leads_only=True, emails="later")
-        spec = wb._filters.spec()
+        # or owner — exactly the titles a real Indian SME's decision-maker
+        # carries.
+        from prospector.filters import SearchSpec, match_person
+        wb = self._imported(["Only Co"])
+        spec = SearchSpec.from_dict(self._press(wb))
         for title in ("Managing Director", "CEO", "Chairman", "President",
                       "Founder", "Co-Founder", "Founder & CEO",
                       "Director", "Owner"):
             lead = Lead(name="P", title=title, company="Only Co")
             self.assertEqual(match_person(spec, lead), "", title)
-        # Still not a decision-maker: an ordinary manager or engineer must
-        # keep being rejected — this widens who counts, not everyone.
+        # Still not a decision-maker: this widens who counts, not everyone.
         for title in ("Quality Engineer", "Assistant Manager", "Intern"):
             lead = Lead(name="P", title=title, company="Only Co")
             self.assertEqual(match_person(spec, lead), "seniority", title)
+
+    def test_the_page_shows_the_people_prism_holds_at_those_companies(self):
+        from prospector.engine import RunResult
+        wb = self._imported(["Acme Tooling"])
+        at = Lead(name="Ravi Patel", title="Director", company="Acme Tooling Pvt Ltd")
+        away = Lead(name="Sara Khan", title="Director", company="Globex")
+        wb._show_result(RunResult(dossiers=[], total_in_sheet=2, signal_source="",
+                                  all_leads=[at, away]), [])
+        ck = wb._cockpit.leads
+        self.assertEqual([ck._dossier_at(r).lead.name for r in range(ck._table.rowCount())],
+                         ["Ravi Patel"])
+
+
+class ThePeoplePageIsThePool(_Workbench):
+    """Find People over everyone Prism holds (addons/leads/pool.py): saved
+    contacts and every past run, one row per person. The owner chose
+    (23-Sep-2026) "instant locally, button fetches new": every filter click,
+    tab, sort, search and page re-reads what is held and spends nothing;
+    only Find new people searches."""
+
+    def _held_run(self, wb, leads, dossiers=(), params=None, sid="s-older",
+             when="2026-09-20T10:00:00+05:30"):
+        wb._runs[sid] = (sid, when, list(leads), list(dossiers), [], dict(params or {}))
+        wb._rebuild_pool()
+
+    @staticmethod
+    def _people(n, title="Plant Head", **kw):
+        return [Lead(name=f"Person {i:02d}", title=title, company=f"Firm {i:02d}",
+                     email=f"p{i}@firm{i}.com", fit_score=50 + i, **kw)
+                for i in range(n)]
+
+    def _names(self, wb):
+        ck = wb._cockpit.leads
+        return [ck._dossier_at(r).lead.name for r in range(ck._table.rowCount())]
+
+    def test_everyone_held_is_on_the_page_split_into_the_three_tabs(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        people = self._people(4)
+        saved = CT.Contact(lead=people[0], saved_at="2026-09-21T09:00:00+05:30")
+        wb._contacts = [saved]
+        self._held_run(wb, people)                       # person 0 is also saved
+        ck = wb._cockpit.leads
+        self.assertEqual(ck._table.rowCount(), 4)   # nobody listed twice
+        self.assertEqual(ck._tab_counts, {"total": 4, "net_new": 3, "saved": 1})
+        ck._tab_btns["saved"].click()
+        self.assertEqual(self._names(wb), ["Person 00"])
+        ck._tab_btns["net_new"].click()
+        self.assertEqual(len(self._names(wb)), 3)
+        self.assertNotIn("Person 00", self._names(wb))
+
+    def test_a_filter_click_narrows_at_once_and_spends_nothing(self):
+        from prospector.filters import SearchSpec
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        self.addCleanup(setattr, self._WB, "SourceWorker", orig)
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        self._held_run(wb, self._people(3)
+                  + [Lead(name="Owner Person", title="Owner", company="Solo Co")])
+        wb._filters.set_spec(SearchSpec.from_dict({"seniority": {"include": ["owner"]}}))
+        self.assertEqual(self._names(wb), ["Owner Person"])
+        self.assertEqual(wb._cockpit.leads._tab_counts["total"], 1)
+        self.assertEqual(wb._cockpit.leads._filter_count, 1)   # "Hide filters 1"
+        self.assertEqual(_FakeSourceWorker.made, [])
+        self.assertIsNone(wb._worker)
+
+    def test_twenty_five_to_a_page_and_the_pager_turns_them(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held_run(wb, self._people(30))
+        ck = wb._cockpit.leads
+        self.assertEqual(ck._table.rowCount(), 25)
+        self.assertEqual(ck._range_lbl.text(), "1 - 25 of 30")
+        ck._next_btn.click()
+        self.assertEqual(ck._table.rowCount(), 5)
+        self.assertEqual(ck._range_lbl.text(), "26 - 30 of 30")
+        self.assertFalse(ck._next_btn.isEnabled())
+        wb._filters.set_spec({"job_titles": {"include": ["Plant Head"]}})
+        self.assertEqual(ck._range_lbl.text(), "1 - 25 of 30")   # a filter: page 1
+
+    def test_sort_orders_the_whole_pool_before_it_is_paged(self):
+        wb = self._WB.LeadsWorkbench({})
+        people = self._people(30)
+        self._held_run(wb, people)
+        ck = wb._cockpit.leads
+        self.assertEqual(self._names(wb)[0], "Person 29")       # best fit first
+        ck._sort.setCurrentIndex(ck._sort.findData("name"))
+        self.assertEqual(self._names(wb)[0], "Person 00")       # A–Z, across pages
+        self.assertEqual(ck.sort_key(), "name")
+
+    def test_search_people_narrows_by_name_title_company_or_place(self):
+        wb = self._WB.LeadsWorkbench({})
+        people = self._people(3)
+        people[2].extra["location"] = "Dubai, United Arab Emirates"
+        self._held_run(wb, people)
+        wb._cockpit.leads._search.setText("dubai")
+        wb._cockpit.leads._search_timer.timeout.emit()        # the debounce, run now
+        self.assertEqual(self._names(wb), ["Person 02"])
+        wb._on_query("firm 01")
+        self.assertEqual(self._names(wb), ["Person 01"])
+
+    def test_a_search_never_loses_the_people_it_found_to_its_own_filters(self):
+        """Industry, keywords and similar titles only STEER a search, which
+        takes whoever comes back — Exa's own industry label, an Apollo tag, a
+        "Works Manager" for "Plant Head". The page must show them under the
+        same filters, or Find new people "finds 300" and shows twelve."""
+        from prospector.filters import SearchSpec
+        wb = self._WB.LeadsWorkbench({})
+        spec = SearchSpec.from_dict({"job_titles": {"include": ["Plant Head"]},
+                                     "industries": {"include": ["Steel Manufacturing"]},
+                                     "keywords": {"include": ["rolling mill"]}})
+        found = [Lead(name="Asha Rao", title="Works Manager", company="Jindal Co",
+                      industry="mining & metals"),
+                 Lead(name="Vikram Das", title="GM Operations", company="Tata Co")]
+        self._held_run(wb, found, params={"mode": "icp_leads_only",
+                                     "filters": spec.to_dict()})
+        imported = Lead(name="Imported Person", title="Accountant", company="Other Co")
+        from addons.leads import contacts as CT
+        wb._contacts = [CT.Contact(lead=imported)]
+        wb._rebuild_pool()
+        wb._filters.set_spec(spec)
+        self.assertEqual(sorted(self._names(wb)), ["Asha Rao", "Vikram Das"])
+        # A different industry is a different question: they are not steered
+        # by it, and carry nothing that says they match it.
+        wb._filters.set_spec({"industries": {"include": ["Pharmaceuticals"]}})
+        self.assertEqual(self._names(wb), [])
+
+    def test_save_moves_the_ticked_people_from_net_new_to_saved(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held_run(wb, self._people(3))
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        ck._table.item(1, 0).setCheckState(Qt.Checked)
+        ck._b_contact.click()
+        self.assertEqual(len(CT.list_contacts(self._contacts)), 2)
+        self.assertEqual(ck._tab_counts, {"total": 3, "net_new": 1, "saved": 2})
+        self.assertIn("Saved 2 as contacts", wb._status.text())
+
+    def test_exporting_someone_saves_them_as_apollo_does(self):
+        from unittest import mock
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held_run(wb, self._people(2))
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        out = os.path.join(self._tmp, "picked.csv")
+        with mock.patch.object(self._WB.QFileDialog, "getSaveFileName",
+                               return_value=(out, "")), \
+                mock.patch.object(self._WB.QMessageBox, "information"):
+            ck._b_export.click()
+        self.assertTrue(os.path.exists(out))
+        self.assertEqual([c.via for c in CT.list_contacts(self._contacts)], [["export"]])
+        self.assertEqual(ck._tab_counts["saved"], 1)
+
+    def test_an_opened_session_shows_only_its_people_until_show_everyone(self):
+        from addons.leads import sessions
+        wb = self._WB.LeadsWorkbench({})
+        self._held_run(wb, self._people(3), sid="s-other")
+        first = self._WB.LeadsWorkbench({})
+        self._finished(first)
+        loaded = sessions.load(self._sessions, first._session_id)
+        wb._apply_session(loaded, scope=True)
+        self.assertEqual(sorted(self._names(wb)), ["Kunyi", "Vaibhav"])
+        self.assertFalse(wb._scope_btn.isHidden())
+        wb._scope_btn.click()
+        self.assertEqual(len(self._names(wb)), 5)
+        self.assertTrue(wb._scope_btn.isHidden())
+
+    def test_the_pool_worker_reads_every_contact_and_every_run(self):
+        from addons.leads import contacts as CT
+        from addons.leads.workers import LeadsPoolWorker
+        first = self._WB.LeadsWorkbench({})
+        self._finished(first)
+        CT.save(self._contacts, [Lead(name="Held One", company="Held Co",
+                                      email="h@held.com")], via="save")
+        got = []
+        w = LeadsPoolWorker(self._contacts, self._sessions)
+        w.done.connect(lambda contacts, runs: got.append((contacts, runs)))
+        w.failed.connect(lambda msg: got.append(msg))
+        w.run()                                              # inline: no thread
+        contacts, runs = got[0]
+        self.assertEqual([c.lead.name for c in contacts], ["Held One"])
+        self.assertEqual(len(runs), 1)
+        sid, when, leads, dossiers, drafts, params = runs[0]
+        self.assertEqual(sid, first._session_id)
+        self.assertEqual(len(leads), 2)
+        self.assertEqual(params["mode"], "sheet")
+        wb = self._WB.LeadsWorkbench({})
+        wb._on_pool_loaded(contacts, runs)
+        self.assertEqual(wb._cockpit.leads._tab_counts, {"total": 3, "net_new": 2,
+                                                          "saved": 1})
+
+    def test_the_run_on_screen_keeps_its_own_objects_when_the_pool_arrives(self):
+        """The workers verify and enrich the run on screen IN PLACE; a copy of
+        it read from disk must not replace it in the page."""
+        from addons.leads.workers import LeadsPoolWorker
+        wb = self._WB.LeadsWorkbench({})
+        res, _drafts = self._finished(wb)
+        got = []
+        w = LeadsPoolWorker(self._contacts, self._sessions)
+        w.done.connect(lambda contacts, runs: got.append((contacts, runs)))
+        w.run()
+        wb._on_pool_loaded(*got[0])
+        ck = wb._cockpit.leads
+        on_screen = {id(ck._dossier_at(r).lead) for r in range(ck._table.rowCount())}
+        self.assertEqual(on_screen, {id(l) for l in res.all_leads})
 
 
 class _FakeQualifyWorker(_FakeSourceWorker):
@@ -2074,14 +2403,18 @@ class ClearAndSelectAllStayUsableDuringARun(_Workbench):
             if cockpit._dossier_at(r).lead in leads:
                 cockpit._table.item(r, 0).setCheckState(Qt.Checked)
 
-    def test_the_six_action_buttons_are_held_off_mid_run(self):
+    def test_the_actions_that_start_a_job_are_held_off_mid_run(self):
         wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
         leads = self._leads_only_run(wb)
         cockpit = wb._cockpit.leads
         self._tick(cockpit, leads)
         wb._set_running(True)
         for b in cockpit._bulk_actions():
-            self.assertFalse(b.isEnabled(), b.text())
+            if b is cockpit._b_contact:
+                # Save is a local write, not a job: it stays usable.
+                self.assertTrue(b.isEnabled(), b.text())
+            else:
+                self.assertFalse(b.isEnabled(), b.text())
 
     def test_clear_and_select_all_are_not_touched_by_a_run(self):
         wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
@@ -2214,7 +2547,7 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
         self.assertEqual(len(_FakeEmailWorker.made), 1)
         worker = _FakeEmailWorker.made[0]
         self.assertTrue(worker.started)
-        self.assertEqual([l.name for l in worker.args[0]], ["P0 Singh", "P1 Singh"])
+        self.assertEqual(sorted(l.name for l in worker.args[0]), ["P0 Singh", "P1 Singh"])
         self.assertEqual(wb._jobs, 1)
 
     def test_the_rails_verify_setting_does_not_cap_this_action(self):
@@ -2289,18 +2622,40 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
 
     def test_an_imported_sheet_can_have_its_emails_found_too(self):
         """The sheet the owner exported from Prism comes back with names and
-        no addresses — the whole point of bringing it back is to find them."""
+        no addresses — the whole point of bringing it back is to find them.
+        Imported people are contacts, on the page with no run at all."""
         wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
-        leads = self._people(wb)
-        wb._session_mode = "sheet"
-        wb._run_params = {"mode": "sheet", "sheet_path": "Prism leads.xlsx"}
+        leads = [Lead(name=f"P{i} Singh", title="Plant Head", company=f"Co {i}")
+                 for i in range(3)]
+        wb._run_import(_contacts_result(self._tmp, leads, name="Prism leads.xlsx"))
+        self.assertIsNone(wb._res)                    # no run on screen
         wb._confirm_emails = lambda n: True
         self._patched_worker()
-        self._tick(wb._cockpit.leads, leads)
-        wb._find_emails(wb._cockpit.leads.selected())
-        self.assertEqual([l.name for l in _FakeEmailWorker.made[0].args[0]],
+        cockpit = wb._cockpit.leads
+        for r in range(cockpit._table.rowCount()):
+            cockpit._table.item(r, 0).setCheckState(Qt.Checked)
+        wb._find_emails(cockpit.selected())
+        self.assertEqual(sorted(l.name for l in _FakeEmailWorker.made[0].args[0]),
                          [l.name for l in leads])
+
+    def test_what_comes_back_for_imported_people_is_kept_on_their_contacts(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        lead = Lead(name="Asha Rao", title="Owner", company="Rao Works")
+        wb._run_import(_contacts_result(self._tmp, [lead]))
+        wb._confirm_emails = lambda n: True
+        self._patched_worker()
+        cockpit = wb._cockpit.leads
+        cockpit._table.item(0, 0).setCheckState(Qt.Checked)
+        wb._find_emails(cockpit.selected())
+        held = _FakeEmailWorker.made[0].args[0][0]    # what the worker fills in
+        held.email = "asha@raoworks.com"
+        held.extra["email_check"] = "valid"
+        wb._jobs = 1
+        wb._on_emails_found(1, 1)
+        self.assertEqual(self._status_at(cockpit, held), "Verified")
+        saved = CT.list_contacts(self._contacts)
+        self.assertEqual(saved[0].lead.email, "asha@raoworks.com")
 
 
 class ApolloIsNotOfferedOnceItsPlanRefuses(_Workbench):
@@ -2583,17 +2938,18 @@ class TriageScoresThePersonNotTheFlow(unittest.TestCase):
 
 # Every key the "?" walkthrough asks this screen for. Spelled out so renaming a
 # widget the tour points at fails here rather than on the owner's screen.
-_COCKPIT_KEYS = ("hide_filters", "toolbar_count", "view_toggle", "sort",
-                 "refine_search", "refine_fit", "refine_qualified_only",
-                 "refine_deliverability", "table", "select_all", "col_lead",
-                 "col_focus", "col_fit", "col_status", "col_signal")
-_BULK_KEYS = ("bulk_bar", "bulk_verify", "bulk_emails", "bulk_save",
+_TOOLBAR_KEYS = ("import_menu", "views_menu", "hide_filters", "people_search",
+                 "research_menu", "save_as_search", "view_toggle", "sort",
+                 "search_settings", "people_tabs")
+_COCKPIT_KEYS = _TOOLBAR_KEYS + ("table", "select_all", "col_lead", "col_focus",
+                                 "col_fit", "col_status", "col_signal")
+_BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_verify", "bulk_emails", "bulk_list",
               "bulk_export", "bulk_qualify", "bulk_sequence")
-_TAB_KEYS = ("tab_leads", "tab_sessions", "tab_lists", "tab_saved",
+_TAB_KEYS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
              "tab_sequences", "tab_analytics")
-_SEARCH_KEYS = ("source_switch", "mode_switch", "run_target", "run_qualify",
-                "run_verify", "offer", "net_new", "btn_find", "btn_prepare",
-                "keys_box")
+# The workbench's own: Find new people. (Search settings' rows are one
+# toolbar step — they sit in a modal dialog the walk must not open.)
+_SEARCH_KEYS = ("btn_find",)
 
 
 def _descends(widget, root) -> bool:
@@ -2619,8 +2975,8 @@ class PointAtMeCockpit(unittest.TestCase):
 
     def test_every_key_points_at_something_on_this_screen(self):
         targets = self.c.help_targets()
-        # No row is ticked and no lead open, so the bulk bar and the drawer are
-        # not on screen to be pointed at.
+        # No row is ticked, no lead open and no page to turn, so the action
+        # bar, the drawer and the pager are not on screen to be pointed at.
         self.assertEqual(sorted(targets), sorted(_COCKPIT_KEYS))
         for key, target in targets.items():
             widget, rect = target if isinstance(target, tuple) else (target, None)
@@ -2629,19 +2985,16 @@ class PointAtMeCockpit(unittest.TestCase):
                 self.assertFalse(rect.isEmpty(), key)
 
     def test_the_targets_are_the_real_controls(self):
-        t = self.c.help_targets()
-        self.assertIs(t["hide_filters"], self.c._filters_btn)
-        self.assertIs(t["toolbar_count"], self.c._count_lbl)
-        self.assertIs(t["view_toggle"], self.c._seg)
-        self.assertIs(t["sort"], self.c._sort)
-        self.assertIs(t["refine_search"], self.c._search)
-        self.assertIs(t["refine_fit"], self.c._fit_min)
-        self.assertIs(t["refine_qualified_only"], self.c._only_qualified)
-        self.assertIs(t["table"], self.c._table)
-        host, rect = t["refine_deliverability"]
-        for box in self.c._status_boxes.values():
-            self.assertIs(box.parentWidget(), host)
-            self.assertTrue(rect.contains(box.geometry()))
+        t, c = self.c.help_targets(), self.c
+        for key, widget in (("import_menu", c._import_btn), ("views_menu", c._views_btn),
+                            ("hide_filters", c._filters_btn),
+                            ("people_search", c._search),
+                            ("research_menu", c._research_btn),
+                            ("save_as_search", c._save_search_btn),
+                            ("view_toggle", c._seg), ("sort", c._sort),
+                            ("search_settings", c._settings_btn),
+                            ("people_tabs", c._tabs_frame), ("table", c._table)):
+            self.assertIs(t[key], widget, key)
 
     def test_a_column_key_rings_its_own_header_section(self):
         head = self.c._head
@@ -2655,7 +3008,7 @@ class PointAtMeCockpit(unittest.TestCase):
             self.assertEqual(rect.width(), head.sectionSize(col), key)
             self.assertEqual(rect.height(), head.viewport().height(), key)
 
-    def test_the_bulk_keys_arrive_with_the_first_tick(self):
+    def test_the_action_bar_keys_arrive_with_the_first_tick(self):
         for key in _BULK_KEYS:
             self.assertNotIn(key, self.c.help_targets())
         for key in _BULK_KEYS:
@@ -2665,9 +3018,10 @@ class PointAtMeCockpit(unittest.TestCase):
         self.c._table.item(0, 0).setCheckState(Qt.Checked)
         t = self.c.help_targets()
         self.assertIs(t["bulk_bar"], self.c._bulk_bar_w)
+        self.assertIs(t["bulk_save"], self.c._b_contact)      # Apollo's Save
         self.assertIs(t["bulk_verify"], self.c._b_verify)
         self.assertIs(t["bulk_emails"], self.c._b_emails)
-        self.assertIs(t["bulk_save"], self.c._b_save)
+        self.assertIs(t["bulk_list"], self.c._b_save)         # Add to list
         self.assertIs(t["bulk_export"], self.c._b_export)
         self.assertIs(t["bulk_sequence"], self.c._b_seq)
 
@@ -2680,12 +3034,20 @@ class PointAtMeCockpit(unittest.TestCase):
         self.c._table.item(0, 0).setCheckState(Qt.Checked)
         self.assertIs(self.c.help_targets()["bulk_qualify"], self.c._b_qualify)
 
-    def test_a_folded_rail_comes_back_for_a_refine_step(self):
+    def test_the_pager_joins_on_a_page_of_the_pool(self):
+        from addons.leads import pool as P
+        self.assertNotIn("pager", self.c.help_targets())
+        people = [P.Person(lead=self.d1.lead)]
+        self.c.set_people(people, {"rows": people, "page": 0, "pages": 1,
+                                   "start": 1, "end": 1, "total": 1})
+        self.assertIs(self.c.help_targets()["pager"], self.c._pager)
+
+    def test_a_folded_rail_comes_back_for_the_people_tabs(self):
         self.c.set_filters_shown(False)
-        self.assertNotIn("refine_fit", self.c.help_targets())
-        self.c.help_reveal("refine_fit")
+        self.assertNotIn("people_tabs", self.c.help_targets())
+        self.c.help_reveal("people_tabs")
         self.assertFalse(self.c._rail.isHidden())
-        self.assertIs(self.c.help_targets()["refine_fit"], self.c._fit_min)
+        self.assertIs(self.c.help_targets()["people_tabs"], self.c._tabs_frame)
 
     def test_the_drawer_step_opens_it_on_a_lead_and_ticks_nobody(self):
         self.assertNotIn("drawer", self.c.help_targets())
@@ -2698,31 +3060,24 @@ class PointAtMeCockpit(unittest.TestCase):
         fired = []
         for signal in (self.c.verifyRequested, self.c.emailsRequested,
                        self.c.exportRequested, self.c.saveListRequested,
-                       self.c.sequenceRequested, self.c.qualifyRequested):
-            signal.connect(fired.append)
+                       self.c.sequenceRequested, self.c.qualifyRequested,
+                       self.c.saveContactsRequested, self.c.importRequested,
+                       self.c.tabChanged, self.c.pageRequested,
+                       self.c.sortChanged, self.c.queryChanged,
+                       self.c.settingsRequested, self.c.saveSearchRequested,
+                       self.c.findPrepareRequested):
+            signal.connect(lambda *a: fired.append(a))
 
         def state():
-            return (self.c._search.text(), self.c._fit_min.value(),
-                    self.c._only_qualified.isChecked(), self.c._sort.currentIndex(),
-                    {n: b.isChecked() for n, b in self.c._status_boxes.items()},
+            return (self.c._search.text(), self.c._sort.currentIndex(), self.c.tab(),
                     self.c._view, sorted(self.c._checked), sorted(self.c._hidden))
 
         before = state()
-        for key in _COCKPIT_KEYS + _BULK_KEYS + ("drawer", "nonsense"):
+        for key in _COCKPIT_KEYS + _BULK_KEYS + ("pager", "drawer", "nonsense"):
             self.c.help_reveal(key)
         self.assertEqual(state(), before)
         self.assertEqual(fired, [])
         self.assertEqual(self.c.selected(), [])
-
-    def test_deliverability_scrolls_the_whole_grid_into_the_rail(self):
-        """Aimed at the first box alone, the rail stopped with Invalid, No
-        email and Mailed below its bottom edge, and the ring ran off the rail.
-        The last box is brought into view first, then the first box."""
-        asked = []
-        self.c._rail.ensureWidgetVisible = lambda w, *a: asked.append(w)
-        self.c.help_reveal("refine_deliverability")
-        boxes = self.c._status_boxes
-        self.assertEqual(asked, [boxes["Mailed"], boxes["Verified"]])
 
     def test_the_snapshot_puts_back_what_the_reveals_moved(self):
         """The walk unfolds the rail, opens the drawer on the first lead and
@@ -2732,7 +3087,7 @@ class PointAtMeCockpit(unittest.TestCase):
         c._table.item(1, 0).setCheckState(Qt.Checked)
         c.set_filters_shown(False)
         snap = c.help_snapshot()
-        for key in ("refine_fit", "refine_deliverability", "col_signal", "drawer"):
+        for key in ("people_tabs", "col_signal", "drawer"):
             c.help_reveal(key)
         self.assertFalse(c._rail.isHidden())
         self.assertFalse(c._drawer_w.isHidden())
@@ -2749,7 +3104,7 @@ class PointAtMeCockpit(unittest.TestCase):
         c = self.c
         c._table.setCurrentCell(1, CK._C_LEAD)
         snap = c.help_snapshot()
-        c.help_reveal("refine_search")
+        c.help_reveal("people_tabs")
         c._table.setCurrentCell(0, CK._C_LEAD)     # anything that moved the row
         c.help_restore(snap)
         self.assertEqual(c._table.currentRow(), 1)
@@ -2758,15 +3113,17 @@ class PointAtMeCockpit(unittest.TestCase):
     def test_an_empty_screen_offers_only_what_is_on_it(self):
         empty = CK.LeadsCockpit()
         targets = empty.help_targets()
-        for gone in ("table", "select_all", "col_lead", "toolbar_count",
-                     "hide_filters", "drawer"):
+        for gone in ("table", "select_all", "col_lead", "pager", "drawer",
+                     "bulk_bar"):
             self.assertNotIn(gone, targets)
-        self.assertIn("refine_search", targets)     # the rail is still there
+        # The toolbar and the rail stay: they are how nobody becomes somebody.
+        for kept in _TOOLBAR_KEYS:
+            self.assertIn(kept, targets)
 
 
 class PointAtMeWorkspace(unittest.TestCase):
     """The tab strip's keys are the workspace's own; everything else it lends
-    from the Leads tab, and revealing one comes back to that tab first."""
+    from the People tab, and revealing one comes back to that tab first."""
 
     def setUp(self):
         self.ws = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
@@ -2783,7 +3140,7 @@ class PointAtMeWorkspace(unittest.TestCase):
     def test_reveal_switches_the_tab_and_comes_back_for_the_leads(self):
         self.ws.help_reveal("tab_sessions")
         self.assertIs(self.ws._stack.currentWidget(), self.ws._sessions)
-        self.ws.help_reveal("refine_search")
+        self.ws.help_reveal("people_tabs")
         self.assertIs(self.ws._stack.currentWidget(), self.ws.leads)
         self.assertFalse(self.ws.leads._rail.isHidden())
 
@@ -2793,69 +3150,52 @@ class PointAtMeWorkspace(unittest.TestCase):
         self.assertIs(self.ws._stack.currentWidget(), self.ws._analytics)
 
     def test_the_snapshot_brings_back_the_tab_the_walk_started_on(self):
-        # Not always Leads: an owner who pressed "?" on Sessions ends there.
+        # Not always People: an owner who pressed "?" on Sessions ends there.
         self.ws.help_reveal("tab_sessions")
         snap = self.ws.help_snapshot()
-        self.ws.help_reveal("refine_search")
+        self.ws.help_reveal("people_tabs")
         self.ws.help_reveal("tab_saved")
         self.ws.help_restore(snap)
         self.assertIs(self.ws._stack.currentWidget(), self.ws._sessions)
 
 
 class PointAtMeWorkbench(_Workbench):
-    """The search half of the walkthrough: the widgets in the rail, unfolded
-    and scrolled to, without a run being started or a setting moved."""
+    """The search half of the walkthrough: Find new people and the run line,
+    unfolded and scrolled to, without a run being started, a setting moved —
+    or Search settings opened: a window-modal dialog over the tour would sit
+    on its own Next button."""
 
-    def test_every_key_is_a_widget_of_the_search(self):
-        wb = self._WB.LeadsWorkbench({})
-        targets = wb.help_targets()
-        # The notice line has nothing to say until a run does.
-        self.assertEqual(sorted(targets), sorted(_SEARCH_KEYS))
-        for key, widget in targets.items():
-            self.assertTrue(_descends(widget, wb), key)
-        self.assertIs(targets["run_target"], wb._target_row)
-        self.assertIs(targets["run_qualify"], wb._qualify_row)
-        self.assertIs(targets["run_verify"], wb._verify_row)
-        self.assertIs(targets["mode_switch"], wb._mode_seg)
-        self.assertIs(targets["source_switch"], wb._source_row)
-        self.assertIs(targets["offer"], wb._offer)
-        self.assertIs(targets["net_new"], wb._skip_seen)
-        self.assertIs(targets["btn_find"], wb._prepare)
-        self.assertIs(targets["btn_prepare"], wb._prepare_all)
+    def _wb(self, cfg=None):
+        wb = self._WB.LeadsWorkbench(cfg or {})
+        self.addCleanup(wb._settings_dlg.hide)          # never leave one up
+        return wb
+
+    def test_at_rest_only_find_new_people_is_on_the_page(self):
+        wb = self._wb()
+        self.assertEqual(sorted(wb.help_targets()), ["btn_find"])
+        self.assertIs(wb.help_targets()["btn_find"], wb._prepare)
+
+    def test_no_step_ever_opens_search_settings(self):
+        from addons.leads import tour as T
+        wb = self._wb()
+        guide = T.Guide(wb)
+        for key, _title, _body in T.STEPS:
+            guide.help_reveal(key)
+            self.assertFalse(wb._settings_dlg.isVisible(), key)
 
     def test_the_notice_joins_once_it_says_something(self):
-        wb = self._WB.LeadsWorkbench({})
+        wb = self._wb()
         self.assertNotIn("notice", wb.help_targets())
         wb._status.setText("Qualifying 3 of 25…")
         self.assertIs(wb.help_targets()["notice"], wb._notice)
 
-    def test_importing_a_sheet_has_no_source_switch_to_point_at(self):
-        wb = self._WB.LeadsWorkbench({})
-        wb._set_mode("sheet")
-        targets = wb.help_targets()
-        for gone in ("source_switch", "run_target", "net_new"):
-            self.assertNotIn(gone, targets)
-        self.assertIn("mode_switch", targets)
-        wb.help_reveal("source_switch")             # never switches the mode back
-        self.assertEqual(wb._mode, "sheet")
-
-    def test_reveal_unfolds_the_search_and_opens_the_keys(self):
-        wb = self._WB.LeadsWorkbench({"exa_api_key": "already-set"})
-        self.assertTrue(wb._keys_box.isHidden())
-        self.assertIs(wb.help_targets()["keys_box"], wb._keys_toggle)
-        wb._fold_setup(False)                       # as a finished run leaves it
-        self.assertEqual(wb.help_targets(), {})
-        wb.help_reveal("keys_box")
-        self.assertFalse(wb._setup_details.isHidden())
-        self.assertIs(wb.help_targets()["keys_box"], wb._keys_box)
-
     def test_a_hidden_rail_comes_back_for_every_step_inside_it(self):
-        """Hide filters folded the rail away, and only the refine steps brought
-        it back — so every facet, run setting and run button was skipped and
-        the walk opened on the run line. The filter panel's keys are unfolded
-        here too, because the filter panel cannot reach the rail."""
+        """Hide filters folded the rail away, and only some steps brought it
+        back — so every facet and Find new people were skipped. The filter
+        panel's keys are unfolded here too, because the filter panel cannot
+        reach the rail."""
         from addons.leads import tour as T
-        wb = self._WB.LeadsWorkbench({})
+        wb = self._wb()
         rail = wb._cockpit.leads._rail
         for key, target in (("facet_locations", lambda: wb._filters.help_targets()["facet_locations"]),
                             ("similar_titles", lambda: wb._filters._similar),
@@ -2871,20 +3211,19 @@ class PointAtMeWorkbench(_Workbench):
         self.assertTrue(rail.isHidden())
 
     def test_the_whole_walk_leaves_the_screen_as_it_found_it(self):
-        """Hide filters on, the Sessions tab up, two facets open, the setup
-        folded over a run: walked to the end, or left with Esc halfway, the
-        tour gives every one of those back, and the facets were still walked."""
+        """Hide filters on, the Sessions tab up, a run on screen: walked to the
+        end, or left with Esc halfway, the tour gives every one of those back,
+        and the facets were still walked."""
         from addons.leads import tour as T
-        wb = self._WB.LeadsWorkbench({})
+        wb = self._wb({"exa_api_key": "already-set"})
         self._finished(wb)
         ws, ck, fp = wb._cockpit, wb._cockpit.leads, wb._filters
 
         def state():
             return (ws._stack.currentIndex(), ck._rail.isHidden(),
                     ck._table.currentRow(), ck._drawer_w.isHidden(),
-                    sorted(n for n, s in fp._sections.items() if s.is_open()),
-                    wb._setup_details.isHidden(), wb._keys_box.isHidden(),
-                    fp.spec().to_dict(), wb._mode, sorted(ck._checked))
+                    wb._settings_dlg.isVisible(), wb._keys_box.isHidden(),
+                    fp.spec().to_dict(), sorted(ck._checked))
 
         ck.set_filters_shown(False)
         ws._select(1)
@@ -2892,15 +3231,18 @@ class PointAtMeWorkbench(_Workbench):
         walk = T.Tour(T.Guide(wb), wb)
         walk.start()
         seen = []
-        while walk.is_open() and len(seen) < 80:
+        while walk.is_open() and len(seen) < 90:
             seen.append(walk.key())
             walk.next_step()
-        self.assertIn("facet_locations", seen)
-        self.assertEqual(seen[0], "mode_switch")
+        for key in ("import_menu", "search_settings", "people_tabs",
+                    "facet_locations", "facet_account_imports", "btn_find",
+                    "table", "tab_analytics"):
+            self.assertIn(key, seen)
+        self.assertEqual(seen[0], "import_menu")
         self.assertEqual(state(), before)
 
         walk.start()
-        for _ in range(80):
+        for _ in range(90):
             if walk.key() == "tab_saved" or not walk.is_open():
                 break
             walk.next_step()
@@ -2908,21 +3250,11 @@ class PointAtMeWorkbench(_Workbench):
         walk.leave()
         self.assertEqual(state(), before)
 
-    def test_the_snapshot_folds_the_setup_and_the_keys_back(self):
-        wb = self._WB.LeadsWorkbench({"exa_api_key": "already-set"})
-        wb._fold_setup(False)
-        snap = wb.help_snapshot()
-        wb.help_reveal("keys_box")
-        self.assertFalse(wb._keys_box.isHidden())
-        wb.help_restore(snap)
-        self.assertTrue(wb._setup_details.isHidden())
-        self.assertTrue(wb._keys_box.isHidden())
-
     def test_no_reveal_starts_a_run_or_moves_a_setting(self):
-        wb = self._WB.LeadsWorkbench({})
+        wb = self._wb()
 
         def state():
-            return (wb._filters.spec().to_dict(), wb._mode, wb._source,
+            return (wb._filters.spec().to_dict(), wb._source,
                     wb._target.value(), wb._limit.value(), wb._verify_limit.value(),
                     wb._offer.toPlainText(), wb._skip_seen.isChecked(), dict(wb.cfg))
 

@@ -29,6 +29,7 @@ or older file holds.
 from __future__ import annotations
 
 import datetime
+import functools
 import re
 from dataclasses import dataclass, field
 
@@ -40,6 +41,26 @@ CHIP_FACETS = ("locations", "job_titles", "seniority", "functions",
                "industries", "companies", "company_hq", "keywords")
 # Multi-select bands: include-only, stored as option keys in canonical order.
 BAND_FACETS = ("headcount", "revenue", "years_in_role")
+# Apollo's "Contact CSV import" and "Account CSV import": include-only lists of
+# import ids (addons/leads/imports.py). What an id MEANS — which people a
+# contacts import brought in, which companies an accounts import named — lives
+# in that store, not here: this module stays stdlib-only and path-free, and the
+# caller (addons/leads/pool.py locally, the workbench for an Exa search)
+# resolves the ids. Apollo's own glossary: "Click Account CSV import or
+# Contact CSV import > then check one or more CSV import file names."
+IMPORT_FACETS = ("contact_imports", "account_imports")
+# Filters over what PRISM knows about a person, not what a search can ask:
+# the e-mail's deliverability (Apollo's "Email status"), the triage fit
+# (Apollo's "Scores") and whether Prism qualified them. No search plans on
+# them and match_person ignores them — the Find People pool applies them
+# (addons/leads/pool.py). They live on the spec anyway so a saved search keeps
+# them, as Apollo's does. Option keys, not labels, like every band.
+EMAIL_STATUS = (
+    ("verified", "Verified"), ("guessed", "Guessed"), ("catch_all", "Catch-all"),
+    ("unknown", "Unknown"), ("invalid", "Invalid"), ("no_email", "No email"),
+    ("mailed", "Mailed"),
+)
+LOCAL_FACETS = ("email_status",)
 
 FACET_LABELS = {
     "locations": "Location", "job_titles": "Job title", "seniority": "Seniority",
@@ -47,6 +68,10 @@ FACET_LABELS = {
     "companies": "Current company", "company_hq": "Company HQ location",
     "keywords": "Keywords", "headcount": "Company headcount",
     "revenue": "Annual revenue", "years_in_role": "Years in current role",
+    "contact_imports": "Contact CSV import",
+    "account_imports": "Account CSV import",
+    "email_status": "Email status",
+    "scores": "Fit score",
 }
 
 # Management levels, Apollo's set. (key, label). A title can hold more than one
@@ -235,6 +260,16 @@ def _bands(raw, options) -> list:
 
 def _bool(value, default: bool) -> bool:
     return value if isinstance(value, bool) else default
+
+
+def _fit_floor(value) -> int:
+    """A fit floor as a whole number 0-100; anything else (text, a bool, a
+    float that is not whole) is no floor."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    if isinstance(value, float) and not value.is_integer():
+        return 0
+    return min(100, max(0, int(value)))
 
 
 def label_of(options, key: str) -> str:
@@ -461,6 +496,14 @@ class SearchSpec:
     headcount: list = field(default_factory=list)
     revenue: list = field(default_factory=list)
     years_in_role: list = field(default_factory=list)
+    # Import ids — see IMPORT_FACETS. Include-only, like Apollo's.
+    contact_imports: list = field(default_factory=list)
+    account_imports: list = field(default_factory=list)
+    # Local-only (LOCAL_FACETS): e-mail status keys, the lowest triage fit
+    # kept (0 = no floor), and "qualified by Prism only".
+    email_status: list = field(default_factory=list)
+    min_fit: int = 0
+    qualified_only: bool = False
     # Apollo's "Include people with similar titles": on, a job-title include
     # only steers the search; off, the person's title must carry one of them.
     similar_titles: bool = True
@@ -474,6 +517,11 @@ class SearchSpec:
         out["headcount"] = list(self.headcount)
         out["revenue"] = list(self.revenue)
         out["years_in_role"] = list(self.years_in_role)
+        for name in IMPORT_FACETS:
+            out[name] = list(getattr(self, name))
+        out["email_status"] = list(self.email_status)
+        out["min_fit"] = int(self.min_fit)
+        out["qualified_only"] = bool(self.qualified_only)
         out["similar_titles"] = bool(self.similar_titles)
         out["changed_jobs_90d"] = bool(self.changed_jobs_90d)
         return out
@@ -489,6 +537,11 @@ class SearchSpec:
                    headcount=_bands(raw.get("headcount"), HEADCOUNT),
                    revenue=_bands(raw.get("revenue"), REVENUE),
                    years_in_role=_bands(raw.get("years_in_role"), YEARS_IN_ROLE),
+                   contact_imports=_values(raw.get("contact_imports")),
+                   account_imports=_values(raw.get("account_imports")),
+                   email_status=_bands(raw.get("email_status"), EMAIL_STATUS),
+                   min_fit=_fit_floor(raw.get("min_fit")),
+                   qualified_only=_bool(raw.get("qualified_only"), False),
                    similar_titles=_bool(raw.get("similar_titles"), True),
                    changed_jobs_90d=_bool(raw.get("changed_jobs_90d"), False))
 
@@ -522,15 +575,19 @@ class SearchSpec:
         return getattr(self, name)
 
     def count(self, name: str) -> int:
-        """How many values one facet (chip or band) holds."""
-        if name in BAND_FACETS:
+        """How many values one facet (chip, band, import or local) holds.
+        "scores" is the fit floor and the qualified switch, one each."""
+        if name == "scores":
+            return int(self.min_fit > 0) + int(self.qualified_only)
+        if name in BAND_FACETS or name in IMPORT_FACETS or name in LOCAL_FACETS:
             return len(getattr(self, name))
         return getattr(self, name).count()
 
     def active_count(self) -> int:
         """Every value set, across the panel — the badge on "Lead filters"."""
-        return (sum(self.count(n) for n in CHIP_FACETS + BAND_FACETS)
-                + int(self.changed_jobs_90d))
+        return (sum(self.count(n) for n in
+                    CHIP_FACETS + BAND_FACETS + IMPORT_FACETS + LOCAL_FACETS)
+                + self.count("scores") + int(self.changed_jobs_90d))
 
     def role_terms(self) -> list:
         """The roles a search asks Exa for: the job titles, or — with none —
@@ -714,6 +771,16 @@ def seniority_of(title: str) -> frozenset:
     "Lead" / "Principal" → {senior}; "Intern" / "Trainee" / "Apprentice" →
     {intern}; a plain individual title ("Engineer", "Analyst", "Executive",
     "Associate") → {entry}. Empty title → empty set."""
+    return _seniority_of(title if isinstance(title, str) else "")
+
+
+# Memoised: a pure function of the title, and addons/leads/pool.py re-filters
+# thousands of people on every click of a filter — the same few hundred
+# distinct titles, run through ~20 regexes each, every time. Behind a str-only
+# front door: a cache needs a hashable key, and a non-string title reads as ""
+# either way (_norm_title).
+@functools.lru_cache(maxsize=16384)
+def _seniority_of(title: str) -> frozenset:
     text = _norm_title(title)
     if not text:
         return frozenset()
@@ -805,6 +872,11 @@ _FUNCTION_RULES = tuple((key, re.compile(p), consume) for key, p, consume in (
 def function_of(title: str) -> frozenset:
     """Every FUNCTIONS key the title reads as ("Head - Manufacturing
     Excellence" → {manufacturing, operations}); empty when none."""
+    return _function_of(title if isinstance(title, str) else "")
+
+
+@functools.lru_cache(maxsize=16384)       # memoised — see _seniority_of
+def _function_of(title: str) -> frozenset:
     text = _norm_title(title)
     keys = set()
     # "IT" only in capitals: case-folded it is the English word.

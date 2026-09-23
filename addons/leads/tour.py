@@ -69,34 +69,66 @@ RING_R = theme.R_CONTROL + 2        # a hair rounder than the control inside it
 GAP = 14                            # ring to card
 
 
-# The walk, in the order someone works the screen: the two ways in, the rail
-# top to bottom, then the results — toolbar, refine, table, the rows you tick,
-# what the bulk bar spends — and last the tabs everything else lives under.
-# One record per control. A step is allowed to name a control that is not on
-# screen today (the bulk bar before anything is ticked); it is skipped.
+# The walk, in the order someone reads Apollo's Find People page: the title
+# row, the toolbar left to right (Search settings is one step — its rows sit
+# in a modal dialog the walk must not open over its own card), then the rail
+# top to bottom — the three tabs, the pinned filters, More filters, Find new
+# people — then the results: the table, its columns, the pages, the rows you
+# tick, what the action bar spends — and last the tabs everything else lives
+# under. One record per control. A step is allowed to name a control that is
+# not on screen today (the action bar before anything is ticked); it is
+# skipped.
 STEPS = (
-    ("mode_switch", "The two ways in",
-     "Find people searches a database with the filters below it. Import a "
-     "sheet works a list you already have, and both end up in the same table."),
+    ("import_menu", "Import",
+     "Brings a sheet in — people as contacts, or companies as accounts. "
+     "Nothing is searched: the import becomes a filter on the left, and "
+     "the page shows what came in."),
 
-    ("source_switch", "Which database you search",
-     "Exa is the default and searches the open web. Apollo searches its own "
-     "people index and needs a paid Apollo plan — on the free plan its search "
-     "refuses outright."),
+    ("views_menu", "Default view",
+     "Your saved searches, a starter search to begin from, and Table or "
+     "Cards. Picking a search filters the page at once — it never runs one."),
 
-    ("source_switch", "What a search costs",
-     "An Exa search costs about five cents, however many people come back. "
-     "Apollo is free to search but charges about one credit for each person "
-     "it hands over."),
+    ("hide_filters", "Hide filters",
+     "Folds the whole rail away and gives the width to the table. The "
+     "number beside it is how many filters are on, so you can still see "
+     "them working with the rail out of sight."),
 
-    ("filters_head", "The filter rail",
-     "Every filter is a chip you add, and most have an exclude side as well. "
-     "An exclusion is always obeyed here, whatever the search hands back."),
+    ("people_search", "Search people",
+     "Narrows the page by name, title, company, e-mail or place. It costs "
+     "nothing and starts no search."),
 
-    ("facet_locations", "Location",
-     "Where the person is. Include the places you sell into and exclude the "
-     "ones you never want — anybody outside the includes is dropped before "
-     "the row is drawn."),
+    ("research_menu", "Research with AI",
+     "Qualify and draft the people you ticked, or find new people and "
+     "qualify them in one run. Both spend — a Groq call and a why-now "
+     "search each — and both ask before a big batch."),
+
+    ("save_as_search", "Save as new search",
+     "Keeps this whole set of filters under a name, in Default view and "
+     "the Saved searches tab, to use again next week."),
+
+    ("view_toggle", "Table or Cards",
+     "The same people in two shapes. Cards show more of each person, the "
+     "table fits far more people on one screen."),
+
+    ("sort", "Sort",
+     "Reorders everyone the filters let through — by relevance, name, "
+     "newest or company — across every page. It never removes anybody."),
+
+    ("search_settings", "Search settings",
+     "What Find new people runs with — Exa or Apollo, how many to find, what "
+     "you sell and your keys. An Exa search costs about five cents. Apollo "
+     "charges about a credit for each person it hands over, up to Reveal up "
+     "to — left at 300 it can spend 300. Hover any setting for what it does."),
+
+    ("people_tabs", "Total, Net New and Saved",
+     "Total is everyone Prism holds who passes the filters. Saved is the "
+     "ones you saved as contacts, Net New is everyone else. The numbers "
+     "move as you filter."),
+
+    ("filters_head", "The filters",
+     "Every filter narrows everyone Prism already holds, the moment you "
+     "click it. It is free — nothing is searched until you press Find new "
+     "people."),
 
     ("facet_job_titles", "Job title",
      "The words in the person's own title. Include the titles you sell to, "
@@ -108,33 +140,54 @@ STEPS = (
 
     ("facet_seniority", "Seniority",
      "The level rather than the wording — owner, C-level, VP, director, "
-     "manager. It is checked after the results come back, so an oddly worded "
-     "title is still judged on its level."),
+     "manager. An oddly worded title is still judged on its level."),
+
+    ("facet_companies", "Current company",
+     "Name the companies you want, or the ones you never want. Excluding your "
+     "own customers here stops every search rediscovering them."),
+
+    ("facet_locations", "Location",
+     "Where the person is. Include the places you sell into and exclude the "
+     "ones you never want — anybody outside the includes is left out."),
+
+    ("facet_industries", "Industry",
+     "The company's line of business. A search can only steer by it, so the "
+     "people a search found for an industry stay under it — read those as "
+     "likely rather than certain."),
+
+    ("facet_contact_imports", "Contact CSV import",
+     "Tick an import to see the people it brought in. Each sheet you import "
+     "is listed here by its file name."),
+
+    ("facet_account_imports", "Account CSV import",
+     "Tick an import to see the people Prism holds at its companies — and "
+     "press Find new people to search for more there, fifty companies at "
+     "a time."),
+
+    ("more_filters", "More filters",
+     "Function, keywords, company size, revenue, HQ, time in role, recent "
+     "job changes, e-mail status and fit score — folded here until you "
+     "need them."),
 
     ("facet_functions", "Function",
      "The part of the business the person runs, such as operations or "
      "engineering. Use it where the same title means different jobs at "
      "different companies."),
 
-    ("facet_industries", "Industry",
-     "Steering only. The industry is a hint to the database, so read a match "
-     "as likely rather than certain — anything you exclude here is still "
-     "enforced on the way back."),
+    ("facet_keywords", "Keywords",
+     "Words to look for around the person and the company. A search can "
+     "only steer by them, like Industry."),
 
     ("facet_headcount", "Company headcount",
-     "How many people the company employs, in bands. Tick every band you "
-     "sell to and a company outside them is dropped."),
+     "How many people the company employs, in bands. A company whose size "
+     "is not on record is let through, not guessed."),
 
     ("facet_revenue", "Annual revenue",
      "The company's revenue, in bands, for when headcount does not describe "
      "your buyer. Nobody is dropped for a revenue that is simply not "
      "published."),
 
-    ("facet_companies", "Current company",
-     "Name the companies you want, or the ones you never want. Excluding your "
-     "own customers here stops every run rediscovering them."),
-
-    ("facet_company_hq", "Company HQ",
+    ("facet_company_hq", "Company HQ location",
      "Where the business is based, which is not always where the person sits. "
      "Location is the person, this is the company."),
 
@@ -146,103 +199,39 @@ STEPS = (
      "Keeps only people who started somewhere new this quarter. A new job is "
      "the strongest reason to write this week rather than next quarter."),
 
-    ("facet_keywords", "Keywords",
-     "Free words to look for around the person and the company. Steering "
-     "only, like Industry, so read a match as likely rather than proven."),
+    ("facet_email_status", "Email status",
+     "Verified, Guessed, Catch-all, Unknown, Invalid, No email or Mailed. "
+     "Verified and Guessed together is the usual view just before a send."),
+
+    ("facet_scores", "Fit score",
+     "The lowest fit to show, and whether to show only the people Prism has "
+     "qualified. Nobody is deleted — lower it and they come back."),
 
     ("count_badge", "How many filters are on",
-     "The number of chips across every facet, including the ones folded out "
-     "of sight. It is the quickest answer to why a run came back with four "
-     "people."),
+     "The number of filters across every facet, including the folded ones. "
+     "It is the quickest answer to why the page shows four people."),
 
     ("clear_all", "Clear all",
-     "Empties every facet at once, folded ones included. It touches the "
-     "filters only — the list already on screen stays where it is."),
+     "Empties every filter at once, folded ones included, and the page "
+     "shows everyone Prism holds again."),
 
-    ("save_search", "Save search",
-     "Keeps this whole set of filters under a name, in the Saved searches "
-     "tab, to run again next week without rebuilding it."),
-
-    ("net_new", "Net new only",
-     "Skips anyone an earlier run already found, matched on e-mail, LinkedIn "
-     "link, or name and company. A second search on the same filters gives "
-     "you new people, not the old ones again."),
-
-    ("run_target", "Reveal up to, or Source up to",
-     "The size of the run. On Exa it is how many people to look for. On "
-     "Apollo it is a spend cap, because each person revealed is about a "
-     "credit — left at 300 it can spend 300."),
-
-    ("run_qualify", "Qualify",
-     "How many of the people found get researched and written to by the run "
-     "itself. Each one is a Groq call plus a why-now search."),
-
-    ("run_verify", "Verify with Hunter",
-     "How many addresses the run checks with Hunter. Its free tier is about "
-     "fifty checks a month, so keep this modest — zero skips the check."),
-
-    ("offer", "What you sell",
-     "One paragraph about your offer. Every lead is qualified against it and "
-     "every draft is written from it, so a vague paragraph gives vague mail."),
-
-    ("btn_find", "Find people",
-     "The cheap run. It finds the people who match your filters and lists "
-     "them — no e-mail lookups and no Groq, so you choose afterwards who is "
-     "worth spending on."),
-
-    ("btn_prepare", "Find and prepare",
-     "The whole pipeline in one press: find the people, look up e-mails, "
-     "qualify the top ones and draft a message each. It spends on everybody "
-     "it keeps."),
-
-    ("keys_box", "Keys and claims",
-     "Your own Exa and Apollo keys, and the approved-claims file the drafts "
-     "are allowed to take numbers from. Set once, then the box folds away."),
+    ("btn_find", "Find new people",
+     "The one button here that spends. It searches with these filters for "
+     "people Prism does not hold yet, says what that costs, and asks first. "
+     "No e-mail lookups and no Groq — you choose afterwards who is worth it."),
 
     ("notice", "The run line",
-     "Live progress on the left while a run works, and on the right the "
-     "summary of what it produced when it finishes."),
+     "Live progress on the left while something runs, and on the right the "
+     "summary of what the last search produced."),
 
-    ("hide_filters", "Hide filters",
-     "Folds the whole rail away and gives the width to the table. Everything "
-     "you set stays on — press it again to bring the rail back."),
-
-    ("toolbar_count", "How many are on screen",
-     "How many people the run found, and how many of them the refine filters "
-     "below are letting through right now."),
-
-    ("view_toggle", "Table or Cards",
-     "The same people in two shapes. Cards show more of each person, the "
-     "table fits far more people on one screen."),
-
-    ("sort", "Sort",
-     "Reorders the list — by fit, by name, by company, by status. It never "
-     "removes anybody from it."),
-
-    ("refine_search", "Search the results",
-     "Narrows the list already on screen by name, title or company. It costs "
-     "nothing and starts no run."),
-
-    ("refine_fit", "Minimum fit",
-     "Hides everyone under the score you pick. They are still in the run and "
-     "come straight back when you lower it."),
-
-    ("refine_qualified_only", "Qualified leads only",
-     "Shows only the people Prism has actually researched and written an "
-     "opener for, and hides the rest of the run."),
-
-    ("refine_deliverability", "Deliverability",
-     "Tick which states of address you want to see. Verified and Guessed "
-     "together is the usual view just before a send."),
-
-    ("table", "Everyone the run found",
-     "One row per person, whether or not Prism knows anything about them yet. "
-     "Click a row to open that person's dossier on the right."),
+    ("table", "The people",
+     "One row per person, however many ways Prism met them. Click a row to "
+     "open that person's dossier on the right."),
 
     ("select_all", "Tick what you want",
      "The box on a row picks that person and the box in the header picks "
-     "everyone the filters are showing. Every bulk action works on the ticked "
-     "rows and on nothing else."),
+     "everyone on this page. Every action works on the ticked rows and on "
+     "nothing else."),
 
     ("col_lead", "Lead",
      "The person's name, with the company they work at under it. The name is "
@@ -268,9 +257,17 @@ STEPS = (
      "The why-now Prism found for that person — a hire, a new plant, a "
      "funding round. Not qualified means found but never researched."),
 
-    ("bulk_bar", "The bulk bar",
+    ("pager", "Pages",
+     "Twenty-five people a page, with how many the filters let through. "
+     "Sort and filters work on every page, not only this one."),
+
+    ("bulk_bar", "The action bar",
      "It appears the moment you tick a row, and everything on it acts on the "
      "ticked rows only. Nothing here can run on the whole list by accident."),
+
+    ("bulk_save", "Save",
+     "Saves the ticked people as contacts, so they move from Net New to "
+     "Saved. Exporting, e-mailing or sequencing someone saves them too."),
 
     ("bulk_verify", "Verify free",
      "Checks the ticked addresses with the free verifiers first and reports "
@@ -280,7 +277,7 @@ STEPS = (
      "Looks up an address for every ticked person. One verifier or Apollo "
      "credit each, for every row you ticked and not a sample of them."),
 
-    ("bulk_save", "Save to list",
+    ("bulk_list", "Add to list",
      "Writes the ticked people to a sheet on your own machine, which then "
      "appears under the Lists tab."),
 
@@ -301,27 +298,28 @@ STEPS = (
      "Everything Prism holds on one person — the signal it found, the address "
      "it has and the draft it wrote. Any row opens it."),
 
-    ("tab_leads", "Leads",
-     "This screen. The run you are working on and the people it found."),
+    ("tab_people", "People",
+     "This screen. Everyone Prism holds — imported, saved or found by a "
+     "search — filtered as you click."),
 
     ("tab_sessions", "Sessions",
-     "Every run you have done, with its filters and its results. Open one and "
-     "you are back where you left it."),
+     "Every search you have run, with its filters and its results. Open one "
+     "to see only its people."),
 
     ("tab_lists", "Lists",
      "The sheets written to disk. Real files on your machine that you can "
      "send to anyone."),
 
     ("tab_saved", "Saved searches",
-     "The filter sets you saved under a name, ready to run again on a week "
+     "The filter sets you saved under a name, ready to use again on a week "
      "when nobody wants to rebuild them."),
 
     ("tab_sequences", "Sequences",
      "The follow-up steps a lead walks through after the first message."),
 
     ("tab_analytics", "Analytics",
-     "What this run actually produced — found, verified, drafted, sent — "
-     "counted for the run on screen."),
+     "What the last search actually produced — found, verified, drafted, "
+     "sent — counted for that run."),
 )
 
 
@@ -644,10 +642,10 @@ class Tour(QWidget):
         """Walked off the end — the screen goes back to how it was found.
 
         An owner that cannot say how it was (no help_snapshot) is at least put
-        back on the Leads tab: the last six steps are the tabs, and finishing a
-        tour on the Analytics tab looks like the tour broke something."""
+        back on the People tab: the last six steps are the tabs, and finishing
+        a tour on the Analytics tab looks like the tour broke something."""
         if self._snapshot is None:
-            self._reveal("tab_leads")
+            self._reveal("tab_people")
         self._shut()
 
     def _shut(self) -> None:

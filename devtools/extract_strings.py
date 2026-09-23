@@ -192,6 +192,12 @@ COPY_TABLES = {
     "MANIFEST",
     "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
     "ROW_ACTIONS", "REGISTER_RANGES", "OPEN_LABEL",
+    # Leads & Outreach (Apollo's Find People): the filter rail's facet names
+    # (prospector.filters), the Sort box, the Total / Net New / Saved tabs,
+    # the page's empty states and Default view's starter searches — each
+    # reaches the screen through a variable.
+    "FACET_LABELS", "_SORTS", "_PEOPLE_TABS", "_EMPTY_TITLE", "_EMPTY_BODY",
+    "_NO_MATCH_TITLE", "_NO_MATCH_BODY", "_STARTERS",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's

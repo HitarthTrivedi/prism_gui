@@ -657,14 +657,96 @@ class Layout(_PanelCase):
         self.assertEqual(self.p.active_count(), 0)
         self.assertTrue(self.p._badge.isHidden())
         self.assertTrue(self.p._clear_btn.isHidden())
+        # Apollo's rail order (23-Sep-2026): the facets a search starts from,
+        # pinned — with the two CSV imports beside them — then "More filters".
         self.assertEqual(list(self.p._sections),
-                         ["locations", "job_titles", "seniority", "functions",
-                          "industries", "headcount", "revenue", "companies", "company_hq",
-                          "years_in_role", "keywords"])
+                         ["job_titles", "seniority", "companies", "locations",
+                          "industries", "contact_imports", "account_imports",
+                          "functions", "keywords", "headcount", "revenue",
+                          "company_hq", "years_in_role", "email_status", "scores"])
         opened = {n for n, s in self.p._sections.items() if s.is_open()}
         self.assertEqual(opened, {"locations", "job_titles"})
         self.assertFalse(self.editor("locations").isHidden())
         self.assertTrue(self.editor("industries").isHidden())
+
+    def test_more_filters_folds_the_rest_until_opened_or_set(self):
+        # Apollo's "View 60+ Filters": the rarer facets wait under a fold…
+        self.assertTrue(self.section("revenue").isHidden())
+        self.assertTrue(self.p._jobs_box.isHidden())
+        self.assertEqual(self.p._more_btn.text(), "More filters (9)")
+        self.p._more_btn.click()
+        self.assertFalse(self.section("revenue").isHidden())
+        self.assertEqual(self.p._more_btn.text(), "Fewer filters")
+        self.p._more_btn.click()
+        # …but an APPLIED filter is pinned into the rail, open fold or not.
+        self.p.set_spec({"revenue": ["10m-50m"]})
+        self.assertFalse(self.section("revenue").isHidden())
+        self.assertEqual(self.p._more_btn.text(), "More filters (8)")
+
+    def test_the_old_refine_controls_are_facets_now(self):
+        # Deliverability, minimum fit and "qualified only" used to sit in the
+        # results rail and hide rows of ONE page; on the spec they filter the
+        # whole pool before it is paged — and a saved search keeps them.
+        self.editor("email_status").buttons["verified"].click()
+        self.editor("email_status").buttons["guessed"].click()
+        self.assertEqual(self.p.spec().email_status, ["verified", "guessed"])
+        self.editor("scores").floor.setValue(60)
+        self.editor("scores").qualified.switch.click()
+        spec = self.p.spec()
+        self.assertEqual((spec.min_fit, spec.qualified_only), (60, True))
+        self.assertEqual(self.section("scores").head.badge.text(), "2")
+        self.section("scores").set_open(False)
+        self.assertEqual(self.chip_view("scores"),
+                         [("Fit 60+", "include"), ("Qualified only", "include")])
+        self.chips("scores")[0].removeRequested.emit()
+        self.assertEqual(self.p.spec().min_fit, 0)
+
+
+class CsvImportFacets(_PanelCase):
+    """Apollo's "Contact CSV import" / "Account CSV import": tick one or more
+    past imports by file name (addons/leads/imports.py holds them)."""
+
+    C1 = {"id": "imp-20260923-101010-aaaaaa", "name": "Apollo_leads (1).csv",
+          "kind": "contacts", "created_at": "2026-09-23T08:48:00+05:30",
+          "counts": {"rows": 3, "added": 3, "updated": 0, "skipped": 0}}
+    A1 = {"id": "imp-20260923-101011-bbbbbb", "name": "AE _ Leads.xlsx",
+          "kind": "accounts", "created_at": "2026-09-22T10:00:00+05:30",
+          "counts": {}, "n_companies": 193}
+
+    def setUp(self):
+        super().setUp()
+        self.p.set_imports([self.C1], [self.A1])
+
+    def test_each_import_is_a_tick_with_what_it_held(self):
+        row = self.editor("contact_imports").rows[self.C1["id"]]
+        self.assertEqual(row.name.full(), "Apollo_leads (1).csv")
+        self.assertTrue(row.meta.full().startswith("3 contacts"))
+        arow = self.editor("account_imports").rows[self.A1["id"]]
+        self.assertTrue(arow.meta.full().startswith("193 companies"))
+        self.assertTrue(self.editor("contact_imports").empty.isHidden())
+
+    def test_ticking_an_import_filters_by_it(self):
+        self.editor("contact_imports").rows[self.C1["id"]].click()
+        self.assertEqual(self.p.spec().contact_imports, [self.C1["id"]])
+        self.assertEqual(self.section("contact_imports").head.badge.text(), "1")
+        self.assertEqual(self.p.active_count(), 1)
+
+    def test_its_chip_shows_the_file_name_and_removes_it(self):
+        # Apollo's rail: "Csv Import: Apollo_leads (1).csv ×".
+        self.p.set_spec({"account_imports": [self.A1["id"]]})
+        self.assertEqual(self.chip_view("account_imports"),
+                         [("AE _ Leads.xlsx", "include")])
+        [chip] = self.chips("account_imports")
+        self.assertFalse(chip.flippable)               # an import has no "exclude"
+        chip.removeRequested.emit()
+        self.assertEqual(self.p.spec().account_imports, [])
+
+    def test_a_deleted_import_stays_chosen_until_removed(self):
+        self.p.set_spec({"contact_imports": [self.C1["id"]]})
+        self.p.set_imports([], [])
+        self.assertEqual(self.p.spec().contact_imports, [self.C1["id"]])
+        self.assertEqual(self.p.import_name("contact_imports", self.C1["id"]), "")
+        self.assertFalse(self.editor("contact_imports").empty.isHidden())
 
     def test_a_header_click_opens_and_closes_without_an_edit(self):
         section = self.section("industries")
@@ -761,12 +843,13 @@ class Suggestions(unittest.TestCase):
 
 # Every key the "?" walkthrough asks this panel for. Spelled out so renaming a
 # widget the tour points at fails here rather than on the owner's screen.
-_KEYS = ("filters_head", "count_badge", "clear_all", "save_search",
+_KEYS = ("filters_head", "count_badge", "clear_all", "more_filters",
          "facet_locations", "facet_job_titles", "similar_titles",
          "facet_seniority", "facet_functions", "facet_industries",
          "facet_headcount", "facet_revenue", "facet_companies",
          "facet_company_hq", "facet_years", "facet_changed_jobs",
-         "facet_keywords")
+         "facet_keywords", "facet_contact_imports", "facet_account_imports",
+         "facet_email_status", "facet_scores")
 
 
 def _descends(widget, root) -> bool:
@@ -792,6 +875,7 @@ class PointAtMe(_PanelCase):
         return self.p.help_targets()
 
     def test_every_key_points_at_a_widget_of_this_panel(self):
+        self.p.set_more_open(True)              # every facet on screen
         targets = self.targets()
         self.assertEqual(sorted(targets), sorted(_KEYS))
         for key, target in targets.items():
@@ -801,24 +885,29 @@ class PointAtMe(_PanelCase):
                 self.assertFalse(rect.isEmpty(), key)
 
     def test_the_targets_are_the_real_controls(self):
+        self.p.set_more_open(True)
         targets = self.targets()
         self.assertIs(targets["facet_locations"], self.section("locations"))
         self.assertIs(targets["facet_revenue"], self.section("revenue"))
         self.assertIs(targets["facet_years"], self.section("years_in_role"))
         self.assertIs(targets["facet_company_hq"], self.section("company_hq"))
+        self.assertIs(targets["facet_contact_imports"], self.section("contact_imports"))
         self.assertIs(targets["facet_changed_jobs"], self.p._jobs)
         self.assertIs(targets["similar_titles"], self.p._similar)
         self.assertIs(targets["count_badge"], self.p._badge)
         self.assertIs(targets["clear_all"], self.p._clear_btn)
-        self.assertIs(targets["save_search"], self.p._save_btn)
+        self.assertIs(targets["more_filters"], self.p._more_btn)
 
-    def test_the_header_is_a_region_over_its_own_row(self):
-        self.p.resize(280, 1600)
-        self.p.layout().activate()          # geometry without showing a window
-        widget, rect = self.targets()["filters_head"]
-        self.assertIs(widget, self.p)
-        for part in (self.p._head_kick, self.p._badge, self.p._save_btn):
-            self.assertTrue(rect.contains(part.geometry()), part.objectName())
+    def test_the_filter_column_is_the_whole_panel(self):
+        # Apollo's rail has no title over its facets, so the walk's "this is
+        # the filter column" step rings the column itself.
+        self.assertIs(self.targets()["filters_head"], self.p)
+
+    def test_a_folded_facet_is_no_target_until_revealed(self):
+        self.assertNotIn("facet_revenue", self.targets())     # under More filters
+        self.p.help_reveal("facet_revenue")
+        self.assertTrue(self.p.more_open())
+        self.assertIs(self.targets()["facet_revenue"], self.section("revenue"))
 
     def test_reveal_opens_a_closed_facet_and_edits_nothing(self):
         before = self.p.spec().to_dict()
@@ -848,7 +937,7 @@ class PointAtMe(_PanelCase):
         targets = self.targets()
         for gone in ("count_badge", "clear_all"):
             self.assertNotIn(gone, targets)
-        for still in ("save_search", "filters_head", "facet_locations"):
+        for still in ("more_filters", "filters_head", "facet_locations"):
             self.assertIn(still, targets)
 
     def test_the_public_key_set_is_every_key_it_answers(self):
@@ -870,6 +959,7 @@ class PointAtMe(_PanelCase):
         self.assertEqual(sorted(n for n, s in self.p._sections.items() if s.is_open()),
                          ["job_titles", "locations"])
         self.assertTrue(self.section("revenue").editor.isHidden())
+        self.assertFalse(self.p.more_open())            # the fold, as found
         self.assertEqual(self.p.spec().to_dict(), before)
         self.assertEqual(self.changes.n, 0)
 

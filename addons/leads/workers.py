@@ -56,14 +56,18 @@ def _nobody_left(skipped: int, filtered, source: str = "exa",
     same evening on a sheet with well-known companies that should have
     been easy to find someone for — exactly the shape this was blind to."""
     total, words = outside_filters(filtered)
-    already = (f" {skipped} more were already pulled in an earlier session — turn "
-               "off “Net new only” to include them." if skipped else "")
+    # The switch by the name Search settings shows it under.
+    switch = "“Only find people no earlier search found” in Search settings"
+    already = (f" {skipped} more were already pulled in an earlier search — they "
+               f"are on the People page already; turn off {switch} to fetch them "
+               "again." if skipped else "")
     if total:
         return (f"Nobody who came back matched your filters — {total} were outside "
                 f"them ({words}). Loosen a filter or widen the search.{already}")
     if skipped:
         return (f"Everyone this search found ({skipped}) was already pulled in an "
-                "earlier session. Widen the filters, or turn off “Net new only”.")
+                f"earlier search — they are on the People page already. Widen the "
+                f"filters, or turn off {switch}.")
     db = "Apollo" if source == "apollo" else "Exa"
     if queries_used and query_errors >= queries_used:
         # Not a guess: every single call to the database failed outright —
@@ -381,6 +385,39 @@ class LeadsSessionLoadWorker(_Worker):
                     return
                 sid = head["id"]
             self.done.emit(sessions.load(self.folder, sid))
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class LeadsPoolWorker(_Worker):
+    """Everyone Prism holds, read off the UI thread: the saved contacts and
+    every past run — what the People page filters instantly (addons/leads/
+    pool.build joins them). Emits (contacts, runs), each run a (session_id,
+    created_at, all_leads, dossiers, drafts, params) tuple — params being what
+    the run was asked, which the pool reads to know what its search was
+    steered by. A run that cannot be read is left out, not the whole page: one
+    damaged file must not hide everyone else."""
+    done = Signal(object, object)
+    failed = Signal(str)
+
+    def __init__(self, contacts_dir: str, sessions_dir: str):
+        super().__init__()
+        self.contacts_dir, self.sessions_dir = contacts_dir, sessions_dir
+
+    def run(self):
+        try:
+            from addons.leads import contacts, sessions
+            saved = contacts.list_contacts(self.contacts_dir) if self.contacts_dir else []
+            runs = []
+            for head in sessions.list_sessions(self.sessions_dir) if self.sessions_dir else ():
+                try:
+                    got = sessions.load(self.sessions_dir, head["id"])
+                except sessions.SessionStoreError:
+                    continue
+                runs.append((head["id"], got["header"].get("created_at", ""),
+                             got["all_leads"], got["dossiers"], got["drafts"],
+                             got["params"]))
+            self.done.emit(saved, runs)
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))
 

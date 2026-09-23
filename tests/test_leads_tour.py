@@ -38,22 +38,25 @@ _app = QApplication.instance() or QApplication(sys.argv)
 # these: a typo'd key is a step that silently never shows, which is the one
 # failure nobody would notice by looking.
 CONTRACT = {
-    # addons/leads/workbench.py
-    "source_switch", "mode_switch", "run_target", "run_qualify", "run_verify",
-    "offer", "net_new", "btn_find", "btn_prepare", "keys_box", "notice",
+    # addons/leads/workbench.py — Find new people, the run line. (Search
+    # settings' rows are one toolbar step: they sit in a modal dialog.)
+    "btn_find", "notice",
     # addons/leads/filter_panel.py
-    "filters_head", "count_badge", "clear_all", "save_search",
+    "filters_head", "count_badge", "clear_all", "more_filters",
     "facet_locations", "facet_job_titles", "similar_titles", "facet_seniority",
     "facet_functions", "facet_industries", "facet_headcount", "facet_revenue",
     "facet_companies", "facet_company_hq", "facet_years", "facet_changed_jobs",
-    "facet_keywords",
-    # addons/leads/cockpit.py
-    "hide_filters", "toolbar_count", "view_toggle", "sort", "refine_search",
-    "refine_fit", "refine_qualified_only", "refine_deliverability", "table",
-    "select_all", "col_lead", "col_focus", "col_fit", "col_status",
-    "col_signal", "bulk_bar", "bulk_verify", "bulk_emails", "bulk_save",
-    "bulk_export", "bulk_qualify", "bulk_sequence", "drawer", "tab_leads",
-    "tab_sessions", "tab_lists", "tab_saved", "tab_sequences", "tab_analytics",
+    "facet_keywords", "facet_contact_imports", "facet_account_imports",
+    "facet_email_status", "facet_scores",
+    # addons/leads/cockpit.py — Apollo's title row and toolbar, the three
+    # tabs, the table, the pages, the action bar, the drawer, the tab strip
+    "import_menu", "views_menu", "hide_filters", "people_search",
+    "research_menu", "save_as_search", "view_toggle", "sort",
+    "search_settings", "people_tabs", "table", "select_all", "col_lead",
+    "col_focus", "col_fit", "col_status", "col_signal", "pager", "bulk_bar",
+    "bulk_save", "bulk_verify", "bulk_emails", "bulk_list", "bulk_export",
+    "bulk_qualify", "bulk_sequence", "drawer", "tab_people", "tab_sessions",
+    "tab_lists", "tab_saved", "tab_sequences", "tab_analytics",
 }
 
 
@@ -134,20 +137,22 @@ class TheSteps(unittest.TestCase):
         for facet in (k for k in CONTRACT if k.startswith("facet_")):
             self.assertIn(facet, keys, facet)
         for extra in ("similar_titles", "count_badge", "clear_all",
-                      "save_search", "filters_head"):
+                      "more_filters", "filters_head"):
             self.assertIn(extra, keys, extra)
 
-    def test_it_points_at_every_column_action_and_tab(self):
-        keys = [k for k, _, _ in T.STEPS]
-        for key in CONTRACT:
-            if key.startswith(("col_", "bulk_", "tab_", "refine_")):
-                self.assertIn(key, keys, key)
+    def test_it_points_at_every_part_the_screen_publishes(self):
+        keys = set(k for k, _, _ in T.STEPS)
+        self.assertEqual(CONTRACT - keys, set())
 
-    def test_the_walk_goes_rail_then_results_then_tabs(self):
+    def test_the_walk_reads_the_page_top_down_then_the_tabs(self):
+        """Apollo's page as it is read: the title row, the toolbar, the
+        rail, the results, the tabs."""
         keys = [k for k, _, _ in T.STEPS]
         where = [keys.index(k) for k in
-                 ("mode_switch", "facet_locations", "btn_find", "table",
-                  "col_fit", "bulk_qualify", "tab_analytics")]
+                 ("import_menu", "views_menu", "search_settings",
+                  "people_tabs", "facet_job_titles", "more_filters",
+                  "facet_scores", "btn_find", "table", "col_fit", "pager",
+                  "bulk_save", "bulk_qualify", "tab_people", "tab_analytics")]
         self.assertEqual(where, sorted(where))
 
     def test_what_a_thing_costs_is_said_where_it_is_spent(self):
@@ -156,11 +161,15 @@ class TheSteps(unittest.TestCase):
         body = dict((k, b) for k, _, b in T.STEPS)
         self.assertIn("credit", body["bulk_emails"])
         self.assertIn("Groq", body["bulk_qualify"])
-        self.assertIn("credit", body["run_target"])
+        self.assertIn("Groq", body["research_menu"])
         self.assertIn("costs nothing", body["bulk_verify"])
-        source = " ".join(b for k, _, b in T.STEPS if k == "source_switch")
-        for word in ("Exa", "Apollo", "credit"):
-            self.assertIn(word, source, word)
+        self.assertIn("costs nothing", body["people_search"])
+        self.assertIn("spends", body["btn_find"])
+        self.assertIn("Nothing is searched", body["import_menu"])
+        self.assertIn("free", body["filters_head"])
+        # What the search it runs costs, where the settings are.
+        for word in ("Exa", "Apollo", "credit", "Reveal up to"):
+            self.assertIn(word, body["search_settings"], word)
 
     def test_the_status_tags_are_all_named(self):
         body = dict((k, b) for k, _, b in T.STEPS)["col_status"]
@@ -261,7 +270,7 @@ class Walking(unittest.TestCase):
         return host, owner, walk
 
     def test_it_opens_on_the_first_step_it_can_point_at(self):
-        steps = (("mode_switch", "One", "The first body, long enough to be a "
+        steps = (("import_menu", "One", "The first body, long enough to be a "
                                         "real sentence about a real control."),
                  ("table", "Two", "The second body, also long enough to read "
                                   "as prose rather than as a label."))
@@ -287,18 +296,18 @@ class Walking(unittest.TestCase):
                           for _ in (0, 1)])
 
     def test_next_and_back_walk_the_steps_that_exist(self):
-        keys = ["mode_switch", "table", "tab_analytics"]
+        keys = ["import_menu", "table", "tab_analytics"]
         host, owner, walk = self._tour(keys)
         walk.start()
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         walk.next_step()
         self.assertEqual(walk.key(), "table")
         self.assertEqual(walk.position(), 2)
         walk.back()
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         self.assertEqual(walk.position(), 1)
         walk.back()                                  # nothing behind the first
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         self.assertTrue(walk.is_open())
 
     def test_a_screen_with_almost_nothing_on_it_still_reaches_the_end(self):
@@ -322,20 +331,20 @@ class Walking(unittest.TestCase):
     def test_an_owner_without_a_snapshot_finishes_on_the_leads_tab(self):
         """The walk ends on Analytics, six tabs away from the work. A screen
         that cannot say where it was is at least put back on Leads."""
-        host, owner, walk = self._tour(["tab_leads", "tab_analytics"])
+        host, owner, walk = self._tour(["tab_people", "tab_analytics"])
         walk.start()
-        self.assertEqual(walk.key(), "tab_leads")
+        self.assertEqual(walk.key(), "tab_people")
         walk.next_step()
         self.assertEqual(walk.key(), "tab_analytics")
         walk.next_step()
         self.assertFalse(walk.is_open())
-        self.assertEqual(owner.revealed[-1], "tab_leads")
+        self.assertEqual(owner.revealed[-1], "tab_people")
 
     def test_finishing_or_escaping_restores_the_screen_it_found(self):
         """Hide filters, the Sessions tab, two open facets: a walk moves all of
         them to point at things, and must hand every one back — walked off the
         end, or left with Esc on the Saved searches step."""
-        host, owner, walk = self._tour(["tab_leads", "tab_saved", "tab_analytics"])
+        host, owner, walk = self._tour(["tab_people", "tab_saved", "tab_analytics"])
         screen = {"tab": "sessions"}
         owner.help_snapshot = lambda: dict(screen)
         restored = []
@@ -416,16 +425,16 @@ class Walking(unittest.TestCase):
 
         class Owner:
             def help_targets(self):
-                return {"refine_deliverability": grid, "col_fit": head}
+                return {"people_tabs": grid, "col_fit": head}
 
         walk = T.Tour(Owner(), host, steps=(
-            ("refine_deliverability", "Grid", "A body long enough to be read as a "
+            ("people_tabs", "Grid", "A body long enough to be read as a "
                                               "sentence about the grid."),
             ("col_fit", "Head", "A body long enough to be read as a sentence "
                                 "about the header row.")))
         walk.start()
         port_rect = QRect(100, 140, 300, 200)
-        self.assertEqual(walk.key(), "refine_deliverability")
+        self.assertEqual(walk.key(), "people_tabs")
         self.assertTrue(port_rect.contains(walk.ring()))
         self.assertEqual(walk.ring().bottom(), port_rect.bottom())
         walk.next_step()
@@ -433,26 +442,26 @@ class Walking(unittest.TestCase):
         self.assertTrue(walk.ring().contains(QRect(100, 100, 300, 40)))
 
     def test_the_keys_move_and_escape_leaves(self):
-        host, owner, walk = self._tour(["mode_switch", "table"])
+        host, owner, walk = self._tour(["import_menu", "table"])
         walk.start()
         _key(walk, Qt.Key_Right)
         self.assertEqual(walk.key(), "table")
         _key(walk, Qt.Key_Left)
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         _key(walk, Qt.Key_Space)
         self.assertEqual(walk.key(), "table")
         _key(walk, Qt.Key_Backspace)
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         _key(walk, Qt.Key_Escape)
         self.assertFalse(walk.is_open())
 
     def test_the_cards_buttons_do_the_same_as_the_keys(self):
-        host, owner, walk = self._tour(["mode_switch", "table"])
+        host, owner, walk = self._tour(["import_menu", "table"])
         walk.start()
         walk._next_btn.click()
         self.assertEqual(walk.key(), "table")
         walk._back_btn.click()
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
         walk._leave_btn.click()
         self.assertFalse(walk.is_open())
 
@@ -475,13 +484,13 @@ class Walking(unittest.TestCase):
         self.assertEqual(walk.card().focusPolicy(), Qt.StrongFocus)
 
     def test_starting_twice_does_not_stack_two_overlays(self):
-        host, owner, walk = self._tour(["mode_switch", "table"])
+        host, owner, walk = self._tour(["import_menu", "table"])
         walk.start()
         walk.next_step()
         walk.start()
         self.assertEqual(len(host.findChildren(T.Tour)), 1)
         self.assertEqual(walk.position(), 1)          # back at the beginning
-        self.assertEqual(walk.key(), "mode_switch")
+        self.assertEqual(walk.key(), "import_menu")
 
     def test_a_resize_re_measures_without_re_revealing(self):
         host, owner, walk = self._tour(["table"])
@@ -496,7 +505,7 @@ class Walking(unittest.TestCase):
         host = _host()
         heard = []
         loud = {key: _Loud(host, heard) for key in
-                ("mode_switch", "table", "bulk_qualify", "tab_analytics")}
+                ("import_menu", "table", "bulk_qualify", "tab_analytics")}
         for i, w in enumerate(loud.values()):
             w.setGeometry(30, 30 + i * 60, 200, 40)
 
@@ -518,9 +527,9 @@ class Walking(unittest.TestCase):
         self.assertFalse(walk.is_open())
 
     def test_a_hidden_target_is_skipped(self):
-        host, owner, walk = self._tour(["mode_switch", "table"],
+        host, owner, walk = self._tour(["import_menu", "table"],
                                        needs_reveal=False)
-        owner.widget("mode_switch").hide()       # a folded facet, a bulk bar
+        owner.widget("import_menu").hide()       # a folded facet, a bulk bar
         walk.start()                             # with nothing ticked
         self.assertEqual(walk.key(), "table")
 
@@ -563,7 +572,7 @@ class TheGuide(unittest.TestCase):
     def _screen(self):
         host = _host()
         inner = QWidget(host)
-        rail = _Part(inner, {"mode_switch": QWidget(inner)})
+        rail = _Part(inner, {"import_menu": QWidget(inner)})
         deep = _Part(inner, {"facet_keywords": QWidget(inner)})
         return host, rail, deep
 
@@ -571,7 +580,7 @@ class TheGuide(unittest.TestCase):
         host, rail, deep = self._screen()
         guide = T.Guide(host)
         self.assertEqual(set(guide.help_targets()),
-                         {"mode_switch", "facet_keywords"})
+                         {"import_menu", "facet_keywords"})
 
     def test_it_asks_every_part_to_reveal(self):
         host, rail, deep = self._screen()
@@ -623,7 +632,7 @@ class TheGuide(unittest.TestCase):
 
         Broken(host)
         guide = T.Guide(host)
-        self.assertIn("mode_switch", guide.help_targets())
+        self.assertIn("import_menu", guide.help_targets())
 
 
 class _Part(QWidget):

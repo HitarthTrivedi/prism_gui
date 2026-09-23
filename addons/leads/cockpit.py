@@ -36,6 +36,7 @@ from __future__ import annotations
 import datetime
 import os
 
+import i18n
 import paths
 import theme
 from addons.leads import evidence
@@ -52,7 +53,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy,
-    QSpinBox, QSplitter, QSplitterHandle, QStackedWidget, QStyle, QStyledItemDelegate,
+    QSplitter, QSplitterHandle, QStackedWidget, QStyle, QStyledItemDelegate,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -80,15 +81,10 @@ _MONO = theme.FONT_MONO_STACK.split(",")[0].strip().strip('"')
 def status_of(dos, draft=None) -> str:
     """The deliverability label for a dossier — the one thing a bulk sender
     must see per row. A lead already sent to reads 'Mailed'; otherwise the free
-    verify verdict (or 'Guessed' for an un-checked pattern address)."""
-    if draft is not None and getattr(draft, "status", "") == "sent":
-        return "Mailed"
-    lead = dos.lead
-    if not (lead.email or "").strip():
-        return "No email"
-    ec = (lead.extra or {}).get("email_check") or ""
-    return {"valid": "Verified", "invalid": "Invalid",
-            "catch-all": "Catch-all", "unknown": "Unknown"}.get(ec, "Guessed")
+    verify verdict (or 'Guessed' for an un-checked pattern address). One rule
+    with the "Email status" filter: addons/leads/pool.py decides, this names."""
+    from addons.leads.pool import EMAIL_STATUS_LABEL, email_status_of
+    return EMAIL_STATUS_LABEL[email_status_of(dos.lead, draft)]
 
 
 def needs_email(dos) -> bool:
@@ -186,25 +182,40 @@ _C_TICK, _C_LEAD, _C_FOCUS, _C_FIT, _C_STATUS, _C_SIGNAL = range(len(_COLS))
 _COL_WIDTH = {_C_TICK: 44, _C_LEAD: 300, _C_FIT: 76, _C_STATUS: 124, _C_SIGNAL: 136}
 _COL_MIN = {_C_LEAD: 180, _C_FIT: 60, _C_STATUS: 100, _C_SIGNAL: 112}
 _FOCUS_MIN = 150
+# Every column at its minimum, and a scrollbar's width to spare: what a docked
+# drawer must leave the table (_dock_room).
+_TABLE_FLOOR = max(_TABLE_MIN, _COL_WIDTH[_C_TICK] + sum(_COL_MIN.values())
+                   + _FOCUS_MIN + 12)
 # Pills that name a state rather than a finding, drawn as a quiet outline.
 _OUTLINE = frozenset({"Not qualified"})
-_EMPTY_TITLE = "No leads yet"
-_EMPTY_BODY = ("Set lead filters in the panel on the left, or import a sheet, then "
-               "press Find people. Lists you saved live under Lists.")
+_EMPTY_TITLE = "No people yet"
+_EMPTY_BODY = ("Import a sheet with Import at the top right, or set filters on the "
+               "left and press Find new people. Everyone Prism has ever found or "
+               "imported shows here, and filters narrow it at once.")
+# When filters (or a tab) leave nobody out of people Prism DOES hold.
+_NO_MATCH_TITLE = "Nobody here matches these filters"
+_NO_MATCH_BODY = ("Remove a filter on the left, look under another tab, or press "
+                  "Find new people to search for people who match.")
+# Apollo's three tabs over every result (pool.split), in its order.
+_PEOPLE_TABS = (("total", "Total"), ("net_new", "Net New"), ("saved", "Saved"))
+# Apollo's sort choices, Prism's way (pool.sort_people); legacy local sorting
+# (a cockpit fed set_dossiers, not a pool) knows the first two.
+_SORTS = (("relevance", "Relevance"), ("name", "Name A–Z"),
+          ("newest", "Newest"), ("company", "Company A–Z"))
 # What the "?" walkthrough calls the parts of this screen (addons/leads/help.py).
 # A column has no widget of its own — the header paints all of them — so those
 # keys answer with a region of the header instead (_section_rect).
 _HELP_COLS = {"col_lead": _C_LEAD, "col_focus": _C_FOCUS, "col_fit": _C_FIT,
               "col_status": _C_STATUS, "col_signal": _C_SIGNAL}
-_HELP_RAIL = frozenset({"refine_search", "refine_fit", "refine_qualified_only",
-                        "refine_deliverability"})
-_HELP_BULK = ("bulk_verify", "bulk_emails", "bulk_save", "bulk_export",
+_HELP_BULK = ("bulk_save", "bulk_verify", "bulk_emails", "bulk_list", "bulk_export",
               "bulk_qualify", "bulk_sequence")
-_HELP_KEYS = frozenset({"hide_filters", "toolbar_count", "view_toggle", "sort",
+_HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_search",
+                        "research_menu", "save_as_search", "sort", "search_settings",
+                        "view_toggle", "people_tabs", "pager",
                         "table", "select_all", "bulk_bar", "drawer"}
-                       | set(_HELP_COLS) | set(_HELP_RAIL) | set(_HELP_BULK))
+                       | set(_HELP_COLS) | set(_HELP_BULK))
 # The tab strip's own keys, in the order the tabs are built (_TABS).
-_HELP_TABS = ("tab_leads", "tab_sessions", "tab_lists", "tab_saved",
+_HELP_TABS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
               "tab_sequences", "tab_analytics")
 _REVEAL_PAD = 24       # a revealed target is scrolled this clear of the edge
 
@@ -806,8 +817,23 @@ class _Reveal(QWidget):
 
 
 class LeadsCockpit(QWidget):
-    """The dense results surface. `set_dossiers` fills it; the six *Requested
-    signals carry the checked dossiers out to the dialog's workers."""
+    """Find People — Apollo's page (23-Sep-2026: "copy the entire architecture
+    and interface of apollo"):
+
+        Find people                                              [Import ▾]
+        [Default view ▾] [Hide filters] [Search people] [Research with AI ▾]
+          [Save as new search]              [Table|Cards] [Sort ▾] [⚙]
+        ┌ Total · Net New · Saved ┐ ┌ NAME … the table …                  ┐
+        │ the filter facets        │ │                                     │
+        │ [Find new people]        │ │ ‹ [1] ›  1 – 25 of 312              │
+        └──────────────────────────┘ └ the action bar, once rows are ticked┘
+
+    It is a VIEW. The workbench owns the pool (addons/leads/pool.py), filters,
+    splits, sorts and pages it, and hands one page here (`set_people`); every
+    control on this page says what the owner asked by a signal. `set_dossiers`
+    still fills it straight from one run's dossiers (Analytics, tests) — then
+    the table sorts itself, as it always did. The *Requested signals carry the
+    ticked rows out to the workbench's workers."""
 
     verifyRequested = Signal(list)
     emailsRequested = Signal(list)
@@ -815,10 +841,25 @@ class LeadsCockpit(QWidget):
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
     qualifyRequested = Signal(list)
+    saveContactsRequested = Signal(list)    # Apollo's "Save": make them contacts
+    importRequested = Signal(str)           # "contacts" | "accounts"
+    tabChanged = Signal(str)                # "total" | "net_new" | "saved"
+    pageRequested = Signal(int)             # 0-based
+    sortChanged = Signal(str)               # a _SORTS key
+    queryChanged = Signal(str)              # the Search people box
+    settingsRequested = Signal()
+    saveSearchRequested = Signal()
+    savedSearchPicked = Signal(str)         # a saved search's id
+    starterPicked = Signal(str)             # a starter search's key (set_starters)
+    manageSearchesRequested = Signal()
+    findPrepareRequested = Signal()         # Research with AI ▸ find and qualify
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._dossiers: list = []
+        self._people: list = []             # the page's pool.Person rows, when pooled
+        self._pooled = False                # fed by set_people (else set_dossiers)
+        self._tab = "total"
         self._draft_by: dict = {}
         self._checked: set = set()          # dossier indices ticked (shared view)
         self._hidden: set = set()           # dossier indices hidden by the filters
@@ -851,6 +892,10 @@ class LeadsCockpit(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        # Apollo's two rows over the whole page — the title with Import, then
+        # the toolbar — both full width, above the rail as well as the table.
+        root.addWidget(self._title_row())
+        root.addWidget(self._toolbar_row())
         # rail | results | drawer, in a splitter the user can drag. The drawer is
         # in the splitter only while there's room to dock it; on a narrow window
         # it floats over the results instead — see _place_drawer.
@@ -873,7 +918,6 @@ class LeadsCockpit(QWidget):
         self._drawer()
         self._body.installEventFilter(self)
         root.addWidget(self._body, 1)
-        self._update_counters()
         self._show_empty(True)
         self._refresh_bulk()
 
@@ -897,10 +941,14 @@ class LeadsCockpit(QWidget):
         return super().eventFilter(obj, event)
 
     def _filter_rail(self) -> QWidget:
-        """The left rail, Sales-Nav style: a slot for the search that BUILDS the
-        list (the workbench mounts it), then the filters that REFINE it. The rail
-        scrolls on its own, so a short window never crushes a control; its edge
-        drags between _RAIL_MIN and _RAIL_MAX."""
+        """Apollo's left column: Total · Net New · Saved, then the filters (the
+        workbench mounts its FilterPanel — set_search_panel), then the one paid
+        action (Find new people — set_find_panel). Every filter is a facet now:
+        the "refine" controls this rail used to carry (deliverability, minimum
+        fit, qualified only, a search box) filtered ONE page of a run; they are
+        facets and the toolbar's Search people, applied to the whole pool
+        before it is paged. The rail scrolls on its own, so a short window
+        never crushes a control; its edge drags between _RAIL_MIN and _RAIL_MAX."""
         self._rail = QScrollArea()
         self._rail.setObjectName("leadsRail")
         self._rail.setMinimumWidth(_RAIL_MIN)
@@ -920,146 +968,242 @@ class LeadsCockpit(QWidget):
         lay.setContentsMargins(theme.SPACE_4, theme.SPACE_4, theme.SPACE_4, theme.SPACE_4)
         lay.setSpacing(theme.SPACE_3)
 
+        lay.addWidget(self._tabs_bar())
+
         self._search_slot = QVBoxLayout()
         self._search_slot.setContentsMargins(0, 0, 0, 0)
         self._search_slot.setSpacing(0)
         lay.addLayout(self._search_slot)
 
-        lay.addWidget(self._rail_head("Refine results"))
-        self._search = QLineEdit()
-        self._search.setPlaceholderText("Search name, company, title")
-        self._search.setClearButtonEnabled(True)
-        self._search.addAction(icons.icon("search", 15, theme.NEUTRAL[500]),
-                               QLineEdit.LeadingPosition)
-        # Debounced: in Cards view every filter pass rebuilds the gallery, so
-        # typing a name would otherwise rebuild it once per keystroke.
-        self._search_timer = QTimer(self)
-        self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(200)
-        self._search_timer.timeout.connect(self._apply_filters)
-        self._search.textChanged.connect(lambda _t: self._search_timer.start())
-        lay.addWidget(self._search)
-
-        fit_row = QHBoxLayout()
-        fit_row.setContentsMargins(0, 0, 0, 0)
-        fit_row.setSpacing(theme.SPACE_2)
-        fit_label = _muted("Minimum fit", 13)
-        fit_label.setWordWrap(False)        # at the rail's narrowest it broke in two
-        fit_row.addWidget(fit_label, 1)
-        self._fit_min = QSpinBox()
-        self._fit_min.setRange(0, 100)
-        self._fit_min.setSuffix(" / 100")
-        self._fit_min.setMinimumWidth(112)
-        self._fit_min.valueChanged.connect(self._apply_filters)
-        fit_row.addWidget(self._fit_min)
-        lay.addLayout(fit_row)
-
-        # A run lists everyone it sourced; this narrows it to the leads Prism
-        # has researched and drafted for.
-        self._only_qualified = QCheckBox("Qualified leads only")
-        self._only_qualified.setStyleSheet("QCheckBox{border:none;background:transparent;}")
-        self._only_qualified.stateChanged.connect(self._apply_filters)
-        lay.addWidget(self._only_qualified)
-
-        lay.addWidget(_muted("Deliverability", 13))
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(theme.SPACE_3)
-        grid.setVerticalSpacing(theme.SPACE_2)
-        self._status_boxes: dict = {}
-        for i, name in enumerate(("Verified", "Guessed", "Catch-all", "Unknown",
-                                  "Invalid", "No email", "Mailed")):
-            cb = QCheckBox(name)
-            cb.setChecked(True)
-            # Under the app stylesheet a QCheckBox is drawn inside a 2px accent
-            # box; the indicator already says checked, so the box is noise.
-            cb.setStyleSheet("QCheckBox{border:none;background:transparent;}")
-            cb.stateChanged.connect(self._apply_filters)
-            self._status_boxes[name] = cb
-            grid.addWidget(cb, i // 2, i % 2)
-        lay.addLayout(grid)
+        self._find_slot = QVBoxLayout()
+        self._find_slot.setContentsMargins(0, 0, 0, 0)
+        self._find_slot.setSpacing(theme.SPACE_1)
+        lay.addLayout(self._find_slot)
         lay.addStretch(1)
         lay.addWidget(_muted("Manual, 1:1 — Prism drafts and paces the touches; you "
                              "send from your own inbox. No auto-DMs.", 11))
         self._rail.setWidget(inner)
         return self._rail
 
-    def _rail_head(self, text: str) -> QLabel:
-        lab = QLabel(text.upper())
-        lab.setStyleSheet(
-            f"color:{theme.NEUTRAL[600]};font-family:'{theme.FONT_HEADING}';"
-            f"font-size:11px;letter-spacing:1px;font-weight:600;")
-        return lab
+    def _tabs_bar(self) -> QWidget:
+        """Total · Net New · Saved, each with its count under its name — the
+        way Apollo stacks them over its filters."""
+        seg = QFrame()
+        seg.setObjectName("peopleTabs")
+        seg.setAttribute(Qt.WA_StyledBackground, True)
+        seg.setStyleSheet(
+            f"QFrame#peopleTabs{{background:{theme.WELL};border:1px solid "
+            f"{theme.HAIRLINE};border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#peopleTabs QPushButton{{background:transparent;border:none;"
+            f"border-radius:{theme.R_CHIP}px;color:{theme.NEUTRAL[600]};"
+            f"padding:5px 4px;font-size:12px;font-weight:600;text-align:center;}}"
+            f"QFrame#peopleTabs QPushButton:hover{{color:{theme.TEXT};}}"
+            f"QFrame#peopleTabs QPushButton:checked{{background:{theme.CARD};"
+            f"color:{theme.TEXT};}}")
+        lay = QHBoxLayout(seg)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
+        self._tab_btns: dict = {}
+        self._tab_counts: dict = {key: 0 for key, _ in _PEOPLE_TABS}
+        for key, name in _PEOPLE_TABS:
+            b = QPushButton()
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setMinimumHeight(40)
+            b.clicked.connect(lambda _=False, k=key: self._pick_tab(k))
+            lay.addWidget(b, 1)
+            self._tab_btns[key] = b
+        self._tabs_frame = seg
+        self._paint_tabs()
+        return seg
+
+    def _paint_tabs(self) -> None:
+        for key, name in _PEOPLE_TABS:
+            b = self._tab_btns[key]
+            # The name through the catalogue by hand: with its count under
+            # it, the whole text matches no entry (i18n.py, Templates).
+            b.setText(f"{i18n.t(name)}\n{self._tab_counts.get(key, 0):,}")
+            b.setChecked(key == self._tab)
+
+    def _pick_tab(self, key: str) -> None:
+        self._tab = key
+        self._paint_tabs()
+        self.tabChanged.emit(key)
+
+    def tab(self) -> str:
+        return self._tab
+
+    def set_tab(self, key: str) -> None:
+        """Select a tab without emitting — the workbench restoring one."""
+        if key in self._tab_btns:
+            self._tab = key
+            self._paint_tabs()
+
+    def set_counts(self, counts: dict) -> None:
+        """The three tabs' counts, {"total", "net_new", "saved"}."""
+        for key, _name in _PEOPLE_TABS:
+            self._tab_counts[key] = int((counts or {}).get(key, 0) or 0)
+        self._paint_tabs()
 
     def set_search_panel(self, widget: QWidget) -> None:
-        """Mount the list-building search (owned by the workbench) at the top of
-        the rail, above the refine filters, with a rule between the two."""
+        """Mount the filter column (the workbench's FilterPanel) under the
+        tabs — Apollo's facets."""
         _clear(self._search_slot)
         self._search_slot.addWidget(widget)
-        self._search_slot.addSpacing(theme.SPACE_4)
+
+    def set_find_panel(self, widget: QWidget) -> None:
+        """Mount the paid search — Find new people and its estimate — under
+        the filters, with a rule between: the one thing on this page that
+        spends, set apart from everything that is free."""
+        _clear(self._find_slot)
         rule = QFrame()
         rule.setObjectName("railRule")
         rule.setFixedHeight(1)
         rule.setStyleSheet(f"QFrame#railRule{{background:{theme.HAIRLINE};border:none;}}")
-        self._search_slot.addWidget(rule)
-        self._search_slot.addSpacing(theme.SPACE_2)
+        self._find_slot.addSpacing(theme.SPACE_2)
+        self._find_slot.addWidget(rule)
+        self._find_slot.addSpacing(theme.SPACE_2)
+        self._find_slot.addWidget(widget)
 
-    def _stat(self, label: str, accent: bool = False) -> QWidget:
-        w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(5)
-        lab = QLabel(label)
-        lab.setStyleSheet(f"color:{theme.NEUTRAL[600]};font-size:12px;")
-        num = QLabel("0")
-        num.setStyleSheet(f"color:{theme.ACCENT if accent else theme.TEXT};"
-                          f"font-family:'{_MONO}';font-size:13px;font-weight:600;")
-        h.addWidget(lab)
-        h.addWidget(num)
-        w._num = num
-        return w
+    # ── the page's own two rows (Apollo's) ───────────────────────────────────
+    def _title_row(self) -> QWidget:
+        """"Find people" and, at the far right, Import ▾ — Apollo's People >
+        Import > CSV. Importing is its own action here, never a mode of the
+        search: the file becomes a "Contact CSV import" / "Account CSV import"
+        filter value, and nothing is searched."""
+        bar = QFrame()
+        bar.setObjectName("peopleTitle")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
+        bar.setStyleSheet(f"QFrame#peopleTitle{{background:{theme.CARD};border:none;}}")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4, 0)
+        lay.setSpacing(theme.SPACE_3)
+        title = QLabel("Find people")
+        title.setObjectName("peopleTitleText")
+        title.setStyleSheet(theme.type_css("SECTION", theme.TEXT))
+        lay.addWidget(title, 0, Qt.AlignVCenter)
+        lay.addStretch(1)
+        self._import_btn = self._menu_button("Import", "importBtn")
+        menu = self._import_btn.menu()
+        a = menu.addAction(i18n.t("Contacts — people from a CSV or Excel file…"))
+        a.triggered.connect(lambda: self.importRequested.emit("contacts"))
+        a = menu.addAction(i18n.t("Accounts — companies from a CSV or Excel file…"))
+        a.triggered.connect(lambda: self.importRequested.emit("accounts"))
+        lay.addWidget(self._import_btn, 0, Qt.AlignVCenter)
+        return bar
 
-    def _center(self) -> QWidget:
-        wrap = QWidget()
-        # On a narrow window the rail gives way (down to its minimum) before
-        # the results do.
-        wrap.setMinimumWidth(_TABLE_MIN)
-        col = QVBoxLayout(wrap)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
+    def _menu_button(self, text: str, name: str, icon_name: str = ""):
+        """A toolbar button that opens a menu — Apollo's "Default view ▾",
+        "Research with AI ▾", "Import ▾" — outlined like Apollo's, with the
+        caret the Sort box wears."""
+        from PySide6.QtWidgets import QToolButton
+        b = QToolButton()
+        b.setObjectName(name)
+        b.setText(text)
+        b.setPopupMode(QToolButton.InstantPopup)
+        b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if icon_name
+                             else Qt.ToolButtonTextOnly)
+        if icon_name:
+            b.setIcon(icons.icon(icon_name, 15, theme.NEUTRAL[700]))
+        b.setCursor(Qt.PointingHandCursor)
+        b.setMenu(QMenu(b))
+        b.setStyleSheet(
+            f"QToolButton#{name}{{background:{theme.CARD};color:{theme.NEUTRAL[800]};"
+            f"border:1px solid {theme.BORDER};border-radius:{theme.R_CONTROL}px;"
+            f"padding:5px 26px 5px 10px;min-height:20px;font-size:12px;"
+            f"font-weight:600;}}"
+            f"QToolButton#{name}:hover{{background:{theme.WELL};"
+            f"border-color:{theme.NEUTRAL[300]};}}"
+            f"QToolButton#{name}::menu-indicator{{image:url({_asset('caret-down.svg')});"
+            f"subcontrol-position:right center;subcontrol-origin:padding;"
+            f"right:8px;width:12px;height:12px;}}")
+        return b
 
+    def _toolbar_row(self) -> QWidget:
+        """Apollo's toolbar, full width over the rail and the table:
+        Default view ▾ · Hide filters · Search people · Research with AI ▾ ·
+        Save as new search … Table|Cards · Sort ▾ · Search settings."""
         self._toolbar = QFrame()
         self._toolbar.setObjectName("resultsBar")
         self._toolbar.setAttribute(Qt.WA_StyledBackground, True)
+        # Its full dress is wider than a 1366 window's page, and a layout
+        # passes a child's minimum up to the window — so, Ignored: the bar
+        # takes the width it is given and _fit_toolbar drops labels to fit,
+        # instead of the bar forcing the whole window wider.
+        self._toolbar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._toolbar.setStyleSheet(
             f"QFrame#resultsBar{{background:{theme.CARD};border:none;"
-            f"border-bottom:1px solid {theme.HAIRLINE};}}")
+            f"border-bottom:1px solid {theme.HAIRLINE};}}"
+            f"QFrame#resultsBar QPushButton#tbBtn{{background:{theme.CARD};"
+            f"color:{theme.NEUTRAL[800]};border:1px solid {theme.BORDER};"
+            f"border-radius:{theme.R_CONTROL}px;padding:5px 12px;min-height:20px;"
+            f"font-size:12px;font-weight:600;}}"
+            f"QFrame#resultsBar QPushButton#tbBtn:hover{{background:{theme.WELL};"
+            f"border-color:{theme.NEUTRAL[300]};}}")
         tlay = QHBoxLayout(self._toolbar)
         tlay.setContentsMargins(theme.SPACE_4, theme.SPACE_2, theme.SPACE_4, theme.SPACE_2)
-        tlay.setSpacing(theme.SPACE_4)
-        # Beside the rail it folds, the way Apollo places it.
+        tlay.setSpacing(theme.SPACE_2)
+
+        # Default view ▾ — the saved searches (Apollo keeps its views there),
+        # and the two layouts this page draws.
+        self._views_btn = self._menu_button("Default view", "viewsBtn", "grid")
+        self._views_menu = self._views_btn.menu()
+        self._saved_searches: list = []
+        self._starters: list = []           # (key, name) — set_starters
+        self._fill_views_menu()
+        tlay.addWidget(self._views_btn)
         tlay.addWidget(self._filters_toggle())
-        self._count_lbl = QLabel("Showing 0 of 0")
-        self._count_lbl.setStyleSheet(f"color:{theme.TEXT};font-size:13px;font-weight:600;")
-        tlay.addWidget(self._count_lbl)
-        self._c_new = self._stat("Net-new", accent=True)
-        self._c_fit = self._stat("Avg fit")
-        tlay.addWidget(self._c_new)
-        tlay.addWidget(self._c_fit)
+
+        self._search = QLineEdit()
+        self._search.setObjectName("peopleSearch")
+        self._search.setPlaceholderText("Search people")
+        self._search.setClearButtonEnabled(True)
+        self._search.setMinimumWidth(150)
+        self._search.setMaximumWidth(260)
+        self._search.addAction(icons.icon("search", 15, theme.NEUTRAL[500]),
+                               QLineEdit.LeadingPosition)
+        # Debounced: every keystroke would otherwise re-filter the whole pool.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)
+        self._search_timer.timeout.connect(
+            lambda: self.queryChanged.emit(self._search.text().strip()))
+        self._search.textChanged.connect(lambda _t: self._search_timer.start())
+        tlay.addWidget(self._search)
+
+        self._research_btn = self._menu_button("Research with AI", "researchBtn",
+                                               "sparkles")
+        menu = self._research_btn.menu()
+        # Armed the moment it opens, with the reason on a disarmed item: a
+        # pick that silently did nothing was 22-Sep's "Nothing changes at all".
+        menu.setToolTipsVisible(True)
+        menu.aboutToShow.connect(self._sync_research_menu)
+        self._find_prepare_ready = lambda: (True, "")
+        self._act_qualify = menu.addAction(i18n.t("Qualify and draft for the people ticked"))
+        self._act_qualify.triggered.connect(
+            lambda: self.qualifyRequested.emit(self.selected()))
+        self._act_find_prepare = menu.addAction(
+            i18n.t("Find new people and qualify them — the whole pipeline"))
+        self._act_find_prepare.triggered.connect(self.findPrepareRequested.emit)
+        tlay.addWidget(self._research_btn)
+
+        self._save_search_btn = QPushButton("Save as new search")
+        self._save_search_btn.setObjectName("tbBtn")
+        self._save_search_btn.setCursor(Qt.PointingHandCursor)
+        self._save_search_btn.setToolTip("Keep these filters to run again later")
+        self._save_search_btn.clicked.connect(lambda _=False: self.saveSearchRequested.emit())
+        tlay.addWidget(self._save_search_btn)
         tlay.addStretch(1)
+
         self._seg = self._view_toggle()
         tlay.addWidget(self._seg)
-        sort = QHBoxLayout()
-        sort.setContentsMargins(0, 0, 0, 0)
-        sort.setSpacing(theme.SPACE_2)
-        self._sort_lbl = QLabel("Sort")
-        self._sort_lbl.setStyleSheet(f"color:{theme.NEUTRAL[600]};font-size:12px;")
-        sort.addWidget(self._sort_lbl)
         self._sort = QComboBox()
         self._sort.setObjectName("leadsSort")
-        self._sort.addItems(["Best fit", "Name A–Z"])
+        for key, label in _SORTS:
+            self._sort.addItem(label, key)
         self._sort.setMinimumWidth(124)
         self._sort.setCursor(Qt.PointingHandCursor)
+        self._sort.setToolTip("Sort")
         # One height with the toggle and the view switch (32px), and a caret:
         # the app sheet's combo is 36px with no arrow, so it read as a text box.
         self._sort.setStyleSheet(
@@ -1071,10 +1215,156 @@ class LeadsCockpit(QWidget):
             f"QComboBox#leadsSort::down-arrow{{image:url({_asset('caret-down.svg')});"
             f"width:12px;height:12px;}}")
         self._sort.currentIndexChanged.connect(self._on_sort_changed)
-        sort.addWidget(self._sort)
-        tlay.addLayout(sort)
+        tlay.addWidget(self._sort)
+        self._settings_btn = QPushButton("Search settings")
+        self._settings_btn.setObjectName("tbBtn")
+        self._settings_btn.setCursor(Qt.PointingHandCursor)
+        self._settings_btn.setToolTip(
+            "Which database to search, how far a search goes, what you sell, "
+            "your keys — the settings every search here runs with")
+        icons.button_icon(self._settings_btn, "sliders", 15, theme.NEUTRAL[700])
+        self._settings_btn.clicked.connect(lambda _=False: self.settingsRequested.emit())
+        tlay.addWidget(self._settings_btn)
         self._toolbar.installEventFilter(self)          # narrow → _fit_toolbar
-        col.addWidget(self._toolbar)
+        return self._toolbar
+
+    def _fill_views_menu(self) -> None:
+        menu = self._views_menu
+        # Not menu.clear(): that deletes each action at once, and this runs
+        # from inside one of them (a pick that refreshes the list) — Qt would
+        # still be emitting the action it had just freed.
+        for act in menu.actions():
+            menu.removeAction(act)
+            act.deleteLater()
+        head = menu.addAction(i18n.t("Saved searches"))
+        head.setEnabled(False)
+        if not self._saved_searches:
+            none = menu.addAction(i18n.t("None yet — use Save as new search"))
+            none.setEnabled(False)
+        for record in self._saved_searches[:20]:
+            # The owner's own name for it: data, never looked up.
+            act = menu.addAction(record.get("name") or i18n.t("Untitled search"))
+            act.triggered.connect(lambda _=False, i=record.get("id", ""):
+                                  self.savedSearchPicked.emit(i))
+        if self._starters:
+            menu.addSeparator()
+            head = menu.addAction(i18n.t("Starter searches"))
+            head.setEnabled(False)
+            for key, name in self._starters:
+                act = menu.addAction(name)
+                act.triggered.connect(lambda _=False, k=key: self.starterPicked.emit(k))
+        menu.addSeparator()
+        manage = menu.addAction(i18n.t("Manage saved searches…"))
+        manage.triggered.connect(self.manageSearchesRequested.emit)
+        menu.addSeparator()
+        layout = menu.addAction(i18n.t("Layout"))
+        layout.setEnabled(False)
+        self._layout_acts = {}
+        for view, name in (("table", i18n.t("Table")), ("cards", i18n.t("Cards"))):
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(self._view == view)
+            act.triggered.connect(lambda _=False, v=view: self._set_view(v))
+            self._layout_acts[view] = act
+
+    def set_find_prepare_ready(self, check) -> None:
+        """How Research with AI ▸ "Find new people and qualify them" knows it
+        can run: check() -> (ok, why) — the workbench's own Find new people,
+        asked each time the menu opens."""
+        self._find_prepare_ready = check
+
+    def _sync_research_menu(self) -> None:
+        """Arm Research with AI's two items exactly as their buttons are."""
+        ok = self._qualify_wanted and self._b_qualify.isEnabled()
+        self._act_qualify.setEnabled(ok)
+        self._act_qualify.setToolTip("" if ok else i18n.t(
+            "Tick people who are not qualified yet."))
+        try:
+            ok, why = self._find_prepare_ready()
+        except Exception:                                   # noqa: BLE001
+            ok, why = False, ""
+        self._act_find_prepare.setEnabled(bool(ok))
+        self._act_find_prepare.setToolTip("" if ok else (why or ""))
+
+    def set_saved_searches(self, records) -> None:
+        """What Default view ▾ lists (saved_searches.list_searches)."""
+        self._saved_searches = list(records or ())
+        self._fill_views_menu()
+
+    def set_starters(self, starters) -> None:
+        """Default view ▾'s starter searches — [(key, name)], the workbench's
+        ready-made filter sets; picking one emits starterPicked(key)."""
+        self._starters = [(str(k), str(n)) for k, n in (starters or ())]
+        self._fill_views_menu()
+
+    def _pager_bar(self) -> QWidget:
+        """Apollo's foot of the results: ‹ [page ▾] ›  "1 - 25 of 312". Only a
+        pooled page has pages; a run shown straight from its dossiers hides it."""
+        self._pager = QFrame()
+        self._pager.setObjectName("peoplePager")
+        self._pager.setAttribute(Qt.WA_StyledBackground, True)
+        self._pager.setStyleSheet(
+            f"QFrame#peoplePager{{background:{theme.CARD};border:none;"
+            f"border-top:1px solid {theme.HAIRLINE};}}"
+            f"QFrame#peoplePager QPushButton{{background:{theme.CARD};"
+            f"color:{theme.NEUTRAL[800]};border:1px solid {theme.BORDER};"
+            f"border-radius:{theme.R_CONTROL}px;padding:3px 10px;min-height:20px;"
+            f"font-size:13px;font-weight:600;}}"
+            f"QFrame#peoplePager QPushButton:disabled{{color:{theme.NEUTRAL[300]};"
+            f"border-color:{theme.HAIRLINE};}}")
+        lay = QHBoxLayout(self._pager)
+        lay.setContentsMargins(theme.SPACE_4, theme.SPACE_2, theme.SPACE_4, theme.SPACE_2)
+        lay.setSpacing(theme.SPACE_2)
+        self._prev_btn = QPushButton("‹")
+        self._prev_btn.setToolTip("Previous page")
+        self._next_btn = QPushButton("›")
+        self._next_btn.setToolTip("Next page")
+        self._page_box = QComboBox()
+        self._page_box.setObjectName("leadsSort")
+        self._page_box.setMinimumWidth(64)
+        for b in (self._prev_btn, self._next_btn):
+            b.setCursor(Qt.PointingHandCursor)
+        self._prev_btn.clicked.connect(lambda: self.pageRequested.emit(self._page_index - 1))
+        self._next_btn.clicked.connect(lambda: self.pageRequested.emit(self._page_index + 1))
+        self._page_box.activated.connect(lambda i: self.pageRequested.emit(i))
+        self._range_lbl = QLabel("")
+        self._range_lbl.setStyleSheet(f"color:{theme.TEXT};font-size:13px;font-weight:600;")
+        lay.addWidget(self._prev_btn)
+        lay.addWidget(self._page_box)
+        lay.addWidget(self._next_btn)
+        lay.addSpacing(theme.SPACE_2)
+        lay.addWidget(self._range_lbl)
+        lay.addStretch(1)
+        self._page_index = 0
+        self._pager.hide()
+        return self._pager
+
+    def set_page(self, info: dict) -> None:
+        """Show which page is on screen — pool.page()'s dict."""
+        info = info or {}
+        pages = max(1, int(info.get("pages", 1) or 1))
+        self._page_index = int(info.get("page", 0) or 0)
+        total = int(info.get("total", 0) or 0)
+        self._page_box.blockSignals(True)
+        if self._page_box.count() != pages:
+            self._page_box.clear()
+            self._page_box.addItems([str(i + 1) for i in range(pages)])
+        self._page_box.setCurrentIndex(min(self._page_index, pages - 1))
+        self._page_box.blockSignals(False)
+        self._prev_btn.setEnabled(self._page_index > 0)
+        self._next_btn.setEnabled(self._page_index < pages - 1)
+        self._range_lbl.setText(i18n.t("{a} - {b} of {n}").format(
+            a=f"{info.get('start', 0):,}", b=f"{info.get('end', 0):,}", n=f"{total:,}"))
+        self._pager.setVisible(self._pooled and total > 0)
+
+    def _center(self) -> QWidget:
+        wrap = QWidget()
+        # On a narrow window the rail gives way (down to its minimum) before
+        # the results do.
+        wrap.setMinimumWidth(_TABLE_MIN)
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
 
         self._table = self._build_table()
 
@@ -1090,6 +1380,7 @@ class LeadsCockpit(QWidget):
         self._view_stack.addWidget(self._empty)             # 2 — nothing loaded
         self._view_stack.installEventFilter(self)
         col.addWidget(self._view_stack, 1)
+        col.addWidget(self._pager_bar())
 
         self._bulk = self._bulk_bar()
         col.addWidget(self._bulk)
@@ -1161,13 +1452,16 @@ class LeadsCockpit(QWidget):
 
     def _filters_toggle(self) -> QPushButton:
         """Hide filters / Show filters — Apollo's switch: fold the rail away for
-        a wider table, and bring it back at the width it had."""
-        self._filters_label = "Hide filters"
+        a wider table, and bring it back at the width it had. Apollo puts the
+        number of filters on beside the words ("Hide Filters 1") — so the owner
+        can see filters are on even with the rail folded away."""
+        self._filters_label = i18n.t("Hide filters")
+        self._filter_count = 0
         b = QPushButton(self._filters_label)
         b.setObjectName("filtersToggle")
         b.setToolTip(self._filters_label)
         b.setCursor(Qt.PointingHandCursor)
-        icons.button_icon(b, "sliders", 15, theme.NEUTRAL[700])
+        icons.button_icon(b, "list", 15, theme.NEUTRAL[700])
         b.setStyleSheet(
             f"QPushButton#filtersToggle{{background:{theme.CARD};color:{theme.NEUTRAL[800]};"
             f"border:1px solid {theme.BORDER};border-radius:{theme.R_CONTROL}px;"
@@ -1190,11 +1484,22 @@ class LeadsCockpit(QWidget):
             if rail.isVisible() and rail.width() >= _RAIL_MIN:
                 self._rail_pref = min(_RAIL_MAX, rail.width())
             rail.hide()
-        self._filters_label = "Hide filters" if show else "Show filters"
+        # Looked up here, not stored in English: the label is sent to the
+        # button with the count beside it, which no catalogue entry matches.
+        self._filters_label = i18n.t("Hide filters") if show else i18n.t("Show filters")
         self._filters_btn.setToolTip(self._filters_label)
         self._fit_toolbar()                 # puts the new label on, unless icon-only
         self._split.refresh()
         self._place_drawer()
+
+    def set_filter_count(self, n: int) -> None:
+        """How many filters are on — shown on Hide filters, Apollo's way."""
+        self._filter_count = max(0, int(n or 0))
+        self._fit_toolbar()
+
+    def _filters_text(self) -> str:
+        return (f"{self._filters_label}  {self._filter_count}" if self._filter_count
+                else self._filters_label)
 
     def _view_toggle(self) -> QWidget:
         seg = QFrame()
@@ -1226,6 +1531,8 @@ class LeadsCockpit(QWidget):
         self._view = view
         self._view_table_btn.setChecked(view == "table")
         self._view_cards_btn.setChecked(view == "cards")
+        for key, act in getattr(self, "_layout_acts", {}).items():
+            act.setChecked(key == view)     # Default view's Layout ticks follow
         if not self._dossiers:
             self._show_empty(True)
             return
@@ -1234,9 +1541,10 @@ class LeadsCockpit(QWidget):
             self._fill_gallery()
 
     def _show_empty(self, empty: bool) -> None:
-        """Nothing loaded: a centred empty state instead of an empty grid, and no
-        toolbar or bulk bar offering to act on nothing."""
-        self._toolbar.setVisible(not empty)
+        """Nobody to show: a centred empty state instead of an empty grid, and
+        no bulk bar offering to act on nobody. The toolbar STAYS — it holds
+        Import, Search people and the filters' switch, which is exactly how
+        someone gets from nobody to somebody."""
         if empty:
             self._land_bulk(False)
             self._view_stack.setCurrentIndex(2)
@@ -1325,6 +1633,11 @@ class LeadsCockpit(QWidget):
         self._bulk_clear.clicked.connect(self._clear_ticks)
         lay.addWidget(self._bulk_clear)
         lay.addStretch(1)
+        # Apollo's "Save": the ticked people become saved contacts — the Saved
+        # tab, and what every later search counts as not net new.
+        self._b_contact = QPushButton("Save")
+        self._b_contact.setToolTip("Save the selected people as contacts — they "
+                                   "move from Net New to Saved.")
         self._b_verify = QPushButton("Verify free")
         # A Find-people run brings back nobody's address (finding people is
         # free; finding addresses is not) — this is where that is spent, on the
@@ -1334,7 +1647,7 @@ class LeadsCockpit(QWidget):
                                   "lead and check it — free verifiers first, "
                                   "then a finder credit where they cannot "
                                   "confirm it.")
-        self._b_save = QPushButton("Save to list")
+        self._b_save = QPushButton("Add to list")
         self._b_export = QPushButton("Export")
         # Runs the qualify pass on the ticked people a run sourced but never
         # qualified. "&&": a lone & in a button label is eaten as a mnemonic.
@@ -1343,6 +1656,8 @@ class LeadsCockpit(QWidget):
                                    "selected leads that aren't qualified yet.")
         self._b_seq = QPushButton("Add to sequence")   # Barlow has no →
         self._b_seq.setObjectName("primary")
+        self._b_contact.clicked.connect(
+            lambda: self.saveContactsRequested.emit(self.selected()))
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
         self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
@@ -1358,8 +1673,8 @@ class LeadsCockpit(QWidget):
         self._emails_wanted = False         # …and someone without a verified address
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
-        for b in (self._b_verify, self._b_emails, self._b_save, self._b_export,
-                  self._b_qualify, self._b_more, self._b_seq):
+        for b in (self._b_contact, self._b_verify, self._b_emails, self._b_save,
+                  self._b_export, self._b_qualify, self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
         self._bulk_bar_w = bar
@@ -1401,26 +1716,34 @@ class LeadsCockpit(QWidget):
         self._bulk.setVisible(show)
 
     # ── narrow windows: the toolbar and the bulk bar shed extras, not letters ──
+    # Apollo's toolbar, compacted least-needed first. Each level keeps what the
+    # one before it kept and gives up one more thing.
+    _TOOLBAR_LEVELS = 6
+
+    def _apply_toolbar_level(self, level: int) -> None:
+        """0 is everything, with words. 1: "Save as new search" says "Save
+        search". 2: Table|Cards leaves the bar (Default view ▾ holds Layout).
+        3: Search settings shows its icon alone. 4: Hide filters and Research
+        with AI shrink to their icons. 5: Default view shrinks to its icon."""
+        def text(widget, value: str) -> None:
+            if widget.text() != value:
+                widget.setText(value)
+        text(self._save_search_btn, "Save search" if level >= 1 else "Save as new search")
+        self._seg.setVisible(level < 2)
+        text(self._settings_btn, "" if level >= 3 else "Search settings")
+        text(self._filters_btn, "" if level >= 4 else self._filters_text())
+        for btn, words, at in ((self._research_btn, "Research with AI", 4),
+                               (self._views_btn, "Default view", 5)):
+            small = level >= at
+            text(btn, "" if small else words)
+            btn.setToolButtonStyle(Qt.ToolButtonIconOnly if small
+                                   else Qt.ToolButtonTextBesideIcon)
+            btn.setToolTip(words if small else "")
+
     def _toolbar_need(self, level: int) -> int:
-        """The width the results toolbar needs at one step of compaction: 0 is
-        all of it; 1 drops Avg fit, 2 Net-new, 3 the "Sort" label, and 4 shows
-        Hide filters as its icon alone."""
-        lay = self._toolbar.layout()
-        m = lay.contentsMargins()
-        btn = self._filters_btn
-        words = btn.fontMetrics().horizontalAdvance(self._filters_label) + theme.SPACE_1
-        with_words = btn.sizeHint().width() + (0 if btn.text() else words)
-        items = [with_words - (words if level >= 4 else 0), self._count_lbl.sizeHint().width()]
-        if level < 2:
-            items.append(self._c_new.sizeHint().width())
-        if level < 1:
-            items.append(self._c_fit.sizeHint().width())
-        items.append(self._seg.sizeHint().width())
-        sort = max(self._sort.minimumWidth(), self._sort.sizeHint().width())
-        if level < 3:
-            sort += self._sort_lbl.sizeHint().width() + theme.SPACE_2
-        items.append(sort)
-        return m.left() + m.right() + sum(items) + lay.spacing() * len(items)
+        """The width the toolbar asks for at one step of compaction."""
+        self._apply_toolbar_level(level)
+        return self._toolbar.layout().sizeHint().width()
 
     def _fit_toolbar(self) -> None:
         """Take the toolbar's extras away, least needed first, until what's left
@@ -1429,18 +1752,17 @@ class LeadsCockpit(QWidget):
         bar = self._toolbar
         level = 0
         if bar.isVisible():
-            while level < 4 and self._toolbar_need(level) > bar.width():
+            while (level < self._TOOLBAR_LEVELS - 1
+                   and self._toolbar_need(level) > bar.width()):
                 level += 1
-        self._c_fit.setVisible(level < 1)
-        self._c_new.setVisible(level < 2)
-        self._sort_lbl.setVisible(level < 3)
-        text = "" if level >= 4 else self._filters_label
-        if self._filters_btn.text() != text:
-            self._filters_btn.setText(text)
+        self._apply_toolbar_level(level)
+        self._toolbar_level = level
 
     def _bulk_actions(self) -> tuple:
-        return (self._b_verify, self._b_emails, self._b_save, self._b_export,
-                self._b_qualify, self._b_seq)
+        """In _HELP_BULK's order: Save, Verify, Find e-mails, Add to list,
+        Export, Qualify & draft, Add to sequence."""
+        return (self._b_contact, self._b_verify, self._b_emails, self._b_save,
+                self._b_export, self._b_qualify, self._b_seq)
 
     def _wanted(self, button: QPushButton) -> bool:
         """An action the run can still use. Qualify and Find e-mails are about
@@ -1454,11 +1776,13 @@ class LeadsCockpit(QWidget):
     @staticmethod
     def _fold_set(level: int, actions: tuple) -> tuple:
         """Which actions sit in More at a compaction level: from 2 the two
-        least used, from 3 all but the primary and Find e-mails (a list with no
-        addresses is unusable, so that stays on the bar as long as it fits)."""
-        verify, emails, save, export, qualify, _seq = actions
-        return {2: (verify, save), 3: (verify, save, export, qualify),
-                4: (verify, save, export, qualify, emails)}.get(level, ())
+        least used, from 3 all but Save, the primary and Find e-mails (a list
+        with no addresses is unusable, so that stays on the bar as long as it
+        fits). Save never folds: it is Apollo's first action, and the one that
+        moves people from Net New to Saved."""
+        _contact, verify, emails, add_list, export, qualify, _seq = actions
+        return {2: (verify, add_list), 3: (verify, add_list, export, qualify),
+                4: (verify, add_list, export, qualify, emails)}.get(level, ())
 
     def _bulk_need(self, level: int) -> int:
         """The width the bulk bar needs at a compaction level: 0 is all of it;
@@ -1595,13 +1919,13 @@ class LeadsCockpit(QWidget):
             self._drawer_pref = max(_DRAWER_MIN, min(_DRAWER_MAX, sizes[2]))
 
     def _dock_room(self) -> bool:
-        """Whether the drawer can dock: the results keep room for the whole
-        toolbar — and never less than _TABLE_MIN — beside the rail and the
-        drawer. That's measured at the toolbar's full dress, which docking
-        doesn't change, so this can't flip-flop."""
+        """Whether the drawer can dock: the table keeps room for every column
+        at its minimum (_TABLE_FLOOR) beside the rail and the drawer. The
+        toolbar spans the whole page above all three (Apollo's), so docking
+        never squeezes it — and nothing here changes with the drawer, so this
+        can't flip-flop."""
         rail = 0 if self._rail.isHidden() else self._rail_pref + _HANDLE_W
-        center = max(_TABLE_MIN, self._toolbar_need(0))
-        need = max(_DOCK_MIN, rail + center + _HANDLE_W + self._drawer_pref)
+        need = max(_DOCK_MIN, rail + _TABLE_FLOOR + _HANDLE_W + self._drawer_pref)
         return self._body.width() >= need
 
     def _float_rect(self) -> QRect:
@@ -1747,15 +2071,55 @@ class LeadsCockpit(QWidget):
 
     # ── data ──────────────────────────────────────────────────────────────────
     def set_dossiers(self, dossiers: list, drafts=None, all_leads=None) -> None:
-        # Qualified dossiers first, then everyone else the run sourced.
-        self._dossiers = list(dossiers or []) + unqualified_rows(dossiers, all_leads)
+        """One run, straight from its dossiers — qualified first, then
+        everyone else it sourced — sorted here by the Sort box, as the
+        cockpit always did. No pool, no pages."""
+        self._pooled = False
+        self._people = []
+        self._load_rows(list(dossiers or []) + unqualified_rows(dossiers, all_leads),
+                        drafts)
+        self._pager.hide()
+
+    def set_people(self, people, page=None, counts=None, empty_text=None) -> None:
+        """One page of the pool — pool.Person rows the workbench has already
+        filtered, split into Total / Net New / Saved, sorted and paged — shown
+        in exactly that order. `page` is pool.page()'s dict, `counts` the three
+        tabs', `empty_text` (title, body) what to say when the page is empty."""
+        from prospector.models import Dossier
+        self._pooled = True
+        self._people = list(people or ())
+        rows, drafts = [], []
+        for person in self._people:
+            dos = person.dossier
+            if dos is None:
+                dos = Dossier(lead=person.lead, verdict="", generated_at="",
+                              status=UNQUALIFIED,
+                              score=int(getattr(person.lead, "fit_score", 0) or 0))
+            rows.append(dos)
+            if person.draft is not None:
+                drafts.append(person.draft)
+        if empty_text:
+            self.set_empty_text(*empty_text)
+        self._load_rows(rows, drafts)
+        if counts is not None:
+            self.set_counts(counts)
+        self.set_page(page or {})
+
+    def person_for(self, dos):
+        """The pool.Person a row stands for (pooled pages only), else None."""
+        for i, d in enumerate(self._dossiers):
+            if d is dos and i < len(self._people):
+                return self._people[i]
+        return None
+
+    def _load_rows(self, dossiers: list, drafts) -> None:
+        self._dossiers = list(dossiers)
         self._draft_by = {id(d.dossier): d for d in (drafts or [])}
-        self._checked = set()               # a fresh run starts with nothing ticked
+        self._checked = set()               # a fresh page starts with nothing ticked
         self._hidden = set()
         self._card_cbs = {}
         self._show_empty(not self._dossiers)
         self._fill_table()                  # _apply_filters() fills the gallery too
-        self._update_counters()
         self._show_selected()               # nothing picked → the drawer stays shut
 
     def _fill_table(self):
@@ -1799,7 +2163,8 @@ class LeadsCockpit(QWidget):
                 signal = "why-now" if getattr(dos, "signal_status", "") == "found" else ""
             t.setItem(row, _C_SIGNAL, QTableWidgetItem(signal))
         t.blockSignals(False)
-        self._resort()
+        if not self._pooled:
+            self._resort()                  # a pooled page arrives already sorted
         self._apply_filters()
         self._refresh_bulk()
 
@@ -1860,51 +2225,47 @@ class LeadsCockpit(QWidget):
             self._resize_col(_C_FOCUS, max(_FOCUS_MIN, rest))
 
     # ── interaction ───────────────────────────────────────────────────────────
+    def sort_key(self) -> str:
+        return self._sort.currentData() or "relevance"
+
+    def set_sort(self, key: str) -> None:
+        """Select a sort without emitting — the workbench restoring one."""
+        i = self._sort.findData(key)
+        if i >= 0 and i != self._sort.currentIndex():
+            self._sort.blockSignals(True)
+            self._sort.setCurrentIndex(i)
+            self._sort.blockSignals(False)
+
     def _resort(self):
-        col, order = (_C_FIT, Qt.DescendingOrder) if self._sort.currentIndex() == 0 \
-            else (_C_LEAD, Qt.AscendingOrder)
+        """A run shown straight from its dossiers sorts itself: Relevance is
+        best fit first, Name is A–Z (the two a single run can answer)."""
+        col, order = ((_C_LEAD, Qt.AscendingOrder) if self.sort_key() == "name"
+                      else (_C_FIT, Qt.DescendingOrder))
         self._table.sortItems(col, order)
 
     def _on_sort_changed(self):
+        if self._pooled:
+            # The whole pool re-sorts, then pages — not just this page.
+            self.sortChanged.emit(self.sort_key())
+            return
         # Not inside _resort: _fill_table calls _resort right before
         # _apply_filters, which already refills the gallery.
         self._resort()
         if self._view == "cards":
             self._fill_gallery()
 
-    def _passes(self, dos, fmin: int, q: str, allowed: set) -> bool:
-        lead = dos.lead
-        if (getattr(lead, "fit_score", 0) or 0) < fmin:
-            return False
-        if self._only_qualified.isChecked() and getattr(dos, "status", "") == UNQUALIFIED:
-            return False
-        if status_of(dos, self._draft_by.get(id(dos))) not in allowed:
-            return False
-        if q:
-            # The row shows the location now, so the search finds it too.
-            where = (lead.extra or {}).get("location") or ""
-            blob = f"{lead.name} {lead.company} {lead.title} {lead.email} {where}".lower()
-            if q not in blob:
-                return False
-        return True
-
     def _apply_filters(self):
-        fmin = self._fit_min.value()
-        q = self._search.text().strip().lower()
-        allowed = {n for n, cb in self._status_boxes.items() if cb.isChecked()}
-        self._hidden = {i for i, dos in enumerate(self._dossiers)
-                        if not self._passes(dos, fmin, q, allowed)}
+        """Every row shows — filters are the pool's now (the workbench's), not
+        this table's; what is on the page is what passed. Still the one pass
+        that re-lays everything a new set of rows touches."""
+        self._hidden = set()
         for row in range(self._table.rowCount()):
-            it = self._table.item(row, _C_TICK)
-            if it is not None:
-                self._table.setRowHidden(row, it.data(Qt.UserRole) in self._hidden)
-        shown = len(self._dossiers) - len(self._hidden)
-        self._count_lbl.setText(f"Showing {shown} of {len(self._dossiers)}")
+            self._table.setRowHidden(row, False)
         self._fit_toolbar()
         if self._view == "cards":
             self._fill_gallery()
         self._refresh_bulk()                # selection may have lost visible rows
-        self._place_drawer()                # the count text moves the dock threshold
+        self._place_drawer()
 
     def _visible(self) -> list:
         """Dossier indices the filters show."""
@@ -1990,7 +2351,8 @@ class LeadsCockpit(QWidget):
         self._sel_lbl.setText(f"{n} selected")
         self._sel_all.setText(f"Select all {shown}")
         self._sel_all_wanted = 0 < n < shown
-        for b in (self._b_verify, self._b_save, self._b_export, self._b_seq):
+        for b in (self._b_contact, self._b_verify, self._b_save, self._b_export,
+                  self._b_seq):
             b.setEnabled(n > 0)
         # Qualify only means something while the run holds people to qualify
         # (never qualified, or a failed pass), and arms when one of them is ticked.
@@ -2023,17 +2385,20 @@ class LeadsCockpit(QWidget):
         not a widget of its own. Nothing is built here.
 
         A key whose part is not on screen right now is left out and the tour
-        skips it: the toolbar and the table before a run has loaded anything,
-        the bulk bar between ticks, the drawer before a lead is opened."""
+        skips it: the table before anyone is in it, the pager before there is
+        a page, the bulk bar between ticks, the drawer before a lead is opened."""
         out = {
+            "import_menu": self._import_btn,
+            "views_menu": self._views_btn,
             "hide_filters": self._filters_btn,
-            "toolbar_count": self._count_lbl,
+            "people_search": self._search,
+            "research_menu": self._research_btn,
+            "save_as_search": self._save_search_btn,
             "view_toggle": self._seg,
             "sort": self._sort,
-            "refine_search": self._search,
-            "refine_fit": self._fit_min,
-            "refine_qualified_only": self._only_qualified,
-            "refine_deliverability": self._status_region(),
+            "search_settings": self._settings_btn,
+            "people_tabs": self._tabs_frame,
+            "pager": self._pager,
             "table": self._table,
             "select_all": (self._head, self._section_rect(_C_TICK)),
             "bulk_bar": self._bulk_bar_w,
@@ -2056,39 +2421,13 @@ class LeadsCockpit(QWidget):
         while it is down rather than ticked into being."""
         if key not in _HELP_KEYS:
             return
-        if key in _HELP_RAIL:
+        if key == "people_tabs":
             self.set_filters_shown(True)        # the rail may be folded away
-            for widget in self._rail_widgets(key):
-                self._rail.ensureWidgetVisible(widget, 0, _REVEAL_PAD)
+            self._rail.ensureWidgetVisible(self._tabs_frame, 0, _REVEAL_PAD)
         elif key in _HELP_COLS or key == "select_all":
             self._scroll_to_column(_HELP_COLS.get(key, _C_TICK))
         elif key == "drawer":
             self._help_open_drawer()
-
-    def _rail_widgets(self, key: str) -> list:
-        """What the rail scrolls to for a refine step, in order. The
-        deliverability grid is the last box and THEN the first: the last pulls
-        the grid's foot above the rail's bottom edge, the first then pulls its
-        head back down if that overshot. Aimed at the first box alone, the
-        ring ran below the rail with Invalid, No email and Mailed out of view;
-        aimed at the grid's parent, a scroll area centres a widget that tall
-        instead of showing its top."""
-        if key == "refine_deliverability":
-            boxes = list(self._status_boxes.values())
-            return [boxes[-1], boxes[0]] if boxes else []
-        widget = {"refine_search": self._search,
-                  "refine_fit": self._fit_min,
-                  "refine_qualified_only": self._only_qualified}.get(key)
-        return [widget] if widget is not None else []
-
-    def _status_region(self) -> tuple:
-        """The deliverability boxes as one region: they are laid out in a grid
-        with no box of their own to ring."""
-        boxes = list(self._status_boxes.values())
-        rect = QRect()
-        for box in boxes:
-            rect = rect.united(box.geometry())
-        return boxes[0].parentWidget(), rect
 
     def _section_rect(self, col: int) -> QRect:
         """One column's heading as a box in the header's own coordinates,
@@ -2247,15 +2586,6 @@ class LeadsCockpit(QWidget):
         if 0 <= idx < len(self._dossiers):
             self._open_drawer(self._dossiers[idx])
 
-    def _update_counters(self):
-        n = len(self._dossiers)
-        mailed = sum(1 for d in self._dossiers
-                     if status_of(d, self._draft_by.get(id(d))) == "Mailed")
-        fits = [getattr(d.lead, "fit_score", 0) or 0 for d in self._dossiers]
-        avg = round(sum(fits) / len(fits)) if fits else 0
-        self._c_new._num.setText(str(n - mailed))
-        self._c_fit._num.setText(str(avg))
-
     # ── drawer ────────────────────────────────────────────────────────────────
     def _show_selected(self):
         row = self._table.currentRow()
@@ -2294,7 +2624,7 @@ class LeadsCockpit(QWidget):
         lay.addWidget(self._d_card("Fit", f"{getattr(lead,'fit_score',0) or 0:g} / 100 · "
                                           f"{lead.fit_reason or ''}"))
         status = status_of(dos, draft)
-        lay.addWidget(self._d_card("Deliverability", status))
+        lay.addWidget(self._d_card(i18n.t("Deliverability"), status))
         if lead.email:
             em = QLabel(lead.email)
             em.setStyleSheet(f"color:{theme.INFO_INK};font-family:'{_MONO}';font-size:11px;")
@@ -2548,10 +2878,11 @@ class _ListsTab(QWidget):
         head.addWidget(refresh)
         head.addWidget(open_dir)
         root.addLayout(head)
-        root.addWidget(_muted(
-            "Every run's sheets and every list you save land here automatically — "
-            "the leads sheet, the hot list and any shortlist. Open one to work it "
-            "in Excel, or bring it back through “Import a sheet”."))
+        root.addWidget(_muted(i18n.t(
+            "Every search's sheets and every list you save land here "
+            "automatically — the leads sheet, the hot list and any shortlist. "
+            "Open one to work it in Excel, or bring it back with Import on the "
+            "People tab.")))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -2591,9 +2922,8 @@ class _ListsTab(QWidget):
         files = self._scan()
         if not files:
             empty = QLabel(
-                "No lists yet.\n\nRun “Find people” or “Find and prepare”, "
-                "or save a shortlist from the Leads tab — the files will appear "
-                "here.")
+                "No lists yet.\n\nFind new people, or tick people on the People "
+                "tab and press Add to list — the files will appear here.")
             empty.setAlignment(Qt.AlignCenter)
             empty.setWordWrap(True)
             empty.setStyleSheet(
@@ -2820,7 +3150,7 @@ class _AnalyticsTab(QWidget):
 
         self._funnel_card, self._funnel = _card("Funnel — this run")
         col.addWidget(self._funnel_card)
-        self._mix_card, self._mix = _card("Deliverability")
+        self._mix_card, self._mix = _card(i18n.t("Deliverability"))
         col.addWidget(self._mix_card)
         self._verdict_card, self._verdict = _card("Fit & verdict")
         col.addWidget(self._verdict_card)
@@ -2885,7 +3215,7 @@ class _AnalyticsTab(QWidget):
 
         # Deliverability mix.
         _clear(self._mix)
-        self._mix.addWidget(_section_head("Deliverability"))
+        self._mix.addWidget(_section_head(i18n.t("Deliverability")))
         if n:
             counts: dict = {}
             for d in dos:
@@ -2986,7 +3316,7 @@ class _SavedSearchesTab(QWidget):
         # itself in the height it is given, and the grid's cells give it none.
         self._empty = C.EmptyState(
             "search", "No saved searches yet",
-            "Set your filters on the Leads tab and press Save search.")
+            "Set your filters on the People tab and press Save as new search.")
         root.addWidget(self._empty, 1)
 
         self._scroll = QScrollArea()
@@ -3169,7 +3499,7 @@ class _SequencesTab(QWidget):
 # ════════════════════════════════════════════════════════════════════════════
 #  The workspace — the tab strip over the five screens
 # ════════════════════════════════════════════════════════════════════════════
-_TABS = ("Leads", "Sessions", "Lists", "Saved searches", "Sequences", "Analytics")
+_TABS = ("People", "Sessions", "Lists", "Saved searches", "Sequences", "Analytics")
 
 
 class LeadsWorkspace(QWidget):
@@ -3184,9 +3514,20 @@ class LeadsWorkspace(QWidget):
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
     qualifyRequested = Signal(list)
+    saveContactsRequested = Signal(list)
     openSessionRequested = Signal(str)
     useSavedSearchRequested = Signal(str)
     deleteSavedSearchRequested = Signal(str)
+    # Find People's own (LeadsCockpit), passed straight through.
+    importRequested = Signal(str)
+    tabChanged = Signal(str)
+    pageRequested = Signal(int)
+    sortChanged = Signal(str)
+    queryChanged = Signal(str)
+    settingsRequested = Signal()
+    saveSearchRequested = Signal()
+    findPrepareRequested = Signal()
+    starterPicked = Signal(str)
 
     def __init__(self, leads_folder: str | None = None, sessions_folder: str = "",
                  searches_folder: str = "", parent=None):
@@ -3194,12 +3535,18 @@ class LeadsWorkspace(QWidget):
         self._folder = leads_folder or os.path.join(
             os.path.expanduser("~"), "Documents", "Prism Leads")
         self.leads = LeadsCockpit()
-        self.leads.verifyRequested.connect(self.verifyRequested)
-        self.leads.emailsRequested.connect(self.emailsRequested)
-        self.leads.exportRequested.connect(self.exportRequested)
-        self.leads.saveListRequested.connect(self.saveListRequested)
-        self.leads.sequenceRequested.connect(self.sequenceRequested)
-        self.leads.qualifyRequested.connect(self.qualifyRequested)
+        for name in ("verifyRequested", "emailsRequested", "exportRequested",
+                     "saveListRequested", "sequenceRequested", "qualifyRequested",
+                     "saveContactsRequested", "importRequested", "tabChanged",
+                     "pageRequested", "sortChanged", "queryChanged",
+                     "settingsRequested", "saveSearchRequested",
+                     "findPrepareRequested", "starterPicked"):
+            getattr(self.leads, name).connect(getattr(self, name))
+        # Default view ▾ picks a saved search the way the Saved searches tab's
+        # "Use search" does; "Manage…" is that tab.
+        self.leads.savedSearchPicked.connect(self.useSavedSearchRequested)
+        self.leads.manageSearchesRequested.connect(
+            lambda: self._select(_TABS.index("Saved searches")))
         # No folder → the tab shows its empty state and never touches disk.
         self._sessions = _SessionsTab(sessions_folder)
         self._sessions.openRequested.connect(self.openSessionRequested)
@@ -3207,6 +3554,7 @@ class LeadsWorkspace(QWidget):
         self._saved = _SavedSearchesTab(searches_folder)
         self._saved.useRequested.connect(self.useSavedSearchRequested)
         self._saved.deleteRequested.connect(self.deleteSavedSearchRequested)
+        self.leads.set_saved_searches(self._saved._records())
         self._sequences = _SequencesTab()
         self._analytics = _AnalyticsTab()
         self._build()
@@ -3310,6 +3658,12 @@ class LeadsWorkspace(QWidget):
             self._select(index)
 
     # ── forwarded from the dialog ──────────────────────────────────────────────
+    def set_run(self, dossiers: list, drafts=None) -> None:
+        """The CURRENT run — what Analytics counts. The People tab shows the
+        pool (set_people), not one run."""
+        draft_by = {id(d.dossier): d for d in (drafts or [])}
+        self._analytics.set_data(list(dossiers or []), draft_by)
+
     def set_dossiers(self, dossiers: list, drafts=None, all_leads=None) -> None:
         # The table lists everyone sourced; Analytics counts only the qualified.
         self.leads.set_dossiers(dossiers, drafts, all_leads)
@@ -3320,8 +3674,18 @@ class LeadsWorkspace(QWidget):
         self._lists.refresh()
 
     def set_search_panel(self, widget: QWidget) -> None:
-        """Mount the workbench's list-building search in the Leads rail."""
+        """Mount the workbench's filter column in the People rail."""
         self.leads.set_search_panel(widget)
+
+    def set_find_panel(self, widget: QWidget) -> None:
+        """Mount the workbench's Find new people under the filters."""
+        self.leads.set_find_panel(widget)
+
+    def set_people(self, people, page=None, counts=None, empty_text=None) -> None:
+        self.leads.set_people(people, page, counts, empty_text)
+
+    def show_people_tab(self) -> None:
+        self._select(0)
 
     def set_empty_text(self, title: str = "", body: str = "") -> None:
         self.leads.set_empty_text(title, body)
@@ -3335,7 +3699,10 @@ class LeadsWorkspace(QWidget):
 
     def set_searches_folder(self, folder: str) -> None:
         self._saved.set_folder(folder)
+        self.leads.set_saved_searches(self._saved._records())
 
     def refresh_searches(self) -> None:
-        """Re-read the Saved searches tab — after a save, a delete or a run."""
+        """Re-read the Saved searches tab — after a save, a delete or a run —
+        and the list People's Default view ▾ offers."""
         self._saved.refresh()
+        self.leads.set_saved_searches(self._saved._records())
