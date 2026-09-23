@@ -1491,21 +1491,6 @@ class SettingsPanel(QDialog):
 
     # ── appearance ────────────────────────────────────────────────────────
     def _appearance(self, col):
-        card_theme = Card()
-        ct = card_theme.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
-        head_t = QHBoxLayout()
-        head_t.setSpacing(theme.SPACE_3)
-        head_t.addWidget(C.IconPad("sun", theme.ACCENT, 34, theme.R_CONTROL, 17))
-        t_col = QVBoxLayout()
-        t_col.addWidget(C.label(i18n.t("Theme appearance"), level="CARD_TITLE"))
-        t_col.addWidget(C.label(i18n.t("Frosted glassmorphism and high-contrast surfaces"), level="META"))
-        head_t.addLayout(t_col, stretch=1)
-        ct.addLayout(head_t)
-        ct.addWidget(C.label(
-            i18n.t("Prism adapts its translucent glassmorphism surfaces and typography dynamically with high-contrast accessibility standards."),
-            level="SUPPORT", wrap=True))
-        col.addWidget(card_theme)
-
         card_wall = Card()
         cw = card_wall.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
         head_w = QHBoxLayout()

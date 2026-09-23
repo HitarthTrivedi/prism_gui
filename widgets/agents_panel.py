@@ -959,7 +959,7 @@ class AgentsPanel(QWidget):
         self.subtitle.setVisible(has)
         self.count.setVisible(has)
         self.budget.setVisible(has and bool(self.budget.text()))
-        self.intent.setVisible(has and bool(self.intent_text.text()))
+        self.intent.setVisible(False)
         self.empty_state.setVisible(not has)
         self.toolkit.setVisible(False)
         self._tail.setVisible(has)

@@ -122,6 +122,16 @@ QDialog #dialogFooter {
     border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+QDialog #dialogFooter QPushButton {
+    min-height: 28px;
+    padding: 5px 16px;
+}
+
+QDialog #dialogFooter #primaryBtn, QDialog #dialogFooter #primary {
+    min-height: 28px;
+    padding: 5px 20px;
+}
+
 QDialog #dialogBody, QDialog QWidget#dialogBody {
     background-color: #ffffff;
 }
@@ -775,19 +785,32 @@ QPushButton:disabled, #secondaryBtn:disabled {
    because "recording" is a state you must be able to see from across a
    workshop and an accent-blue mic looks identical to every other control. */
 #micBtn {
-    background: transparent;
-    border: 2px solid rgba(0, 0, 0, 0.10);
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.15);
     border-radius: 8px;
-    padding: 6px 13px;
-    min-height: 18px;
+    padding: 5px 16px;
+    min-height: 28px;
     font-family: "Barlow";
-    font-size: 13px;
-    font-weight: 500;
-    color: #424244;
+    font-size: 14px;
+    font-weight: 600;
+    color: #09090b;
 }
 
 #micBtn:hover {
-    background: rgba(0, 0, 0, 0.02);
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.25);
+    color: #000000;
+}
+
+#micBtn:pressed {
+    background: rgba(240, 240, 240, 0.95);
+    border-color: #09090b;
+    color: #000000;
+}
+
+#micBtn:focus {
+    border-color: #09090b;
+    color: #09090b;
 }
 
 #micBtn:checked {

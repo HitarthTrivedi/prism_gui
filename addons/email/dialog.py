@@ -812,7 +812,7 @@ class EmailComposeDialog(PrismDialog):
         self.footer.add_secondary(
             self.button(i18n.t("Close"), on_click=self.reject))
         self.send_btn = self.button(i18n.t("Send"), "primary",
-                                    icon_name="mail", on_click=self._send)
+                                    on_click=self._send)
         self.footer.set_primary(self.send_btn)
         self.tab_chain(self.to_edit, self.subject_edit, self.body_edit,
                        self.brief_edit)
