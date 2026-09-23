@@ -639,8 +639,11 @@ class AddonFrontDoor(Page):
     navigate = Signal(str)      # a key for MainWindow._handle_command
 
     def header_actions(self):
+        if not self.ACTION:
+            return []
         return [
-            C.button(i18n.t(self.ACTION), "primary",
+            C.button(i18n.t(self.ACTION), "secondary",
+                     icon_name=self.ACTION_ICON,
                      on_click=self.opened.emit),
         ]
 

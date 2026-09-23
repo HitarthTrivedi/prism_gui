@@ -438,7 +438,7 @@ class InputPanel(Card):
         self.mic_btn.clicked.connect(self.mic_toggle_clicked.emit)
         row.addWidget(self.mic_btn)
 
-        self.attach_file_btn = _action(i18n.t("Add file"), "file",
+        self.attach_file_btn = _action(i18n.t("Add file"), "paperclip",
                                        i18n.t("Attach a file from your computer"))
         self.attach_file_btn.clicked.connect(self.attach_file_clicked.emit)
         row.addWidget(self.attach_file_btn)

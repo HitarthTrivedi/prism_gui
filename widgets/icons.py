@@ -14,6 +14,7 @@ from PySide6.QtCore import QByteArray, Qt, QSize, QRectF
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
+import re
 
 import paths
 import theme
@@ -110,6 +111,12 @@ def _svg_color_attrs(color: str, prop: str) -> str:
     ``stroke-opacity`` / ``fill-opacity`` attribute instead, which QtSvg
     does understand at every version.
     """
+    color_s = (color or "").strip()
+    if color_s.startswith("rgba(") and color_s.endswith(")"):
+        m = re.match(r"rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d\.]+)\s*\)", color_s)
+        if m:
+            r, g, b, a = m.groups()
+            return f'{prop}="rgb({r},{g},{b})" {prop}-opacity="{a}"'
     qc = QColor(color)
     if not qc.isValid():
         # Fallback: let the theme string through and hope for the best.
