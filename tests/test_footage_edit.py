@@ -369,6 +369,7 @@ def test_mix_audio_preserves_audio_longer_than_video(monkeypatch):
     }
     monkeypatch.setattr(footage, "probe", lambda p: durations.get(p, {"duration": 0}))
     monkeypatch.setattr(footage.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(footage, "is_valid_audio", lambda p: True)
     monkeypatch.setattr(footage.os, "replace", lambda s, d: None)
 
     import subprocess
@@ -402,6 +403,7 @@ def test_mix_audio_when_video_is_longer(monkeypatch):
     }
     monkeypatch.setattr(footage, "probe", lambda p: durations.get(p, {"duration": 0}))
     monkeypatch.setattr(footage.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(footage, "is_valid_audio", lambda p: True)
     monkeypatch.setattr(footage.os, "replace", lambda s, d: None)
 
     import subprocess

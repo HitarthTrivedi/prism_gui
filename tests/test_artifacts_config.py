@@ -153,6 +153,17 @@ class GroupingByTask(unittest.TestCase):
     def test_an_empty_task_is_the_top_level_directory_itself(self):
         self.assertEqual(self.CFG.artifact_task_dir(""), self._tmp.name)
 
+    def test_continue_run_keeps_followup_artifacts_in_same_folder(self):
+        folder = self.CFG.begin_run("create a boq for steel")
+        first = self.CFG.save_artifact(self._src.name, "initial boq", kind="boq", task="create a boq for steel")
+        self.assertEqual(os.path.dirname(first), folder)
+        # Follow-up continues run
+        self.CFG.continue_run(folder, task="create a boq for steel")
+        # Follow-up saves an artifact with a different follow-up query
+        second = self.CFG.save_artifact(self._src.name, "summarize it and give me a document",
+                                         kind="content", task="summarize it and give me a document")
+        self.assertEqual(os.path.dirname(second), folder)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

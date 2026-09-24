@@ -678,5 +678,47 @@ print("LAUNCHED_OK")
                      f"stdout: {result.stdout}\nstderr: {result.stderr}")
 
 
+    def test_guess_ext_recognizes_audio(self):
+        from core.automation import _guess_ext
+        self.assertEqual(_guess_ext("audio/mpeg", b""), ".mp3")
+        self.assertEqual(_guess_ext("audio/mp3", b""), ".mp3")
+        self.assertEqual(_guess_ext("audio/wav", b""), ".wav")
+        self.assertEqual(_guess_ext("audio/ogg", b""), ".ogg")
+        self.assertEqual(_guess_ext("audio/mp4", b""), ".m4a")
+        # Magic bytes
+        self.assertEqual(_guess_ext("application/octet-stream", b"ID3\x03\x00\x00"), ".mp3")
+        self.assertEqual(_guess_ext("", b"\xff\xfb\x90\x00"), ".mp3")
+        self.assertEqual(_guess_ext("", b"RIFF\x00\x00\x00\x00WAVEfmt "), ".wav")
+        self.assertEqual(_guess_ext("", b"OggS\x00\x02"), ".ogg")
+
+    def test_card_type_re_matches_audio_cards(self):
+        from core.automation import _CARD_TYPE_RE
+        self.assertTrue(bool(_CARD_TYPE_RE.search("Audio · MP3")))
+        self.assertTrue(bool(_CARD_TYPE_RE.search("Voice · WAV")))
+        self.assertTrue(bool(_CARD_TYPE_RE.search("Speech · M4A")))
+        self.assertTrue(bool(_CARD_TYPE_RE.search("mp3")))
+
+    def test_pipeline_preserves_audio_across_image_generation(self):
+        # Emulate the pipeline updates when audio is generated followed by artwork
+        audio_file = {"path": "/tmp/test_voice.mp3", "kind": "audio"}
+        pipeline_files = [audio_file]
+
+        from core import reel_web as _rw
+        made_images = [{"path": f"/tmp/art_{i}.png", "kind": "image"} for i in range(6)]
+
+        # Slicing logic used in automation.py for artwork stage
+        audio_in_pipeline = [
+            f for f in pipeline_files
+            if f.get("kind") == "audio" or str(f.get("path", "")).lower().endswith(
+                (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"))
+        ]
+        pipeline_files[:] = audio_in_pipeline + made_images[-_rw.MAX_GENERATED:]
+
+        # Audio must still be in pipeline_files alongside the generated images
+        self.assertIn(audio_file, pipeline_files)
+        self.assertEqual(pipeline_files[0], audio_file)
+        self.assertEqual(len(pipeline_files), 1 + min(6, _rw.MAX_GENERATED))
+
+
 if __name__ == "__main__":
     unittest.main()

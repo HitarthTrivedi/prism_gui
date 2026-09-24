@@ -124,10 +124,12 @@ class AutomationWorker(_Worker):
                  files_out: list | None = None,
                  image_stages=None, failover: bool = True,
                  motion_skeleton: str = "",
-                 stage_skills: dict | None = None):
+                 stage_skills: dict | None = None,
+                 prior_responses: dict | None = None):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
+        self.prior_responses = prior_responses
         # Stage keys the caller promises will produce a picture — they get
         # the engine's full image budget. See automation.run(image_stages=).
         self.image_stages = set(image_stages or ())
@@ -222,6 +224,7 @@ class AutomationWorker(_Worker):
             if self.skip_stages:
                 kwargs["skip_stages"] = self.skip_stages
             if self.followup:
+                kwargs["followup"] = True
                 kwargs["min_wait"] = automation.FOLLOWUP_MIN_WAIT
             if self.files_out is not None:
                 kwargs["pipeline_files_out"] = self.files_out
@@ -231,6 +234,8 @@ class AutomationWorker(_Worker):
                 kwargs["failover"] = False
             if self.stage_skills:
                 kwargs["stage_skills"] = self.stage_skills
+            if self.prior_responses:
+                kwargs["prior_responses"] = self.prior_responses
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
@@ -272,31 +277,40 @@ class FollowupRouteWorker(_Worker):
                 f'- key "{s["stage"]}" — done by {s["agent"]}: {s["summary"]}'
                 for s in self.stages_info)
             keys = [s["stage"] for s in self.stages_info]
-            extra = ""
+
+            universal = {
+                "content": "write, summarize, draft prose, or produce a document (.docx, .pdf, markdown report, article)",
+                "audio": "generate audio, voiceover, podcast, speech, or narration",
+                "artwork": "make pictures, graphics, diagrams, or visual assets",
+                "presentation": "create slides, a deck, or presentation",
+            }
             if self.reel:
-                keys += ["artwork", "reel"]
-                extra = (
-                    '\nThis task filmed a reel, so two more steps exist: key '
-                    '"artwork" — make NEW pictures in the image tool (say '
-                    'what, in "images"); key "reel" — change the reel\'s '
-                    "scenes or look in its design chat and film it again. Any "
-                    'change that should show in the video ends with "reel". '
-                    'A picture that is only made and never placed is useless, '
-                    'so "artwork" is always followed by "reel". '
-                    'IMPORTANT: if the user asks to change the script, narration, '
-                    'voice-over, ad copy, hook, or phrasing of a reel that has '
-                    'an "audio" step, include BOTH the writing step AND "audio" '
-                    'AND "media" in your plan — changing the words means '
-                    'regenerating the voice and re-rendering the video too.')
+                universal["reel"] = "change reel scenes or look in its design chat and film it again"
+
+            for k in universal:
+                if k not in keys:
+                    keys.append(k)
+
+            cap_lines = "\n".join(f'- key "{k}": {desc}' for k, desc in universal.items())
+            extra = (
+                f"\nAdditional capabilities available if requested:\n{cap_lines}\n"
+                "- If the user asks to summarize, explain, or get a document/report/file, include 'content'.\n"
+                "- If the user asks for audio, voice, or narration, include 'audio'.\n"
+                "- If the user asks to modify an earlier step, include that step's key."
+            )
+            if self.reel:
+                extra += (
+                    '\nThis task filmed a reel. Any change that should show in the video ends with "reel". '
+                    'If the user asks for audio or voiceover for the reel, include "audio" before "reel" '
+                    '(e.g. ["audio", "reel"] or ["content", "audio", "reel"]).'
+                )
+
             prompt = (
-                "A multi-step task just finished. The steps that ran, each with "
-                "its category key, the tool that did it, and a snippet of its "
-                f"output:\n\n{lines}\n{extra}\n\n"
+                "A task just finished. The steps that ran:\n"
+                f"{lines}\n{extra}\n\n"
                 f'The user now says: "{self.followup}"\n\n'
-                "Which steps does this follow-up need, IN ORDER? Usually one; "
-                "several only when one step's new output feeds the next. Reply "
-                'with ONLY a JSON object: {"steps": ["<key>", …], "images": '
-                '"<what pictures to make, or empty>"}. Valid keys: '
+                "Which steps does this follow-up need, IN ORDER? Reply with ONLY a JSON object: "
+                '{"steps": ["<key>", …], "images": "<what pictures to make, or empty>"}. Valid keys: '
                 + ", ".join(f'"{k}"' for k in keys)
                 + ". If genuinely unsure, use the last step that ran."
             )
@@ -565,6 +579,11 @@ class ReelWorker(_Worker):
         try:
             engine.render(self.spec, self.out_path,
                           on_progress=lambda d, t: self.progress.emit(d, t))
+            if self.spec.get("_audio") and os.path.isfile(self.spec["_audio"]):
+                try:
+                    CB.get_footage().mix_audio(self.out_path, self.spec["_audio"])
+                except Exception:
+                    pass
             self.done.emit(self.out_path)
         except Exception as e:
             if self.studio and hasattr(engine, "ensure_accent_applied"):
@@ -572,6 +591,11 @@ class ReelWorker(_Worker):
                     self.spec = engine.ensure_accent_applied(self.spec)
                     engine.render(self.spec, self.out_path,
                                   on_progress=lambda d, t: self.progress.emit(d, t))
+                    if self.spec.get("_audio") and os.path.isfile(self.spec["_audio"]):
+                        try:
+                            CB.get_footage().mix_audio(self.out_path, self.spec["_audio"])
+                        except Exception:
+                            pass
                     self.done.emit(self.out_path)
                     return
                 except Exception as retry_e:

@@ -33,6 +33,7 @@ from widgets.controls import heading, kicker
 from widgets.markdown import render_markdown
 
 _PATH_ROLE = 1000
+_RECORD_ROLE = 1001
 
 
 def _when(path: str) -> tuple[str, str]:
@@ -66,8 +67,25 @@ def _editable_reel(url: str) -> bool:
     less editable than one still on the workbench."""
     if not url.lower().endswith(".mp4"):
         return False
+    spec_path = url[:-4] + ".json"
+    if not os.path.isfile(spec_path):
+        folder = os.path.dirname(url)
+        stem = os.path.splitext(os.path.basename(url))[0]
+        cand = os.path.join(folder, stem + ".json")
+        if os.path.isfile(cand):
+            spec_path = cand
+        elif folder and os.path.isdir(folder):
+            try:
+                jsons = [os.path.join(folder, f) for f in os.listdir(folder)
+                         if f.lower().endswith(".json")]
+                jsons.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0,
+                           reverse=True)
+                if jsons:
+                    spec_path = jsons[0]
+            except OSError:
+                pass
     try:
-        with open(url[:-4] + ".json", encoding="utf-8") as f:
+        with open(spec_path, encoding="utf-8") as f:
             spec = json.load(f)
         return CB.get_reel_edit().is_studio_spec(spec)
     except Exception:                                   # noqa: BLE001
@@ -289,23 +307,86 @@ class HistoryDialog(PrismDialog):
             self.view.setHtml(self._page(
                 "<p style='color:%s'>%s</p>" % (theme.NEUTRAL[600], nobody)))
             return
+        chains: dict[str, list[dict]] = {}
+        order: list[str] = []
+        user_art_dir = ""
+        try:
+            user_art_dir = os.path.normpath(paths.user_dir("artifacts"))
+        except Exception:
+            pass
+
         for name in names:
             path = os.path.join(runs_dir, name)
-            day, clock = _when(path)
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     rec = json.load(f) or {}
-                # The planner's short name for the job, when the run has
-                # one; the request verbatim for older records.
-                query = (rec.get("title") or "").strip() or rec.get("query", "")
             except Exception:
-                query = "(unreadable run file)"
+                rec = {}
+            rec["_path"] = path
+            rec["_name"] = name
+            try:
+                rec["_mtime"] = os.path.getmtime(path)
+            except OSError:
+                rec["_mtime"] = 0
+
+            art = (rec.get("artifacts") or "").strip()
+            norm_art = os.path.normpath(art) if art else ""
+            if norm_art and norm_art != user_art_dir:
+                key = norm_art
+            else:
+                key = path
+
+            if key not in chains:
+                chains[key] = []
+                order.append(key)
+            chains[key].append(rec)
+
+        for key in order:
+            chain_items = sorted(chains[key], key=lambda r: r["_mtime"])
+            root_rec = chain_items[0]
+            root_path = root_rec["_path"]
+
+            followups = list(root_rec.get("followups") or [])
+            seen_fu_queries = {fu.get("query") for fu in followups if fu.get("query")}
+
+            # Merge legacy separate sibling files as followups
+            for sib in chain_items[1:]:
+                sib_query = (sib.get("query") or "").strip()
+                if sib_query and sib_query not in seen_fu_queries and sib_query != (root_rec.get("query") or "").strip():
+                    followups.append({
+                        "index": len(followups) + 1,
+                        "query": sib_query,
+                        "timestamp": sib.get("_mtime") or sib.get("updated_at") or 0,
+                        "responses": sib.get("responses") or {},
+                        "links": sib.get("links") or {},
+                        "agents": sib.get("agents") or {},
+                        "durations": sib.get("durations") or {},
+                        "error": sib.get("error"),
+                    })
+                    seen_fu_queries.add(sib_query)
+                for sfu in (sib.get("followups") or []):
+                    if sfu.get("query") and sfu.get("query") not in seen_fu_queries:
+                        followups.append(sfu)
+                        seen_fu_queries.add(sfu.get("query"))
+                if sib.get("responses"):
+                    root_rec.setdefault("responses", {}).update(sib["responses"])
+                if sib.get("links"):
+                    root_rec.setdefault("links", {}).update(sib["links"])
+                if sib.get("agents"):
+                    root_rec.setdefault("agents", {}).update(sib["agents"])
+
+            root_rec["followups"] = followups
+
+            day, clock = _when(chain_items[-1]["_path"])
+            fu_count = len(followups)
+            clock_text = f"{clock} · {fu_count} follow-up{'s' if fu_count != 1 else ''}" if fu_count > 0 else clock
+            query = (root_rec.get("title") or "").strip() or root_rec.get("query", "") or "(no task recorded)"
+
             item = QListWidgetItem()
-            item.setData(_PATH_ROLE, path)
-            item.setToolTip(name)
-            widget = _RunItem(day, clock, query)
-            # +4 so descenders on the query line aren't shaved off — the row
-            # widget's own hint is exact, and the item view gives no slack.
+            item.setData(_PATH_ROLE, root_path)
+            item.setData(_RECORD_ROLE, root_rec)
+            item.setToolTip(root_rec["_name"])
+            widget = _RunItem(day, clock_text, query)
             item.setSizeHint(QSize(0, widget.sizeHint().height() + 4))
             self.runs.addItem(item)
             self.runs.setItemWidget(item, widget)
@@ -315,19 +396,22 @@ class HistoryDialog(PrismDialog):
         if item is None:
             return
         path = item.data(_PATH_ROLE)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                record = json.load(f)
-        except Exception as e:
-            self._current_reel = ""
-            self._current_record = None
-            self.edit_reel_btn.setVisible(False)
-            self.follow_up_btn.setVisible(False)
-            self.view.setHtml(self._page(
-                f"<p style='color:{theme.ERR_INK}'>Couldn't read "
-                f"{os.path.basename(path)}: "
-                f"{e}</p>"))
-            return
+        record = item.data(_RECORD_ROLE)
+        if not record:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    record = json.load(f)
+            except Exception as e:
+                self._current_reel = ""
+                self._current_record = None
+                self.edit_reel_btn.setVisible(False)
+                self.follow_up_btn.setVisible(False)
+                self.view.setHtml(self._page(
+                    f"<p style='color:{theme.ERR_INK}'>Couldn't read "
+                    f"{os.path.basename(path)}: "
+                    f"{e}</p>"))
+                return
+        record["_path"] = path
         self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
         # A follow-up needs something to follow up: a run that saved stage
         # output, links, or add-on details. NOT `record.get("query")` --
@@ -364,8 +448,20 @@ class HistoryDialog(PrismDialog):
             for val in artifacts.values():
                 if val and isinstance(val, str) and _editable_reel(val):
                     return val
-        elif isinstance(artifacts, str) and _editable_reel(artifacts):
-            return artifacts
+        elif isinstance(artifacts, str):
+            if _editable_reel(artifacts):
+                return artifacts
+            if os.path.isdir(artifacts):
+                try:
+                    cands = [os.path.join(artifacts, f) for f in os.listdir(artifacts)
+                             if f.lower().endswith(".mp4")]
+                    cands.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0,
+                               reverse=True)
+                    for cand in cands:
+                        if _editable_reel(cand):
+                            return cand
+                except OSError:
+                    pass
         for url in (record.get("links") or {}).values():
             if url and isinstance(url, str) and _editable_reel(url):
                 return url
@@ -438,7 +534,13 @@ class HistoryDialog(PrismDialog):
         query_html = _esc(str(record.get("query") or ""))
         query_html = (query_html.replace("\r\n", "<br>")
                       .replace("\r", "<br>").replace("\n", "<br>"))
+        has_fus = bool(record.get("followups"))
+        initial_tag = (f"<div style='margin-bottom:6px;'><span style='background:{theme.ACCENT_RAMP[100]}; "
+                       f"color:{theme.ACCENT_RAMP[800]}; padding:2px 8px; border-radius:4px; "
+                       f"font-size:11px; font-weight:700; text-transform:uppercase;'>Initial Task</span></div>"
+                       if has_fus else "")
         parts = [
+            initial_tag,
             f"<div style='font-family:{theme.FONT_BODY};font-size:16px;"
             f"line-height:145%;margin:0 0 8px 0'>"
             f"{query_html}</div>",
@@ -551,7 +653,100 @@ class HistoryDialog(PrismDialog):
                     f"<b>{_esc(k)}:</b> &nbsp;<a href='{_esc(u)}' style='color:{theme.ACCENT_RAMP[700]}; text-decoration: underline; font-weight: 500;'>"
                     f"{_esc(u)}</a></p>")
 
-        if not ran and not step_info and not reel_info and not extra_links:
+        followups = record.get("followups") or []
+        for fu in followups:
+            fu_idx = fu.get("index", 1)
+            fu_query = fu.get("query") or "Follow-up refinement"
+            fu_timestamp = fu.get("timestamp")
+            fu_time_str = ""
+            if fu_timestamp:
+                try:
+                    fu_moment = time.localtime(float(fu_timestamp))
+                    fu_time_str = time.strftime("%d %b %Y at %H:%M", fu_moment)
+                except Exception:
+                    pass
+
+            fu_agents = fu.get("agents") or {}
+            fu_tools = [v for v in fu_agents.values() if v]
+            fu_tools_str = ", ".join(dict.fromkeys(fu_tools)) if fu_tools else ""
+
+            parts.append(
+                f"<div style='margin:32px 0 14px 0;'>"
+                f"<table width='100%' cellspacing='0' cellpadding='0'><tr>"
+                f"<td style='border-bottom:1px dashed {theme.ACCENT_RAMP[300]};'></td>"
+                f"<td width='1' style='padding:0 12px; white-space:nowrap;'>"
+                f"<span style='background:{theme.ACCENT_RAMP[600]}; color:#ffffff; "
+                f"padding:5px 14px; border-radius:14px; font-size:12px; font-weight:700; "
+                f"letter-spacing:0.5px;'>"
+                f"➔ &nbsp;FOLLOW-UP {fu_idx}</span></td>"
+                f"<td style='border-bottom:1px dashed {theme.ACCENT_RAMP[300]};'></td>"
+                f"</tr></table></div>")
+
+            # Follow-up header box
+            fu_meta_line = " &nbsp;·&nbsp; ".join(filter(None, [fu_time_str, fu_tools_str]))
+            parts.append(
+                f"<div style='margin:0 0 16px 0; padding:12px 14px; "
+                f"background:{theme.ACCENT_RAMP[100]}; border-left:4px solid {theme.ACCENT_RAMP[600]}; "
+                f"border-radius:4px;'>"
+                f"<div style='font-size:11px; font-weight:700; color:{theme.ACCENT_RAMP[800]}; "
+                f"text-transform:uppercase; margin-bottom:4px;'>"
+                f"Refinement requested"
+                + (f" &nbsp;·&nbsp; <span style='font-weight:500;'>{_esc(fu_meta_line)}</span>" if fu_meta_line else "")
+                + f"</div>"
+                f"<div style='font-size:14px; color:{theme.NEUTRAL[900]}; font-weight:500; "
+                f"line-height:140%;'>"
+                f"{_esc(fu_query)}</div></div>")
+
+            if fu.get("error"):
+                parts.append(
+                    f"<table width='100%' cellspacing='0' cellpadding='8' style='margin:0 0 10px 0;'>"
+                    f"<tr><td bgcolor='{theme.ERR_BG}'>"
+                    f"<span style='color:{theme.ERR_INK}; font-size:12px;'>"
+                    f"This follow-up stopped early — {_esc(fu['error'])}</span>"
+                    f"</td></tr></table>")
+
+            fu_responses = fu.get("responses") or {}
+            fu_links = fu.get("links") or {}
+            fu_rendered_urls = set()
+
+            for s_name, s_texts in fu_responses.items():
+                clean_s = s_name.replace("_", " ").replace("-", " ")
+                _, s_title, _ = STAGE_COPY.get(s_name, ("grid", clean_s.title(), ""))
+                s_url = fu_links.get(s_name) or ""
+                if s_url:
+                    fu_rendered_urls.add(s_url)
+                s_agent = fu_agents.get(s_name) or s_name
+
+                parts.append(
+                    f"<p style='margin:14px 0 2px 0'>"
+                    f"<span style='font-family:{theme.FONT_HEADING};font-size:16px;"
+                    f"color:{theme.ACCENT_RAMP[700]}'>◆</span>"
+                    f"<span style='font-family:{theme.FONT_HEADING};font-size:15px'>"
+                    f"&nbsp;&nbsp;{_esc(s_title)}</span>"
+                    f"<span style='color:{theme.NEUTRAL[600]};font-size:12px'>"
+                    f"&nbsp;&nbsp;·&nbsp;&nbsp;{_esc(s_agent)}</span></p>")
+
+                if s_url:
+                    parts.append(f"<p style='margin:0 0 6px 0;font-size:12px'>"
+                                 f"🔗 <a href='{_esc(s_url)}' style='color:"
+                                 f"{theme.ACCENT_RAMP[700]}; text-decoration: underline; font-weight: 500;'>"
+                                 f"{_esc(_one_line(s_url, 75))}</a></p>")
+
+                joined_fu = "\n\n———\n\n".join(t for t in s_texts if t)
+                if joined_fu.strip():
+                    parts.append(self._sub("Updated output"))
+                    parts.append(self._quote(render_markdown(joined_fu), theme.SURFACE, raw_html=True))
+
+            fu_extra_links = {k: v for k, v in fu_links.items() if v and v not in fu_rendered_urls}
+            if fu_extra_links:
+                parts.append(self._sub("Generated Links"))
+                for k, u in fu_extra_links.items():
+                    parts.append(
+                        f"<p style='margin:4px 0 6px 0;font-size:12px'>"
+                        f"<b>{_esc(k)}:</b> &nbsp;<a href='{_esc(u)}' style='color:{theme.ACCENT_RAMP[700]}; "
+                        f"text-decoration: underline; font-weight: 500;'>{_esc(u)}</a></p>")
+
+        if not ran and not step_info and not reel_info and not extra_links and not followups:
             parts.append(f"<p style='color:{theme.NEUTRAL[600]}'>This run didn't "
                          f"record any step responses.</p>")
 

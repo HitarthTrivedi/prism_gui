@@ -1458,11 +1458,7 @@ class EmailComposeDialog(PrismDialog):
         # Show modern, sleek floating Toast notification instead of tiny native modal box
         tone = "warn" if (failed or stopped) else "ok"
         parent_win = self.parent()
-
-        # Display toast directly on this dialog and on parent if available
-        C.show_toast(self, title=title, body=body, tone=tone, duration=3500)
-        if parent_win:
-            C.show_toast(parent_win, title=title, body=body, tone=tone, duration=4000)
+        top_win = parent_win.window() if (parent_win and hasattr(parent_win, "window")) else parent_win
 
         if held and not stopped:
             # What went is gone from the screen; what stayed is the list.
@@ -1470,13 +1466,21 @@ class EmailComposeDialog(PrismDialog):
             self._drop_sent(sent)
             self.status.setText(i18n.t(
                 "{k} still to send — held back by the limit.").format(k=len(held)))
+            C.show_toast(self, title=title, body=body, tone=tone, duration=3500)
             return
 
         if sent and not failed and not stopped:
             self.send_btn.setEnabled(False)
             self.send_btn.setText(i18n.t("Sent"))
-            # Close dialog cleanly after showing toast
+            # Toast belongs on the host window (MainWindow) which stays alive after dialog closes
+            if top_win:
+                C.show_toast(top_win, title=title, body=body, tone=tone, duration=4000)
+            else:
+                C.show_toast(self, title=title, body=body, tone=tone, duration=1700)
+            # Close dialog cleanly after brief confirmation
             QTimer.singleShot(1800, self.accept)
+        else:
+            C.show_toast(self, title=title, body=body, tone=tone, duration=4000)
 
     def _on_send_failed(self, error: str):
         """Login or connection died — nothing went out at all."""
@@ -1513,6 +1517,27 @@ class EmailComposeDialog(PrismDialog):
             self.status.setText(i18n.t(
                 "Sent, but could not save to History: {error}").format(error=e))
 
+    def _cleanup_workers(self):
+        """Wind up every worker before this dialog is destroyed — a QThread
+        destroyed while running aborts the whole process."""
+        for worker in (self._worker, self._send_worker):
+            if worker is None:
+                continue
+            try:
+                if not worker.isRunning():
+                    continue
+                if hasattr(worker, "stop"):
+                    worker.stop()
+                if not worker.wait(4000):
+                    worker.terminate()
+                    worker.wait(500)
+            except Exception:
+                pass
+
+    def accept(self):
+        self._cleanup_workers()
+        super().accept()
+
     def closeEvent(self, event):
         """Wind up every worker before this dialog is destroyed — a QThread
         destroyed while running aborts the whole process."""
@@ -1523,17 +1548,5 @@ class EmailComposeDialog(PrismDialog):
             if leave != QMessageBox.Yes:
                 event.ignore()
                 return
-        for worker in (self._worker, self._send_worker):
-            if worker is None:
-                continue
-            try:
-                if not worker.isRunning():
-                    continue
-                if hasattr(worker, "stop"):
-                    worker.stop()
-                if not worker.wait(8000):
-                    worker.terminate()
-                    worker.wait(1000)
-            except RuntimeError:
-                pass
+        self._cleanup_workers()
         super().closeEvent(event)

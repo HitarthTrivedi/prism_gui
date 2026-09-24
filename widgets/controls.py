@@ -2094,8 +2094,13 @@ class Toast(QFrame):
         if self._top:
             self._top.installEventFilter(self)
 
+        self._dismissed = False
+        self._timer = None
         if duration > 0:
-            QTimer.singleShot(duration, self.dismiss)
+            self._timer = QTimer(self)
+            self._timer.setSingleShot(True)
+            self._timer.timeout.connect(self.dismiss)
+            self._timer.start(duration)
 
     def mousePressEvent(self, event):
         if self._on_click:
@@ -2103,53 +2108,94 @@ class Toast(QFrame):
         super().mousePressEvent(event)
 
     def closeEvent(self, event):
+        self._dismissed = True
+        if self._timer:
+            try:
+                self._timer.stop()
+            except Exception:
+                pass
         top = getattr(self, "_top", None)
         if top:
             try:
-                top.removeEventFilter(self)
+                import shiboken6
+                if shiboken6.isValid(top):
+                    top.removeEventFilter(self)
             except Exception:
                 pass
         super().closeEvent(event)
 
     def eventFilter(self, watched, event):
-        top = getattr(self, "_top", None)
-        if top and watched == top and event.type() in (QEvent.Resize, QEvent.Move):
-            self._reposition(animate=False)
+        try:
+            import shiboken6
+            if not shiboken6.isValid(self):
+                return False
+            top = getattr(self, "_top", None)
+            if top and shiboken6.isValid(top) and watched == top and event.type() in (QEvent.Resize, QEvent.Move):
+                self._reposition(animate=False)
+        except Exception:
+            return False
         return super().eventFilter(watched, event)
 
     def _reposition(self, animate: bool = True):
-        top = getattr(self, "_top", None)
-        if not top:
-            return
-        top_w = top.width()
-        top_h = top.height()
-        w = max(self.width(), self.sizeHint().width(), 380)
-        h = max(self.height(), self.sizeHint().height())
-        x = (top_w - w) // 2
-        if self._position == "top":
-            y = 28
-        else:
-            y = top_h - h - 32
+        try:
+            import shiboken6
+            if not shiboken6.isValid(self):
+                return
+            top = getattr(self, "_top", None)
+            if not top or not shiboken6.isValid(top):
+                return
+            top_w = top.width()
+            top_h = top.height()
+            w = max(self.width(), self.sizeHint().width(), 380)
+            h = max(self.height(), self.sizeHint().height())
+            x = (top_w - w) // 2
+            if self._position == "top":
+                y = 28
+            else:
+                y = top_h - h - 32
 
-        if animate:
-            start_y = y + 16 if self._position == "bottom" else y - 16
-            self.setGeometry(x, start_y, w, h)
-            self._anim = QPropertyAnimation(self, b"pos", self)
-            self._anim.setDuration(220)
-            self._anim.setStartValue(QPoint(x, start_y))
-            self._anim.setEndValue(QPoint(x, y))
-            self._anim.setEasingCurve(QEasingCurve.OutCubic)
-            self._anim.start()
-        else:
-            self.setGeometry(x, y, w, h)
-        self.raise_()
+            if animate:
+                start_y = y + 16 if self._position == "bottom" else y - 16
+                self.setGeometry(x, start_y, w, h)
+                self._anim = QPropertyAnimation(self, b"pos", self)
+                self._anim.setDuration(220)
+                self._anim.setStartValue(QPoint(x, start_y))
+                self._anim.setEndValue(QPoint(x, y))
+                self._anim.setEasingCurve(QEasingCurve.OutCubic)
+                self._anim.start()
+            else:
+                self.setGeometry(x, y, w, h)
+            self.raise_()
+        except Exception:
+            pass
 
     def dismiss(self):
+        try:
+            import shiboken6
+            if not shiboken6.isValid(self):
+                return
+        except Exception:
+            pass
+        if getattr(self, "_dismissed", False):
+            return
+        self._dismissed = True
+        if getattr(self, "_timer", None):
+            try:
+                self._timer.stop()
+            except Exception:
+                pass
         try:
             top = getattr(self, "_top", None)
             if top:
                 try:
-                    top.removeEventFilter(self)
+                    import shiboken6
+                    if shiboken6.isValid(top):
+                        top.removeEventFilter(self)
+                except Exception:
+                    pass
+            if hasattr(self, "_anim") and self._anim:
+                try:
+                    self._anim.stop()
                 except Exception:
                     pass
             self._anim_out = QPropertyAnimation(self, b"pos", self)
@@ -2161,23 +2207,37 @@ class Toast(QFrame):
             self._anim_out.finished.connect(self.close)
             self._anim_out.start()
         except Exception:
-            self.close()
+            try:
+                self.close()
+            except Exception:
+                pass
 
 
 def show_toast(parent: QWidget | None, title: str, body: str = "",
                tone: str = "ok", duration: int = 4000, position: str = "bottom",
-               on_click=None) -> Toast:
+               on_click=None) -> Toast | None:
     """Show a modern, floating toast notification on `parent` (or active window)."""
-    top = None
-    if parent is not None:
-        top = parent.window() if hasattr(parent, "window") else parent
-    if top is None:
-        from PySide6.QtWidgets import QApplication
-        top = QApplication.activeWindow()
-    toast = Toast(top, title=title, body=body, tone=tone, duration=duration,
-                  position=position, on_click=on_click)
-    toast.show()
-    return toast
+    try:
+        top = None
+        if parent is not None:
+            try:
+                import shiboken6
+                if not shiboken6.isValid(parent):
+                    return None
+            except Exception:
+                pass
+            top = parent.window() if hasattr(parent, "window") else parent
+        if top is None:
+            from PySide6.QtWidgets import QApplication
+            top = QApplication.activeWindow()
+        if not top:
+            return None
+        toast = Toast(top, title=title, body=body, tone=tone, duration=duration,
+                      position=position, on_click=on_click)
+        toast.show()
+        return toast
+    except Exception:
+        return None
 
 
 # ── Animated Wave Dots Loader ─────────────────────────────────────────────

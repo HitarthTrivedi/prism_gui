@@ -570,6 +570,7 @@ class HomePanel(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.NoFrame)
+        self._scroll.verticalScrollBar().valueChanged.connect(lambda _: self._scroll.viewport().update())
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._host = QWidget()
         self._scroll.setWidget(self._host)

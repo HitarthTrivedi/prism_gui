@@ -275,6 +275,7 @@ class PrismDialog(QDialog):
             self.scroll = QScrollArea()
             self.scroll.setWidgetResizable(True)
             self.scroll.setFrameShape(QScrollArea.NoFrame)
+            self.scroll.verticalScrollBar().valueChanged.connect(lambda _: self.scroll.viewport().update())
             self.scroll.setWidget(self._content)
             root.addWidget(self.scroll, stretch=1)
         else:

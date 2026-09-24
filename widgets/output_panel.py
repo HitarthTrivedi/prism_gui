@@ -1062,6 +1062,7 @@ class OutputPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.verticalScrollBar().valueChanged.connect(lambda _: scroll.viewport().update())
         inner = QWidget()
         self.cards_box = QVBoxLayout(inner)
         self.cards_box.setContentsMargins(0, 2, 0, 2)
@@ -1202,25 +1203,60 @@ class OutputPanel(QWidget):
         self._sync_problems()
         self._refresh_header()
 
-    # ── the plan, before it runs ────────────────────────────────────────────
-    def set_plan(self, steps):
+    def set_plan(self, steps, followup: bool = False,
+                 prior_responses: dict = None, prior_links: dict = None,
+                 prior_agents: dict = None):
         """Seed the timeline with every step the run is about to take.
 
         `steps` is what AgentsPanel.selected_agents() returns — {stage: tool} —
         or any ordered list of (stage, tool) pairs.
 
-        This is the fix for two separate holes. The `queued` state was written
-        into this file and was unreachable, because a card only ever came into
-        existence inside stage_started and was overwritten on the next line.
-        And the plan vanished the moment the run began: the running page
-        replaces the plan page outright, so nothing on screen said what was
-        still to come. Both are the same missing fact — the ordered stage list,
-        which the caller has and the panel did not.
+        When `followup` is True, existing completed cards are preserved so
+        the person can continue seeing the already work done section.
         """
-        self.clear()
+        if not followup:
+            self.clear()
+        else:
+            # If workbench was clean (e.g. follow-up from History), populate
+            # the completed cards from prior_responses so already work done is shown.
+            if not self._cards and prior_responses:
+                links = prior_links or {}
+                agents = prior_agents or {}
+                for stage, texts in prior_responses.items():
+                    if not texts:
+                        continue
+                    agent = agents.get(stage) or ""
+                    card = self._ensure_card(stage, agent)
+                    card.set_done(texts, links.get(stage, ""))
+
         items = list(steps.items()) if isinstance(steps, dict) else list(steps)
+        if followup:
+            # For any existing card whose stage is being re-run in the follow-up,
+            # archive the previous card so its completed deliverable stays visible
+            # in the already-done section while the new follow-up card is queued.
+            for stage, agent in items:
+                if stage in self._cards and self._cards[stage].state() == "completed":
+                    old_card = self._cards[stage]
+                    old_key = f"{stage}_prior"
+                    suffix = 1
+                    while old_key in self._cards:
+                        suffix += 1
+                        old_key = f"{stage}_prior_{suffix}"
+                    self._cards[old_key] = old_card
+                    del self._cards[stage]
+                    idx = self._order.index(stage)
+                    self._order[idx] = old_key
+                    old_card.set_note(i18n.t("Completed in earlier run"))
+
         for stage, agent in items:
             self._ensure_card(stage, agent)
+
+        # Re-number all cards sequentially (1, 2, 3...)
+        for i, key in enumerate(self._order):
+            if key in self._cards:
+                self._cards[key].number.setText(str(i + 1))
+                self._cards[key].set_last(i == len(self._order) - 1)
+
         self._refresh_header()
 
     def _sync_tail(self):

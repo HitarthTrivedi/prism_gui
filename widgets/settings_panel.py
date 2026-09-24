@@ -254,6 +254,7 @@ class SettingsPanel(QDialog):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.NoFrame)
+        self._scroll.verticalScrollBar().valueChanged.connect(lambda _: self._scroll.viewport().update())
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }")
         self._page = QWidget()
@@ -1573,8 +1574,6 @@ class SettingsPanel(QDialog):
              self._path(artifacts_dir)),
             (i18n.t("Logs"), self._path(logs or "—")),
             (i18n.t("Log files on disk"), self._safe(self._log_size) or "—"),
-            (i18n.t("Licence server"),
-             self._path(self._safe(licensing.client.server_url) or "—")),
         ]))
 
 

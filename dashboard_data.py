@@ -118,66 +118,107 @@ def _ago(stamp: float, now: float | None = None) -> str:
 
 
 def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
-    """The last few runs, shaped for a row: title, the tools it used, when,
-    and whether it finished.
+    """The last few tasks, grouped as unified journeys: First task -> Followup 1 -> Followup 2.
 
-    Reads only as many files as it needs. History lists every run and can
-    afford to walk the folder; Home wants three rows and is on the startup
-    path, so a workspace with a thousand runs must not cost a thousand opens.
+    A task and its subsequent follow-ups share their artifacts workspace or
+    explicit follow-up chain. They collapse into a single row showing the
+    parent task, total follow-up count, tools used across the entire journey,
+    and latest activity time.
     """
-    out = []
-    for path in _run_files(cfg)[:limit]:
+    groups: dict[str, list[tuple[str, dict, float]]] = {}
+    order: list[str] = []
+
+    scan_max = max(limit * 5, 30)
+    for path in _run_files(cfg)[:scan_max]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 record = json.load(f) or {}
-            # Inside the try, and not for tidiness: a run file that vanishes
-            # between _run_files() listing it and this stat raises OSError, and
-            # Home is built during MainWindow.__init__ — so an unguarded stat
-            # here does not blank a panel, it stops the window existing at all.
-            # A frozen build has no console to say why. run_counts() and
-            # runs_per_day() have always guarded theirs; this one was the odd
-            # one out. Real on a synced or shared team folder.
             when_stamp = os.path.getmtime(path)
-            when = _ago(when_stamp)
         except (OSError, Exception):
             continue
-        agents = record.get("agents") or {}
-        # Ordered by stage as the run executed, de-duplicated — a task that
-        # sent two stages to ChatGPT should say "ChatGPT", not "ChatGPT ·
-        # ChatGPT".
-        tools, seen = [], set()
-        for tool in agents.values():
-            name = (tool or "").strip()
-            if name and name.lower() not in seen:
-                seen.add(name.lower())
-                tools.append(name)
+
+        art = (record.get("artifacts") or "").strip()
+        user_art_dir = ""
+        try:
+            user_art_dir = os.path.normpath(paths.user_dir("artifacts"))
+        except Exception:
+            pass
+
+        norm_art = os.path.normpath(art) if art else ""
+        if norm_art and norm_art != user_art_dir:
+            key = norm_art
+        else:
+            key = path
+
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append((path, record, when_stamp))
+
+    out = []
+    for key in order:
+        if len(out) >= limit:
+            break
+        items = groups[key]
+        # Sort chronologically so index 0 is the root / initial task
+        items_chrono = sorted(items, key=lambda x: x[2])
+        root_path, root_rec, root_stamp = items_chrono[0]
+
+        # Gather any followups stored inside records + legacy separate run files
+        internal_fus = list(root_rec.get("followups") or [])
+        if len(items_chrono) > 1:
+            # Sibling run files are legacy follow-ups
+            sibling_fus = len(items_chrono) - 1
+        else:
+            sibling_fus = 0
+        total_fu_count = max(len(internal_fus), sibling_fus)
+
+        # De-duplicate tools across root task and all follow-ups
+        tools, seen_tools = [], set()
+        for _, rec, _ in items_chrono:
+            agents = rec.get("agents") or {}
+            for tool in agents.values():
+                name = (tool or "").strip()
+                if name and name.lower() not in seen_tools:
+                    seen_tools.add(name.lower())
+                    tools.append(name)
+            for fu in (rec.get("followups") or []):
+                for tool in (fu.get("agents") or {}).values():
+                    name = (tool or "").strip()
+                    if name and name.lower() not in seen_tools:
+                        seen_tools.add(name.lower())
+                        tools.append(name)
+
+        # Latest activity timestamp
+        stamps = [it[2] for it in items]
+        for _, rec, _ in items:
+            for fu in (rec.get("followups") or []):
+                if fu.get("timestamp"):
+                    stamps.append(float(fu["timestamp"]))
+        latest_stamp = max(stamps) if stamps else root_stamp
+
+        when = _ago(latest_stamp)
+        if total_fu_count > 0:
+            when = f"{when} · {total_fu_count} follow-up{'s' if total_fu_count != 1 else ''}"
+
+        latest_rec = items_chrono[-1][1]
+        err = (latest_rec.get("error") or root_rec.get("error") or "").strip()
+
+        # Initial task title and query
+        title = ((root_rec.get("title") or "").strip()
+                 or (root_rec.get("query") or "").strip() or "Untitled task")
+        query = (root_rec.get("query") or "").strip()
+
         out.append({
-            # The planner's short name for the job when the run has one;
-            # the request verbatim for records from before titles existed.
-            "title": ((record.get("title") or "").strip()
-                      or (record.get("query") or "").strip() or "Untitled task"),
-            "query": (record.get("query") or "").strip(),
+            "title": title,
+            "query": query,
             "tools": tools,
-            # `when` from inside the try above, NOT a second getmtime. The
-            # guard up there exists because Home is built during
-            # MainWindow.__init__, so a run file that vanishes mid-walk does
-            # not blank a panel — it stops the window existing at all. Calling
-            # getmtime again out here re-opened that exact hole one line below
-            # the comment explaining it, and left the guarded value unused.
             "when": when,
-            "ok": not record.get("error"),
-            # Home names the cause on its "stopped before any tool ran" row.
-            # Worth carrying: 86 of this workspace's records are the same
-            # "Chrome would not launch", and telling someone that is far more
-            # actionable than telling them 86 things "Failed".
-            "error": (record.get("error") or "").strip(),
-            # The raw mtime as well as the English. History groups runs by
-            # date, and doing that off _ago()'s wording meant every "N weeks
-            # ago" — one week or four — collapsed into a single bucket, so a
-            # month of work arrived as one undated heap of 78 rows. Reading
-            # the number costs nothing: it is the same stat _ago() just did.
-            "stamp": when_stamp,
-            "path": path,
+            "ok": not bool(err),
+            "error": err,
+            "stamp": latest_stamp,
+            "path": root_path,
+            "followup_count": total_fu_count,
         })
     return out
 
@@ -490,3 +531,72 @@ def waiting_view(cfg: dict, rows: list[dict] | None = None) -> list[dict]:
             "num": row.get("Inquiry no", ""),
         })
     return out
+
+
+def filter_active_artifacts(paths: list[str]) -> list[str]:
+    """Given a collection of artifact files from a task directory (which may span
+    multiple iterative follow-up runs), return only the active/latest deliverables
+    by filtering out superseded earlier versions of reels, specs, audio, and documents.
+    """
+    if not paths:
+        return []
+
+    existing = [p for p in paths if p and os.path.isfile(p)]
+    try:
+        existing.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    except OSError:
+        pass
+
+    active = []
+    seen_roles = set()
+
+    for p in existing:
+        ext = os.path.splitext(p)[1].lower()
+        name = os.path.basename(p).lower()
+
+        # 1. Video files (reel MP4s): keep the latest cut
+        if ext in (".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"):
+            if "video" not in seen_roles:
+                active.append(p)
+                seen_roles.add("video")
+            continue
+
+        # 2. Reel JSON specs: keep the latest spec
+        if ext == ".json" and "reel" in name:
+            if "reel_spec" not in seen_roles:
+                active.append(p)
+                seen_roles.add("reel_spec")
+            continue
+
+        # 3. Audio files (voiceovers): keep the latest voiceover
+        if ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"):
+            if "audio" not in seen_roles:
+                active.append(p)
+                seen_roles.add("audio")
+            continue
+
+        # 4. Artwork / scene images: keep each distinct scene artwork
+        if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            import re
+            m = re.search(r"(artwork\s*\d*|scene\s*\d*)", name)
+            key = f"image_{m.group(1)}" if m else f"image_{name}"
+            if key not in seen_roles:
+                active.append(p)
+                seen_roles.add(key)
+            continue
+
+        # 5. Documents (.pdf, .docx, .xlsx, .csv, .pptx): keep latest of each extension
+        if ext in (".pdf", ".docx", ".xlsx", ".csv", ".pptx", ".html"):
+            doc_key = f"doc_{ext}"
+            if doc_key not in seen_roles:
+                active.append(p)
+                seen_roles.add(doc_key)
+            continue
+
+        # Other distinct files
+        if name not in seen_roles:
+            active.append(p)
+            seen_roles.add(name)
+
+    return active
+

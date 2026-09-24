@@ -126,5 +126,64 @@ class RunFileVanishesMidWalk(unittest.TestCase):
             "a panel — it stops the window existing at all.")
 
 
+class FilterActiveArtifactsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _touch(self, name: str, mtime_offset: int = 0) -> str:
+        path = os.path.join(self.dir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("test")
+        t = 1700000000 + mtime_offset
+        os.utime(path, (t, t))
+        return path
+
+    def test_filters_superseded_reels_and_specs(self):
+        # 3 runs/follow-ups of a reel task
+        v1_mp4 = self._touch("Titan Fast Track Watch Belt Reel - Reel.mp4", 10)
+        v1_json = self._touch("Titan Fast Track Watch Belt Reel - Reel.json", 10)
+        v2_mp4 = self._touch("fix the formatting issue in text - Reel.mp4", 20)
+        v2_json = self._touch("fix the formatting issue in text - Reel.json", 20)
+        v3_audio = self._touch("generate a voice for this reel - Audio - voiceover.mp3", 30)
+        v3_mp4 = self._touch("generate a voice for this reel - Reel.mp4", 30)
+        v3_json = self._touch("generate a voice for this reel - Reel.json", 30)
+
+        # 5 distinct artwork scene images
+        art1 = self._touch("Titan Fast Track Watch Belt Reel - Artwork.png", 5)
+        art2 = self._touch("Titan Fast Track Watch Belt Reel - Artwork 2.png", 5)
+        art3 = self._touch("Titan Fast Track Watch Belt Reel - Artwork 3.png", 5)
+        art4 = self._touch("Titan Fast Track Watch Belt Reel - Artwork 4.png", 5)
+        art5 = self._touch("Titan Fast Track Watch Belt Reel - Artwork 5.png", 5)
+
+        all_paths = [
+            v1_mp4, v1_json, v2_mp4, v2_json, v3_audio, v3_mp4, v3_json,
+            art1, art2, art3, art4, art5,
+        ]
+
+        active = DATA.filter_active_artifacts(all_paths)
+
+        # Must pick ONLY the newest reel MP4 (v3_mp4)
+        self.assertIn(v3_mp4, active)
+        self.assertNotIn(v1_mp4, active)
+        self.assertNotIn(v2_mp4, active)
+
+        # Must pick ONLY the newest reel spec JSON (v3_json)
+        self.assertIn(v3_json, active)
+        self.assertNotIn(v1_json, active)
+        self.assertNotIn(v2_json, active)
+
+        # Must keep the newest audio voiceover
+        self.assertIn(v3_audio, active)
+
+        # Must keep all 5 distinct scene images
+        for a in (art1, art2, art3, art4, art5):
+            self.assertIn(a, active)
+
+
 if __name__ == "__main__":
     unittest.main()
+

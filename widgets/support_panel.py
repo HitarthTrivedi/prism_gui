@@ -1137,6 +1137,16 @@ class SupportPanel(QWidget):
             self._worker.deleteLater()
             self._worker = None
 
+    def _transcript(self) -> str:
+        """Format the conversation log as plain text for the contact sheet."""
+        lines = []
+        for who, text in getattr(self, "_log", []):
+            speaker = i18n.t("Prism") if who == "prism" else i18n.t("You")
+            clean_text = str(text or "").strip()
+            if clean_text:
+                lines.append(f"{speaker}:\n{clean_text}\n")
+        return "\n".join(lines).strip()
+
     # ── tier 3: a person ──────────────────────────────────────────────────
     def _open_contact(self):
         from dialogs.contact_dialog import ContactDialog

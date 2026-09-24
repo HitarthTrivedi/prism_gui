@@ -350,9 +350,10 @@ class BoqDialog(PrismDialog):
         # so the quantities CSV and the written-up deck land in the same
         # Artifacts subfolder rather than two differently-named ones.
         try:
+            task_label = getattr(self, "_task_name", "") or f"{self._doc} — {self.request}"
             CB.config.save_artifact(
                 self.csv_path, os.path.basename(self.cad_path), kind="boq",
-                task=f"{self._run_prefix}{self.request}")
+                task=task_label)
         except Exception:                               # noqa: BLE001
             pass
         note = "  ".join(notes)
@@ -444,6 +445,8 @@ class BoqDialog(PrismDialog):
         # agree, or the same drawing produces two different documents.
         self.interpreter = "ChatGPT" if self.images else None
         self.request = request or f"Produce a {self._doc} from the attached drawing."
+        self._task_name = f"{self._doc} — {self.request}"
+        self._artifacts_dir = CB.config.begin_run(self._task_name, title=self._task_name)
 
         # Start the clock for this run's timing report.
         self._t0 = time.time()
@@ -556,9 +559,10 @@ class BoqDialog(PrismDialog):
         # tool could check", which put the customer's drawing on a third
         # party's server for a formatting job that never needed it.
         files = list(self.templates) + list(self.notes)
+        task_label = getattr(self, "_task_name", "") or f"{self._doc} — {self.request}"
 
         self._worker = AutomationWorker(
-            {}, self.cfg, files, f"{self._run_prefix}{self.request}",
+            {}, self.cfg, files, task_label,
             custom_stages=[("format", self.writer_agent, [prompt])],
             # The skill formatting_prompt was written against, so its
             # checker also reads the answer -- a parts row with no grade, a
@@ -591,9 +595,11 @@ class BoqDialog(PrismDialog):
                 (f"Done in {timing}. " if timing else "Done. ")
                 + "Check the numbers against the saved file above.")
         self.open_btn.setEnabled(bool(self._links.get("format")))
+        task_label = getattr(self, "_task_name", "") or f"{self._noun} — {self.request}"
         CB.config.save_run({
-            "query": f"{self._noun} — {self.request}", "responses": responses,
+            "query": task_label, "responses": responses,
             "links": self._links,
+            "artifacts": getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir(),
             "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
         })
 

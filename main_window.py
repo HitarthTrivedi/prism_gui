@@ -1205,6 +1205,10 @@ class MainWindow(QMainWindow):
         self._set_stage("describe")
         self.routing = None
         self._last_query = ""
+        self._current_run_file = None
+        self._is_followup_run = False
+        self._followup_session = None
+        self._followup_text = ""
         self._stage_agents = {}
         self._stage_results = []
         self._run_shortfall = []
@@ -1542,11 +1546,13 @@ class MainWindow(QMainWindow):
         # stages to the same refinement flow every routed run gets. The format
         # stage's query label doubles as the Artifacts task key, so "what came
         # back" shows the BOQ itself.
+        task_name = getattr(dlg, "_task_name", "") or f"{dlg._doc} — {getattr(dlg, 'request', '')}"
         self._offer_followup_for_dialog(
-            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
+            task_name,
             getattr(dlg, "_all_responses", {}),
             getattr(dlg, "_stage_agents_map", {}),
-            getattr(dlg, "_links", {}))
+            getattr(dlg, "_links", {}),
+            artifacts_dir=getattr(dlg, "_artifacts_dir", "") or CB.config.current_run_dir())
 
     def _open_bom(self):
         # Same front-door pattern as BOQ. Gated on the BOQ entitlement for now —
@@ -1568,11 +1574,13 @@ class MainWindow(QMainWindow):
         # and writes a parts list instead of a quantities schedule.
         dlg = BoqDialog(self.cfg, [], self, mode="bom")
         dlg.exec()
+        task_name = getattr(dlg, "_task_name", "") or f"{dlg._doc} — {getattr(dlg, 'request', '')}"
         self._offer_followup_for_dialog(
-            f"{dlg._doc} — {getattr(dlg, 'request', '')}",
+            task_name,
             getattr(dlg, "_all_responses", {}),
             getattr(dlg, "_stage_agents_map", {}),
-            getattr(dlg, "_links", {}))
+            getattr(dlg, "_links", {}),
+            artifacts_dir=getattr(dlg, "_artifacts_dir", "") or CB.config.current_run_dir())
 
     def _open_gerber(self):
         # Gerber is its own add-on since 2026-09-10 -- see addons/gerber/addon.py.
@@ -1729,8 +1737,19 @@ class MainWindow(QMainWindow):
             except Exception:                           # noqa: BLE001
                 configured = {}
             agents = {s: configured.get(s, "") for s in responses}
+        target_path = record.get("_path") or record.get("path") or ""
+        self._current_run_file = target_path or self._current_run_file
+        self._is_followup_run = True
         # The record is the truth here, not whatever ran last.
-        self._followup_session = None
+        self._followup_session = {
+            "query": record.get("query", ""),
+            "title": record.get("title", ""),
+            "run_file": target_path,
+            "responses": responses,
+            "links": record.get("links") or {},
+            "agents": agents,
+            "artifacts_dir": record.get("artifacts") or "",
+        }
         self._offer_followup_for_dialog(record.get("query", ""), responses,
                                         agents, record.get("links") or {},
                                         artifacts_dir=record.get("artifacts") or "")
@@ -2089,6 +2108,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Setup needed", "Finish Setup (API key + agents) first.")
             return
         self._last_query = query
+        self._current_run_file = None
+        self._is_followup_run = False
+        self._followup_session = None
+        self._followup_text = ""
         if len(self._task_queue) > 1:
             self.statusBar().showMessage(
                 f"Planning task {self._task_pos} of {len(self._task_queue)}…", 0)
@@ -2530,6 +2553,23 @@ class MainWindow(QMainWindow):
         page it was filmed from in the browser, with the edit layer on."""
         import json as _json
         spec_path = mp4_path[:-4] + ".json"
+        if not os.path.isfile(spec_path):
+            folder = os.path.dirname(mp4_path)
+            stem = os.path.splitext(os.path.basename(mp4_path))[0]
+            cand = os.path.join(folder, stem + ".json")
+            if os.path.isfile(cand):
+                spec_path = cand
+            else:
+                for d in [folder, CB.config.current_run_dir(), CB.config.RUNS_DIR]:
+                    if d and os.path.isdir(d):
+                        try:
+                            jsons = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".json")]
+                            jsons.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0, reverse=True)
+                            if jsons:
+                                spec_path = jsons[0]
+                                break
+                        except OSError:
+                            pass
         try:
             with open(spec_path, encoding="utf-8") as f:
                 spec = _json.load(f)
@@ -2582,12 +2622,15 @@ class MainWindow(QMainWindow):
 
     def _on_reel_edits_rendered(self, edits: list):
         self._keep_reel_edits(edits)
-        self._stop_reel_editor()
         ctx = self._reel_edit_ctx
         if not ctx:
             return
         import time as _time
-        CB.config.begin_run("reel — layout fixed by hand")   # its own folder
+        mp4_path = ctx.get("mp4_path", "")
+        folder = os.path.dirname(mp4_path) if (mp4_path and os.path.isdir(os.path.dirname(mp4_path))) else CB.config.current_run_dir()
+        task_label = getattr(self, "_last_query", "") or "reel"
+        if folder and os.path.isdir(folder):
+            CB.config.continue_run(folder, task=task_label, title=CB.config.current_run_title())
         out = os.path.join(CB.config.RUNS_DIR,
                            f"reel_{int(_time.time())}.mp4")
         self.statusBar().showMessage(
@@ -2628,13 +2671,37 @@ class MainWindow(QMainWindow):
         self._start_studio_followup(reel, design_url, agent, [], fresh_panel=True)
 
     def _on_reel_edit_rendered_done(self, path: str):
+        ctx = self._reel_edit_ctx or {}
+        spec_path = path[:-4] + ".json"
+        if ctx.get("spec"):
+            import json as _json
+            try:
+                with open(spec_path, "w", encoding="utf-8") as f:
+                    _json.dump(ctx["spec"], f, indent=2)
+            except OSError:
+                pass
+        task_label = getattr(self, "_last_query", "") or "reel"
         try:
             artifact = CB.config.save_artifact(
-                path, "reel — layout fixed by hand", kind="reel",
-                task="reel — layout fixed by hand")
+                path, task_label, kind="reel",
+                task=task_label)
         except Exception:                               # noqa: BLE001
             artifact = ""
         shown = artifact or path
+        if ctx:
+            ctx["mp4_path"] = shown
+            ctx["spec_path"] = shown[:-4] + ".json"
+            if os.path.isfile(spec_path) and shown != path:
+                try:
+                    import shutil
+                    shutil.copy2(spec_path, ctx["spec_path"])
+                except OSError:
+                    pass
+        sess = getattr(self, "_followup_session", None)
+        if sess:
+            sess["links"]["media"] = shown
+        note = f"reel layout fixed and rendered — {os.path.basename(shown)}"
+        self._save_run(responses={"media": [note]}, links={"media": shown})
         self.statusBar().showMessage(i18n.t(
             "Fixed reel rendered — {name}").format(
             name=os.path.basename(shown)), 12000)
@@ -2881,12 +2948,85 @@ class MainWindow(QMainWindow):
         CLI ever wrote there, so nothing done in the GUI was ever kept.
 
         Failures are swallowed to the status bar on purpose: the run itself
-        succeeded, and a full disk shouldn't turn that into an error dialog."""
+        succeeded, and a full disk shouldn't turn that into an error dialog.
+
+        When this run is a follow-up, it updates the existing task record in-place,
+        recording the follow-up request and outputs under the parent task's history
+        so the task flow remains: First task -> Followup 1 -> Followup 2 -> etc.
+        """
+        import time
         if responses is None or links is None:
             # A failed run has no engine return value — rebuild what did land
             # from the per-stage events we collected on the way.
             responses = {r["stage"]: [r["text"]] for r in self._stage_results if r["ok"]}
             links = {r["stage"]: r["url"] for r in self._stage_results if r.get("url")}
+
+        is_fu = bool(getattr(self, "_is_followup_run", False)
+                     or getattr(self, "_followup_text", "").strip())
+        sess = getattr(self, "_followup_session", None)
+        target_path = getattr(self, "_current_run_file", None) or (sess.get("run_file") if sess else None)
+
+        if is_fu and not target_path:
+            cur_art = (sess.get("artifacts_dir") if sess else "") or CB.config.current_run_dir()
+            if cur_art and os.path.isdir(cur_art):
+                try:
+                    me = identity.current()
+                    rdir = workspace.runs_dir(me["mid"], self.cfg)
+                    if os.path.isdir(rdir):
+                        for n in sorted(os.listdir(rdir), reverse=True):
+                            if n.startswith("run_") and n.endswith(".json"):
+                                fp = os.path.join(rdir, n)
+                                try:
+                                    with open(fp, "r", encoding="utf-8") as rf:
+                                        rd = json.load(rf) or {}
+                                    if rd.get("artifacts") and os.path.normpath(rd.get("artifacts")) == os.path.normpath(cur_art):
+                                        target_path = fp
+                                        self._current_run_file = fp
+                                        break
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+        if is_fu and target_path and os.path.isfile(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    record = json.load(f) or {}
+            except Exception:
+                record = {}
+            if record:
+                followups = list(record.get("followups") or [])
+                fu_text = getattr(self, "_followup_text", "").strip() or "Follow-up refinement"
+                followups.append({
+                    "index": len(followups) + 1,
+                    "query": fu_text,
+                    "timestamp": time.time(),
+                    "responses": dict(responses or {}),
+                    "links": dict(links or {}),
+                    "agents": dict(self._stage_agents),
+                    "durations": self.output_panel.stage_durations(),
+                    "error": error,
+                })
+                record["followups"] = followups
+                rec_resp = record.setdefault("responses", {})
+                rec_resp.update(responses or {})
+                rec_links = record.setdefault("links", {})
+                rec_links.update(links or {})
+                record.setdefault("agents", {}).update(self._stage_agents)
+                record["updated_at"] = time.time()
+                cur_art = CB.config.current_run_dir()
+                if cur_art:
+                    record["artifacts"] = cur_art
+                if error:
+                    record["latest_error"] = error
+                try:
+                    CB.config.save_run(record, path=target_path)
+                    self._is_followup_run = False
+                    self._followup_text = ""
+                    return
+                except Exception as e:
+                    self.statusBar().showMessage(f"Couldn't update task history: {e}", 8000)
+
         record = {
             "query": getattr(self, "_last_query", ""),
             "routing": self.routing or {},
@@ -2902,6 +3042,7 @@ class MainWindow(QMainWindow):
             # why History can say what a run did but never how long any of it
             # took, and why "this one is slow" has never been answerable.
             "durations": self.output_panel.stage_durations(),
+            "followups": [],
         }
         # Where this run's files went — one folder per run (config.begin_run)
         # — so a follow-up from History attaches THIS run's output, not
@@ -2924,7 +3065,12 @@ class MainWindow(QMainWindow):
             # reading someone else's profile and then starting a run must file
             # that run under themselves, not under the person they were
             # looking at.
-            CB.config.save_run(record, workspace.runs_dir(me["mid"], self.cfg))
+            path = CB.config.save_run(record, workspace.runs_dir(me["mid"], self.cfg))
+            self._current_run_file = path
+            if sess:
+                sess["run_file"] = path
+                sess["initial_query"] = record.get("query")
+                sess["initial_title"] = record.get("title")
         except Exception as e:
             self.statusBar().showMessage(f"Couldn't save this run to history: {e}", 8000)
 
@@ -3081,7 +3227,11 @@ class MainWindow(QMainWindow):
         query = getattr(self, "_last_query", "")
         sess = getattr(self, "_followup_session", None)
         if not sess or sess.get("query") != query:
-            sess = {"query": query, "responses": {}, "links": {}, "agents": {}}
+            sess = {"query": query, "responses": {}, "links": {}, "agents": {}, "artifacts_dir": ""}
+        if artifacts_dir:
+            sess["artifacts_dir"] = artifacts_dir
+        elif not sess.get("artifacts_dir"):
+            sess["artifacts_dir"] = CB.config.current_run_dir()
         sess["responses"].update({k: v for k, v in responses.items() if v})
         sess["links"].update({k: v for k, v in (links or {}).items() if v})
         sess["agents"].update({k: v for k, v in self._stage_agents.items() if v})
@@ -3090,6 +3240,12 @@ class MainWindow(QMainWindow):
         for s, a in sess["agents"].items():
             self._stage_agents.setdefault(s, a)
         self._followup_links = links
+
+        # Anchor current run directory for any follow-up artifacts
+        art_dir = sess.get("artifacts_dir") or artifacts_dir or CB.config.current_run_dir()
+        if art_dir and os.path.isdir(art_dir):
+            CB.config.continue_run(art_dir, task=query)
+
         # Gather what THIS task PRODUCED, up front. The engine saves every
         # stage's output (the BOQ PDF, the ChatGPT document, generated images)
         # into the task's Artifacts folder, keyed by the task. These files are
@@ -3101,12 +3257,13 @@ class MainWindow(QMainWindow):
         # "make a reel…" once attached twelve files from four runs.)
         artifact_paths = []
         try:
-            art_dir = artifacts_dir or CB.config.current_run_dir()
             if art_dir and os.path.isdir(art_dir):
-                artifact_paths = [
+                all_art = [
                     os.path.join(art_dir, n) for n in sorted(os.listdir(art_dir))
                     if os.path.isfile(os.path.join(art_dir, n))
                     and n != CB.config.ABOUT_FILE]
+                from dashboard_data import filter_active_artifacts
+                artifact_paths = filter_active_artifacts(all_art)
         except Exception:                               # noqa: BLE001
             pass
         from dialogs.followup_dialog import FollowupDialog
@@ -3117,8 +3274,8 @@ class MainWindow(QMainWindow):
             return
         self._followup_text = dlg.followup_text()
         self._followup_responses = responses
-        # Attachments = files the person just added + the artifacts this task
-        # produced, so a follow-up step builds on the real deliverable.
+        # Attachments = files the person just added + the active artifacts this task
+        # produced, so a follow-up step builds on the latest real deliverable.
         atts = []
         for p in list(dlg.file_paths()) + artifact_paths:
             if p and p not in {a.get("path") for a in atts}:
@@ -3160,6 +3317,23 @@ class MainWindow(QMainWindow):
         self._workers.append(worker)
         worker.start()
 
+    def _resolve_stage_agent(self, stage: str) -> str:
+        """Resolve which tool should run a stage in follow-up."""
+        agent = (self._stage_agents.get(stage)
+                 or (self.cfg.get("agents") or {}).get(stage))
+        if agent:
+            return agent
+        cats = getattr(CB.agents, "CATEGORIES", {})
+        if stage in cats and cats[stage].get("agents"):
+            return cats[stage]["agents"][0]
+        if stage == "audio":
+            return "ElevenLabs"
+        if stage == "content":
+            return "ChatGPT"
+        if stage == "presentation":
+            return "Gamma.app"
+        return "ChatGPT"
+
     def _on_followup_routed(self, plan: dict):
         """Carry out the classifier's plan.
 
@@ -3184,16 +3358,35 @@ class MainWindow(QMainWindow):
         design_url = (links.get("design") or saved_studio.get("design_url") or "")
         can_reel = bool(reel and design_url)
         images = (plan.get("images") or "").strip() if "artwork" in steps else ""
-        ordinary = [s for s in steps
-                    if s in responses and s not in ("design", "media")]
+
         low_followup = getattr(self, "_followup_text", "").casefold()
+
+        # Universal capability keywords: if the user explicitly asked for audio,
+        # document/summary, or presentation, make sure the corresponding stage is included!
+        wants_audio_explicit = any(term in low_followup for term in (
+            "audio", "voice", "voiceover", "voice-over", "narration", "speech", "podcast"))
+        wants_doc_explicit = any(term in low_followup for term in (
+            "doc", "document", "docx", "pdf", "report", "summary", "summarize", "writeup", "write-up"))
+        wants_slides_explicit = any(term in low_followup for term in (
+            "slide", "deck", "presentation", "powerpoint", "ppt"))
+
+        if wants_audio_explicit and "audio" not in steps:
+            steps.append("audio")
+        if wants_doc_explicit and "content" not in steps and "content" not in responses:
+            steps.insert(0, "content")
+        if wants_slides_explicit and "presentation" not in steps:
+            steps.append("presentation")
+
         reel_copy_change = any(term in low_followup for term in (
             "script", "voice-over", "voiceover", "narration", "catchy",
             "ad copy", "advertising copy", "hook", "tagline", "slogan",
-            "pro ad", "ad maker"))
+            "pro ad", "ad maker", "audio", "voice", "speech"))
         wants_reel = can_reel and (
             not steps or bool({"reel", "artwork", "design", "media"} & set(steps))
-            or reel_copy_change)
+            or reel_copy_change or wants_audio_explicit)
+
+        ordinary = [s for s in steps if s not in ("design", "media", "reel", "artwork")]
+
         if wants_reel:
             agent = (self._stage_agents.get("design")
                      or self._stage_agents.get("brains") or "ChatGPT")
@@ -3202,7 +3395,7 @@ class MainWindow(QMainWindow):
                 # produce is what the design chat is then told has changed.
                 maker = ((self.cfg.get("agents") or {}).get("visual")
                          or self._stage_agents.get("visual") or "ChatGPT")
-                shown = {s: self._stage_agents.get(s, "") for s in ordinary}
+                shown = {s: self._resolve_stage_agent(s) for s in ordinary}
                 if images:
                     shown["artwork"] = maker
                 shown.update({"design": agent, "media": "Prism Studio"})
@@ -3214,6 +3407,7 @@ class MainWindow(QMainWindow):
                 self._start_studio_followup(reel, design_url, agent,
                                             atts, images=images)
             return
+
         # Local footage reel: a script/copy change needs to regenerate voice
         # and re-render the video too — not just re-write the text.
         has_local_mp4 = any(
@@ -3224,21 +3418,19 @@ class MainWindow(QMainWindow):
             isinstance(v, str) and (v.lower().endswith(".mp4")
             or "client_reel" in os.path.basename(v))
             for v in (links or {}).values())
-        has_audio_stage = "audio" in responses
-        has_media_stage = "media" in responses
-        if reel_copy_change and has_footage_mp4 and (has_audio_stage or has_media_stage):
+        has_audio_stage = "audio" in responses or "audio" in steps or wants_audio_explicit
+        has_media_stage = "media" in responses or "reel" in steps
+        if (reel_copy_change or wants_audio_explicit) and has_footage_mp4 and (has_audio_stage or has_media_stage):
             # Chain: content re-run → audio re-gen → media re-render
-            content_steps = [s for s in (ordinary or [list(responses.keys())[0]])
-                             if s in responses]
+            content_steps = [s for s in (ordinary or [list(responses.keys())[0]])]
             if not content_steps:
-                content_steps = ["content"] if "content" in responses else [
-                    list(responses.keys())[0]]
+                content_steps = ["content"]
             chain_steps = list(content_steps)
-            plan_agents = {s: self._stage_agents.get(s, "") for s in chain_steps}
-            if has_audio_stage:
+            plan_agents = {s: self._resolve_stage_agent(s) for s in chain_steps}
+            if has_audio_stage and "audio" not in chain_steps:
                 chain_steps.append("audio")
-                plan_agents["audio"] = self._stage_agents.get("audio", "ElevenLabs")
-            if has_media_stage:
+                plan_agents["audio"] = self._resolve_stage_agent("audio")
+            if has_media_stage and "media" not in chain_steps:
                 chain_steps.append("media")
                 plan_agents["media"] = self._stage_agents.get("media", "Prism Studio")
             self.statusBar().showMessage(
@@ -3246,13 +3438,41 @@ class MainWindow(QMainWindow):
             self._set_stage("run")
             self._start_followup_run(chain_steps, atts, plan_agents=plan_agents)
             return
+
         if not ordinary:
             ordinary = [list(responses.keys())[-1]]     # unsure → the last step
+        plan_agents = {s: self._resolve_stage_agent(s) for s in ordinary}
+        for s, a in plan_agents.items():
+            self._stage_agents[s] = a
         self._set_stage("run")
-        self._start_followup_run(ordinary, atts)
+        self._start_followup_run(ordinary, atts, plan_agents=plan_agents)
 
     def _followup_prompt(self, stage: str, responses: dict, first: bool) -> str:
+        if stage == "audio":
+            # Voice-over / audio agents must receive ONLY the spoken words/script,
+            # never pipeline instructions, meta wrappers, or chat headers.
+            try:
+                auto = CB.get_automation()
+                voice_fn = getattr(auto, "_voiceover_text", None)
+            except Exception:
+                voice_fn = None
+            voice_sources = [
+                t for ts in reversed(list(responses.values()))
+                for t in (ts if isinstance(ts, list) else [ts])
+                if str(t).strip()
+            ]
+            spoken = voice_fn(voice_sources) if voice_fn else ""
+            if not spoken:
+                user_req = getattr(self, "_followup_text", "").strip()
+                extracted = voice_fn([user_req]) if voice_fn else ""
+                spoken = extracted or user_req
+            return spoken
+
         prior = "\n\n".join(responses.get(stage) or [])
+        if not prior.strip():
+            # If this stage didn't run previously (e.g. asking for a summary/document
+            # or audio on a BOQ/Research deliverable), provide the prior deliverable summary!
+            prior = self._result_summary(responses)
         # A finished answer can be an entire document, a long research dump or
         # an exported table. Sending it back verbatim makes the browser
         # composer fall back to slow character-by-character typing when fast
@@ -3266,8 +3486,17 @@ class MainWindow(QMainWindow):
             prior = (prior[:head].rstrip()
                      + "\n\n[Earlier result shortened here for the chat]\n\n"
                      + prior[-(max_prior - head):].lstrip())
-        att_note = (" New file(s) are attached to this chat — use them."
-                    if getattr(self, "_followup_attachments", None) else "")
+        att_note = ""
+        if getattr(self, "_followup_attachments", None):
+            names = [a.get("name") or os.path.basename(a.get("path", ""))
+                     for a in self._followup_attachments if isinstance(a, dict) and a.get("path")]
+            if names:
+                att_note = (
+                    f" The latest active deliverable file(s) are attached: "
+                    f"{', '.join(names)}. Build upon and use these latest versions, not any earlier drafts."
+                )
+            else:
+                att_note = " New file(s) are attached to this chat — use them."
         chain = ("" if first else
                  " The step before you has been redone for this change — its "
                  "new output is the context above; build on that, not on "
@@ -3289,9 +3518,19 @@ class MainWindow(QMainWindow):
         continues that chat with its full context instead of starting a
         fresh one. `then(responses, links)` continues a longer plan instead
         of finishing; `plan_agents` is the whole plan, for the timeline."""
+        self._is_followup_run = True
+        sess = getattr(self, "_followup_session", None)
+        if not getattr(self, "_current_run_file", None) and sess and sess.get("run_file"):
+            self._current_run_file = sess["run_file"]
+        art_dir = (sess.get("artifacts_dir") if sess else "") or CB.config.current_run_dir()
+        if art_dir and os.path.isdir(art_dir):
+            CB.config.continue_run(art_dir, task=getattr(self, "_last_query", "") or self._followup_text)
         responses = getattr(self, "_followup_responses", {}) or {}
         links = getattr(self, "_followup_links", {}) or {}
-        run_agents = {s: self._stage_agents.get(s, "") for s in stages}
+        run_agents = {s: (plan_agents or {}).get(s) or self._resolve_stage_agent(s)
+                      for s in stages}
+        for s, a in run_agents.items():
+            self._stage_agents[s] = a
         custom = [(s, run_agents[s], [self._followup_prompt(s, responses, i == 0)])
                   for i, s in enumerate(stages)]
         resume = {s: links[s] for s in stages if links.get(s)}
@@ -3305,23 +3544,23 @@ class MainWindow(QMainWindow):
         # inner stack shows RUNNING below.
         self._show_screen("workbench")
         self._set_stage("run")
-        self.output_panel.clear()
-        self.output_panel.set_plan(plan_agents or run_agents)
+        self.output_panel.set_plan(
+            plan_agents or run_agents, followup=True,
+            prior_responses=responses, prior_links=links,
+            prior_agents=self._stage_agents)
         self.output_panel.set_task(self._followup_text)
         self.input_panel.set_state("running")
         self._run_finished = False
         self.output_panel.set_finished(False)
         self.output_panel.set_running(True)
         self.work_stack.setCurrentIndex(RUNNING)
-        # The refinement is its own small run: the completion window shows
-        # it alone, not stacked under the task it refines. (The follow-up
-        # session, not these accumulators, is what carries the task forward.)
         self._stage_results = []
         self._run_shortfall = []
         self._task_runs = []
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
-            custom_stages=custom, resume_urls=resume or None, followup=True)
+            custom_stages=custom, resume_urls=resume or None, followup=True,
+            chatgpt_analysis=False, prior_responses=responses)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
@@ -3346,6 +3585,12 @@ class MainWindow(QMainWindow):
             sess["links"].update({k: v for k, v in links.items() if v})
         self._followup_links = {**(getattr(self, "_followup_links", {}) or {}),
                                 **{k: v for k, v in links.items() if v}}
+        audio_path = (links or {}).get("audio")
+        if audio_path and os.path.exists(audio_path):
+            try:
+                atts = list(atts) + [CB.files.attach(audio_path)]
+            except Exception:
+                atts = list(atts) + [{"path": audio_path, "name": os.path.basename(audio_path)}]
         context = "\n\n".join(
             f"[{s.upper()}]\n" + "\n\n".join(t for t in texts if t)
             for s, texts in responses.items() if texts)
@@ -3358,7 +3603,13 @@ class MainWindow(QMainWindow):
         """(mp4, spec path, spec) when this task filmed a Studio reel — the
         saved design beside the video is what a follow-up changes."""
         import json as _json
-        for url in (links or {}).values():
+
+        # 1. Prefer explicit 'media' stage in links if present
+        media_cand = (links or {}).get("media")
+        candidates_urls = [media_cand] if media_cand else []
+        candidates_urls.extend([v for v in (links or {}).values() if v != media_cand])
+
+        for url in candidates_urls:
             if not (isinstance(url, str) and url.lower().endswith(".mp4")
                     and paths.is_local_result(url)):
                 continue
@@ -3372,6 +3623,28 @@ class MainWindow(QMainWindow):
                 continue
             if CB.get_reel_edit().is_studio_spec(spec):
                 return url, spec_path, spec
+
+        # 2. Check the current task's artifacts directory for the latest reel & spec
+        sess = getattr(self, "_followup_session", None)
+        art_dir = (sess.get("artifacts_dir") if sess else "") or CB.config.current_run_dir()
+        if art_dir and os.path.isdir(art_dir):
+            try:
+                mp4s = sorted(
+                    [os.path.join(art_dir, f) for f in os.listdir(art_dir)
+                     if f.lower().endswith(".mp4") and os.path.isfile(os.path.join(art_dir, f))],
+                    key=lambda p: os.path.getmtime(p), reverse=True)
+                for mp4 in mp4s:
+                    spec_path = mp4[:-4] + ".json"
+                    if os.path.isfile(spec_path):
+                        try:
+                            with open(spec_path, encoding="utf-8") as f:
+                                spec = _json.load(f)
+                            if CB.get_reel_edit().is_studio_spec(spec):
+                                return mp4, spec_path, spec
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         # An export failure has no media link, but its project was saved
         # before encoding. Recover only the exact design conversation; using
         # the newest reel globally could send a change to another client's job.
@@ -3417,8 +3690,12 @@ class MainWindow(QMainWindow):
         self._show_screen("workbench")
         self._set_stage("run")
         if fresh_panel:
-            self.output_panel.clear()
-            self.output_panel.set_plan(run_agents)
+            responses = getattr(self, "_followup_responses", {}) or {}
+            links = getattr(self, "_followup_links", {}) or {}
+            self.output_panel.set_plan(
+                run_agents, followup=True,
+                prior_responses=responses, prior_links=links,
+                prior_agents=self._stage_agents)
             self.output_panel.set_task(self._followup_text)
             self._stage_results = []
             self._run_shortfall = []
@@ -3449,17 +3726,25 @@ class MainWindow(QMainWindow):
 
     def _on_studio_followup_done(self, out: str, spec_path: str, note: str):
         try:
-            CB.config.save_artifact(out, self._last_query, kind="reel",
-                                    task=self._last_query)
+            saved = CB.config.save_artifact(out, self._last_query, kind="reel",
+                                            task=self._last_query)
         except Exception:                               # noqa: BLE001
-            pass
+            saved = out
+        if spec_path and os.path.isfile(spec_path):
+            try:
+                import shutil
+                dest_json = os.path.splitext(saved)[0] + ".json"
+                if os.path.abspath(spec_path) != os.path.abspath(dest_json):
+                    shutil.copy2(spec_path, dest_json)
+            except OSError:
+                pass
         design_url = (getattr(self, "_followup_links", {}) or {}).get(
             "design", "")
         # Through the ordinary completion path — History, the completion
         # window, and the offer of another follow-up. `media` now points at
         # the new cut, so that is the reel the next follow-up changes.
         self._on_run_done({"design": [note], "media": [note]},
-                          {"design": design_url, "media": out})
+                          {"design": design_url, "media": saved or out})
 
     def _result_summary(self, responses: dict) -> str:
         """Recap for the follow-up dialog: the FINAL result first, then the
