@@ -431,10 +431,8 @@ class InputPanel(Card):
         row = QHBoxLayout(self.actions_row)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SPACE_2)
-        self.mic_btn = _action(i18n.t("Speak"), "mic",
-                               i18n.t("Dictate the task instead of typing"))
-        self.mic_btn.setObjectName("micBtn")
-        self.mic_btn.setCheckable(True)
+        self.mic_btn = C.VoiceInputButton(i18n.t("Speak"), self)
+        self.mic_btn.setToolTip(i18n.t("Dictate the task instead of typing"))
         self.mic_btn.clicked.connect(self.mic_toggle_clicked.emit)
         row.addWidget(self.mic_btn)
 
@@ -833,25 +831,10 @@ class InputPanel(Card):
         self.status.setVisible(bool(text))
 
     def set_recording(self, on: bool):
-        self.mic_btn.setChecked(on)
-        self.mic_btn.setText(i18n.t('Stop') if on else i18n.t('Speak'))
-        icons.button_icon(self.mic_btn, "stop" if on else "mic", 15,
-                          theme.ERR if on else theme.NEUTRAL[600])
-        if on:
-            self._blink.start()
-        else:
-            self._blink.stop()
-            self._blink_on = False
-            self.mic_btn.setStyleSheet("")
+        self.mic_btn.set_recording(on)
 
     def _pulse_mic(self):
-        """Recording is the one state where nothing on screen would otherwise
-        move — a slow tint pulse on the button is the whole cue. The armed
-        colours come from #micBtn:checked; this only varies the intensity, so
-        the pulse cannot drift away from the stylesheet's red."""
-        self._blink_on = not self._blink_on
-        self.mic_btn.setStyleSheet(
-            f"background: {theme.ERR_BG};" if self._blink_on else "")
+        pass
 
     def _on_route_btn_clicked(self):
         """The same button does both jobs, like mic_btn's Speak/Stop — while

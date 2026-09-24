@@ -35,7 +35,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient,
+    QLinearGradient, QRadialGradient, QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
@@ -2386,5 +2386,315 @@ class WaveDotsProgress(QProgressBar):
             cx = i * (self._dot_size + self._spacing) + r
             painter.drawEllipse(QRectF(cx - r, center_y + y_off - r, self._dot_size, self._dot_size))
         painter.end()
+
+
+# ── Animated Voice Input Component ─────────────────────────────────────────
+
+class VoiceFrequencyBars(QWidget):
+    """12 animated frequency bars matching Framer Motion's VoiceInput frequency visualizer.
+
+    When listening but not speaking:
+      - Renders a clean, sleek, plain horizontal baseline line across the visualizer width.
+      - Zero frantic jitter or unwanted bouncing.
+    When speaking:
+      - Dynamically animates the 12 rounded frequency bars oscillating up to 16px with speech harmonics.
+    When speech pauses or ends:
+      - Smoothly eases down back to the flat plain resting line.
+
+    Supports:
+      - set_speaking(bool)
+      - set_audio_level(float 0.0..1.0)
+      - Automatic conversational speech cadence when running in default demonstration mode.
+      - Consumes 0% idle CPU when stopped.
+    """
+
+    def __init__(self, parent: QWidget | None = None, bar_count: int = 12,
+                 bar_width: float = 2.5, spacing: float = 2.5, color: str | None = None):
+        super().__init__(parent)
+        self._bar_count = bar_count
+        self._bar_width = bar_width
+        self._spacing = spacing
+        self._color = color or "#8a2f2f"
+        self._time = 0.0
+
+        self._is_speaking = False
+        self._speech_level = 0.0          # 0.0 = completely flat plain line, 1.0 = full wave
+        self._target_speech_level = 0.0
+        self._cadence_mode = True         # Natural conversational cadence when active
+        self._cadence_timer = 0.0
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)  # ~60 FPS
+        self._timer.timeout.connect(self._on_tick)
+
+        self._total_w = int(bar_count * bar_width + (bar_count - 1) * spacing)
+        self.setFixedSize(self._total_w, 20)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+    def sizeHint(self) -> QSize:
+        return QSize(self._total_w, 20)
+
+    def start(self):
+        self._time = 0.0
+        self._cadence_timer = 0.0
+        self._is_speaking = False
+        self._speech_level = 0.0
+        self._target_speech_level = 0.0
+        if not self._timer.isActive():
+            self._timer.start()
+        self.show()
+
+    def stop(self):
+        if self._timer.isActive():
+            self._timer.stop()
+        self._is_speaking = False
+        self._speech_level = 0.0
+        self._target_speech_level = 0.0
+        self.hide()
+
+    def set_speaking(self, speaking: bool):
+        self._cadence_mode = False
+        self._is_speaking = bool(speaking)
+        self._target_speech_level = 1.0 if speaking else 0.0
+
+    def set_audio_level(self, level: float):
+        self._cadence_mode = False
+        level = max(0.0, min(1.0, float(level)))
+        self._is_speaking = level > 0.05
+        self._target_speech_level = level
+
+    def is_speaking(self) -> bool:
+        return self._is_speaking
+
+    def speech_level(self) -> float:
+        return self._speech_level
+
+    def _on_tick(self):
+        self._time += 0.05
+
+        # In automatic cadence mode, simulate natural conversational speech bursts and pauses
+        if self._cadence_mode:
+            self._cadence_timer += 0.016
+            cycle = self._cadence_timer % 4.5
+            # 0.0 - 0.8s: Initial silence/pause -> plain resting line
+            # 0.8 - 3.2s: Speaking -> wave effect with natural phrasing modulation
+            # 3.2 - 4.5s: Pause between sentences -> plain resting line
+            if 0.8 <= cycle <= 3.2:
+                self._is_speaking = True
+                sub_cycle = math.sin((cycle - 0.8) * 4.0)
+                self._target_speech_level = max(0.35, min(1.0, 0.75 + 0.25 * sub_cycle))
+            else:
+                self._is_speaking = False
+                self._target_speech_level = 0.0
+
+        # Natural attack and decay easing
+        if self._target_speech_level > self._speech_level:
+            # Fast attack (0.22) when speech begins
+            self._speech_level += (self._target_speech_level - self._speech_level) * 0.22
+        else:
+            # Smooth analog decay (0.12) when pausing / stopping speech
+            self._speech_level += (self._target_speech_level - self._speech_level) * 0.12
+
+        if abs(self._speech_level - self._target_speech_level) < 0.005:
+            self._speech_level = self._target_speech_level
+
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+
+        mid_y = self.height() / 2.0
+        r = self._bar_width / 2.0
+
+        # 1. Plain listening line (when silent / not speaking)
+        # Fades smoothly as speech level rises
+        plain_opacity = max(0.0, 1.0 - self._speech_level * 1.6)
+        if plain_opacity > 0.01:
+            line_color = QColor(self._color)
+            line_color.setAlphaF(plain_opacity)
+            painter.setBrush(QBrush(line_color))
+            painter.drawRoundedRect(QRectF(0, mid_y - 1.0, self._total_w, 2.0), 1.0, 1.0)
+
+        # 2. Dynamic frequency wave effect (emerges and animates when speaking)
+        if self._speech_level > 0.01:
+            bars_opacity = min(1.0, self._speech_level * 1.8)
+            bar_color = QColor(self._color)
+            bar_color.setAlphaF(bars_opacity)
+            painter.setBrush(QBrush(bar_color))
+
+            for i in range(self._bar_count):
+                phase = self._time * 3.5 + i * 0.48
+                wave = 3.0 + 5.0 * math.sin(phase) + 3.0 * math.sin(phase * 1.8 + 1.2) + 2.5 * math.cos(phase * 0.6)
+                wave = max(0.0, min(14.0, abs(wave)))
+
+                h = 2.0 + wave * self._speech_level
+                h = max(2.0, min(16.0, h))
+
+                x = i * (self._bar_width + self._spacing)
+                y = mid_y - h / 2.0
+                painter.drawRoundedRect(QRectF(x, y, self._bar_width, h), r, r)
+
+        painter.end()
+
+
+class VoiceInputButton(QPushButton):
+    """Interactive Voice Input Button matching shadcn / Framer Motion VoiceInput.
+
+    In idle state:
+      - Standard secondary pill with mic glyph and "Speak" label (matching Add File/Folder).
+    In active (listening) state:
+      - Smooth horizontal expansion.
+      - Displays animated rotating/pulsing recording glyph.
+      - Displays plain listening line while silent, transitioning to animated 12 frequency wave bars while speaking.
+      - Displays live running timer in MM:SS format.
+      - Armed recording red tint.
+    """
+
+    def __init__(self, text: str = "Speak", parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("micBtn")
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(40)
+        self.setMaximumHeight(40)
+
+        self._listening = False
+        self._time_sec = 0
+
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(14, 0, 14, 0)
+        self._row.setSpacing(7)
+        self._row.setAlignment(Qt.AlignCenter)
+
+        # 1. Leading icon label
+        self._icon_lbl = QLabel(self)
+        self._icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._icon_lbl.setPixmap(icons.pixmap("mic", 15, theme.NEUTRAL[700]))
+        self._row.addWidget(self._icon_lbl)
+
+        # 2. Text label (for idle "Speak")
+        self._text_lbl = QLabel(text, self)
+        self._text_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._text_lbl.setStyleSheet(
+            "font-family: 'Barlow'; font-size: 14px; font-weight: 600; color: #09090b;")
+        self._row.addWidget(self._text_lbl)
+
+        # 3. Frequency bars (12 wave bars with plain resting line)
+        self._bars = VoiceFrequencyBars(self, bar_count=12, bar_width=2.5, spacing=2.5, color="#8a2f2f")
+        self._bars.setVisible(False)
+        self._row.addWidget(self._bars)
+
+        # 4. Timer label (MM:SS)
+        self._timer_lbl = QLabel("00:00", self)
+        self._timer_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._timer_lbl.setStyleSheet(
+            "font-family: 'Barlow'; font-size: 13px; font-weight: 600; color: #8a2f2f; min-width: 38px;")
+        self._timer_lbl.setVisible(False)
+        self._row.addWidget(self._timer_lbl)
+
+        # Rotation/pulse timer for listening indicator
+        self._rot_angle = 0
+        self._rot_timer = QTimer(self)
+        self._rot_timer.setInterval(40)
+        self._rot_timer.timeout.connect(self._on_rot_tick)
+
+        # 1-second elapsed timer
+        self._second_timer = QTimer(self)
+        self._second_timer.setInterval(1000)
+        self._second_timer.timeout.connect(self._on_second_tick)
+
+    def sizeHint(self) -> QSize:
+        if self._listening:
+            return QSize(162, 40)
+        return QSize(96, 40)
+
+    def text(self) -> str:
+        return "Stop" if self._listening else self._text_lbl.text()
+
+    def setText(self, text: str):
+        self._text_lbl.setText(text)
+
+    def isChecked(self) -> bool:
+        return self._listening
+
+    def setChecked(self, on: bool):
+        self.set_recording(on)
+
+    def set_speaking(self, speaking: bool):
+        self._bars.set_speaking(speaking)
+
+    def set_audio_level(self, level: float):
+        self._bars.set_audio_level(level)
+
+    def is_speaking(self) -> bool:
+        return self._bars.is_speaking()
+
+    def set_recording(self, on: bool):
+        if self._listening == on:
+            return
+        self._listening = on
+        super().setChecked(on)
+
+        if on:
+            self._time_sec = 0
+            self._timer_lbl.setText("00:00")
+            self._text_lbl.setVisible(False)
+            self._bars.start()
+            self._timer_lbl.setVisible(True)
+            self._second_timer.start()
+            self._rot_angle = 0
+            self._rot_timer.start()
+            self._update_recording_icon()
+            self.setStyleSheet("""
+                #micBtn {
+                    background: #fdeeee;
+                    border: 1px solid #eecccc;
+                    border-radius: 8px;
+                    min-height: 28px;
+                }
+                #micBtn:hover {
+                    background: #fbdada;
+                    border-color: #e4b8b8;
+                }
+            """)
+        else:
+            self._rot_timer.stop()
+            self._second_timer.stop()
+            self._bars.stop()
+            self._timer_lbl.setVisible(False)
+            self._text_lbl.setVisible(True)
+            self._icon_lbl.setPixmap(icons.pixmap("mic", 15, theme.NEUTRAL[700]))
+            self.setStyleSheet("")
+
+        self.updateGeometry()
+        if self.parentWidget() and self.parentWidget().layout():
+            self.parentWidget().layout().activate()
+
+    def _on_rot_tick(self):
+        self._rot_angle = (self._rot_angle + 12) % 360
+        self._update_recording_icon()
+
+    def _update_recording_icon(self):
+        size = 16
+        pix = QPixmap(size, size)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.translate(size / 2.0, size / 2.0)
+        p.rotate(self._rot_angle)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor("#8a2f2f")))
+        p.drawRoundedRect(QRectF(-4.5, -4.5, 9, 9), 2, 2)
+        p.end()
+        self._icon_lbl.setPixmap(pix)
+
+    def _on_second_tick(self):
+        self._time_sec += 1
+        mins = self._time_sec // 60
+        secs = self._time_sec % 60
+        self._timer_lbl.setText(f"{mins:02d}:{secs:02d}")
+
 
 
