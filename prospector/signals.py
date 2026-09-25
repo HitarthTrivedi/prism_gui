@@ -65,45 +65,57 @@ class ExaSignalProvider(SignalProvider):
         self.errored = False
         if not (self.api_key and lead.company):
             return []
-        import requests  # lazy: matches how the engine defers heavy imports
+        from . import gateway
         from datetime import datetime, timedelta, timezone
 
         # The topic is a NEWS focus, never the seller's offer. The company name
         # is quoted so the search is about THAT company's own recent moves.
         topic = focus or ("expansion, new plant, capacity investment, automation, "
                           "digital transformation, Industry 4.0, IIoT, hiring")
-        query = f'"{lead.company}" news: {topic}'
-        # Real recency, not a hardcoded year token: only the last ~6 months, so a
-        # stale profile page can't pose as a "why-now".
-        now = datetime.now(timezone.utc)
-        start = (now - timedelta(days=180)).strftime("%Y-%m-%dT00:00:00.000Z")
-        headers = {"x-api-key": self.api_key,
-                   "Authorization": f"Bearer {self.api_key}",
-                   "Content-Type": "application/json"}
-        payload = {
-            "query": query,
-            "type": "auto",
-            "numResults": self.num_results,
-            "startPublishedDate": start,
-            "endPublishedDate": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
-            "contents": {"highlights": True, "text": {"maxCharacters": 800}},
-        }
-        if self.exclude_domains:
-            payload["excludeDomains"] = list(self.exclude_domains)
-        try:
-            resp = requests.post(EXA_SEARCH_URL, headers=headers,
-                                 json=payload, timeout=self.timeout)
-        except Exception:                       # noqa: BLE001 — network is a status line, not a crash
-            self.errored = True
-            return []
-        if resp.status_code != 200:
-            self.errored = True
-            return []
-        try:
-            results = resp.json().get("results", [])
-        except ValueError:
-            self.errored = True
-            return []
+        if gateway.is_pool(self.api_key):
+            # Pooled: the licence server builds the search (dates, contents and
+            # count are ITS rules) and asks Exa; the blocklist and the reading of
+            # each result below are unchanged.
+            results = gateway.news_rows(lead.company, focus=topic,
+                                        exclude_domains=self.exclude_domains,
+                                        num_results=self.num_results)
+            if results is None:
+                self.errored = True
+                return []
+        else:
+            import requests  # lazy: matches how the engine defers heavy imports
+            query = f'"{lead.company}" news: {topic}'
+            # Real recency, not a hardcoded year token: only the last ~6 months, so a
+            # stale profile page can't pose as a "why-now".
+            now = datetime.now(timezone.utc)
+            start = (now - timedelta(days=180)).strftime("%Y-%m-%dT00:00:00.000Z")
+            headers = {"x-api-key": self.api_key,
+                       "Authorization": f"Bearer {self.api_key}",
+                       "Content-Type": "application/json"}
+            payload = {
+                "query": query,
+                "type": "auto",
+                "numResults": self.num_results,
+                "startPublishedDate": start,
+                "endPublishedDate": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "contents": {"highlights": True, "text": {"maxCharacters": 800}},
+            }
+            if self.exclude_domains:
+                payload["excludeDomains"] = list(self.exclude_domains)
+            try:
+                resp = requests.post(EXA_SEARCH_URL, headers=headers,
+                                     json=payload, timeout=self.timeout)
+            except Exception:                   # noqa: BLE001 — network is a status line, not a crash
+                self.errored = True
+                return []
+            if resp.status_code != 200:
+                self.errored = True
+                return []
+            try:
+                results = resp.json().get("results", [])
+            except ValueError:
+                self.errored = True
+                return []
 
         out = []
         for r in results:

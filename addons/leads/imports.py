@@ -14,11 +14,11 @@ One file, imports.json, in a folder the caller names. Two kinds, as in Apollo:
     what the import WAS — its file, the column mapping, the settings, the
     counts — and the Contact CSV import filter asks contacts.py who carries
     the tag.
-  · "accounts" — companies. There is no saved-accounts store yet (that is the
-    Companies page), so the companies live on the record itself, each as
-    {"name", "website", "domain", "location", "industry", "headcount"}; the
-    Account CSV import filter keeps people who work at one of them, and a
-    paid search can go and find people there.
+  · "accounts" — companies. They are saved as accounts (accounts.py), and the
+    record keeps its own copy too, each as {"name", "website", "domain",
+    "location", "industry", "headcount", …}: the Account CSV import filter
+    keeps people who work at one of them, and a paid search walks them in
+    order to find people there (mark_searched).
 
 A record: {"id", "name" (the file's name, what the filter shows), "kind",
 "created_at", "source" (the path it was read from — shown, never re-read),
@@ -52,7 +52,8 @@ _WHAT = "your CSV imports"
 KINDS = ("contacts", "accounts")
 _ID = re.compile(r"imp-\d{8}-\d{6}-[0-9a-f]{6}")
 _COMPANY_FIELDS = ("name", "website", "domain", "location", "industry",
-                   "headcount", "phone", "linkedin")
+                   "headcount", "phone", "linkedin", "stage", "revenue",
+                   "description")
 _COUNT_KEYS = ("rows", "added", "updated", "skipped")
 
 _LOCK = threading.RLock()
@@ -76,10 +77,21 @@ def valid_id(value) -> bool:
     return isinstance(value, str) and bool(_ID.fullmatch(value))
 
 
+# A real host: dot-separated labels, and a last label of letters ("acme.example",
+# "idmc.company") — so "Not Found", "N/A", "localhost" and "192.168.0.1" are not one.
+_HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}")
+
+
 def domain_of(website) -> str:
     """"https://www.acme.example/about" → "acme.example"; "" when there is no
-    host. The same reduction a company's e-mail domain gets in pool.py, so a
-    person at @acme.example is at the account whose website is acme.example."""
+    host — or when what is there is not a web address at all. The same reduction
+    a company's e-mail domain gets in pool.py, so a person at @acme.example is at
+    the account whose website is acme.example.
+
+    The last rule is not a nicety (24-Sep-2026): the owner's AE _ Leads.xlsx had
+    "Not Found" in 115 website cells and "Not available" in 19 more, "Not Found"
+    read as the domain "not found", and every company after the first was
+    dropped as a duplicate of it — 215 rows imported as 74 companies."""
     raw = (website if isinstance(website, str) else "").strip().lower()
     if not raw:
         return ""
@@ -91,7 +103,8 @@ def domain_of(website) -> str:
         host = urlsplit(raw).hostname or ""
     except ValueError:
         return ""
-    return host[4:] if host.startswith("www.") else host
+    host = host[4:] if host.startswith("www.") else host
+    return host if _HOST.fullmatch(host) else ""
 
 
 def _text(value) -> str:
@@ -332,6 +345,29 @@ def update_counts(folder, import_id, counts) -> bool:
         for record in records:
             if record["id"] == import_id:
                 record["counts"] = _counts(counts)
+                store.commit(folder, FILE, _KEY, SCHEMA, doing, _WHAT, state,
+                             records + kept)
+                return True
+    return False
+
+
+def set_companies(folder, import_id, companies) -> bool:
+    """Replace an accounts import's companies — what an enrichment pass found
+    (a website, a size, an HQ) written back, in the same order, so the
+    Account CSV import filter can match by the domains it learned and the
+    searched position still points at the same companies. False when there
+    is no such accounts import. Raises StoreError on a failed write."""
+    if not valid_id(import_id):
+        return False
+    clean = [c for c in (_company(c) for c in companies or ()) if c is not None]
+    doing = "Couldn't update this import's companies"
+    with _LOCK:
+        state, items = store.for_writing(folder, FILE, _KEY, SCHEMA, doing, _WHAT)
+        records, kept = _split(items)
+        for record in records:
+            if record["id"] == import_id and record["kind"] == "accounts":
+                record["companies"] = clean
+                record["searched"] = min(record.get("searched", 0), len(clean))
                 store.commit(folder, FILE, _KEY, SCHEMA, doing, _WHAT, state,
                              records + kept)
                 return True

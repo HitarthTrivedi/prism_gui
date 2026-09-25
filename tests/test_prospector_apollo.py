@@ -668,9 +668,12 @@ class FinderTest(unittest.TestCase):
                                                "key"), ("", ""))
         self.assertEqual(apollo.find_email(self._lead(), ""), ("", ""))
 
-    def test_apollo_sits_in_the_waterfall_after_tomba_and_before_hunter(self):
+    def test_the_finders_are_apollo_then_hunter(self):
+        # The owner, 24-Sep-2026 (updated): Apollo first (broader database,
+        # often already has the id for leads sourced from Apollo); Hunter next
+        # as a monthly-credit fallback for people Apollo missed.
         keys = [k for k, _, _ in verify._FINDERS]
-        self.assertEqual(keys, ["tomba_key", "apollo_api_key", "hunter_api_key"])
+        self.assertEqual(keys, ["apollo_api_key", "hunter_api_key"])
         self.assertIn("apollo_api_key", verify.VERIFIER_KEYS)
 
     def test_collect_keys_picks_the_apollo_key_up(self):

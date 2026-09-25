@@ -50,7 +50,9 @@ def _dos(name, fit, email="", check="", signal="none", company="Acme"):
 class StatusReading(unittest.TestCase):
     def test_every_status_maps(self):
         self.assertEqual(CK.status_of(_dos("A", 90, "a@x.com", "valid")), "Verified")
-        self.assertEqual(CK.status_of(_dos("B", 80, "b@x.com", "")), "Guessed")
+        # No verifier has ruled on it: "Unverified" (it read "Guessed" until
+        # 24-Sep-2026, when Prism stopped guessing addresses at all).
+        self.assertEqual(CK.status_of(_dos("B", 80, "b@x.com", "")), "Unverified")
         self.assertEqual(CK.status_of(_dos("C", 70, "c@x.com", "catch-all")), "Catch-all")
         self.assertEqual(CK.status_of(_dos("D", 60, "d@x.com", "invalid")), "Invalid")
         self.assertEqual(CK.status_of(_dos("E", 50, "")), "No email")
@@ -214,8 +216,18 @@ class CockpitBehaviour(unittest.TestCase):
     def test_drawer_renders_on_select(self):
         r = self._find(self.d1)
         self.c._table.setCurrentCell(r, 1)
-        # the drawer inner layout has real content (more than just the stretch)
-        self.assertGreater(self.c._drawer_lay.count(), 3)
+        # The person panel opens on them (Apollo's contact profile), and the
+        # qualification they earned leads its Prospect tab — more than the
+        # stretch. (Was: the old drawer's layout held over 3 cards; its Fit and
+        # Deliverability now sit in the panel's Record details and Contact
+        # information, so the count moved with them.)
+        from PySide6.QtWidgets import QLabel
+        panel = self.c.person_panel
+        self.assertEqual(panel.name.text(), "Kunyi")
+        texts = [w.text() for w in self.c._drawer_w.findChildren(QLabel)]
+        self.assertIn("WARM · 96 / 100", texts)
+        self.assertIn("k@x.com", texts)
+        self.assertGreater(self.c._drawer_lay.count(), 1)
 
 
 class LayoutStates(unittest.TestCase):
@@ -271,9 +283,13 @@ class LayoutStates(unittest.TestCase):
         self.assertEqual(c._search_slot.indexOf(find), -1)
         rail = c._rail.widget().layout()
         # Total / Net New / Saved over the filters, Find new people under them.
+        # Between the tabs and the filters, the "N removed · Restore" line
+        # (23-Sep-2026: Remove) — hidden while nobody is removed.
         self.assertIs(rail.itemAt(0).widget(), c._tabs_frame)
-        self.assertIs(rail.itemAt(1).layout(), c._search_slot)
-        self.assertIs(rail.itemAt(2).layout(), c._find_slot)
+        self.assertIs(rail.itemAt(1).widget(), c._removed_link)
+        self.assertTrue(c._removed_link.isHidden())
+        self.assertIs(rail.itemAt(2).layout(), c._search_slot)
+        self.assertIs(rail.itemAt(3).layout(), c._find_slot)
 
 
 class TableFeel(unittest.TestCase):
@@ -657,16 +673,21 @@ class _Workbench(unittest.TestCase):
         self._searches = tempfile.mkdtemp()
         self._contacts = tempfile.mkdtemp()
         self._imports = tempfile.mkdtemp()
+        self._accounts = tempfile.mkdtemp()
         self.asked = []
         self._saved_attrs = {
             name: getattr(WB.LeadsWorkbench, name)
             for name in ("_autosave_dir", "_sessions_dir", "_searches_dir",
-                         "_contacts_dir", "_imports_dir", "_confirm_search")}
+                         "_contacts_dir", "_imports_dir", "_accounts_dir",
+                         "_removed_dir", "_confirm_search")}
         WB.LeadsWorkbench._autosave_dir = lambda _self: self._tmp        # no real Documents
         WB.LeadsWorkbench._sessions_dir = lambda _self: self._sessions   # no real workspace
         WB.LeadsWorkbench._searches_dir = lambda _self: self._searches
         WB.LeadsWorkbench._contacts_dir = lambda _self: self._contacts
         WB.LeadsWorkbench._imports_dir = lambda _self: self._imports
+        WB.LeadsWorkbench._accounts_dir = lambda _self: self._accounts
+        self._removed = tempfile.mkdtemp()
+        WB.LeadsWorkbench._removed_dir = lambda _self: self._removed
 
         def confirm(_self, spec, companies, note):
             self.asked.append((spec, list(companies), note))
@@ -818,6 +839,10 @@ class _FakeSignal:
     def connect(self, slot):
         self.slots.append(slot)
 
+    def emit(self, *args):
+        for slot in list(self.slots):
+            slot(*args)
+
 
 class _FakeSourceWorker:
     """Stands in for SourceWorker: records what it was handed; start() only
@@ -828,6 +853,7 @@ class _FakeSourceWorker:
         self.args, self.kwargs, self.started = args, kwargs, False
         self.progress, self.done, self.failed = _FakeSignal(), _FakeSignal(), _FakeSignal()
         self.blocked = _FakeSignal()        # Apollo's plan/scope refusal
+        self.companiesAsked = _FakeSignal()  # a group of an import's companies asked
         _FakeSourceWorker.made.append(self)
 
     def start(self):
@@ -1002,7 +1028,9 @@ class LeadFiltersInTheWorkbench(_Workbench):
                                side_effect=answer(QMessageBox.StandardButton.No)):
             ok = confirm(wb, spec, ["Acme Tooling"], "companies 1–1 of 1 from the import")
         self.assertFalse(ok)
-        self.assertIn(f"about {wb._estimate(spec)} Exa searches", asked[0])
+        # One company, one search — the location's exclusion is checked on
+        # who comes back, not spread over twelve regions (24-Sep-2026).
+        self.assertIn("It will run 1 Exa search, asking the company", asked[0])
         self.assertIn("companies 1–1 of 1", asked[0])
         self.assertIn("Owners, Founders, Chiefs and Directors", asked[0])
         # The owner named titles himself: no word about who it asks for.
@@ -1246,6 +1274,23 @@ class ApolloIsTheOtherDatabase(_Workbench):
                                   "apollo_api_key": "ap-secret"}])
         self.assertEqual(wb.cfg["apollo_api_key"], "ap-secret")
 
+    def test_done_in_search_settings_keeps_a_new_exa_key(self):
+        """24-Sep-2026: the owner's Exa key expired. A new one pasted into
+        Search settings › Keys & claims was only kept once Find new people
+        was pressed — Done forgot it, and Find e-mails and the company
+        look-ups went on with the old key. Done keeps it now, and writes
+        nothing else in the config."""
+        from unittest import mock
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "exa-old"})
+        wb._exa.setText("exa-new")
+        saved = []
+        with mock.patch("core_bridge.config.load",
+                        return_value={"api_key": "gsk_kept", "exa_api_key": "exa-old"}), \
+                mock.patch("core_bridge.config.save", side_effect=saved.append):
+            wb._settings_dlg.accept()                   # Done
+        self.assertEqual(saved, [{"api_key": "gsk_kept", "exa_api_key": "exa-new"}])
+        self.assertEqual(wb.cfg["exa_api_key"], "exa-new")
+
     def test_an_apollo_run_hands_the_worker_the_source_and_the_filters(self):
         wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k"})
         wb._src_apollo.click()                          # Exa is the default now
@@ -1426,8 +1471,11 @@ class SourceWorkerSearchesApollo(unittest.TestCase):
         self.assertEqual(calls["spec"], spec)
         self.assertEqual((calls["key"], calls["target"]), ("ap-test", 25))
         self.assertIsNone(calls["skip"])                 # no sessions folder
-        # Only the person Apollo had no address for is guessed an address.
-        self.assertEqual(enriched, [[unknown]])
+        # The person Apollo had no address for is NOT guessed one (24-Sep-2026:
+        # "hunter + apollo only to find mails") — the finders look them up
+        # later, for the hot and warm, or from Find e-mails.
+        self.assertEqual(enriched, [])
+        self.assertEqual(unknown.email, "")
         res, _drafts = got["done"][0]
         self.assertEqual(res.apollo_stats["revealed"], 2)
         self.assertEqual(res.filtered_out, {"location": 40})
@@ -1606,6 +1654,57 @@ class EverySourcedPersonIsListed(unittest.TestCase):
         self.assertEqual(len(w._analytics._dossiers), 1)
 
 
+class AnImportsCompaniesAreAskedInGroupsInOnePress(unittest.TestCase):
+    """SourceWorker.run(), inline: an Account CSV import searched whole (the
+    owner, 24-Sep-2026) hands the worker every company — more than one
+    Current company facet holds — and it asks them in groups of that size,
+    one after another in this one run, every company once, saying after each
+    group how many are asked."""
+
+    def test_seventy_two_companies_go_in_two_groups_every_one_asked(self):
+        from unittest import mock
+        from addons.leads.workers import SourceWorker
+        from prospector.filters import MAX_FACET_VALUES, SearchSpec
+        names = [f"Company {i}" for i in range(1, 73)]
+        spec = SearchSpec.from_dict({"seniority": {"include": ["owner", "director"]},
+                                     "companies": {"include": names[:MAX_FACET_VALUES]}})
+        w = SourceWorker([], [], "Line retrofits", {}, leads_only=True, emails="later",
+                         spec=spec.to_dict(), companies=names)
+        asked, calls, got = [], [], {"done": [], "failed": []}
+        w.companiesAsked.connect(asked.append)
+        w.done.connect(lambda res, drafts: got["done"].append(res))
+        w.failed.connect(got["failed"].append)
+
+        def fake_source(industries, roles, key, **kw):
+            part = kw["spec"]
+            calls.append((list(part.companies.include), kw["target"], kw["per_company"]))
+            kw["stats"].update(queries_used=len(part.companies.include),
+                               filtered={"seniority": 1})
+            return [Lead(name=f"P {c}", company=c, title="Owner")
+                    for c in part.companies.include[:2]]
+        patches = [mock.patch("prospector.signals.exa_key", return_value="exa-test"),
+                   mock.patch("prospector.source.source", side_effect=fake_source),
+                   mock.patch("prospector.triage.rank",
+                              side_effect=lambda leads, offer, roles=None: list(leads))]
+        for patch in patches:
+            patch.start()
+        try:
+            w.run()
+        finally:
+            for patch in patches:
+                patch.stop()
+        self.assertEqual(got["failed"], [])
+        self.assertEqual([len(c) for c, _t, _p in calls], [MAX_FACET_VALUES, 72 - MAX_FACET_VALUES])
+        self.assertEqual(calls[0][0] + calls[1][0], names)      # every company, once
+        # The run's target never cuts a group short: up to 3 from each company.
+        self.assertEqual([(t, p) for _c, t, p in calls],
+                         [(MAX_FACET_VALUES * 3, 3), ((72 - MAX_FACET_VALUES) * 3, 3)])
+        self.assertEqual(asked, [MAX_FACET_VALUES, 72])
+        res = got["done"][0]
+        self.assertEqual(len(res.all_leads), 4)
+        self.assertEqual(res.filtered_out, {"seniority": 2})     # both groups counted
+
+
 class ALeadsOnlyRunShowsItsPeople(_Workbench):
 
     def test_opening_a_leads_only_run_lists_every_person(self):
@@ -1764,9 +1863,8 @@ class ImportIsItsOwnAction(_Workbench):
         book.active.append(["Acme Tooling", "Packaging Machinery", "Vadodara"])
         book.save(path)
         w = ImportWizard("contacts")
-        self.assertTrue(w.load(path))
-        w._go_next()                                        # to the mapping
-        self.assertFalse(w._next.isEnabled())
+        self.assertTrue(w.load(path))                       # straight to the mapping
+        self.assertFalse(w._import.isEnabled())
         self.assertIn("looks like a list of companies", w._map_error.text())
         people = ImportWizard("contacts")
         book = openpyxl.Workbook()
@@ -1775,16 +1873,188 @@ class ImportIsItsOwnAction(_Workbench):
         other = os.path.join(self._tmp, "people.xlsx")
         book.save(other)
         self.assertTrue(people.load(other))
-        people._go_next()
-        self.assertTrue(people._next.isEnabled())
+        self.assertTrue(people._import.isEnabled())
         self.assertEqual(people._map_error.text(), "")
 
 
-class AnAccountImportIsSearchedInBatches(_Workbench):
-    """Find new people over an Account CSV import asks Exa for people at its
-    companies — MAX_FACET_VALUES at a time (Exa pairs every role with every
-    company, so an unbounded list is unbounded searches), from where the last
-    search stopped, kept on disk so a restart never pays for the same
+class ImportSettingsReachTheStores(_Workbench):
+    """The import page's settings, end to end into the stores (knowledge.apollo.io
+    "Import a CSV of Contacts / Accounts"): the stage — from the CSV or one for
+    everyone — "If … already exist", "Auto-assign accounts?", "Add to a list?",
+    and an accounts import's enrichment, which asks before it spends."""
+
+    @staticmethod
+    def _people():
+        a = Lead(name="Asha Rao", title="Owner", company="Rao Precision Works",
+                 email="asha@raoprecision.example")
+        a.extra["stage"] = "Interested"
+        b = Lead(name="Vikram Das", title="Director", company="Das Steel",
+                 email="vikram@gmail.com")
+        b.extra["website"] = "dassteel.example"
+        c = Lead(name="Nita Shah", title="CEO", company="Shah Forgings")
+        c.extra["linkedin"] = "linkedin.com/in/nita-shah-example"
+        return [a, b, c]
+
+    def test_the_stage_from_the_csv_or_one_for_everyone(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._people(), stage="csv"))
+        stages = {c.lead.name: c.stage for c in CT.list_contacts(self._contacts)}
+        self.assertEqual(stages, {"Asha Rao": "Interested", "Vikram Das": "Cold",
+                                  "Nita Shah": "Cold"})
+        other = tempfile.mkdtemp()
+        self._WB.LeadsWorkbench._contacts_dir = lambda _self: other
+        wb2 = self._WB.LeadsWorkbench({})
+        wb2._run_import(_contacts_result(self._tmp, self._people(), stage="Approaching"))
+        self.assertEqual({c.stage for c in CT.list_contacts(other)}, {"Approaching"})
+
+    def test_auto_assign_creates_the_accounts_by_website_or_email_domain(self):
+        from addons.leads import accounts as AC
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._people(),
+                                        assign_accounts="domain"))
+        accounts = {a.name: a.domain for a in AC.list_accounts(self._accounts)}
+        # Asha by her e-mail, Vikram by his company's website (his address is
+        # gmail — nobody's company), Nita gives no domain at all.
+        self.assertEqual(accounts, {"Rao Precision Works": "raoprecision.example",
+                                    "Das Steel": "dassteel.example"})
+        self.assertIn("2 new accounts", wb._status.text())
+
+    def test_auto_assign_by_name_and_not_at_all(self):
+        from addons.leads import accounts as AC
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._people(), assign_accounts="none"))
+        self.assertEqual(AC.list_accounts(self._accounts), [])
+        wb._run_import(_contacts_result(self._tmp, self._people(), name="again.csv",
+                                        assign_accounts="name"))
+        self.assertEqual(sorted(a.name for a in AC.list_accounts(self._accounts)),
+                         ["Das Steel", "Rao Precision Works", "Shah Forgings"])
+
+    def test_add_to_a_list_tags_every_contact_with_it(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        wb._run_import(_contacts_result(self._tmp, self._people(), add_to_list=True,
+                                        list_name="Expo leads"))
+        self.assertEqual({tuple(c.lists) for c in CT.list_contacts(self._contacts)},
+                         {("Expo leads",)})
+        self.assertIn("Expo leads", wb._list_names())
+
+    def test_an_accounts_import_saves_the_accounts_with_their_stage(self):
+        from addons.leads import accounts as AC
+        wb = self._WB.LeadsWorkbench({})
+        result = _accounts_result(self._tmp, ["Google", "SPI Technologies Inc"])
+        result["companies"][1]["stage"] = "Current Client"
+        result["settings"] = {"stage": "csv", "update_existing": True}
+        wb._run_import(result)
+        stages = {a.name: a.stage for a in AC.list_accounts(self._accounts)}
+        self.assertEqual(stages, {"Google": "Cold", "SPI Technologies Inc": "Current Client"})
+
+    def test_enrichment_asks_first_then_fills_the_import_and_the_accounts(self):
+        from addons.leads import accounts as AC
+        from addons.leads import imports as IM
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        asked, made = [], []
+        from addons.leads import workers as WK
+        orig = WK.LeadsAccountEnrichWorker
+
+        class _Worker(_FakeSourceWorker):
+            wants = staticmethod(orig.wants)            # the real rule, no thread
+
+            def __init__(self, companies, cfg, mode):
+                super().__init__(companies, cfg, mode)
+                made.append(self)
+
+        WK.LeadsAccountEnrichWorker = _Worker
+        self.addCleanup(setattr, WK, "LeadsAccountEnrichWorker", orig)
+        wb._confirm_enrich = lambda n: asked.append(n) or True
+        result = _accounts_result(self._tmp, ["Google", "Tiny Co"])
+        result["companies"][0]["website"] = "google.com"
+        result["settings"] = {"stage": "Cold", "update_existing": True,
+                              "find_websites": True}
+        wb._run_import(result)
+        self.assertEqual(asked, [1])                    # only Tiny Co has no website
+        self.assertEqual(len(made), 1)
+        self.assertTrue(made[0].started)
+        self.assertEqual(wb._jobs, 1)
+        head = IM.list_imports(self._imports, "accounts")[0]
+        found = [dict(c) for c in made[0].args[0]]
+        found[1].update(website="tinyco.example", headcount="12", location="Pune, India")
+        wb._on_accounts_enriched(head["id"], found, 1)
+        self.assertEqual(wb._jobs, 0)
+        self.assertEqual(IM.get(self._imports, head["id"])["companies"][1]["domain"],
+                         "tinyco.example")
+        tiny = next(a for a in AC.list_accounts(self._accounts) if a.name == "Tiny Co")
+        self.assertEqual((tiny.domain, tiny.headcount, tiny.location),
+                         ("tinyco.example", "12", "Pune, India"))
+        self.assertIn("Filled in 1 companies", wb._status.text())
+
+    def test_a_no_to_the_enrichment_spends_nothing(self):
+        wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+        wb._confirm_enrich = lambda n: False
+        result = _accounts_result(self._tmp, ["Tiny Co"])
+        result["settings"] = {"stage": "Cold", "enrich_all": True}
+        wb._run_import(result)
+        self.assertEqual(wb._jobs, 0)
+        self.assertIsNone(wb._enrich_worker)
+
+    def test_enrichment_without_an_exa_key_says_so(self):
+        wb = self._WB.LeadsWorkbench({})
+        wb._confirm_enrich = lambda n: self.fail("must not ask without a key")
+        result = _accounts_result(self._tmp, ["Tiny Co"])
+        result["settings"] = {"stage": "Cold", "enrich_all": True}
+        wb._run_import(result)
+        self.assertIn("Exa API key", wb._status.text())
+
+
+class SendingMovesContactsToApproaching(_Workbench):
+    """Apollo's stage trigger: "Approaching — you have sent the contact at
+    least one message". Sending saves the person as a contact (Apollo:
+    "Adding prospects to a sequence saves them as contacts") and moves a
+    Cold one on; a stage the owner set by hand stands."""
+
+    def test_the_people_sent_to_move_on_from_cold_only(self):
+        from addons.leads import contacts as CT
+        from prospector.reach import Draft
+        wb = self._WB.LeadsWorkbench({})
+        a = Lead(name="Asha Rao", company="Rao", email="asha@rao.example")
+        b = Lead(name="Bo Lund", company="Lund", email="bo@lund.example")
+        wb._keep_as_contacts([a, b], "save")
+        CT.set_stage(self._contacts, b, "Interested")
+        for c in wb._contacts:
+            if c.lead is b:
+                c.stage = "Interested"
+        drafts = [Draft(dossier=Dossier(lead=a), subject="Hi", body="x", status="sent"),
+                  Draft(dossier=Dossier(lead=b), subject="Hi", body="x", status="sent")]
+        wb._send_worker = type("W", (), {"drafts": drafts})()
+        wb._jobs = 1
+        from unittest import mock
+        with mock.patch.object(self._WB.QMessageBox, "information"):
+            wb._on_sent(["asha@rao.example", "bo@lund.example"], [])
+        stages = {c.lead.name: c.stage for c in CT.list_contacts(self._contacts)}
+        self.assertEqual(stages, {"Asha Rao": "Approaching", "Bo Lund": "Interested"})
+        self.assertEqual({c.lead.name: c.stage for c in wb._contacts}, stages)
+
+    def test_sending_saves_the_people_as_contacts_first(self):
+        from addons.leads import contacts as CT
+        from prospector.reach import Draft
+        wb = self._WB.LeadsWorkbench({})
+        a = Lead(name="Asha Rao", company="Rao", email="asha@rao.example")
+        drafts = [Draft(dossier=Dossier(lead=a), subject="Hi", body="x")]
+        orig = self._WB.LeadsSendWorker
+        self._WB.LeadsSendWorker = _FakeSourceWorker
+        self.addCleanup(setattr, self._WB, "LeadsSendWorker", orig)
+        wb._run_send(drafts)
+        [c] = CT.list_contacts(self._contacts)
+        self.assertEqual((c.lead.name, c.via), ("Asha Rao", ["sequence"]))
+
+
+class AnAccountImportIsSearchedInOnePress(_Workbench):
+    """Find new people over an Account CSV import asks Exa for people at
+    every company not searched yet — one search a company, all of them in one
+    press (the owner, 24-Sep-2026: "all at once"; it used to be 50 a press,
+    and a hidden cap on a run's calls asked most of them for one role only),
+    up to _COMPANIES_PER_PRESS. A company counts as searched once its group
+    really was asked, kept on disk so a restart never pays for the same
     companies twice. With no job title or seniority of the owner's own it asks
     for the decision-makers an Indian SME actually has (22-Sep-2026: MD, CEO,
     Founder, Director, Owner — not one vertical's automation heads)."""
@@ -1801,16 +2071,25 @@ class AnAccountImportIsSearchedInBatches(_Workbench):
         wb._run_import(_accounts_result(self._tmp, names, name=name))
         return wb
 
-    def _press(self, wb):
-        """Find new people, then the search "finishing" so it can be pressed
-        again; the spec the worker was handed."""
+    def _press(self, wb, asked=None):
+        """Find new people, the worker asking `asked` of the companies it was
+        handed (all of them unless told), then the search "finishing" so it
+        can be pressed again; the spec the worker was handed."""
         before = len(_FakeSourceWorker.made)
         wb._on_prepare()
         if len(_FakeSourceWorker.made) == before:
             return None
+        worker = _FakeSourceWorker.made[-1]
+        companies = worker.kwargs.get("companies") or []
+        if companies:
+            worker.companiesAsked.emit(len(companies) if asked is None else asked)
         wb._jobs = 0
         wb._set_running(False)
-        return _FakeSourceWorker.made[-1].kwargs["spec"]
+        return worker.kwargs["spec"]
+
+    def _handed(self):
+        """The companies the last search was handed."""
+        return _FakeSourceWorker.made[-1].kwargs.get("companies")
 
     def _searched(self):
         from addons.leads import imports as IM
@@ -1828,33 +2107,67 @@ class AnAccountImportIsSearchedInBatches(_Workbench):
         self.assertEqual(spec["account_imports"], [])       # companies, not the id
         _spec, companies, note = self.asked[0]
         self.assertEqual(companies, names)
+        self.assertEqual(self._handed(), names)
         self.assertEqual(note, "companies 1–5 of 5 from the import")
         # The session keeps the RAIL's filters: the import, not 5 chips.
         self.assertEqual(wb._next_params["filters"]["account_imports"],
                          wb._filters.spec().account_imports)
         self.assertEqual(self._searched(), [5])
 
-    def test_a_big_import_goes_fifty_at_a_time_and_a_restart_carries_on(self):
+    def test_a_big_import_goes_in_one_press_and_a_stopped_one_carries_on(self):
         from prospector.filters import MAX_FACET_VALUES
         n = MAX_FACET_VALUES * 2 + 10
         names = [f"Company {i}" for i in range(1, n + 1)]
         wb = self._imported(names)
-        first = self._press(wb)["companies"]["include"]
-        self.assertEqual(first, names[:MAX_FACET_VALUES])
+        self.assertIn(f"{n} Exa searches — one per company", wb._find_meta.text())
+        # The press stops after its first group (a crash, a closed window):
+        # only what was asked counts as searched.
+        spec = self._press(wb, asked=MAX_FACET_VALUES)
+        self.assertEqual(self._handed(), names)             # every company, one press
+        self.assertEqual(spec["companies"]["include"], names[:MAX_FACET_VALUES])
         self.assertEqual(self._searched(), [MAX_FACET_VALUES])
         # A new launch: the position came off disk, not memory.
         again = self._WB.LeadsWorkbench({"exa_api_key": "k"})
         from addons.leads import imports as IM
         head = IM.list_imports(self._imports, "accounts")[0]
         again._filters.set_spec({"account_imports": [head["id"]]})
-        self.assertIn(f"companies {MAX_FACET_VALUES + 1}–{2 * MAX_FACET_VALUES} of {n}",
-                      again._find_meta.text())
-        second = self._press(again)["companies"]["include"]
-        third = self._press(again)["companies"]["include"]
-        self.assertEqual((len(second), len(third)), (MAX_FACET_VALUES, 10))
-        self.assertEqual(first + second + third, names)     # no gaps, no repeats
+        self.assertIn(f"companies {MAX_FACET_VALUES + 1}–{n} of {n}", again._find_meta.text())
+        self._press(again)
+        self.assertEqual(self._handed(), names[MAX_FACET_VALUES:])   # no gaps, no repeats
         self.assertEqual(self._searched(), [n])
         self.assertIn("all searched", IM.label(IM.list_imports(self._imports)[0]))
+
+    def test_the_box_says_exactly_what_the_press_spends(self):
+        from unittest import mock
+        wb = self._imported([f"Company {i}" for i in range(1, 73)])
+        spec, companies, note, _marks = wb._search_spec()
+        said = []
+        box = self._WB.QMessageBox
+        with mock.patch.object(box, "question", side_effect=lambda _p, _t, text, *a, **k:
+                               (said.append(text), box.StandardButton.No)[1]):
+            self._saved_attrs["_confirm_search"](wb, spec, companies, note)
+        self.assertIn("It will run 72 Exa searches: one for each company", said[0])
+        self.assertIn("companies 1–72 of 72 from the import", said[0])
+
+    def test_nothing_counts_as_searched_until_it_is_asked(self):
+        names = [f"Company {i}" for i in range(1, 6)]
+        wb = self._imported(names)
+        self._press(wb, asked=0)
+        self.assertEqual(self._searched(), [0])             # never asked: never paid
+        self._press(wb, asked=2)
+        self.assertEqual(self._handed(), names)             # the same five again
+        self.assertEqual(self._searched(), [2])
+
+    def test_a_press_asks_at_most_so_many_companies(self):
+        self._WB._COMPANIES_PER_PRESS, orig = 3, self._WB._COMPANIES_PER_PRESS
+        self.addCleanup(setattr, self._WB, "_COMPANIES_PER_PRESS", orig)
+        names = [f"Company {i}" for i in range(1, 6)]
+        wb = self._imported(names)
+        self._press(wb)
+        self.assertEqual(self._handed(), names[:3])
+        self._press(wb)
+        self.assertEqual(self._handed(), names[3:])
+        self.assertEqual(self._searched(), [5])
 
     def test_once_every_company_is_searched_it_says_so_and_starts_again(self):
         wb = self._imported(["Acme Tooling", "Beta Corp"])
@@ -2151,6 +2464,621 @@ class ThePeoplePageIsThePool(_Workbench):
         self.assertEqual(on_screen, {id(l) for l in res.all_leads})
 
 
+class SelectionAcrossPages(_Workbench):
+    """Apollo's selection over a result that runs to many pages (knowledge.
+    apollo.io "Search for People"): tick people on one page, go on to the
+    next, and they stay picked; Bulk Selection offers "Select this page",
+    "Select all" and "Select number of people" with "Max people per
+    company"; every action acts on everyone picked, on every page. A new
+    search starts with nobody picked."""
+
+    def _held(self, wb, n=60, companies=None):
+        people = [Lead(name=f"Person {i:02d}", title="Plant Head",
+                       company=(companies[i] if companies else f"Firm {i:02d}"),
+                       email=f"p{i}@firm{i}.com", fit_score=100 - i) for i in range(n)]
+        wb._runs["s1"] = ("s1", "2026-09-23T10:00:00+05:30", people, [], [], {})
+        wb._rebuild_pool()
+        return people
+
+    @staticmethod
+    def _names(rows):
+        return [d.lead.name for d in rows]
+
+    def test_ticks_stay_when_the_page_turns(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        ck._table.item(1, 0).setCheckState(Qt.Checked)
+        ck._next_btn.click()
+        self.assertEqual(ck._sel_lbl.text(), "2 selected")
+        self.assertEqual(ck._head.check_state(), Qt.Unchecked)   # this page: none
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        self.assertEqual(self._names(ck.selected()), ["Person 00", "Person 01", "Person 25"])
+        ck._prev_btn.click()
+        ticked = [r for r in range(ck._table.rowCount())
+                  if ck._table.item(r, 0).checkState() == Qt.Checked]
+        self.assertEqual(ticked, [0, 1])
+        self.assertEqual(ck._head.check_state(), Qt.PartiallyChecked)
+
+    def test_select_all_is_everyone_on_every_page(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        self.assertEqual(ck._sel_all.text(), "Select all 60")
+        ck._sel_all.click()
+        self.assertEqual(len(ck.selected()), 60)
+        self.assertEqual(ck._sel_lbl.text(), "60 selected")
+        self.assertEqual(ck._head.check_state(), Qt.Checked)
+        ck._bulk_clear.click()                              # every page, not one
+        self.assertEqual(ck.selected(), [])
+        ck._next_btn.click()
+        self.assertEqual(ck.selected(), [])
+
+    def test_bulk_selection_a_number_at_most_so_many_per_company(self):
+        wb = self._WB.LeadsWorkbench({})
+        firms = ["Acme Pvt Ltd", "Acme", "Beta", "ACME Ltd.", "Gamma", "Beta", "Delta"] * 5
+        self._held(wb, n=35, companies=firms)
+        ck = wb._cockpit.leads
+        pop = ck._bulk_select
+        pop.number.setValue(4)
+        pop.per_company.setValue(1)
+        pop.apply_btn.click()
+        picked = ck.selected()
+        self.assertEqual([d.lead.company for d in picked], ["Acme Pvt Ltd", "Beta", "Gamma",
+                                                            "Delta"])
+        pop.pageRequested.emit()                            # Select this page (25)
+        self.assertEqual(len(ck.selected()), 25)
+        pop.clearRequested.emit()
+        self.assertEqual(ck.selected(), [])
+
+    def test_the_header_caret_opens_bulk_selection_with_its_counts(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        head = ck._head
+        caret = head._caret_rect(head._tick_section())
+        QApplication.sendEvent(head.viewport(), QMouseEvent(
+            QEvent.MouseButtonPress, QPointF(caret.center()),
+            QPointF(head.viewport().mapToGlobal(caret.center())),
+            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        self.addCleanup(ck._bulk_select.hide)
+        self.assertTrue(ck._bulk_select.isVisible())
+        self.assertEqual(ck._bulk_select.page_btn.text(), "Select this page (25)")
+        self.assertEqual(ck._bulk_select.all_btn.text(), "Select all (60)")
+        self.assertEqual(ck.selected(), [])                 # opening ticks nothing
+
+    def test_a_new_search_starts_with_nobody_picked_a_sort_or_page_keeps_them(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        wb._on_sort("name")
+        self.assertEqual(len(ck.selected()), 1)
+        wb._on_page(1)
+        self.assertEqual(len(ck.selected()), 1)
+        wb._filters.set_spec({"job_titles": {"include": ["Plant Head"]}})
+        self.assertEqual(ck.selected(), [])
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        wb._on_query("person 0")
+        self.assertEqual(ck.selected(), [])
+
+    def test_every_action_gets_everyone_picked_on_every_page(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        got = []
+        wb._cockpit.saveListRequested.disconnect()
+        wb._cockpit.saveListRequested.connect(got.append)
+        ck._table.item(3, 0).setCheckState(Qt.Checked)
+        ck._next_btn.click()
+        ck._table.item(4, 0).setCheckState(Qt.Checked)
+        ck._b_save.click()
+        self.assertEqual(self._names(got[0]), ["Person 03", "Person 29"])
+
+    def test_a_save_keeps_the_selection(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb, n=3)
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        ck._b_contact.click()                   # the pool is rebuilt under it
+        self.assertEqual(self._names(ck.selected()), ["Person 00"])
+
+
+class SetStageAndTheRecordFilters(_Workbench):
+    """Apollo's Edit > Set stage on the people picked, and the Stage, Lists
+    and Custom fields filters over the owner's own records, end to end."""
+
+    def _held(self, wb, n=3):
+        people = [Lead(name=f"Person {i}", title="Owner", company=f"Firm {i}",
+                       email=f"p{i}@firm{i}.com") for i in range(n)]
+        wb._runs["s1"] = ("s1", "2026-09-23T10:00:00+05:30", people, [], [], {})
+        wb._rebuild_pool()
+        return people
+
+    def _names(self, wb):
+        ck = wb._cockpit.leads
+        return sorted(ck._dossier_at(r).lead.name for r in range(ck._table.rowCount()))
+
+    def _set_stage(self, wb, stage):
+        ck = wb._cockpit.leads
+        [act] = [a for a in ck._stage_menu.actions() if a.text() == stage]
+        act.trigger()
+
+    def test_set_stage_saves_the_people_first_then_moves_them(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        self.assertFalse(ck._b_stage.isEnabled())           # nobody picked
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        ck._table.item(1, 0).setCheckState(Qt.Checked)
+        self.assertTrue(ck._b_stage.isEnabled())
+        self._set_stage(wb, "Interested")
+        stages = {c.lead.name: c.stage for c in CT.list_contacts(self._contacts)}
+        self.assertEqual(stages, {"Person 0": "Interested", "Person 1": "Interested"})
+        self.assertIn("Moved 2 to Interested", wb._status.text())
+        self.assertEqual(ck._tab_counts["saved"], 2)
+
+    def test_the_stage_filter_shows_who_is_at_a_stage(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        ck._table.item(0, 0).setCheckState(Qt.Checked)
+        self._set_stage(wb, "Do Not Contact")
+        wb._filters.set_spec({"contact_stages": {"exclude": ["Do Not Contact"]}})
+        self.assertEqual(self._names(wb), ["Person 1", "Person 2"])
+        wb._filters.set_spec({"contact_stages": {"include": ["Do Not Contact"]}})
+        self.assertEqual(self._names(wb), ["Person 0"])
+
+    def test_a_list_added_to_is_offered_and_filters(self):
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        wb._keep_as_contacts(people[:2], "list", list_name="Expo leads")
+        self.assertEqual(wb._filters._records["contact_lists"], ["Expo leads"])
+        wb._filters.set_spec({"contact_lists": {"include": ["Expo leads"]}})
+        self.assertEqual(self._names(wb), ["Person 0", "Person 1"])
+
+    def test_an_account_stage_reads_the_saved_accounts(self):
+        from addons.leads import accounts as AC
+        AC.save(self._accounts, [{"name": "Firm 1", "website": "firm1.com",
+                                  "stage": "Current Client"}],
+                via="import", stage_of=lambda c: c.get("stage"))
+        wb = self._WB.LeadsWorkbench({})
+        wb._reload_accounts()
+        self._held(wb)
+        wb._filters.set_spec({"account_stages": {"include": ["Current Client"]}})
+        self.assertEqual(self._names(wb), ["Person 1"])
+
+    def test_an_imported_column_becomes_a_custom_field(self):
+        wb = self._WB.LeadsWorkbench({})
+        a = Lead(name="Asha Rao", company="Rao Works", email="asha@rao.example")
+        a.extra["custom"] = {"Lead Quality": "A"}
+        b = Lead(name="Bo Lund", company="Lund Steel", email="bo@lund.example")
+        b.extra["custom"] = {"Lead Quality": "C"}
+        wb._run_import(_contacts_result(self._tmp, [a, b]))
+        panel = wb._filters
+        self.assertEqual(panel._records["custom"]["contact"]["Lead Quality"], ["A", "C"])
+        panel.set_spec({"custom_fields": {"contact:Lead Quality": ["A"]}})
+        self.assertEqual(self._names(wb), ["Asha Rao"])
+
+    def test_pinned_filters_are_kept_between_sessions(self):
+        saved = {}
+        wb = self._WB.LeadsWorkbench({"leads_pinned_filters": ["lists", "job_titles"]})
+        self.assertEqual(wb._filters.pinned(), ["job_titles", "lists"])
+        self.assertFalse(wb._filters._sections["lists"].isHidden())
+        wb._save_cfg = lambda name, value: saved.__setitem__(name, value)   # no real config
+
+        def pin_stage(dlg):
+            dlg.panel._pin_btns["stages"].setChecked(True)
+            return True
+        wb._filters._ask = pin_stage
+        wb._filters._more_btn.click()
+        self.assertEqual(saved["leads_pinned_filters"], ["job_titles", "lists", "stages"])
+
+    def test_the_pool_worker_hands_the_saved_accounts_first(self):
+        from addons.leads import accounts as AC
+        from addons.leads.workers import LeadsPoolWorker
+        AC.save(self._accounts, [{"name": "Firm 1", "website": "firm1.com"}], via="import")
+        got = []
+        w = LeadsPoolWorker(self._contacts, self._sessions, self._accounts)
+        w.accounts_read.connect(lambda accounts: got.append(("accounts", accounts)))
+        w.done.connect(lambda contacts, runs: got.append(("done", contacts)))
+        w.run()
+        self.assertEqual([kind for kind, _v in got], ["accounts", "done"])
+        self.assertEqual([a.name for a in got[0][1]], ["Firm 1"])
+
+
+class RemoveTakesThemOffTheList(_Workbench):
+    """The owner, 23-Sep-2026: "still can't clear the selected people". Clear
+    only ever unticked — the recorder showed it working — and what he wanted
+    was the people GONE. He chose "Remove from list": out of Total, Net New
+    and Saved, out of new searches, restorable, nothing deleted
+    (addons/leads/removed.py). End to end, through the real buttons."""
+
+    def _held(self, wb, n=3):
+        people = [Lead(name=f"Person {i}", title="Owner", company=f"Firm {i}",
+                       email=f"p{i}@firm{i}.com") for i in range(n)]
+        wb._runs["s1"] = ("s1", "2026-09-23T10:00:00+05:30", people, [], [], {})
+        wb._rebuild_pool()
+        return people
+
+    def _names(self, wb):
+        ck = wb._cockpit.leads
+        return sorted(ck._dossier_at(r).lead.name for r in range(ck._table.rowCount()))
+
+    def _tick(self, wb, *names):
+        ck = wb._cockpit.leads
+        for r in range(ck._table.rowCount()):
+            if ck._dossier_at(r).lead.name in names:
+                ck._table.item(r, 0).setCheckState(Qt.Checked)
+
+    def _remove(self, wb, *names, answer=True):
+        asked = []
+        wb._confirm_remove = lambda n: (asked.append(n), answer)[1]
+        self._tick(wb, *names)
+        wb._cockpit.leads._b_remove.click()
+        return asked
+
+    def _gone(self):
+        from addons.leads import removed as RM
+        return sorted(r.name for r in RM.list_removed(self._removed))
+
+    def test_remove_takes_them_off_every_tab_and_off_the_page(self):
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        wb._keep_as_contacts([people[2]], "save")             # one of them is Saved
+        ck = wb._cockpit.leads
+        asked = self._remove(wb, "Person 0", "Person 2")
+        self.assertEqual(asked, [2])                          # it asked first
+        self.assertEqual(self._names(wb), ["Person 1"])
+        self.assertEqual((ck._tab_counts["total"], ck._tab_counts["net_new"],
+                          ck._tab_counts["saved"]), (1, 1, 0))
+        self.assertEqual(self._gone(), ["Person 0", "Person 2"])
+        self.assertEqual(ck.selected(), [])                   # nobody left picked
+        self.assertFalse(ck._bulk_open)
+        self.assertEqual(wb._status.text(), "Removed 2 from the list.")
+        self.assertFalse(wb._undo_btn.isHidden())
+        self.assertFalse(ck._removed_link.isHidden())
+        self.assertEqual(ck._removed_link.text(), "2 removed · Restore")
+
+    def test_nothing_is_deleted_the_contact_stays_on_file(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        wb._keep_as_contacts([people[0]], "save")
+        self._remove(wb, "Person 0")
+        self.assertEqual([c.lead.name for c in CT.list_contacts(self._contacts)],
+                         ["Person 0"])
+
+    def test_saying_no_removes_nobody(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        self._remove(wb, "Person 1", answer=False)
+        self.assertEqual(self._names(wb), ["Person 0", "Person 1", "Person 2"])
+        self.assertEqual(self._gone(), [])
+        self.assertEqual(len(wb._cockpit.leads.selected()), 1)   # still picked
+
+    def test_undo_puts_them_straight_back(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        self._remove(wb, "Person 1")
+        wb._undo_btn.click()
+        self.assertEqual(self._names(wb), ["Person 0", "Person 1", "Person 2"])
+        self.assertEqual(self._gone(), [])
+        self.assertEqual(wb._status.text(), "Put 1 back on the list.")
+        self.assertTrue(wb._undo_btn.isHidden())              # one Undo per Remove
+        self.assertTrue(wb._cockpit.leads._removed_link.isHidden())
+
+    def test_undo_retires_with_the_next_message(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        self._remove(wb, "Person 1")
+        wb._status.setText("Something else happened.")
+        self.assertTrue(wb._undo_btn.isHidden())
+
+    def test_restore_brings_a_saved_contact_back_as_it_stood(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        wb._keep_as_contacts([people[0]], "save")
+        CT.set_stage(self._contacts, people[0], "Interested")
+        wb._contacts = CT.list_contacts(self._contacts)
+        wb._rebuild_pool()
+        self._remove(wb, "Person 0")
+        shown = []
+        wb._restore_dialog = lambda records: (shown.append([r.name for r in records]),
+                                              [r.id for r in records])[1]
+        wb._cockpit.leads._removed_link.click()               # "1 removed · Restore"
+        self.assertEqual(shown, [["Person 0"]])
+        self.assertEqual(self._names(wb), ["Person 0", "Person 1", "Person 2"])
+        ck = wb._cockpit.leads
+        self.assertEqual(ck._tab_counts["saved"], 1)
+        wb._filters.set_spec({"contact_stages": {"include": ["Interested"]}})
+        self.assertEqual(self._names(wb), ["Person 0"])       # the stage came back too
+
+    def test_closing_the_removed_window_restores_nobody(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        self._remove(wb, "Person 0")
+        wb._restore_dialog = lambda records: []
+        wb._open_removed()
+        self.assertEqual(self._gone(), ["Person 0"])
+
+    def test_the_open_person_goes_with_them(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        row = next(r for r in range(ck._table.rowCount())
+                   if ck._dossier_at(r).lead.name == "Person 1")
+        ck._table.setCurrentCell(row, 1)
+        self.assertFalse(ck._drawer_w.isHidden())
+        self._remove(wb, "Person 1")
+        self.assertTrue(ck._drawer_w.isHidden())
+
+    def test_clear_selection_only_unticks(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        self.assertEqual(ck._bulk_clear.text(), "Clear selection")
+        self._tick(wb, "Person 0", "Person 1")
+        ck._bulk_clear.click()
+        self.assertEqual(ck.selected(), [])
+        self.assertEqual(self._names(wb), ["Person 0", "Person 1", "Person 2"])
+        self.assertEqual(self._gone(), [])
+
+    def test_remove_stays_usable_while_a_job_runs(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        ck = wb._cockpit.leads
+        self._tick(wb, "Person 0")
+        wb._set_running(True)
+        self.assertTrue(ck._b_remove.isEnabled())             # a local write, like Save
+        self.assertFalse(ck._b_export.isEnabled())
+        wb._set_running(False)
+
+    def test_send_all_leaves_them_out(self):
+        wb = self._WB.LeadsWorkbench({})
+        res, drafts = self._run()
+        from prospector.reach import Draft
+        kunyi, vaibhav = res.dossiers
+        wb._drafts = [Draft(dossier=kunyi, subject="Hi", body="Hello"),
+                      Draft(dossier=vaibhav, subject="Hi", body="Hello")]
+        from addons.leads import removed as RM
+        RM.remove(self._removed, [kunyi.lead])
+        wb._reload_removed()
+        self.assertEqual([d.dossier.lead.name for d in wb._sendable(wb._drafts)],
+                         ["Vaibhav"])
+
+    def test_export_sheets_leave_them_out(self):
+        wb = self._WB.LeadsWorkbench({})
+        res, drafts = self._run()
+        wb._res, wb._drafts = res, drafts
+        from addons.leads import removed as RM
+        RM.remove(self._removed, [res.dossiers[0].lead])
+        wb._reload_removed()
+        made = []
+
+        class _Export:
+            def __init__(self, leads, dossiers, folder):
+                made.append(([l.name for l in leads], [d.lead.name for d in dossiers]))
+                self.progress = self.done = self.failed = _FakeSignal()
+
+            def start(self):
+                pass
+        orig = self._WB.LeadsExportWorker
+        self._WB.LeadsExportWorker = _Export
+        try:
+            wb._start_export(self._tmp, announce=False)
+        finally:
+            self._WB.LeadsExportWorker = orig
+        self.assertEqual(made, [(["Vaibhav"], ["Vaibhav"])])
+
+    def test_a_new_search_is_told_who_to_skip(self):
+        _FakeSourceWorker.made = []
+        orig = self._WB.SourceWorker
+        self._WB.SourceWorker = _FakeSourceWorker
+        try:
+            wb = self._WB.LeadsWorkbench({"exa_api_key": "k"})
+            wb._filters.set_spec({"job_titles": {"include": ["Plant Head"]}})
+            wb._on_prepare()
+        finally:
+            self._WB.SourceWorker = orig
+        self.assertEqual(_FakeSourceWorker.made[0].kwargs["removed_dir"], self._removed)
+
+    def test_an_import_naming_a_removed_person_brings_them_back(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        self._remove(wb, "Person 0")
+        again = Lead(name="Person 0", company="Firm 0", email="p0@firm0.com")
+        wb._run_import(_contacts_result(self._tmp, [again]))
+        self.assertEqual(self._gone(), [])
+        self.assertIn("1 back from Removed", wb._status.text())
+
+    def test_the_pool_worker_hands_the_removed_before_everyone(self):
+        from addons.leads import removed as RM
+        from addons.leads.workers import LeadsPoolWorker
+        RM.remove(self._removed, [Lead(name="Person 0", company="Firm 0",
+                                       email="p0@firm0.com")])
+        got = []
+        w = LeadsPoolWorker(self._contacts, self._sessions, self._accounts, self._removed)
+        w.removed_read.connect(lambda records: got.append(("removed", records)))
+        w.done.connect(lambda contacts, runs: got.append(("done", contacts)))
+        w.run()
+        self.assertEqual([kind for kind, _v in got], ["removed", "done"])
+        self.assertEqual([r.name for r in got[0][1]], ["Person 0"])
+
+
+class ThePersonPanelActsOnTheStores(_Workbench):
+    """Apollo's contact profile, end to end: a row opens the person's panel
+    with what the stores hold about them, and every act on it lands in the
+    stores — someone not saved yet is saved first — and on the page."""
+
+    def _held(self, wb):
+        people = [Lead(name="Asha Rao", title="Owner", company="Rao Works",
+                       email="asha@rao.example"),
+                  Lead(name="Bo Rao", title="CFO", company="Rao Works",
+                       email="bo@rao.example"),
+                  Lead(name="Cy Lund", title="CEO", company="Lund Steel",
+                       email="cy@lund.example")]
+        wb._runs["s1"] = ("s1", "2026-09-22T10:00:00+05:30", people, [], [],
+                          {"mode": "icp_leads_only",
+                           "filters": {"job_titles": {"include": ["Owner"]}}})
+        wb._rebuild_pool()
+        return people
+
+    def _open(self, wb, name):
+        ck = wb._cockpit.leads
+        for r in range(ck._table.rowCount()):
+            if ck._dossier_at(r).lead.name == name:
+                ck._table.setCurrentCell(r, 1)
+                return ck.person_panel
+        self.fail(f"{name} is not on the page")
+
+    def test_a_row_opens_what_the_stores_hold_about_them(self):
+        from addons.leads.person import activities
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        view = panel.view
+        self.assertIsNone(view.contact)                       # not saved yet
+        self.assertEqual([p.lead.name for p in view.colleagues], ["Bo Rao"])
+        self.assertEqual([a["text"] for a in activities(view)],
+                         ["Found by a search: 1 title · Anywhere"])
+
+    def test_a_stage_from_the_panel_saves_them_first_then_moves_them(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        panel.stage.setCurrentIndex(panel.stage.findData("Interested"))
+        panel.stage.activated.emit(panel.stage.currentIndex())
+        [c] = CT.list_contacts(self._contacts)
+        self.assertEqual((c.lead.name, c.stage), ("Asha Rao", "Interested"))
+        self.assertEqual([h["kind"] for h in c.history], ["saved", "stage"])
+        self.assertEqual(panel.view.contact.stage, "Interested")   # drawn again
+        wb._filters.set_spec({"contact_stages": {"include": ["Interested"]}})
+        ck = wb._cockpit.leads
+        self.assertEqual([ck._dossier_at(r).lead.name for r in range(ck._table.rowCount())],
+                         ["Asha Rao"])
+
+    def test_notes_tasks_and_logged_calls_land_in_activities(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        panel = self._open(wb, "Cy Lund")
+        panel.noteRequested.emit(people[2], "Met at the expo")
+        panel.taskRequested.emit(people[2], "Send the brochure", "2026-09-30")
+        panel.logRequested.emit(people[2], "call", "Wants a quote")
+        c = CT.get(self._contacts, people[2])
+        self.assertEqual([n["text"] for n in c.notes], ["Met at the expo"])
+        self.assertEqual([(t["text"], t["due"]) for t in c.tasks],
+                         [("Send the brochure", "2026-09-30")])
+        lines = [a["text"] for a in __import__("addons.leads.person",
+                                               fromlist=["activities"]).activities(panel.view)]
+        self.assertIn("Call logged: Wants a quote", lines)
+        self.assertIn("Note: Met at the expo", lines)
+        panel.taskDoneRequested.emit(people[2], c.tasks[0]["id"], True)
+        self.assertTrue(CT.get(self._contacts, people[2]).tasks[0]["done"])
+
+    def test_edit_contact_info_changes_the_record_and_the_page(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        panel.ask_edit = lambda values: {"title": "Managing Director"}
+        panel._act_edit.trigger()
+        self.assertEqual(CT.get(self._contacts, panel.view.lead).lead.title,
+                         "Managing Director")
+        ck = wb._cockpit.leads
+        titles = {ck._dossier_at(r).lead.name: ck._dossier_at(r).lead.title
+                  for r in range(ck._table.rowCount())}
+        self.assertEqual(titles["Asha Rao"], "Managing Director")
+        self.assertEqual(panel.role.text(), "Managing Director at Rao Works")
+
+    def test_flag_as_inaccurate_is_bad_data(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        people = self._held(wb)
+        panel = self._open(wb, "Bo Rao")
+        panel._act_flag.trigger()
+        c = CT.get(self._contacts, people[1])
+        self.assertEqual(c.stage, "Bad Data")
+        self.assertIn("flagged", [h["kind"] for h in c.history])
+
+    def test_delete_contact_leaves_someone_found_as_net_new(self):
+        from addons.leads import contacts as CT
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        panel.saveRequested.emit(panel.view.lead)
+        self.assertEqual(wb._cockpit.leads._tab_counts["saved"], 1)
+        panel.confirm_delete = lambda name: True
+        panel._act_delete.trigger()
+        self.assertEqual(CT.list_contacts(self._contacts), [])
+        self.assertEqual(wb._cockpit.leads._tab_counts, {"total": 3, "net_new": 3,
+                                                         "saved": 0})
+        self.assertIsNone(panel.view.contact)                 # still open, net new
+
+    def test_the_account_side(self):
+        from addons.leads import accounts as AC
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Cy Lund")
+        self.assertIsNone(panel.view.account)
+        panel.accountSaveRequested.emit(panel.view.lead)
+        [acc] = AC.list_accounts(self._accounts)
+        self.assertEqual((acc.name, acc.domain), ("Lund Steel", "lund.example"))
+        self.assertEqual(panel.view.account.name, "Lund Steel")
+        panel.accountStageRequested.emit(panel.view.account, "Active Opportunity")
+        self.assertEqual(AC.list_accounts(self._accounts)[0].stage, "Active Opportunity")
+        self.assertEqual(panel.account_stage.currentData(), "Active Opportunity")
+
+    def test_a_colleague_opens_in_the_same_panel(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        panel.personPicked.emit(panel.view.colleagues[0])
+        self.assertEqual(panel.name.text(), "Bo Rao")
+
+    def test_enrichment_runs_the_picks_one_after_another(self):
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+        panel = self._open(wb, "Asha Rao")
+        ran = []
+
+        def email(dossiers):
+            ran.append(("email", dossiers[0].lead.name))
+            wb._jobs = 1                                    # it started a job
+
+        wb._find_emails = email
+        wb._qualify_selected = lambda dossiers: ran.append(("qualify", dossiers[0].lead.name))
+        panel.enrichRequested.emit(panel.view.row, ["qualify", "email"])
+        self.assertEqual(ran, [("email", "Asha Rao")])      # e-mail first, then waits
+        wb._jobs = 0
+        wb._after_job()                                     # the job's end moves it on
+        self.assertEqual(ran, [("email", "Asha Rao"), ("qualify", "Asha Rao")])
+
+    def test_a_send_is_logged_in_their_activities(self):
+        from addons.leads import contacts as CT
+        from prospector.reach import Draft
+        from unittest import mock
+        wb = self._WB.LeadsWorkbench({})
+        a = Lead(name="Asha Rao", company="Rao", email="asha@rao.example")
+        wb._keep_as_contacts([a], "save")
+        drafts = [Draft(dossier=Dossier(lead=a), subject="Your second plant", body="x",
+                        status="sent")]
+        wb._send_worker = type("W", (), {"drafts": drafts})()
+        wb._jobs = 1
+        with mock.patch.object(self._WB.QMessageBox, "information"):
+            wb._on_sent(["asha@rao.example"], [])
+        c = CT.get(self._contacts, a)
+        self.assertIn(("sent", "Your second plant"),
+                      [(h["kind"], h["text"]) for h in c.history])
+        self.assertEqual(c.stage, "Approaching")
+
+
 class _FakeQualifyWorker(_FakeSourceWorker):
     """Stands in for LeadsQualifyWorker: records the leads it was handed."""
     made: list = []
@@ -2410,8 +3338,9 @@ class ClearAndSelectAllStayUsableDuringARun(_Workbench):
         self._tick(cockpit, leads)
         wb._set_running(True)
         for b in cockpit._bulk_actions():
-            if b is cockpit._b_contact:
-                # Save is a local write, not a job: it stays usable.
+            if b in (cockpit._b_contact, cockpit._b_stage, cockpit._b_remove):
+                # Save, Set stage and Remove are local writes, not jobs: they
+                # stay usable.
                 self.assertTrue(b.isEnabled(), b.text())
             else:
                 self.assertFalse(b.isEnabled(), b.text())
@@ -2464,6 +3393,7 @@ class _FakeEmailWorker(_FakeSourceWorker):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.refused = _FakeSignal()         # finders that turned the account away
         _FakeEmailWorker.made.append(self)
 
 
@@ -2577,7 +3507,7 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
         wb._jobs = 1
         wb._on_emails_found(2, 1)
         self.assertEqual(self._status_at(cockpit, leads[0]), "Verified")
-        self.assertEqual(self._status_at(cockpit, leads[1]), "Guessed")
+        self.assertEqual(self._status_at(cockpit, leads[1]), "Unverified")
         self.assertEqual(self._status_at(cockpit, leads[2]), "No email")
         self.assertIn("2 new address", wb._status.text())
         self.assertIn("1 verified", wb._status.text())
@@ -2607,6 +3537,65 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
         wb._find_emails(wb._cockpit.leads.selected())
         self.assertEqual(_FakeEmailWorker.made, [])
         self.assertEqual(wb._jobs, 0)
+
+    def test_select_all_then_the_button_starts_the_worker(self):
+        """The owner's own clicks, with nothing patched between the button and
+        the worker but the worker and the Yes: 24-Sep-2026 a changed call to
+        _confirm_emails raised inside the click, and every test above — each
+        replacing _confirm_emails — still passed while the button did nothing."""
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        wb = self._WB.LeadsWorkbench({})
+        self._people(wb, n=12)                       # past ten: the question is asked
+        self._patched_worker()
+        asked = []
+        with mock.patch.object(QMessageBox, "question",
+                               side_effect=lambda *a, **k: (
+                                   asked.append(a),
+                                   QMessageBox.StandardButton.Yes)[1]):
+            wb._cockpit.leads._select_all()
+            wb._cockpit.leads._b_emails.click()
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(len(_FakeEmailWorker.made), 1)
+        self.assertTrue(_FakeEmailWorker.made[0].started)
+        self.assertEqual(len(_FakeEmailWorker.made[0].args[0]), 12)
+
+    _APOLLO_NO = "Apollo: finding e-mails isn't in your Basic (Trial) plan. Only paid Apollo plans include it."
+    _HUNTER_NO = "Hunter: this month's searches are used up. They come back on 27 Sep."
+
+    def _refused_run(self, wb, found):
+        """The worker's two last words: who refused, then the count."""
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        self._people(wb)
+        self._patched_worker()
+        wb._cockpit.leads._select_all()
+        wb._find_emails(wb._cockpit.leads.selected())
+        worker = _FakeEmailWorker.made[0]
+        with mock.patch.object(QMessageBox, "warning") as warned:
+            worker.refused.emit({"Apollo": self._APOLLO_NO, "Hunter": self._HUNTER_NO})
+            worker.done.emit(found, 0)
+        return warned
+
+    def test_finders_that_refused_the_account_are_named_when_nothing_is_found(self):
+        """24-Sep-2026: Apollo's Free plan and Hunter's spent quota refused
+        every one of 159 lookups, and all the owner saw was "Found 0". The
+        refusals are the answer — said in a box, and on the status line."""
+        wb = self._WB.LeadsWorkbench({})
+        warned = self._refused_run(wb, found=0)
+        self.assertEqual(warned.call_count, 1)
+        said = warned.call_args[0][2]
+        self.assertIn(self._APOLLO_NO, said)
+        self.assertIn(self._HUNTER_NO, said)
+        self.assertIn("Basic (Trial) plan", wb._status.text())
+        self.assertIn("used up", wb._status.text())
+
+    def test_a_partial_result_names_the_refusal_without_a_box(self):
+        wb = self._WB.LeadsWorkbench({})
+        warned = self._refused_run(wb, found=2)
+        warned.assert_not_called()
+        self.assertIn("2 new address", wb._status.text())
+        self.assertIn("Basic (Trial) plan", wb._status.text())
 
     def test_leads_that_are_already_verified_are_left_alone(self):
         wb = self._WB.LeadsWorkbench({})
@@ -2816,7 +3805,11 @@ class FindPeopleFirstEmailsLater(unittest.TestCase):
         self.assertTrue(all(not l.email for l in res.all_leads))
         self.assertTrue(any("left for later" in p for p in got["progress"]))
 
-    def test_emails_now_is_still_the_old_run(self):
+    def test_emails_now_guesses_nobody_either(self):
+        """It used to write firstname.lastname@<website> for everyone found.
+        The owner, 24-Sep-2026: "the emails shouldn't be guessed any day" —
+        a run that finds addresses finds them for the hot and warm, after
+        qualifying, with Hunter then Apollo (verify_reachable)."""
         from unittest import mock
         people = self._people()
         w, got = self._worker(emails="now")
@@ -2826,13 +3819,17 @@ class FindPeopleFirstEmailsLater(unittest.TestCase):
                 mock.patch("prospector.enrich.enrich") as enriched:
             w.run()
         self.assertEqual(got["failed"], [])
-        self.assertEqual(list(enriched.call_args[0][0]), people)
+        enriched.assert_not_called()
+        res, _drafts = got["done"][0]
+        self.assertTrue(all(not l.email for l in res.all_leads))
 
 
 class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
-    """LeadsEmailWorker, called inline: blank addresses are enriched once,
-    every lead goes through the free-first waterfall, and what came back is
-    counted — found, and of those confirmed."""
+    """LeadsEmailWorker, called inline: every lead goes through
+    find_and_verify once — an address they came with is checked, anyone
+    without one is looked up by the finders (Hunter, then Apollo) — and what
+    came back is counted, found and of those confirmed. Nobody's address is
+    guessed (the owner, 24-Sep-2026)."""
 
     def _worker(self, leads, cfg=None):
         from addons.leads.workers import LeadsEmailWorker
@@ -2843,31 +3840,33 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
         w.failed.connect(got["failed"].append)
         return w, got
 
-    def test_blanks_are_enriched_then_everyone_is_verified(self):
+    def test_everyone_is_found_or_checked_once_and_nothing_is_guessed(self):
         from unittest import mock
         blank = Lead(name="Ana Ruiz", company="Acme", title="Owner")
         held = Lead(name="Bo Lund", company="Globex", title="Owner",
                     email="bo@globex.com")
         seen = []
 
-        def fake_enrich(leads, key="", **kw):
-            for l in leads:
-                l.email = f"{l.name.split()[0].lower()}@acme.com"
-
-        def fake_verify(lead, keys=None):
+        def fake_find(lead, keys=None, refused=None):
+            # What a finder does: a real address, and whose it was.
             seen.append((lead, dict(keys or {})))
+            if not lead.email:
+                lead.email = "ana.ruiz@acme.com"
+                lead.extra["email_source"] = "hunter"
             lead.extra["email_check"] = "valid" if "@acme" in lead.email else "catch-all"
 
-        w, got = self._worker([blank, held], cfg={"reoon_api_key": "r"})
-        with mock.patch("prospector.signals.exa_key", return_value="exa-k"), \
-                mock.patch("prospector.enrich.enrich", side_effect=fake_enrich), \
-                mock.patch("prospector.verify.find_and_verify", side_effect=fake_verify):
+        w, got = self._worker([blank, held], cfg={"hunter_api_key": "h",
+                                                  "reoon_api_key": "r"})
+        with mock.patch("prospector.enrich.enrich") as enriched, \
+                mock.patch("prospector.verify.find_and_verify", side_effect=fake_find):
             w.run()
         self.assertEqual(got["failed"], [])
-        self.assertEqual(blank.email, "ana@acme.com")
+        enriched.assert_not_called()                     # nothing made up first
+        self.assertEqual((blank.email, blank.extra["email_source"]),
+                         ("ana.ruiz@acme.com", "hunter"))
         self.assertEqual([l for l, _k in seen], [blank, held])
         self.assertEqual(got["done"], [(1, 1)])          # one found, one verified
-        self.assertEqual(seen[0][1], {"reoon_api_key": "r"})
+        self.assertEqual(seen[0][1], {"hunter_api_key": "h", "reoon_api_key": "r"})
 
     def test_a_refused_apollo_plan_is_not_asked_to_find_either(self):
         from unittest import mock
@@ -2880,33 +3879,52 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
         with mock.patch("prospector.signals.exa_key", return_value=""), \
                 mock.patch("prospector.enrich.enrich"), \
                 mock.patch("prospector.verify.find_and_verify",
-                           side_effect=lambda l, k=None: keys.append(dict(k or {}))):
+                           side_effect=lambda l, k=None, refused=None: keys.append(dict(k or {}))):
             w.run()
         self.assertNotIn("apollo_api_key", keys[0])
         self.assertIn("reoon_api_key", keys[0])
 
-    def test_everyone_it_guessed_an_address_for_is_also_checked(self):
-        """The regression: enrich wrote a pattern address for every blank lead
-        while the verifier saw only the first `verify_limit` of them, so the
-        rest reached the table and the exported sheet as guesses that read like
-        findings. A guessed address only verifies safe about one time in twenty
-        — an unchecked one is the expensive half of this button."""
+    def test_a_refused_account_is_said_once_before_the_result(self):
+        """The batch shares one `refused`: whatever find_and_verify writes
+        there reaches the workbench once, ahead of the count it explains."""
+        from unittest import mock
+        leads = [Lead(name=f"P{i} Singh", company="Acme", title="Owner") for i in range(3)]
+        w, got = self._worker(leads, cfg={"apollo_api_key": "ap-k"})
+        order = []
+        w.refused.connect(lambda why: order.append(("refused", why)))
+        w.done.connect(lambda f, v: order.append(("done", f)))
+        shared = []
+
+        def fake_find(lead, keys=None, refused=None):
+            shared.append(refused)
+            refused["Apollo"] = "Apollo: finding e-mails isn't in your Free plan. Only paid Apollo plans include it."
+
+        with mock.patch("prospector.verify.find_and_verify", side_effect=fake_find):
+            w.run()
+        self.assertEqual(got["failed"], [])
+        self.assertTrue(all(r is shared[0] for r in shared))   # one dict, the whole batch
+        self.assertEqual([k for k, _ in order], ["refused", "done"])
+        self.assertIn("Free plan", order[0][1]["Apollo"])
+
+    def test_every_ticked_person_is_looked_up_and_none_is_made_up(self):
+        """Every row ticked is looked up — none skipped, none sampled — and a
+        person no finder knows keeps NO address. (It used to write a pattern
+        address for every blank row first; those reached the exported sheet as
+        guesses that read like findings, 24-Sep-2026.)"""
         from unittest import mock
         leads = [Lead(name=f"P{i} Singh", company="Acme", title="Owner")
                  for i in range(30)]
         checked = []
         w, got = self._worker(leads)
-        with mock.patch("prospector.signals.exa_key", return_value="exa-k"), \
-                mock.patch("prospector.enrich.enrich",
-                           side_effect=lambda ls, key="", **kw: [
-                               setattr(l, "email", f"p{i}@acme.com")
-                               for i, l in enumerate(ls)]), \
+        with mock.patch("prospector.enrich.enrich") as enriched, \
                 mock.patch("prospector.verify.find_and_verify",
-                           side_effect=lambda l, k=None: checked.append(l)):
+                           side_effect=lambda l, k=None, refused=None: checked.append(l)):
             w.run()
         self.assertEqual(got["failed"], [])
+        enriched.assert_not_called()
         self.assertEqual(len(checked), len(leads))
-        self.assertEqual(got["done"], [(30, 0)])
+        self.assertTrue(all(not l.email for l in leads))
+        self.assertEqual(got["done"], [(0, 0)])
 
 
 class TriageScoresThePersonNotTheFlow(unittest.TestCase):
@@ -2943,8 +3961,8 @@ _TOOLBAR_KEYS = ("import_menu", "views_menu", "hide_filters", "people_search",
                  "search_settings", "people_tabs")
 _COCKPIT_KEYS = _TOOLBAR_KEYS + ("table", "select_all", "col_lead", "col_focus",
                                  "col_fit", "col_status", "col_signal")
-_BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_verify", "bulk_emails", "bulk_list",
-              "bulk_export", "bulk_qualify", "bulk_sequence")
+_BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails",
+              "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
 _TAB_KEYS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
              "tab_sequences", "tab_analytics")
 # The workbench's own: Find new people. (Search settings' rows are one

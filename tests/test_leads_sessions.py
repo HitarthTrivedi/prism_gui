@@ -175,7 +175,7 @@ class TheGraphComesBack(_Folder):
         self.assertEqual(
             cockpit.status_of(dossiers[0], draft_by.get(id(dossiers[0]))), "Mailed")
         self.assertEqual(
-            cockpit.status_of(dossiers[1], draft_by.get(id(dossiers[1]))), "Guessed")
+            cockpit.status_of(dossiers[1], draft_by.get(id(dossiers[1]))), "Unverified")
 
 
 class WhatGoesIntoTheFile(_Folder):

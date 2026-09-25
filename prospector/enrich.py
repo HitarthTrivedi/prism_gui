@@ -1,18 +1,22 @@
 """
-Prism Sales Automation — enrich: a real, verifiable e-mail per lead
-────────────────────────────────────────────────────────────────────
-A sourced lead has a name, a title and a company — but no address. This stage
-finds each company's REAL website (Exa, one lookup per unique company, a
-blocklist keeping directories and socials out) and builds the working-pattern
-address firstname.lastname@thatdomain. On a real client list this lifted the
-share of leads on a mail-accepting domain from ~22% to ~68%, for free.
+Prism Sales Automation — enrich: a company's real domain, and never a guess
+────────────────────────────────────────────────────────────────────────────
+The owner, 24-Sep-2026: "the emails shouldn't be guessed any day — it's gonna
+be usage of hunter + apollo only to find mails." Prism used to build
+firstname.lastname@<the company's website> for anyone without an address.
+Those read like findings in the exported sheet and were often plainly wrong:
+ABB's website is new.abb.com, its mail is abb.com, and a sheet of 52 such
+addresses went out with not one confirmed. An address now comes only from the
+person's own sheet, or from a finder that knows them — Hunter or Apollo
+(verify.find_and_verify) — and is checked after.
 
-Two rules:
-  · It only fills a BLANK e-mail — a sheet that already carried real addresses
-    keeps them untouched.
-  · The MX check (does the domain even accept mail) lives in `exports`; here we
-    only get the address as right as it can be without a paid vendor, and fall
-    back to a company-name slug domain when the lookup finds nothing.
+What is left here:
+  · `enrich` — each company's real website domain (Exa, one lookup per unique
+    company, a blocklist keeping directories and socials out), kept on the lead
+    as company_domain for the finders to ask with. It never writes an address.
+  · `is_guess` / `forget_guess` — an address an older build GUESSED is taken off
+    the lead (kept aside as guessed_email), so no guess is shown, sent or
+    exported again.
 """
 from __future__ import annotations
 
@@ -47,7 +51,23 @@ _SUFFIX = re.compile(r"\b(limited|ltd|pvt|private|india|industries|manufacturing
                      r"corporation|company|group|the|inc|llp)\b", re.I)
 
 
+def _first_real_host(results) -> str:
+    """The first result whose host is a company's own site, not a directory,
+    social feed or aggregator (_BLOCK)."""
+    for res in results or []:
+        host = urlparse((res or {}).get("url", "")).netloc.lower().replace("www.", "")
+        if host and not any(b in host for b in _BLOCK):
+            return host
+    return ""
+
+
 def _real_domain(company: str, api_key: str, timeout: int = 30) -> str:
+    from . import gateway
+    if gateway.is_pool(api_key):
+        # Pooled: the licence server asks Exa (its key, the customer's credits)
+        # and sends back only each result's address and title; choosing a real
+        # company site among them stays here, with the blocklist.
+        return _first_real_host(gateway.website_rows(company))
     import requests
     try:
         r = requests.post(
@@ -57,13 +77,9 @@ def _real_domain(company: str, api_key: str, timeout: int = 30) -> str:
                   "type": "auto", "numResults": 5}, timeout=timeout)
         if r.status_code != 200:
             return ""
-        for res in r.json().get("results", []):
-            host = urlparse(res.get("url", "")).netloc.lower().replace("www.", "")
-            if host and not any(b in host for b in _BLOCK):
-                return host
+        return _first_real_host(r.json().get("results", []))
     except Exception:                                   # noqa: BLE001
         return ""
-    return ""
 
 
 def _slug_domain(company: str) -> str:
@@ -72,16 +88,21 @@ def _slug_domain(company: str) -> str:
 
 
 def _pattern_email(name: str, domain: str) -> str:
+    """The address older builds GUESSED — kept only so is_guess can recognise
+    one. Nothing writes it any more."""
     parts = re.sub(r"[^A-Za-z ]", "", name).split()
     return (f"{parts[0].lower()}.{parts[-1].lower()}@{domain}"
             if domain and len(parts) >= 2 else "")
 
 
 def enrich(leads, api_key: str = "", on_progress=None):
-    """Give every lead that lacks one a real-domain e-mail. Each company is
-    looked up ONCE (threaded); a lead that already has an address is left as it
-    is. Falls back to a slug domain when Exa finds nothing (or has no key)."""
-    need = [l for l in leads if not (l.email or "").strip()]
+    """The real website domain of every company whose people have no address
+    and no domain yet, as company_domain — one Exa lookup per unique company
+    (threaded). Nothing when the lookup finds no real site: a domain made up
+    from the company's name is a guess too. It NEVER writes an address; the
+    finders do that (verify.find_and_verify)."""
+    need = [l for l in leads if not (l.email or "").strip()
+            and not (l.extra or {}).get("company_domain")]
     companies = sorted({l.company for l in need if l.company})
     if on_progress:
         on_progress(0, len(companies))
@@ -91,8 +112,35 @@ def enrich(leads, api_key: str = "", on_progress=None):
             dom_map = dict(zip(companies,
                                ex.map(lambda c: _real_domain(c, api_key), companies)))
     for l in need:
-        dom = dom_map.get(l.company) or _slug_domain(l.company)
+        dom = dom_map.get(l.company)
         if dom:
             l.extra["company_domain"] = dom
-            l.email = _pattern_email(l.name, dom)
     return leads
+
+
+def is_guess(lead) -> bool:
+    """Whether the address on `lead` is one an older build GUESSED: exactly the
+    working pattern on the company_domain enrich looked up (or made up from the
+    name), with no finder, sheet or Apollo recorded as its source. Only enrich
+    ever set company_domain on a lead without an address — Apollo sets it with
+    email_source — so a real address from a sheet can never read as a guess."""
+    extra = getattr(lead, "extra", None) or {}
+    email = (getattr(lead, "email", "") or "").strip().lower()
+    domain = (extra.get("company_domain") or "").strip().lower()
+    if not (email and domain) or extra.get("email_source"):
+        return False
+    return email == _pattern_email(getattr(lead, "name", "") or "", domain).lower()
+
+
+def forget_guess(lead) -> bool:
+    """Take a guessed address off `lead` (is_guess), kept aside as
+    extra["guessed_email"] with the check once run on it, so the lead reads as
+    having no address — the finders' job. True when one was taken."""
+    if not is_guess(lead):
+        return False
+    lead.extra["guessed_email"] = lead.email
+    check = lead.extra.pop("email_check", None)
+    if check:
+        lead.extra["guessed_email_check"] = check
+    lead.email = ""
+    return True

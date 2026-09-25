@@ -96,6 +96,47 @@ class ReadingRows(unittest.TestCase):
         self.assertEqual(companies[0]["name"], "Acme")
         self.assertEqual(companies[0]["custom"], {"Lead Quality": "A"})
 
+    def test_a_placeholder_in_a_field_is_a_blank_one(self):
+        """The owner's AE _ Leads.xlsx wrote "Not Found" wherever research found
+        nothing: 115 websites, 105 sizes, 2 cities. In a mapped field that is a
+        blank, never a value."""
+        header = ["Company Name", "City", "Website", "Approx Employee Size"]
+        companies, skipped = IMP.accounts_from_rows(
+            header, [["Acme Pumps", "Not Found", "Not Found", "N/A"],
+                     ["Beta Valves", "Vadodara", "not available", "100-250"]],
+            IMP.guess_mapping(header, "accounts"))
+        self.assertEqual(skipped, 0)
+        self.assertEqual((companies[0]["website"], companies[0]["location"],
+                          companies[0]["headcount"]), ("", "", ""))
+        self.assertEqual((companies[1]["website"], companies[1]["location"],
+                          companies[1]["headcount"]), ("", "Vadodara", "100-250"))
+
+    def test_which_cells_count_as_saying_nothing(self):
+        for text in ("Not Found", "  not   available ", "N/A", "n.a.", "None", "-", "—", "TBD",
+                     "Unknown", "", None):
+            self.assertTrue(IMP.is_placeholder(text) or not text, text)
+        for text in ("Nagpur", "Nova Works", "Acme", "http://acme.example", "0"):
+            self.assertFalse(IMP.is_placeholder(text), text)
+
+    def test_a_custom_column_keeps_what_the_owner_typed_even_if_it_says_nothing(self):
+        header = ["Company Name", "Lead Quality"]
+        companies, _ = IMP.accounts_from_rows(header, [["Acme", "Not Found"]],
+                                              IMP.guess_mapping(header, "accounts"))
+        self.assertEqual(companies[0]["custom"], {"Lead Quality": "Not Found"})
+
+    def test_a_person_with_a_placeholder_email_has_no_email(self):
+        header = ["Name", "Email"]
+        leads, _ = IMP.contacts_from_rows(header, [["Asha Rao", "Not Found"]],
+                                          IMP.guess_mapping(header, "contacts"))
+        self.assertEqual((leads[0].name, leads[0].email), ("Asha Rao", ""))
+        self.assertNotIn("email_source", leads[0].extra)
+
+    def test_a_row_whose_only_company_is_a_placeholder_names_no_company(self):
+        header = ["Company Name", "Website"]
+        companies, skipped = IMP.accounts_from_rows(
+            header, [["Not Found", "Not Found"]], IMP.guess_mapping(header, "accounts"))
+        self.assertEqual((companies, skipped), ([], 0))
+
     def test_read_table_and_tabs_on_a_csv(self):
         path = os.path.join(tempfile.mkdtemp(), "people.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:

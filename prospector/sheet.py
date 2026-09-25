@@ -192,6 +192,8 @@ def leads_from_sheet(name, header, rows) -> list[Lead]:
         )
         if extra_emails:
             lead.extra["other_emails"] = extra_emails
+        if email:
+            lead.extra["email_source"] = "sheet"     # the owner's own file had it
         # Kept for the leads-sheet export (Location / In role since / LinkedIn
         # / Website); unmapped, they were being dropped, which is why the
         # exported sheet looked thinner than the client's own.

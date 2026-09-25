@@ -101,7 +101,16 @@ REFUSED = "Apollo answered {code} for {path}."
 
 
 class ApolloError(Exception):
-    """Something Apollo said no to, in words the owner can act on."""
+    """Something Apollo said no to, in words the owner can act on. `code` is
+    the HTTP status when Apollo answered one (0 otherwise) and `error_code`
+    Apollo's own name for the refusal ("API_INACCESSIBLE": a Free plan)."""
+
+    def __init__(self, message: str = "", code: int = 0, error_code: str = "",
+                 detail: str = ""):
+        super().__init__(message)
+        self.code = code
+        self.error_code = error_code
+        self.detail = detail                # Apollo's own sentence, when it sent one
 
 
 class _Unreachable(ApolloError):
@@ -168,7 +177,19 @@ def _post(path: str, body: dict, api_key: str, timeout: int = 30) -> dict:
                 return response.json() or {}
             except Exception:                           # noqa: BLE001
                 return {}
-        raise ApolloError(_message(code, path))
+        raise ApolloError(_message(code, path), code, *_refusal_of(response))
+
+
+def _refusal_of(response) -> tuple:
+    """(error_code, error): Apollo's own name for a refusal ("API_INACCESSIBLE")
+    and its sentence ("…not included in your Basic (Trial) plan…"), or ""s."""
+    try:
+        body = response.json()
+    except Exception:                                   # noqa: BLE001
+        return "", ""
+    if not isinstance(body, dict):
+        return "", ""
+    return str(body.get("error_code") or ""), str(body.get("error") or "")
 
 
 def api_key(cfg: dict | None = None) -> str:
@@ -623,8 +644,11 @@ def find_email(lead, api_key) -> tuple:
     """Apollo's `people/match` for ONE lead — the profile link or the Apollo id
     when the lead carries one (the surest match), else the name with the company
     domain or name. Returns (email, "valid" | "unknown"), and ("", "") when
-    Apollo knows nobody, has no address, or refuses: a finder in the verify
-    waterfall must never end a run.
+    Apollo knows nobody, has no address, or refuses this one person. A refusal
+    of the KEY itself — 401, or 403: a Free plan (people/match is not in it) or
+    a key scoped to other endpoints — is raised instead: every other person
+    would get the same answer, so verify stops asking Apollo for the batch and
+    says why (verify.FinderRefused) rather than end the run.
 
     One credit, and only when Apollo finds the person — which is why verify
     calls it for the hot/warm slice alone."""
@@ -659,7 +683,9 @@ def find_email(lead, api_key) -> tuple:
         return "", ""
     try:
         data = _post(MATCH, body, key)
-    except ApolloError:
+    except ApolloError as exc:
+        if exc.code in (401, 403):
+            raise
         return "", ""
     person = data.get("person") if isinstance(data, dict) else None
     if not isinstance(person, dict):

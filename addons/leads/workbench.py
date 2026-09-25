@@ -32,7 +32,7 @@ import datetime
 import os
 import re
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout,
@@ -44,14 +44,16 @@ import i18n
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
+from prospector import gateway
 from prospector.filters import MAX_FACET_VALUES, SearchSpec
 from addons.leads import pool as P
 from addons.leads import saved_searches
 from addons.leads.filter_panel import (
     HELP_KEYS as _FILTER_HELP_KEYS, FilterPanel, reveal_in_scroll, static_suggest,
 )
-from addons.leads.workers import (LeadsEmailWorker, LeadsExportWorker,
-                                  LeadsQualifyWorker, LeadsSendWorker,
+from addons.leads.credits_page import CreditPopover, CreditUsageDialog, UpgradeDialog
+from addons.leads.workers import (CreditsCallWorker, CreditsWorker, LeadsEmailWorker,
+                                  LeadsExportWorker, LeadsQualifyWorker, LeadsSendWorker,
                                   LeadsSessionLoadWorker, LeadsVerifyWorker,
                                   SourceWorker, outside_filters)
 from addons.leads.cockpit import LeadsWorkspace
@@ -139,6 +141,11 @@ _STARTERS = {
 # Four terms is 200 real searches for 50 companies, not the 250 the
 # original five-term version cost.
 _COMPANY_SEARCH_SENIORITY = ("owner", "founder", "c_suite", "director")
+# One press of Find new people over an Account CSV import asks every company
+# not searched yet, one Exa search each (the owner, 24-Sep-2026: "all at
+# once") — up to this many, so a sheet of thousands still asks first in
+# pieces a person can weigh. The confirmation names the exact count.
+_COMPANIES_PER_PRESS = 500
 
 
 def _company_search_spec(spec: SearchSpec) -> SearchSpec:
@@ -342,7 +349,23 @@ class LeadsWorkbench(QWidget):
         self._page = 0
         self._query = ""
         self._scope = ""                    # a session id: People shows only that run
+        # What the result on screen IS (filters, tab, search box, scope): the
+        # selection is cleared when it changes, kept across pages and sorts.
+        self._result_sig = None
         self._accounts: dict = {}           # tuple of import ids → resolve_accounts(...)
+        # The saved accounts (accounts.py), for the Stage / Lists / Custom
+        # fields filters' account side — and an index of them, since the page
+        # asks once per person on every filter change.
+        from addons.leads import accounts as AC
+        self._saved_accounts: list = []
+        self._account_index = AC.Index()
+        # The people taken off the list (removed.py): the records, and the
+        # keys the pool and Send all / Export sheets leave out. _undo_ids is
+        # the last Remove, while its notice (and Undo) is up.
+        self._removed: list = []
+        self._removed_keys = frozenset()
+        self._undo_ids: list = []
+        self._undo_text = ""
         self._pool_worker = None
         self._drafts = []
         self._draft_by = {}
@@ -353,6 +376,10 @@ class LeadsWorkbench(QWidget):
         self._verify_worker = None
         self._email_worker = None
         self._qualify_worker = None
+        self._enrich_worker = None
+        # The person panel's Enrichment picks, run one after another: each
+        # step is a job, and a job refuses to start while another runs.
+        self._enrich_queue: list = []
         # Apollo's own words when its API refused this plan or key scope, and
         # the key it refused (held in memory only — the config keeps a flag,
         # never a key). Empty = Apollo is on offer.
@@ -388,6 +415,9 @@ class LeadsWorkbench(QWidget):
         self._build_results()
         self._refresh_prepare()
         self._refresh_imports()
+        # The balance and the price list, read once the screen is up (and again
+        # after every run and whenever the screen is shown) — never on the way in.
+        QTimer.singleShot(0, self, self._refresh_credits)
 
     # ── batch actions (placed by the host) ────────────────────────────────────
     def _build_actions(self):
@@ -401,9 +431,169 @@ class LeadsWorkbench(QWidget):
         self._send_btn = C.button(i18n.t("Send all"), "primary",
                                   on_click=self._on_send)
         self._send_btn.setEnabled(False)
+        # The credit pool's balance, beside the actions it pays for. Built
+        # always (its handlers live here) and placed only when Leads runs on
+        # the pool — see credits_button().
+        self._credits_btn = C.button(i18n.t("Credits"), "tertiary",
+                                     on_click=self._show_credits)
+        self._credits_btn.setToolTip(i18n.t(
+            "Your credits — every paid lookup Leads makes is charged to them. "
+            "Click for the price list."))
+        self._credits_worker = None
+        self._credit_popover = None             # the "Team credit usage" card, built on first click
+        self._credit_dlg = None                 # the Credit usage page, while open
+        self._upgrade_dlg = None                # the Upgrade flow, while open
+        self._credit_status: dict = {}          # the last balance / price list read
+        self._credits_error = ""
 
     def action_buttons(self) -> list:
         return [self._export_btn, self._send_btn]
+
+    def credits_button(self):
+        """The balance pill, for the host's page header — None when Leads runs
+        on the developer's own keys (PRISM_LEADS_DIRECT), where there is no
+        pool to show."""
+        return self._credits_btn if gateway.pooled() else None
+
+    # ── credits: the pool every paid lookup is charged to ─────────────────────
+    # Leads holds no provider key. Each lookup goes to Prism's licence server
+    # (prospector/gateway.py), which charges the customer's credits and makes
+    # the call. This screen's part: show the balance, say what an action will
+    # cost BEFORE it runs (in credits, from the server's own price list), and
+    # say so plainly when a run stops because the pool ran dry.
+    @staticmethod
+    def _pooled() -> bool:
+        return gateway.pooled()
+
+    @staticmethod
+    def _cr(n: int) -> str:
+        """"1 credit" / "1,240 credits"."""
+        n = int(n)
+        return i18n.t("1 credit") if n == 1 else i18n.t("{n} credits").format(n=f"{n:,}")
+
+    def _refresh_credits(self) -> None:
+        """Read the balance and the price list off the UI thread. One read at a
+        time, and none at all on the developer's own keys."""
+        if not self._pooled() or self._credits_worker is not None:
+            return
+        self._credits_worker = CreditsWorker()
+        self._credits_worker.done.connect(self._on_credits)
+        self._credits_worker.failed.connect(self._on_credits_failed)
+        self._credits_worker.start()
+
+    def _on_credits(self, status: dict) -> None:
+        self._credits_worker = None
+        self._credit_status = dict(status or {})
+        self._credits_error = ""
+        self._sync_credits()
+        self._refresh_prepare()             # the cost under Find new people uses the price list
+
+    def _on_credits_failed(self, why: str) -> None:
+        self._credits_worker = None
+        self._credits_error = why or i18n.t("Couldn't read your credits.")
+        self._sync_credits()
+
+    def _balance(self):
+        """The credits left, as last read — None until the server has said."""
+        if self._credit_status.get("balance") is not None:
+            return int(self._credit_status["balance"])
+        return gateway.known_balance()
+
+    def _sync_credits(self) -> None:
+        balance = self._balance()
+        self._credits_btn.setText(self._cr(balance) if balance is not None
+                                  else i18n.t("Credits"))
+        # Running low reads at a glance: less than three searches' worth is red,
+        # and the tooltip says what to do.
+        low = balance is not None and balance < 3 * max(1, gateway.rate("people_search", 3))
+        self._credits_btn.setStyleSheet(
+            f"QPushButton{{color:{theme.ERR_INK};font-weight:600;}}" if low else "")
+        tip = [self._credits_error] if self._credits_error else []
+        if low:
+            tip.append(i18n.t("You're nearly out of credits — click to ask for more.")
+                       if balance > 0 else
+                       i18n.t("You're out of credits — click to ask for more."))
+        tip.append(i18n.t("Every paid lookup is charged to your credits. Click to see "
+                          "how many are left, what they were spent on, and how to get more."))
+        self._credits_btn.setToolTip("\n".join(tip))
+
+    def _show_credits(self) -> None:
+        """The pill's click: Apollo's small "Team credit usage" card — how much is
+        used, how many are left, and Upgrade plan / View usage. One popover, kept
+        and re-read each time, so clicking the pill never piles up widgets."""
+        self._refresh_credits()
+        pop = self._credit_popover
+        if pop is None:
+            pop = self._credit_popover = CreditPopover(self)
+            pop.card.usageRequested.connect(self._open_credit_usage)
+            pop.card.upgradeRequested.connect(self._open_upgrade)
+        pop.card.set_loading()
+        worker = CreditsCallWorker("usage")
+        worker.done.connect(pop.show_usage)
+        worker.failed.connect(pop.show_error)
+        worker.start()
+        pop.open_below(self._credits_btn)
+
+    def _open_credit_usage(self) -> None:
+        """View usage: the Credit usage page (Overview, Usage details, About
+        credits). Opened with open(), like Search settings, so the screen stays alive."""
+        dlg = self._credit_dlg = CreditUsageDialog(self._credit_status.get("rates") or {}, self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.upgradeRequested.connect(self._open_upgrade)
+        dlg.destroyed.connect(lambda *_: setattr(self, "_credit_dlg", None))
+        dlg.open()
+
+    def _open_upgrade(self) -> None:
+        """Upgrade plan / Add more credits: Select plan, Add-ons, Payment, Review —
+        which ends in a request to Alphakore, since nothing here takes a card."""
+        dlg = self._upgrade_dlg = UpgradeDialog(self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.destroyed.connect(lambda *_: setattr(self, "_upgrade_dlg", None))
+        dlg.open()
+
+    def _balance_line(self) -> str:
+        balance = self._balance()
+        return "" if balance is None else i18n.t("You have {c}.").format(c=self._cr(balance))
+
+    def _pool_blocker(self, op: str) -> str:
+        """Why a paid action cannot start right now, in words — or ''. Said
+        before a worker spends a thread finding out."""
+        if gateway.outdated():
+            return i18n.t(gateway.OUTDATED_MESSAGE)
+        if not gateway.ready(op):
+            return i18n.t("That lookup isn't switched on yet — contact Alphakore "
+                          "and we'll turn it on. You haven't been charged.")
+        balance = self._balance()
+        if balance is not None and balance <= 0:
+            return i18n.t("You have no credits left. Ask Alphakore to top up and "
+                          "it will run straight away.")
+        return ""
+
+    def _confirm_pool(self, title: str, lines: list) -> bool:
+        """"This will cost about N credits — go?", with the balance under it.
+        The owner approves every credit (23-Sep-2026); the wording changed with
+        the pool, the rule did not."""
+        balance_line = self._balance_line()
+        if balance_line:
+            lines = list(lines) + [balance_line]
+        answer = QMessageBox.question(
+            self, title, "\n\n".join(lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _used_note(self) -> str:
+        """"   ·   96 credits used" for the end of a run's line — and, when the
+        pool ran dry, why the run stopped short."""
+        if not self._pooled():
+            return ""
+        parts = []
+        used = gateway.used()
+        if used:
+            parts.append(i18n.t("{c} used").format(c=self._cr(used)))
+        if gateway.exhausted():
+            parts.append(i18n.t("stopped: out of credits — ask Alphakore to top up"))
+        return ("   ·   " + "   ·   ".join(parts)) if parts else ""
 
     # ── what a search runs with: the filters, Find new people, Search settings ─
     def _build_inputs(self):
@@ -427,6 +617,12 @@ class LeadsWorkbench(QWidget):
         self._filters.set_spec(SearchSpec())
         self._filters.changed.connect(self._on_filters_changed)
         self._filters.saveRequested.connect(self._save_search)
+        # The filters the owner pinned to the rail, as they left them.
+        pinned = self.cfg.get("leads_pinned_filters")
+        if isinstance(pinned, list):
+            self._filters.set_pinned(pinned)
+        self._filters.pinnedChanged.connect(
+            lambda names: self._save_cfg("leads_pinned_filters", list(names)))
 
         # -- Find new people, at the foot of the rail ---------------------------
         self._find_panel = QWidget()
@@ -460,6 +656,8 @@ class LeadsWorkbench(QWidget):
 
         # -- Search settings: a dialog, built once, opened from the toolbar -----
         self._settings_dlg = _SearchSettings(self)
+        # Done (or its ✕) keeps the keys typed in it — see _save_keys.
+        self._settings_dlg.finished.connect(lambda _result: self._save_keys())
         body = self._settings_dlg.body
 
         # The same filters, asked of two databases: Exa's web search (an Exa
@@ -479,6 +677,10 @@ class LeadsWorkbench(QWidget):
         # a whole setting — its name and its control — the way it is read.
         self._source_row = _setting(i18n.t("Search with"), src)
         body.addWidget(self._source_row)
+        # On the credit pool Exa is the only database and nobody picks it — the
+        # licence server holds the key — so the switch is built (the
+        # walkthrough and the tests address it) but not shown.
+        self._source_row.setVisible(not self._pooled())
 
         body.addWidget(_kick(i18n.t("Run settings")))
         self._target = QSpinBox()
@@ -496,10 +698,16 @@ class LeadsWorkbench(QWidget):
         self._verify_limit = QSpinBox()
         self._verify_limit.setRange(0, 200)
         self._verify_limit.setValue(25)
-        self._verify_limit.setToolTip(i18n.t(
-            "How many hot/warm addresses to check with Hunter. Its free tier is "
-            "~50 credits a month, so keep this modest — 0 skips verification."))
-        self._verify_row = _setting(i18n.t("Verify (Hunter)"), self._verify_limit)
+        if self._pooled():
+            self._verify_limit.setToolTip(i18n.t(
+                "How many hot/warm addresses to find and check this run. Each "
+                "one costs credits — 0 skips it."))
+            self._verify_row = _setting(i18n.t("Verify"), self._verify_limit)
+        else:
+            self._verify_limit.setToolTip(i18n.t(
+                "How many hot/warm addresses to check with Hunter. Its free tier is "
+                "~50 credits a month, so keep this modest — 0 skips verification."))
+            self._verify_row = _setting(i18n.t("Verify (Hunter)"), self._verify_limit)
         body.addWidget(self._verify_row)
 
         body.addWidget(_field(i18n.t("What you sell")))
@@ -530,22 +738,28 @@ class LeadsWorkbench(QWidget):
 
         # Keys & claims are set once — folded away unless a key is missing.
         # "&&": a lone & in a button label is eaten as a keyboard mnemonic.
-        self._keys_toggle = C.button(i18n.t("Keys & claims").replace("&", "&&"), "link",
-                                     icon_name="key", on_click=self._toggle_keys)
+        self._keys_toggle = C.button(
+            (i18n.t("Approved claims") if self._pooled()
+             else i18n.t("Keys & claims").replace("&", "&&")), "link",
+            icon_name="key", on_click=self._toggle_keys)
         body.addWidget(self._keys_toggle)
         self._keys_box = QWidget()
         kb = QVBoxLayout(self._keys_box)
         kb.setContentsMargins(0, 0, 0, 0)
         kb.setSpacing(theme.SPACE_1)
-        kb.addWidget(_field(i18n.t("Exa API key · finds people and why-now signals")))
+        self._byo_widgets = []       # the key rows: built, but not shown on the pool
+        self._byo_widgets.append(_field(i18n.t("Exa API key · finds people and why-now signals")))
+        kb.addWidget(self._byo_widgets[-1])
         self._exa = QLineEdit()
         self._exa.setText(self.cfg.get("exa_api_key") or "")
         self._exa.setEchoMode(QLineEdit.PasswordEchoOnEdit)   # never on screen at rest
         self._exa.setPlaceholderText(i18n.t("Needed to find people — saved once"))
         C.add_password_visibility(self._exa)
         kb.addWidget(self._exa)
+        self._byo_widgets.append(self._exa)
         kb.addSpacing(theme.SPACE_1)
-        kb.addWidget(_field(i18n.t("Apollo API key · searches Apollo's own database")))
+        self._byo_widgets.append(_field(i18n.t("Apollo API key · searches Apollo's own database")))
+        kb.addWidget(self._byo_widgets[-1])
         self._apollo = QLineEdit()
         self._apollo.setText(self.cfg.get("apollo_api_key") or "")
         self._apollo.setEchoMode(QLineEdit.PasswordEchoOnEdit)
@@ -553,6 +767,7 @@ class LeadsWorkbench(QWidget):
             "Search Apollo's database and reveal verified emails — saved once"))
         C.add_password_visibility(self._apollo)
         kb.addWidget(self._apollo)
+        self._byo_widgets.append(self._apollo)
         kb.addSpacing(theme.SPACE_2)
         self._claims = C.button(i18n.t("Approved claims file…"), "secondary",
                                 icon_name="file", on_click=self._choose_claims)
@@ -561,18 +776,21 @@ class LeadsWorkbench(QWidget):
             i18n.t("Optional — with none, the emails make no numeric claim."),
             level="META", wrap=True)
         kb.addWidget(self._claims_lbl)
-        kb.addWidget(C.label(i18n.t(
+        self._byo_widgets.append(C.label(i18n.t(
             "Verifier keys (Reoon, ZeroBounce, Hunter…) come from Settings > "
             "Agents — free tiers first, so most checks cost nothing."),
             level="META", wrap=True))
+        kb.addWidget(self._byo_widgets[-1])
+        for w in self._byo_widgets:
+            w.setVisible(not self._pooled())
         body.addWidget(self._keys_box)
         body.addStretch(1)
         # A different Apollo key is a different Apollo plan, so typing one lifts
         # a block this key earned.
         self._apollo.textEdited.connect(self._on_apollo_key_typed)
         # Either key is enough to run a search, so either folds the box away.
-        self._keys_box.setVisible(not (self._key("exa_api_key")
-                                       or self._key("apollo_api_key")))
+        self._keys_box.setVisible(False if self._pooled() else not (
+            self._key("exa_api_key") or self._key("apollo_api_key")))
         # Exa is the default even where an Apollo key is set: Apollo's people
         # search is not in its FREE plan (its API Keys page says so outright),
         # so offering it first sends most owners into a 403. A run that already
@@ -614,8 +832,8 @@ class LeadsWorkbench(QWidget):
         this plan, cannot be picked at all: not by a click, and not by a
         session that was run on it before the refusal."""
         self._source = "apollo" if source == "apollo" else "exa"
-        if self._source == "apollo" and self._apollo_blocked:
-            self._source = "exa"
+        if self._source == "apollo" and (self._apollo_blocked or self._pooled()):
+            self._source = "exa"            # on the pool, Exa is the only database
         self._src_apollo.setChecked(self._source == "apollo")
         self._src_exa.setChecked(self._source == "exa")
         self._sync_apollo()
@@ -669,6 +887,10 @@ class LeadsWorkbench(QWidget):
 
     def _sync_notice(self):
         notice, summary = getattr(self, "_notice", None), getattr(self, "_summary", None)
+        undo = getattr(self, "_undo_btn", None)
+        if undo is not None:
+            # Undo belongs to the Remove it follows: any later message retires it.
+            undo.setVisible(bool(self._undo_ids) and self._status.text() == self._undo_text)
         if notice is not None and summary is not None:
             notice.setVisible(not (self._status.isHidden() and summary.isHidden()))
 
@@ -677,14 +899,14 @@ class LeadsWorkbench(QWidget):
         filters ask — or (None, [], why, {}) when they ask nobody.
 
         An Account CSV import is a list of COMPANIES: the search asks Exa for
-        people at the next MAX_FACET_VALUES of them (_account_batch — Exa
-        pairs every role with every company, so an unbounded list is
-        unbounded searches; the batch is a real product limit), and with no
-        job title or seniority of the owner's own, it asks for the
-        decision-makers (_company_search_spec). `marks` is how far each import
-        will have been searched, for _on_prepare to record once the search
-        starts. A Contact CSV import is people already held: nothing to
-        search for."""
+        people at every company not searched yet, one search each, up to
+        _COMPANIES_PER_PRESS (_account_batch), and with no job title or
+        seniority of the owner's own it asks for the decision-makers
+        (_company_search_spec). The spec's Current company facet holds the
+        first MAX_FACET_VALUES; `companies` is all of them, which the worker
+        asks in groups of that size. `marks` is how far each import will have
+        been searched as the groups are asked (_on_companies_asked). A Contact
+        CSV import is people already held: nothing to search for."""
         spec = self._filters.spec()
         companies, note, marks = [], "", {}
         if spec.account_imports:
@@ -693,7 +915,7 @@ class LeadsWorkbench(QWidget):
                 return None, [], i18n.t(
                     "The chosen account import holds no companies."), {}
             spec = _company_search_spec(spec)
-            spec.companies.include = list(companies)
+            spec.companies.include = list(companies[:MAX_FACET_VALUES])
             spec.account_imports = []
         spec.contact_imports = []           # people already held — not a search term
         if not spec.is_searchable():
@@ -703,14 +925,17 @@ class LeadsWorkbench(QWidget):
         return spec, companies, note, marks
 
     def _account_batch(self, import_ids):
-        """(companies, marks, note): the next MAX_FACET_VALUES companies of the
-        chosen Account CSV imports, each import walked on from where its last
-        search stopped (imports.mark_searched — on disk, so a restart does
-        not pay for the same companies twice), a company already searched in
-        another of them skipped. `marks` is {import id: searched up to} once
-        this batch is asked. When every company has been searched, the batch
-        starts again from the first, and the note says so — the confirmation
-        before the search repeats it."""
+        """(companies, marks, note): every company of the chosen Account CSV
+        imports not searched yet — up to _COMPANIES_PER_PRESS — each import
+        walked on from where its last search stopped (imports.mark_searched —
+        on disk, so a restart does not pay for the same companies twice), a
+        company already searched in another of them skipped. `marks` is
+        {"order": [(import id, searched up to)] — one per company, in order —
+        "final": {import id: searched up to} once all of them are asked}: an
+        import moves on as its companies really are asked
+        (_on_companies_asked), never ahead of them. When every company has
+        been searched, the batch starts again from the first, and the note
+        says so — the confirmation before the search repeats it."""
         from addons.leads import imports as IM
         folder = self._imports_dir()
         records = [r for r in (IM.get(folder, i) for i in import_ids)
@@ -726,22 +951,24 @@ class LeadsWorkbench(QWidget):
         if not restart:                     # what earlier batches already asked
             for r in records:
                 seen.update(name_of(c).casefold() for c in r["companies"][:r["searched"]])
-        companies, walked = [], 0
-        marks = {r["id"]: 0 for r in records} if restart else {}
+        companies, order, walked = [], [], 0
+        final = {r["id"]: 0 for r in records} if restart else {}
         for r in records:
             start = 0 if restart else r["searched"]
             upto = start
             for i in range(start, len(r["companies"])):
-                if len(companies) >= MAX_FACET_VALUES:
+                if len(companies) >= _COMPANIES_PER_PRESS:
                     break
                 name = name_of(r["companies"][i])
                 upto = i + 1
                 if name and name.casefold() not in seen:
                     seen.add(name.casefold())
                     companies.append(name)
+                    order.append((r["id"], upto))
             walked += upto - start
             if upto != start:
-                marks[r["id"]] = upto
+                final[r["id"]] = upto
+        marks = {"order": order, "final": final} if companies else {}
         first = (0 if restart else done) + 1
         note = i18n.t("companies {a}–{b} of {n} from the import").format(
             a=first, b=first + walked - 1, n=total)
@@ -750,13 +977,24 @@ class LeadsWorkbench(QWidget):
                                    "again from the first")
         return companies, marks, note
 
-    def _estimate(self, spec) -> int:
-        """How many Exa searches the first pass of this search will make."""
+    def _estimate(self, spec, companies=()) -> int:
+        """How many Exa searches this search makes to start with."""
+        return self._searches(spec, companies)[0]
+
+    def _searches(self, spec, companies=()) -> tuple:
+        """(first, more): the Exa searches a press makes to start with, and
+        the most it may add when too few new people come back — worked out
+        the way the search itself will do it (source.planned_searches), not
+        guessed (24-Sep-2026: the box said "about 200" of a press that stopped
+        at 60). Over an import's companies: one a company, nothing more."""
         try:
             from prospector import filters as F
-            return len(F.plan(spec))
+            from prospector import source as S
+            if companies:
+                return sum(len(F.plan(part)) for part in F.company_chunks(spec, companies)), 0
+            return S.planned_searches(spec)
         except Exception:                                   # noqa: BLE001
-            return 0
+            return 0, 0
 
     def _refresh_prepare(self):
         """Find new people: armed when the filters ask for somebody, with what
@@ -770,15 +1008,44 @@ class LeadsWorkbench(QWidget):
         if not ok:
             self._find_meta.setText(note)
             return
-        if self._source == "apollo":
+        if self._pooled():
+            text = self._pool_search_meta(spec, _companies)
+        elif self._source == "apollo":
             text = i18n.t("Searches Apollo — about a credit per person revealed")
         else:
-            n = self._estimate(spec)
-            text = (i18n.t("About {n} Exa searches").format(n=n) if n
-                    else i18n.t("Searches Exa"))
+            n, more = self._searches(spec, _companies)
+            if not n:
+                text = i18n.t("Searches Exa")
+            elif _companies:
+                text = (i18n.t("1 Exa search — one company") if n == 1 else
+                        i18n.t("{n} Exa searches — one per company").format(n=n))
+            elif more:
+                text = i18n.t("About {n} Exa searches — up to {m} more if too few "
+                              "come back").format(n=n, m=more)
+            else:
+                text = i18n.t("About {n} Exa searches").format(n=n)
         if note:
             text += " · " + note
         self._find_meta.setText(text)
+
+    def _pool_search_meta(self, spec, companies) -> str:
+        """The line under Find new people, in credits: "About 30 searches — 90
+        credits". Each search costs what the server's price list says (3 until
+        the owner sets it), and a search that finds nobody is not charged — so
+        this is a ceiling, and the words say "up to"."""
+        n, more = self._searches(spec, companies)
+        if not n:
+            return i18n.t("Searches for new people")
+        price = gateway.rate("people_search", 3)
+        if companies:
+            return (i18n.t("1 search — up to {c}").format(c=self._cr(price)) if n == 1 else
+                    i18n.t("{n} searches, one per company — up to {c}").format(
+                        n=n, c=self._cr(n * price)))
+        if more:
+            return i18n.t("About {n} searches — up to {c}, and up to {m} more searches "
+                          "if too few new people come back").format(
+                              n=n, c=self._cr(n * price), m=more)
+        return i18n.t("About {n} searches — up to {c}").format(n=n, c=self._cr(n * price))
 
     def _find_prepare_ready(self):
         """(ok, why) for Research with AI ▸ "Find new people and qualify
@@ -840,6 +1107,10 @@ class LeadsWorkbench(QWidget):
                                    on_click=self.clear_scope)
         self._scope_btn.hide()
         nl.addWidget(self._scope_btn)
+        # Right after a Remove: put them straight back.
+        self._undo_btn = C.button(i18n.t("Undo"), "link", on_click=self._undo_remove)
+        self._undo_btn.hide()
+        nl.addWidget(self._undo_btn)
         nl.addWidget(self._summary, 1)
         self._notice.setVisible(False)
         self._root.addWidget(self._notice)
@@ -860,6 +1131,9 @@ class LeadsWorkbench(QWidget):
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
         self._cockpit.qualifyRequested.connect(self._qualify_selected)
         self._cockpit.saveContactsRequested.connect(self._save_contacts)
+        self._cockpit.stageRequested.connect(self._set_stage_selected)
+        self._cockpit.removeRequested.connect(self._remove_selected)
+        self._cockpit.removedRequested.connect(self._open_removed)
         self._cockpit.importRequested.connect(self._import)
         self._cockpit.tabChanged.connect(self._on_tab)
         self._cockpit.pageRequested.connect(self._on_page)
@@ -874,6 +1148,25 @@ class LeadsWorkbench(QWidget):
             [(key, i18n.t(name)) for key, (name, _make) in _STARTERS.items()])
         self._cockpit.set_search_panel(self._filters)
         self._cockpit.set_find_panel(self._find_panel)
+        # The person panel (Apollo's contact profile): what it shows comes from
+        # here, and every act on it is carried out here, on the stores.
+        leads = self._cockpit.leads
+        leads.set_person_provider(self._person_view)
+        pp = leads.person_panel
+        pp.saveRequested.connect(self._panel_save)
+        pp.stageRequested.connect(self._panel_stage)
+        pp.accountStageRequested.connect(self._panel_account_stage)
+        pp.accountSaveRequested.connect(self._panel_account_save)
+        pp.noteRequested.connect(self._panel_note)
+        pp.taskRequested.connect(self._panel_task)
+        pp.taskDoneRequested.connect(self._panel_task_done)
+        pp.logRequested.connect(self._panel_log)
+        pp.editRequested.connect(self._panel_edit)
+        pp.flagRequested.connect(self._panel_flag)
+        pp.deleteRequested.connect(self._panel_delete)
+        pp.listRequested.connect(lambda dos: self._save_list([dos]))
+        pp.sequenceRequested.connect(lambda dos: self._add_to_sequence([dos]))
+        pp.enrichRequested.connect(self._panel_enrich)
         frame = QFrame()
         frame.setObjectName("leadsFrame")
         frame.setAttribute(Qt.WA_StyledBackground, True)
@@ -890,6 +1183,7 @@ class LeadsWorkbench(QWidget):
         is shown again, so a list saved elsewhere appears."""
         if getattr(self, "_cockpit", None) is not None:
             self._cockpit.refresh_lists()
+        self._refresh_credits()             # a top-up since the screen was last shown
 
     # ── Find People: the pool, and the page over it ──────────────────────────
     def _contacts_dir(self) -> str:
@@ -928,7 +1222,10 @@ class LeadsWorkbench(QWidget):
         """Read every saved contact and every past run, off the UI thread, and
         put the page back over them (_on_pool_loaded)."""
         from addons.leads.workers import LeadsPoolWorker
-        self._pool_worker = LeadsPoolWorker(self._contacts_dir(), self._sessions_dir())
+        self._pool_worker = LeadsPoolWorker(self._contacts_dir(), self._sessions_dir(),
+                                            self._accounts_dir(), self._removed_dir())
+        self._pool_worker.accounts_read.connect(self._set_saved_accounts)
+        self._pool_worker.removed_read.connect(self._set_removed)
         self._pool_worker.done.connect(self._on_pool_loaded)
         self._pool_worker.failed.connect(
             lambda msg: self._status.setText(
@@ -961,8 +1258,26 @@ class LeadsWorkbench(QWidget):
                 dict(self._run_params))
 
     def _rebuild_pool(self) -> None:
-        self._people = P.build(self._contacts, self._runs.values())
+        self._pool_changed()
         self._refilter()
+
+    def _pool_changed(self) -> None:
+        """The pool from the contacts and runs in hand — and what the Stage,
+        Lists and Custom fields filters can offer from it."""
+        self._people = P.without(P.build(self._contacts, self._runs.values()),
+                                 self._removed_keys)
+        self._filters.set_record_options(P.record_options(self._people,
+                                                          self._saved_accounts))
+
+    def _set_saved_accounts(self, accounts) -> None:
+        from addons.leads import accounts as AC
+        self._saved_accounts = list(accounts or ())
+        self._account_index = AC.Index(self._saved_accounts)
+
+    def _reload_accounts(self) -> None:
+        """Re-read the saved accounts after something here wrote them."""
+        from addons.leads import accounts as AC
+        self._set_saved_accounts(AC.list_accounts(self._accounts_dir()))
 
     def _accounts_for(self, spec) -> dict:
         """pool.resolve_accounts for the chosen Account CSV imports, cached
@@ -987,11 +1302,19 @@ class LeadsWorkbench(QWidget):
         if self._scope:
             people = [p for p in people if self._scope in p.sessions]
         matched = P.filter_people(people, spec, accounts=self._accounts_for(spec),
-                                  query=self._query)
+                                  query=self._query, saved_accounts=self._account_index)
         tabs = P.split(matched)
         counts = {k: len(v) for k, v in tabs.items()}
         rows = P.sort_people(tabs.get(self._tab, tabs["total"]), self._sort)
         info = P.page(rows, self._page)
+        # A new search starts with nobody selected, as Apollo's does; another
+        # page, another sort or the pool re-read keeps whoever was.
+        import json
+        signature = (json.dumps(spec.to_dict(), sort_keys=True), self._tab,
+                     self._query, self._scope)
+        if signature != self._result_sig:
+            self._result_sig = signature
+            self._cockpit.leads.clear_selection()
         self._page = info["page"]
         if not self._people:
             empty = None                    # the cockpit's own "No people yet"
@@ -1001,7 +1324,7 @@ class LeadsWorkbench(QWidget):
         else:
             empty = None
         self._cockpit.leads.set_empty_text()
-        self._cockpit.set_people(info["rows"], info, counts, empty)
+        self._cockpit.set_people(info["rows"], info, counts, empty, universe=rows)
         self._cockpit.leads.set_filter_count(spec.active_count())
 
     def _on_filters_changed(self):
@@ -1033,19 +1356,21 @@ class LeadsWorkbench(QWidget):
             self._refilter()
 
     # ── Apollo's "Save": people become contacts ──────────────────────────────
-    def _keep_as_contacts(self, leads, via: str) -> bool:
+    def _keep_as_contacts(self, leads, via: str, list_name: str = "") -> bool:
         """Save these people as contacts — Apollo's rule that acting on
         someone (exporting them, sequencing them, finding their e-mail) saves
         them, and the one place such an action's result outlives a run that is
         not the one on screen. Their newest fields are written over the saved
-        record. True when the page was rebuilt. Never raises into the UI."""
+        record; `list_name` is added to each (Add to list). True when the page
+        was rebuilt. Never raises into the UI."""
         leads = [l for l in leads or () if l is not None]
         if not leads:
             return False
         try:
             from addons.leads import contacts as CT
             from prospector.identity import keys_of
-            CT.save(self._contacts_dir(), leads, via=via, update=True)
+            CT.save(self._contacts_dir(), leads, via=via, update=True,
+                    list_name=list_name)
         except Exception as e:                              # noqa: BLE001
             self._status.setText(str(e) or i18n.t("Couldn't save these contacts."))
             return False
@@ -1069,13 +1394,33 @@ class LeadsWorkbench(QWidget):
                 self._contacts.append(hit)
             elif hit.lead is not lead:
                 CT.merge(hit.lead, lead)
+            if list_name and list_name not in hit.lists:
+                hit.lists.append(list_name)
             for key in keys:
                 by_key.setdefault(key, hit)
         self._rebuild_pool_keep_page()
         return True
 
+    def _advance_stage(self, leads, to: str, only_from) -> int:
+        """contacts.advance_stage, mirrored on the contacts in memory. Never
+        raises into the UI."""
+        from addons.leads import contacts as CT
+        from prospector.identity import keys_of
+        try:
+            moved = CT.advance_stage(self._contacts_dir(), leads, to, only_from)
+        except Exception as e:                              # noqa: BLE001
+            self._status.setText(str(e) or i18n.t("Couldn't update the stages."))
+            return 0
+        wanted = set()
+        for lead in leads:
+            wanted.update(keys_of(lead))
+        for contact in self._contacts:
+            if contact.stage in only_from and not wanted.isdisjoint(keys_of(contact.lead)):
+                contact.stage = to
+        return moved
+
     def _rebuild_pool_keep_page(self) -> None:
-        self._people = P.build(self._contacts, self._runs.values())
+        self._pool_changed()
         self._refilter(keep_page=True)
 
     def _save_contacts(self, dossiers):
@@ -1088,6 +1433,429 @@ class LeadsWorkbench(QWidget):
         self._status.setText(i18n.t("Saved {n} as contacts — they're under Saved now.")
                              .format(n=len(leads)))
 
+    def _set_stage_selected(self, dossiers, stage: str):
+        """Edit > Set stage: the selected people move to `stage` — saved as
+        contacts first when they are not yet, since only a contact has a
+        stage (Apollo's rule that acting on a prospect saves them)."""
+        from addons.leads import contacts as CT
+        from prospector.identity import keys_of
+        leads = [getattr(d, "lead", None) for d in dossiers or ()]
+        leads = [l for l in leads if l is not None]
+        stage = CT.stage_named(stage)
+        if not (leads and stage) or not self._keep_as_contacts(leads, "save"):
+            return
+        try:
+            moved = CT.set_stage_many(self._contacts_dir(), leads, stage)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        wanted = set()
+        for lead in leads:
+            wanted.update(keys_of(lead))
+        for contact in self._contacts:
+            if not wanted.isdisjoint(keys_of(contact.lead)):
+                contact.stage = stage
+        self._rebuild_pool_keep_page()
+        self._status.setText(
+            i18n.t("Moved {n} to {stage}.").format(n=moved, stage=stage) if moved
+            else i18n.t("Already at {stage}.").format(stage=stage))
+
+    # ── Remove: people off the list (removed.py) ─────────────────────────────
+    # The owner, 23-Sep-2026: ticking people and pressing Clear should take
+    # them away. He chose "Remove from list": out of Total, Net New and Saved,
+    # out of every new search, restorable — nothing is deleted.
+    def _removed_dir(self) -> str:
+        """This member's removed people, beside their contacts. Tests patch
+        this method."""
+        try:
+            import identity
+            import workspace
+            return workspace.member_dir(identity.current()["mid"], self.cfg,
+                                        "leads", "removed")
+        except Exception:                                   # noqa: BLE001
+            import paths
+            return paths.user_dir("leads", "removed")
+
+    def _set_removed(self, records) -> None:
+        """The removed list in hand — what the pool leaves out, and the
+        rail's "N removed"."""
+        from addons.leads import removed as RM
+        self._removed = list(records or ())
+        self._removed_keys = RM.keys(self._removed)
+        self._cockpit.leads.set_removed_count(len(self._removed))
+
+    def _reload_removed(self) -> None:
+        from addons.leads import removed as RM
+        self._set_removed(RM.list_removed(self._removed_dir()))
+
+    def _is_removed(self, lead) -> bool:
+        from prospector.identity import keys_of
+        return bool(self._removed_keys) and not keys_of(lead).isdisjoint(self._removed_keys)
+
+    def _persons_for(self, rows) -> list:
+        """The pool.Person behind each row — so a removal carries every key
+        their records have, not only the row's own lead's. A row the pool no
+        longer holds is taken by its lead."""
+        by_row = {id(p.row()): p for p in self._people}
+        out = []
+        for row in rows or ():
+            person = by_row.get(id(row)) or getattr(row, "lead", None)
+            if person is not None:
+                out.append(person)
+        return out
+
+    def _confirm_remove(self, n: int) -> bool:
+        """"Take 25 people off the list?" — before anyone leaves the page.
+        Tests patch this."""
+        who = (i18n.t("this person") if n == 1
+               else i18n.t("{n} people").format(n=f"{n:,}"))
+        answer = QMessageBox.question(
+            self, i18n.t("Remove from list"),
+            i18n.t("Take {who} off the list? They leave People (Total, Net New "
+                   "and Saved) and new searches won't bring them back. Nothing is "
+                   "deleted: bring them back any time from Removed, under the tabs "
+                   "at the top of the filters.").format(who=who),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _remove_selected(self, rows) -> None:
+        """The action bar's Remove."""
+        from addons.leads import removed as RM
+        people = self._persons_for(rows)
+        if not people or not self._confirm_remove(len(people)):
+            return
+        try:
+            ids = RM.remove(self._removed_dir(), people)
+        except RM.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._reload_removed()
+        leads = self._cockpit.leads
+        leads.clear_selection()
+        # The person open in the panel goes with them, rather than staying up
+        # for someone the page no longer lists.
+        shown = getattr(leads, "_drawer_person", None)
+        shown_keys = getattr(shown, "keys", None) or frozenset()
+        if shown_keys and not shown_keys.isdisjoint(self._removed_keys):
+            leads._dismiss_drawer()
+        self._rebuild_pool_keep_page()
+        self._refresh_send()
+        text = i18n.t("Removed {n} from the list.").format(n=len(people))
+        self._undo_ids, self._undo_text = ids, text
+        self._status.setText(text)
+        self._sync_notice()
+
+    def _undo_remove(self) -> None:
+        """The notice's Undo: the last Remove, put back."""
+        ids, self._undo_ids = list(self._undo_ids), []
+        self._restore(ids)
+
+    def _restore_dialog(self, records) -> list:
+        """The Removed window: the ids ticked to come back, [] on Close.
+        Tests patch this."""
+        from addons.leads.removed_dialog import RemovedDialog
+        dlg = RemovedDialog(records, parent=self)
+        return dlg.chosen_ids() if dlg.exec() == QDialog.Accepted else []
+
+    def _open_removed(self) -> None:
+        """The rail's "N removed · Restore"."""
+        self._reload_removed()                  # as the file has it now
+        ids = self._restore_dialog(self._removed)
+        if ids:
+            self._undo_ids = []
+            self._restore(ids)
+
+    def _restore(self, ids) -> None:
+        from addons.leads import removed as RM
+        if not ids:
+            return
+        try:
+            n = RM.restore(self._removed_dir(), ids)
+        except RM.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._reload_removed()
+        self._rebuild_pool_keep_page()
+        self._refresh_send()
+        self._status.setText(i18n.t("Put {n} back on the list.").format(n=n))
+
+    def _refresh_send(self) -> None:
+        """Send all as the list now stands — a removal can leave it nobody."""
+        if not self._jobs:
+            self._send_btn.setEnabled(bool(self._sendable(self._drafts)))
+
+    # ── the person panel (Apollo's contact profile) ─────────────────────────
+    def _person_view(self, dos, person=None):
+        """Everything the panel shows about one person, from the stores: their
+        saved contact as the file has it (notes, tasks, Activities), the
+        account they work at, their Account CSV import company, who else
+        Prism holds there, and the searches that found them."""
+        from addons.leads import contacts as CT
+        from addons.leads.person import PersonView
+        lead = getattr(dos, "lead", None)
+        if lead is None:
+            return None
+        if person is None:
+            person = next((p for p in self._people if p.lead is lead), None)
+        found_by = []
+        for sid in (person.sessions if person is not None else ()):
+            run = self._runs.get(sid)
+            if run:
+                found_by.append((run[1], self._search_words(run[5] if len(run) > 5 else {})))
+        near = P.colleagues(self._people, person) if person is not None else []
+        draft = person.draft if person is not None else None
+        return PersonView(
+            row=dos, draft=draft if draft is not None else self._draft_for(dos),
+            person=person, contact=CT.get(self._contacts_dir(), lead),
+            account=self._account_index.match(lead),
+            company=dict(person.account) if person is not None and person.account else {},
+            colleagues=near[:6], more_colleagues=max(0, len(near) - 6),
+            found_by=found_by)
+
+    @staticmethod
+    def _search_words(params) -> str:
+        """What a run asked, in a few words — "6 titles · Anywhere except India"."""
+        if not isinstance(params, dict) or params.get("mode") == "sheet":
+            return i18n.t("a sheet you loaded")
+        try:
+            return SearchSpec.from_params(params).summary()
+        except Exception:                                   # noqa: BLE001
+            return i18n.t("a search")
+
+    def _panel_done(self, said: str = "", rebuild: bool = False) -> None:
+        if rebuild:
+            self._rebuild_pool_keep_page()
+        if said:
+            self._status.setText(said)
+        self._cockpit.leads.refresh_person()
+
+    def _ensure_contact(self, lead) -> bool:
+        """Apollo's rule: acting on someone saves them first. False when the
+        save failed (the status line says why)."""
+        from addons.leads import contacts as CT
+        if CT.find(self._contacts, lead) is not None:
+            return True
+        return self._keep_as_contacts([lead], "save")
+
+    def _panel_save(self, lead) -> None:
+        if self._keep_as_contacts([lead], "save"):
+            self._panel_done(i18n.t("Saved {name} as a contact.").format(
+                name=lead.name or i18n.t("them")))
+
+    def _panel_stage(self, lead, stage: str) -> None:
+        from addons.leads import contacts as CT
+        stage = CT.stage_named(stage)
+        if not stage or not self._ensure_contact(lead):
+            return
+        try:
+            CT.set_stage(self._contacts_dir(), lead, stage)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        saved = CT.find(self._contacts, lead)
+        if saved is not None:
+            saved.stage = stage
+        self._panel_done(i18n.t("Moved {name} to {stage}.").format(
+            name=lead.name or i18n.t("them"), stage=stage), rebuild=True)
+
+    def _panel_account_stage(self, account, stage: str) -> None:
+        from addons.leads import accounts as AC
+        try:
+            AC.set_stage(self._accounts_dir(), account, stage)
+        except AC.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._reload_accounts()
+        self._panel_done(i18n.t("Moved {company} to {stage}.").format(
+            company=getattr(account, "name", "") or i18n.t("the account"),
+            stage=AC.stage_named(stage)), rebuild=True)
+
+    def _panel_account_save(self, lead) -> None:
+        from addons.leads import accounts as AC
+        company = AC.from_lead(lead, "domain") or AC.from_lead(lead, "name")
+        if not company:
+            return
+        try:
+            AC.save(self._accounts_dir(), [company], via="save")
+        except AC.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._reload_accounts()
+        self._panel_done(i18n.t("Saved {company} as an account.").format(
+            company=company.get("name") or company.get("domain")), rebuild=True)
+
+    def _panel_note(self, lead, text: str) -> None:
+        from addons.leads import contacts as CT
+        if not self._ensure_contact(lead):
+            return
+        try:
+            CT.add_note(self._contacts_dir(), lead, text)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._panel_done(i18n.t("Note kept."))
+
+    def _panel_task(self, lead, text: str, due: str) -> None:
+        from addons.leads import contacts as CT
+        if not self._ensure_contact(lead):
+            return
+        try:
+            CT.add_task(self._contacts_dir(), lead, text, due)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._panel_done(i18n.t("Task added."))
+
+    def _panel_task_done(self, lead, task_id: str, done: bool) -> None:
+        from addons.leads import contacts as CT
+        try:
+            CT.set_task_done(self._contacts_dir(), lead, task_id, done)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._panel_done()
+
+    def _panel_log(self, lead, kind: str, text: str) -> None:
+        from addons.leads import contacts as CT
+        if not self._ensure_contact(lead):
+            return
+        try:
+            CT.log(self._contacts_dir(), lead, kind, text)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._panel_done(i18n.t("Logged."))
+
+    def _panel_edit(self, lead, changes: dict) -> None:
+        """Edit contact info — the saved record and the person on the page."""
+        from addons.leads import contacts as CT
+        if not self._ensure_contact(lead):
+            return
+        try:
+            done = CT.edit(self._contacts_dir(), lead, changes)
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        saved = CT.find(self._contacts, lead)
+        if saved is not None and saved.lead is not lead:
+            CT.merge(saved.lead, lead)
+        self._panel_done(i18n.t("Saved the changes.") if done else "", rebuild=done)
+
+    def _panel_flag(self, lead) -> None:
+        """Flag as inaccurate: their details are wrong — kept in their
+        Activities, and the stage becomes Apollo's Bad Data."""
+        from addons.leads import contacts as CT
+        if not self._ensure_contact(lead):
+            return
+        try:
+            CT.log(self._contacts_dir(), lead, "flagged")
+            CT.set_stage(self._contacts_dir(), lead, "Bad Data")
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        saved = CT.find(self._contacts, lead)
+        if saved is not None:
+            saved.stage = "Bad Data"
+        self._panel_done(i18n.t("Flagged {name} as inaccurate — their stage is Bad Data.")
+                         .format(name=lead.name or i18n.t("them")), rebuild=True)
+
+    def _panel_delete(self, lead) -> None:
+        """Delete contact: out of the contacts store — someone a search found
+        stays on the page as net new, as Apollo's deleted contacts return."""
+        from addons.leads import contacts as CT
+        from prospector.identity import keys_of
+        try:
+            CT.remove(self._contacts_dir(), [lead])
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        gone = keys_of(lead)
+        self._contacts = [c for c in self._contacts if gone.isdisjoint(keys_of(c.lead))]
+        self._rebuild_pool_keep_page()
+        self._status.setText(i18n.t("Deleted {name} from your contacts.").format(
+            name=lead.name or i18n.t("them")))
+        still = any(not gone.isdisjoint(p.keys) for p in self._people)
+        if still:
+            self._cockpit.leads.refresh_person()
+        else:
+            self._cockpit.leads._dismiss_drawer()
+
+    def _panel_enrich(self, dos, fields) -> None:
+        """Enrichment ▸ Enrich fields: each picked field in turn — an e-mail,
+        the company, a qualify pass — every one asking before it spends."""
+        if self._jobs:
+            self._status.setText(i18n.t(
+                "Wait for the job that is running to finish, then try again."))
+            return
+        self._enrich_queue = [(dos, f) for f in ("email", "company", "qualify")
+                              if f in (fields or ())]
+        self._next_enrichment()
+
+    def _next_enrichment(self) -> None:
+        """Start the next picked enrichment; one that starts no job (declined,
+        or nothing to do) hands on to the next at once."""
+        while self._enrich_queue and not self._jobs:
+            dos, what = self._enrich_queue.pop(0)
+            if what == "email":
+                self._find_emails([dos])
+            elif what == "company":
+                self._enrich_company(dos.lead)
+            elif what == "qualify":
+                self._qualify_selected([dos])
+
+    def _enrich_company(self, lead) -> None:
+        """Enrichment ▸ Company: one Exa lookup for the company a person works
+        at — its website, size, revenue and HQ — into their saved account."""
+        from addons.leads import accounts as AC
+        from addons.leads.workers import LeadsAccountEnrichWorker
+        if self._jobs:
+            return
+        account = self._account_index.match(lead)
+        company = ({k: getattr(account, k) for k in ("name", "website", "domain",
+                                                     "location", "industry", "headcount",
+                                                     "revenue", "description")}
+                   if account is not None
+                   else AC.from_lead(lead, "domain") or AC.from_lead(lead, "name"))
+        if not company or not LeadsAccountEnrichWorker.wants(company, "all"):
+            self._status.setText(i18n.t("Nothing left to look up for this company."))
+            return
+        if self._pooled():
+            blocked = self._pool_blocker("company")
+            if blocked:
+                self._status.setText(blocked)
+                return
+        elif not self._key("exa_api_key"):
+            self._status.setText(i18n.t(
+                "Looking the company up needs an Exa API key — add it under "
+                "Search settings › Keys & claims."))
+            return
+        if not self._confirm_enrich(1):
+            return
+        self._set_running(True)
+        self._status.setText(i18n.t("Looking up {name}…").format(
+            name=company.get("name") or company.get("domain")))
+        self._enrich_worker = LeadsAccountEnrichWorker([company], self.cfg, "all")
+        self._enrich_worker.done.connect(self._on_company_enriched)
+        self._enrich_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._enrich_worker.start()
+
+    def _on_company_enriched(self, companies, filled: int) -> None:
+        from addons.leads import accounts as AC
+        idle = self._job_done()
+        try:
+            AC.save(self._accounts_dir(), list(companies or ()), via="enrich", update=True)
+        except AC.StoreError as e:
+            self._status.setText(str(e))
+        else:
+            self._status.setText(i18n.t("Filled in the company from Exa.") if filled
+                                 else i18n.t("Exa had nothing more on this company."))
+        self._reload_accounts()
+        self._rebuild_pool_keep_page()
+        if idle:
+            self._set_running(False)
+
     # ── Import ▾ ──────────────────────────────────────────────────────────────
     def _import(self, kind: str):
         """Import ▾ — the wizard, then the stores. Nothing is searched: the
@@ -1099,18 +1867,56 @@ class LeadsWorkbench(QWidget):
             return
         from PySide6.QtWidgets import QDialog
         from addons.leads.import_wizard import ImportWizard
-        wizard = ImportWizard(kind, start_dir=self._autosave_dir(), parent=self)
+        wizard = ImportWizard(kind, start_dir=self._autosave_dir(), parent=self,
+                              lists=self._list_names())
         if wizard.exec() != QDialog.Accepted:
             return
         self._run_import(wizard.result())
 
+    def _list_names(self) -> list:
+        """The lists there are — the sheets in the Lists folder, and every list
+        a saved contact was added to — for "Add to a list?"."""
+        names = []
+        try:
+            for entry in sorted(os.listdir(self._autosave_dir())):
+                stem, ext = os.path.splitext(entry)
+                if ext.lower() in (".csv", ".xlsx") and stem not in names:
+                    names.append(stem)
+        except OSError:
+            pass
+        for contact in self._contacts:
+            for name in getattr(contact, "lists", ()) or ():
+                if name not in names:
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def _stage_of(settings: dict):
+        """A save's stage_of for an import's Stage setting: "csv" reads each
+        row's own stage column, anything else is the stage for everyone."""
+        stage = (settings or {}).get("stage") or "Cold"
+        if stage == "csv":
+            def from_row(item):
+                if isinstance(item, dict):
+                    return item.get("stage", "")
+                return (getattr(item, "extra", None) or {}).get("stage", "")
+            return from_row
+        return lambda _item: stage
+
     def _run_import(self, result: dict):
         """Write one wizard's result: the import record (imports.py) and, for
-        contacts, the people themselves (contacts.py, tagged with the import).
-        Then show them: the new import's filter applied, the Total tab."""
+        contacts, the people themselves (contacts.py, tagged with the import),
+        their stage and list, and — "Auto-assign accounts?" — the companies
+        they work at (accounts.py); for accounts, the companies as saved
+        accounts too. Then show them: the new import's filter applied, the
+        Total tab. What spends (Find e-mails, the accounts' enrichment) asks
+        first, afterwards."""
+        from addons.leads import accounts as AC
         from addons.leads import contacts as CT
         from addons.leads import imports as IM
         kind = result.get("kind")
+        settings = result.get("settings") or {}
+        list_name = settings.get("list_name", "") if settings.get("add_to_list") else ""
         if kind == "contacts":
             # Ranked on the way in, as a loaded sheet always was: the cheap,
             # local fit off the title and what you sell — no API, no credit —
@@ -1129,39 +1935,65 @@ class LeadsWorkbench(QWidget):
                     mapping=result.get("mapping"), settings=result.get("settings"),
                     counts={"rows": result.get("rows", 0),
                             "skipped": result.get("skipped", 0)})
-                settings = result.get("settings") or {}
-                got = CT.save(self._contacts_dir(), result.get("leads") or [],
+                leads = result.get("leads") or []
+                got = CT.save(self._contacts_dir(), leads,
                               via="import", import_id=header["id"],
-                              update=bool(settings.get("update_existing", True)))
+                              update=bool(settings.get("update_existing", True)),
+                              stage_of=self._stage_of(settings), list_name=list_name)
                 IM.update_counts(self._imports_dir(), header["id"], {
                     "rows": result.get("rows", 0), "skipped": result.get("skipped", 0),
                     "added": got["added"], "updated": got["updated"] + got["tagged"]})
                 self._contacts = CT.list_contacts(self._contacts_dir())
                 said = i18n.t("Imported {n} contacts from {file}").format(
                     n=got["added"] + got["updated"] + got["tagged"], file=result["name"])
+                by = settings.get("assign_accounts", "none")
+                if by in ("domain", "name"):
+                    companies = [c for c in (AC.from_lead(l, by) for l in leads) if c]
+                    if companies:
+                        made = AC.save(self._accounts_dir(), companies, via="contact")
+                        if made["added"]:
+                            said += " · " + i18n.t("{n} new accounts").format(
+                                n=made["added"])
                 facet = "contact_imports"
             else:
+                companies = result.get("companies") or []
                 header = IM.create(
                     self._imports_dir(), name=result["name"], kind="accounts",
                     source=result.get("path", ""), sheet=result.get("sheet", ""),
-                    mapping=result.get("mapping"),
+                    mapping=result.get("mapping"), settings=settings,
                     counts={"rows": result.get("rows", 0),
                             "skipped": result.get("skipped", 0)},
-                    companies=result.get("companies") or [])
+                    companies=companies)
+                got = AC.save(self._accounts_dir(), companies, via="import",
+                              import_id=header["id"],
+                              update=bool(settings.get("update_existing", True)),
+                              stage_of=self._stage_of(settings), list_name=list_name)
+                IM.update_counts(self._imports_dir(), header["id"], {
+                    "rows": result.get("rows", 0), "skipped": result.get("skipped", 0),
+                    "added": got["added"], "updated": got["updated"] + got["tagged"]})
                 said = i18n.t("Imported {n} companies from {file} — press Find new "
                               "people to search for people at them.").format(
                     n=header.get("n_companies", 0), file=result["name"])
                 facet = "account_imports"
-        except (IM.StoreError, CT.StoreError, ValueError) as e:
+        except (IM.StoreError, CT.StoreError, AC.StoreError, ValueError) as e:
             QMessageBox.warning(self, i18n.t("Import"), str(e))
             return
         if result.get("skipped"):
             said += " · " + i18n.t("{k} rows skipped").format(k=result["skipped"])
+        if kind == "contacts":
+            # Someone taken off the list and now imported again is wanted
+            # after all: the owner picked this sheet row by row.
+            from addons.leads import removed as RM
+            back = RM.restore_leads(self._removed_dir(), result.get("leads") or [])
+            if back:
+                said += " · " + i18n.t("{n} back from Removed").format(n=back)
+                self._reload_removed()
         # Show what came in, the way Apollo's import opens its people: that
         # import's filter and nothing else ("Hide Filters 1") — a job title
         # left on the rail would hide most of a sheet that never had one. The
         # pool first, so the one re-filter the spec change causes sees them.
-        self._people = P.build(self._contacts, self._runs.values())
+        self._reload_accounts()
+        self._pool_changed()
         self._refresh_imports()
         spec = SearchSpec()
         setattr(spec, facet, [header["id"]])
@@ -1171,14 +2003,131 @@ class LeadsWorkbench(QWidget):
         self._cockpit.show_people_tab()
         self._filters.set_spec(spec)        # → _on_filters_changed → _refilter
         self._status.setText(said)
-        settings = result.get("settings") or {}
-        leads = result.get("leads") or []
-        if kind == "contacts" and settings.get("add_to_list") and leads:
-            self._write_import_list(leads, settings.get("list_name") or result["name"])
-        if kind == "contacts" and settings.get("find_emails"):
-            missing = [l for l in leads if not (l.email or "").strip()]
-            if missing:
-                self._find_emails(self._placeholders(missing))
+        if kind == "contacts":
+            leads = result.get("leads") or []
+            if list_name and leads:
+                self._write_import_list(leads, list_name)
+            if settings.get("find_emails"):
+                # The SAVED contacts' own records, so the rows on screen are
+                # the ones the lookup fills in.
+                saved = [CT.find(self._contacts, l) for l in leads
+                         if not (l.email or "").strip()]
+                missing = [c.lead for c in saved if c is not None]
+                if missing:
+                    self._find_emails(self._placeholders(missing))
+        else:
+            if list_name and companies:
+                self._write_account_list(companies, list_name)
+            mode = ("all" if settings.get("enrich_all")
+                    else "websites" if settings.get("find_websites") else "")
+            if mode:
+                self._enrich_accounts(header["id"], mode)
+
+    # ── an accounts import's Intelligent enrichment ──────────────────────────
+    def _accounts_dir(self) -> str:
+        """This member's saved accounts, beside their contacts. Tests patch
+        this method."""
+        try:
+            import identity
+            import workspace
+            return workspace.member_dir(identity.current()["mid"], self.cfg,
+                                        "leads", "accounts")
+        except Exception:                                   # noqa: BLE001
+            import paths
+            return paths.user_dir("leads", "accounts")
+
+    def _confirm_enrich(self, n: int) -> bool:
+        """"Look up N companies on Exa?" — every search is a credit the owner
+        approves. Tests patch this."""
+        if self._pooled():
+            price = gateway.rate("company_lookup")
+            return self._confirm_pool(i18n.t("Look the companies up"), [
+                i18n.t("Look up {n} companies — up to {c} — for their website, "
+                       "size, revenue and HQ?").format(n=n, c=self._cr(n * price))])
+        answer = QMessageBox.question(
+            self, i18n.t("Look the companies up"),
+            i18n.t("Look up {n} companies on Exa — about {n} searches — for their "
+                   "website, size, revenue and HQ?").format(n=n),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _enrich_accounts(self, import_id: str, mode: str) -> None:
+        """Run an accounts import's enrichment: the import's companies to
+        LeadsAccountEnrichWorker, after the owner approves the searches."""
+        from addons.leads import imports as IM
+        from addons.leads.workers import LeadsAccountEnrichWorker
+        if self._jobs:
+            return
+        record = IM.get(self._imports_dir(), import_id)
+        companies = list((record or {}).get("companies") or ())
+        n = sum(1 for c in companies if LeadsAccountEnrichWorker.wants(c, mode))
+        if not n:
+            return
+        if self._pooled():
+            blocked = self._pool_blocker("company")
+            if blocked:
+                self._status.setText(blocked)
+                return
+        elif not self._key("exa_api_key"):
+            self._status.setText(i18n.t(
+                "Looking the companies up needs an Exa API key — add it under "
+                "Search settings › Keys & claims."))
+            return
+        if not self._confirm_enrich(n):
+            return
+        self._set_running(True)
+        self._status.setText(i18n.t("Looking up {n} companies…").format(n=n))
+        self._enrich_worker = LeadsAccountEnrichWorker(companies, self.cfg, mode)
+        self._enrich_worker.progress.connect(lambda i, total, name: self._status.setText(
+            i18n.t("Looking up {i} of {n}: {name}").format(i=i, n=total, name=name)))
+        self._enrich_worker.done.connect(
+            lambda found, filled, i=import_id: self._on_accounts_enriched(i, found, filled))
+        self._enrich_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._enrich_worker.start()
+
+    def _on_accounts_enriched(self, import_id: str, companies, filled: int):
+        """Write what the lookup found back to the import (the Account CSV
+        import filter matches by the domains it learned) and to the saved
+        accounts, and re-read the page."""
+        from addons.leads import accounts as AC
+        from addons.leads import imports as IM
+        idle = self._job_done()
+        try:
+            IM.set_companies(self._imports_dir(), import_id, companies)
+            AC.save(self._accounts_dir(), companies, via="enrich", update=True)
+        except (IM.StoreError, AC.StoreError) as e:
+            self._status.setText(str(e))
+        else:
+            self._status.setText(i18n.t("Filled in {n} companies from Exa.").format(
+                n=filled))
+        if idle:
+            self._set_running(False)
+        self._reload_accounts()
+        self._pool_changed()
+        self._refresh_imports()
+        self._refilter(keep_page=True)
+
+    def _write_account_list(self, companies, name: str) -> None:
+        """"Add to a list?" for an accounts import: the companies as a sheet
+        in the Lists folder."""
+        safe = re.sub(r"[^\w .-]+", "", os.path.splitext(name.strip())[0]) or "list"
+        path = os.path.join(self._autosave_dir(), f"{safe}.csv")
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["company", "website", "location", "industry", "employees",
+                            "stage"])
+                for c in companies:
+                    w.writerow([c.get("name", ""), c.get("website", ""),
+                                c.get("location", ""), c.get("industry", ""),
+                                c.get("headcount", ""), c.get("stage", "")])
+        except OSError as e:
+            self._status.setText(i18n.t("Couldn't write the list {path}: {err}")
+                                 .format(path=path, err=e))
+            return
+        self._cockpit.refresh_lists()
 
     def _placeholders(self, leads) -> list:
         """Leads as the display-only dossiers the bulk actions take."""
@@ -1225,12 +2174,7 @@ class LeadsWorkbench(QWidget):
         if self._jobs:
             return
         from prospector import reach
-        # Persist the search keys once, to config, so every run after picks them
-        # up. Read the config FRESH and change only those keys: self.cfg can
-        # predate an account or key saved elsewhere, and saving it whole would
-        # wipe them.
-        self._save_search_key("exa_api_key", self._exa.text().strip())
-        self._save_search_key("apollo_api_key", self._apollo.text().strip())
+        self._save_keys()
         missing = self._missing_key()
         if missing:
             self._status.setText(missing)
@@ -1243,17 +2187,10 @@ class LeadsWorkbench(QWidget):
         if not self._confirm_search(spec, companies, note):
             return
         filters = self._filters.spec()
-        if marks:
-            # Counted as searched once the search starts — kept on disk, so
-            # the next press (or the next launch) asks the next companies.
-            from addons.leads import imports as IM
-            try:
-                for import_id, upto in marks.items():
-                    IM.mark_searched(self._imports_dir(), import_id, upto)
-            except IM.StoreError as e:
-                self._status.setText(str(e))
-                return
-            self._refresh_imports()
+        # An import's companies count as searched as each group of them is
+        # asked (_on_companies_asked) — kept on disk, so the next press (or
+        # the next launch) asks only the companies never asked.
+        self._search_marks = marks
         claims = reach.load_claims(self._claims_path)
         offer = self._offer.toPlainText().strip() or DEFAULT_OFFER
         include_earlier = not self._skip_seen.isChecked()
@@ -1280,7 +2217,9 @@ class LeadsWorkbench(QWidget):
             sender=self._sender(), claims=claims,
             exclude_domains=self._seller_domains(), leads_only=leads_only,
             sessions_dir=self._sessions_dir(), include_earlier=include_earlier,
-            spec=spec.to_dict(), source=self._source, emails=emails)
+            spec=spec.to_dict(), source=self._source, emails=emails,
+            removed_dir=self._removed_dir(), companies=list(companies))
+        self._worker.companiesAsked.connect(self._on_companies_asked)
         self._worker.blocked.connect(self._on_source_blocked)
         self._worker.progress.connect(self._status.setText)
         self._worker.done.connect(self._on_prepared)
@@ -1288,18 +2227,56 @@ class LeadsWorkbench(QWidget):
         self._job_started()
         self._worker.start()
 
+    def _on_companies_asked(self, asked: int) -> None:
+        """The worker has asked the first `asked` companies of this press:
+        their imports move on that far — and, the whole press asked, to the
+        end of what it walked (companies skipped as already searched too)."""
+        marks = getattr(self, "_search_marks", None) or {}
+        order = marks.get("order") or []
+        if not order:
+            return
+        if asked >= len(order):
+            upto = dict(marks.get("final") or {})
+        else:
+            upto = {}
+            for import_id, at in order[:max(0, asked)]:
+                upto[import_id] = max(upto.get(import_id, 0), at)
+        from addons.leads import imports as IM
+        try:
+            for import_id, at in upto.items():
+                IM.mark_searched(self._imports_dir(), import_id, at)
+        except IM.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._refresh_imports()
+
     def _confirm_search(self, spec, companies, note: str) -> bool:
         """"This will run about 200 Exa searches — go?" before a search
         spends anything (23-Sep-2026: the owner approves every credit). Says
         what it searches for when the owner did not say it himself — an
         account import with no title or seniority asks for the decision-
         makers. Tests patch this."""
+        if self._pooled():
+            return self._confirm_pool_search(spec, companies, note)
         if self._source == "apollo":
             cost = i18n.t("It searches Apollo — about one Apollo credit for each "
                           "person revealed, up to {n}.").format(n=self._target.value())
         else:
-            cost = i18n.t("It will run about {n} Exa searches.").format(
-                n=self._estimate(spec))
+            n, more = self._searches(spec, companies)
+            if companies and n == 1:
+                cost = i18n.t("It will run 1 Exa search, asking the company for "
+                              "everyone the search wants at once. It keeps up to 3 "
+                              "people from it.")
+            elif companies:
+                cost = i18n.t("It will run {n} Exa searches: one for each company, "
+                              "asking for everyone the search wants at once. It "
+                              "keeps up to 3 people from each company.").format(n=n)
+            elif more:
+                cost = i18n.t("It will run about {n} Exa searches, and up to {m} "
+                              "more only if too few new people come back.").format(
+                                  n=n, m=more)
+            else:
+                cost = i18n.t("It will run about {n} Exa searches.").format(n=n)
         lines = [cost]
         if companies:
             lines.append(i18n.t("It looks at {what}.").format(what=note))
@@ -1314,6 +2291,61 @@ class LeadsWorkbench(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes)
         return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_pool_search(self, spec, companies, note: str) -> bool:
+        """The credits version of _confirm_search. A search costs what the
+        server's price list says and only a search that finds people is charged,
+        so the figure is the most it can be — and it is exact about how many
+        searches there are (source.planned_searches), not a guess."""
+        n, more = self._searches(spec, companies)
+        price = gateway.rate("people_search", 3)
+        if companies and n == 1:
+            cost = i18n.t("It will run 1 search, asking the company for everyone "
+                          "the search wants at once — up to {c}. It keeps up to 3 "
+                          "people from it.").format(c=self._cr(price))
+        elif companies:
+            cost = i18n.t("It will run {n} searches: one for each company, asking "
+                          "for everyone the search wants at once — up to {c}. It "
+                          "keeps up to 3 people from each company.").format(
+                              n=n, c=self._cr(n * price))
+        elif more:
+            cost = i18n.t("It will run about {n} searches — up to {c} — and up to "
+                          "{m} more only if too few new people come back.").format(
+                              n=n, c=self._cr(n * price), m=more)
+        else:
+            cost = i18n.t("It will run about {n} searches — up to {c}.").format(
+                n=n, c=self._cr(n * price))
+        lines = [cost, i18n.t("A search that finds nobody is not charged.")]
+        if companies:
+            lines.append(i18n.t("It looks at {what}.").format(what=note))
+            own = self._filters.spec()
+            if not own.job_titles.include and not own.seniority.include \
+                    and not own.functions.include:
+                lines.append(i18n.t(
+                    "With no job title or seniority set, it asks for Owners, "
+                    "Founders, Chiefs and Directors."))
+        balance = self._balance()
+        if balance is not None and n * price > balance:
+            lines.append(i18n.t("That is more than you have — the search stops "
+                                "when your credits run out."))
+        return self._confirm_pool(i18n.t("Find new people"), lines)
+
+    def _save_keys(self) -> None:
+        """Keep what Search settings › Keys & claims holds, in the config, so
+        every run after picks it up — when Search settings closes and when a
+        search starts. The owner, 24-Sep-2026: an expired Exa key replaced
+        there was only kept once Find new people was pressed, so Done forgot
+        it and Find e-mails and the company look-ups went on with the old one.
+        Each key is written alone (_save_search_key): self.cfg can predate an
+        account or a key saved elsewhere, and saving it whole would wipe them.
+
+        On the credit pool there are no keys to keep — the hidden boxes hold
+        whatever an older build saved, and writing it back would only keep a
+        provider key on a customer's machine."""
+        if self._pooled():
+            return
+        self._save_search_key("exa_api_key", self._exa.text().strip())
+        self._save_search_key("apollo_api_key", self._apollo.text().strip())
 
     def _save_search_key(self, name: str, value: str):
         """Keep one search key in the config, and in this window's cfg."""
@@ -1336,7 +2368,11 @@ class LeadsWorkbench(QWidget):
 
     def _missing_key(self) -> str:
         """Why this search cannot start, naming the key the chosen source
-        needs — said before a worker spends a thread finding out."""
+        needs — said before a worker spends a thread finding out. On the
+        credit pool there is no key to miss: the reason is no credits, or a
+        lookup the server has not switched on."""
+        if self._pooled():
+            return self._pool_blocker("people")
         if self._source == "apollo" and not self._key("apollo_api_key"):
             return i18n.t("Searching Apollo needs an Apollo API key — add it "
                           "under Keys & claims, or search with Exa instead.")
@@ -1417,16 +2453,16 @@ class LeadsWorkbench(QWidget):
             apollo = self._apollo_bit(res)
             if apollo:
                 text += "   ·   " + apollo
-            self._summary.setText(text)
+            self._summary.setText(text + self._used_note())
         elif res.dossiers:
             self._summary.setText(self._run_summary(res, self._drafts))
             self._status.setText(i18n.t(
                 "{n} ready to send — every lead below shows its outcome."
-            ).format(n=len(self._pending(self._drafts))))
+            ).format(n=len(self._sendable(self._drafts))))
         else:
             self._summary.setText("")
         self._export_btn.setEnabled(bool(res.dossiers or getattr(res, "all_leads", None)))
-        self._send_btn.setEnabled(bool(self._pending(self._drafts)))
+        self._send_btn.setEnabled(bool(self._sendable(self._drafts)))
 
     def _on_failed(self, msg):
         if self._job_done():
@@ -1443,7 +2479,15 @@ class LeadsWorkbench(QWidget):
         if not dossiers or self._jobs:
             return
         from prospector import verify
-        if not verify.collect_keys(self.cfg):
+        if self._pooled():
+            blocked = self._pool_blocker("verify")
+            if blocked:
+                self._status.setText(blocked)
+                return
+            if not self._confirm_verify(sum(1 for d in dossiers
+                                            if (d.lead.email or "").strip())):
+                return
+        elif not verify.collect_keys(self.cfg):
             QMessageBox.information(
                 self, i18n.t("Verify e-mails"),
                 i18n.t("Add a verifier key in Settings > Agents (Reoon, "
@@ -1461,6 +2505,18 @@ class LeadsWorkbench(QWidget):
         self._job_started()
         self._verify_worker.start()
 
+    def _confirm_verify(self, n: int) -> bool:
+        """On the pool a check costs a credit, so a batch past ten asks first.
+        A check is charged only when a verifier actually answers. Tests patch
+        this."""
+        if n <= 10:
+            return True
+        price = gateway.rate("email_verify")
+        return self._confirm_pool(i18n.t("Verify e-mails"), [
+            i18n.t("Check {n} e-mail addresses — up to {c}.").format(
+                n=n, c=self._cr(n * price)),
+            i18n.t("An address is charged only when a verifier answers.")])
+
     def _on_verified(self):
         if self._job_done():
             self._set_running(False)
@@ -1469,7 +2525,8 @@ class LeadsWorkbench(QWidget):
         # checked on someone OUTSIDE the run on screen is kept at all.
         if not self._keep_as_contacts(getattr(self, "_acted", []), "email"):
             self._rebuild_pool_keep_page()  # the rows show the new statuses
-        self._status.setText(i18n.t("Verification done — statuses updated."))
+        self._status.setText(i18n.t("Verification done — statuses updated.")
+                             + self._used_note())
         # Same deal as Find e-mails: the sheet already on disk is the
         # deliverable, so a status a verify pass just confirmed belongs in it
         # too, not only on screen.
@@ -1494,6 +2551,11 @@ class LeadsWorkbench(QWidget):
             self._status.setText(i18n.t(
                 "Those leads already have a verified address."))
             return
+        if self._pooled():
+            blocked = self._pool_blocker("find_email")
+            if blocked:
+                self._status.setText(blocked)
+                return
         if not self._confirm_emails(len(leads)):
             return
         self._set_running(True)
@@ -1508,43 +2570,76 @@ class LeadsWorkbench(QWidget):
         self._email_worker.progress.connect(lambda i, n, l: self._status.setText(
             i18n.t("Finding e-mail domains…") if not i else
             i18n.t("Checking {i} of {n}: {who}").format(i=i, n=n, who=l.display())))
+        self._finder_refusals = {}
+        self._email_worker.refused.connect(self._on_finders_refused)
         self._email_worker.done.connect(self._on_emails_found)
         self._email_worker.failed.connect(self._on_failed)
         self._job_started()
         self._email_worker.start()
 
     def _confirm_emails(self, n: int) -> bool:
-        """Each lead costs an Exa domain lookup and, where the free verifiers
-        can't confirm it, a finder credit — and every ticked row is checked,
-        nothing is sampled — so a batch past ten asks first, and names whose
-        credits. This question is the only cap on the spend. Tests patch this."""
+        """Each lead can cost a finder credit — Apollo's, then Hunter's, only
+        when one of them knows the person — and every ticked row is looked up,
+        nothing is sampled, so a batch past ten asks first, and names whose
+        credits. Nothing is guessed (24-Sep-2026). This question is the only
+        cap on the spend. Tests patch this. On the credit pool it asks in
+        credits (_confirm_pool_emails); the finders' own names are the
+        developer switch's."""
         if n <= 10:
             return True
-        who = i18n.t("verifier credits")
-        if self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked"):
-            who = i18n.t("verifier credits, and Apollo credits where Apollo is "
-                         "the finder")
+        if self._pooled():
+            return self._confirm_pool_emails(n)
+        # Named in the order verify._FINDERS asks them.
+        apollo = self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked")
+        hunter = self._key("hunter_api_key")
+        who = (i18n.t("Apollo, then Hunter") if apollo and hunter
+               else i18n.t("Apollo") if apollo else i18n.t("Hunter"))
         answer = QMessageBox.question(
             self, i18n.t("Find e-mails"),
-            i18n.t("Find and check e-mails for {n} leads? Prism looks up each "
-                   "company's real domain, then confirms every one of the {n} "
-                   "addresses — free verifiers first, then {who}.").format(
-                       n=n, who=who))
+            i18n.t("Find and check e-mails for {n} leads? Prism asks {who} for "
+                   "each person's real address and checks what comes back with "
+                   "the free verifiers. A credit is used only when a finder "
+                   "knows the person. Nothing is guessed.").format(n=n, who=who))
         return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_pool_emails(self, n: int) -> bool:
+        """The credits version of _confirm_emails: per lead, a company-website
+        lookup where the lead has none, an address found (charged only when a
+        finder knows the person) and a check of what came back. Nothing is
+        guessed, so a lead nobody knows costs at most the website lookup."""
+        find, check, site = (gateway.rate("email_find"), gateway.rate("email_verify"),
+                             gateway.rate("domain_lookup"))
+        return self._confirm_pool(i18n.t("Find e-mails"), [
+            i18n.t("Find and check e-mails for {n} leads — up to {c}.").format(
+                n=n, c=self._cr(n * (site + find + check))),
+            i18n.t("Prism looks up each company's website, asks a finder for the "
+                   "person's real address and checks what comes back. An address "
+                   "is charged only when a finder knows the person. Nothing is "
+                   "guessed.")])
+
+    def _on_finders_refused(self, why) -> None:
+        """{finder: why} from the e-mail worker, just before its result: the
+        finders that turned the account away (verify.FinderRefused)."""
+        self._finder_refusals = dict(why or {})
 
     def _on_emails_found(self, found: int, verified: int):
         """Fold the addresses in: the rows re-render with their new Status
-        (Verified / Guessed / Catch-all / No email) and the session keeps them,
-        so the next thing the owner does starts from what this cost."""
+        (Verified / Unverified / Catch-all / No email) and the session keeps them,
+        so the next thing the owner does starts from what this cost. A finder
+        that refused the account is named with the result — and when nothing
+        was found, in a box the owner cannot miss (24-Sep-2026: Apollo's Free
+        plan and Hunter's spent quota refused all 159 lookups in silence)."""
         idle = self._job_done()
         self._save_session()                # the addresses are the run's value now
         if not self._keep_as_contacts(getattr(self, "_acted", []), "email"):
             self._rebuild_pool_keep_page()  # the rows show the new statuses
         if idle:
             self._set_running(False)
-        self._status.setText(i18n.t(
-            "Found {n} new address(es) — {v} verified.").format(
-                n=found, v=verified))
+        refusals = list((getattr(self, "_finder_refusals", None) or {}).values())
+        self._finder_refusals = {}
+        line = i18n.t("Found {n} new address(es) — {v} verified.").format(
+            n=found, v=verified)
+        self._status.setText("   ·   ".join([line] + refusals) + self._used_note())
         # The sheet already sitting in the autosave folder is the deliverable —
         # rewrite it with the addresses this run just found, the same way a
         # finished run writes it the first time, so the owner never has to
@@ -1552,6 +2647,10 @@ class LeadsWorkbench(QWidget):
         if self._res is not None and (self._res.dossiers
                                       or getattr(self._res, "all_leads", None)):
             self._start_export(self._autosave_dir(), announce=False)
+        if refusals and not found:
+            QMessageBox.warning(self, i18n.t("Find e-mails"), "\n\n".join(
+                [i18n.t("No e-mails were found. The finders turned Prism away:")]
+                + refusals))
 
     def _qualify_selected(self, dossiers):
         """Qualify & draft the checked people the run sourced but never
@@ -1568,7 +2667,12 @@ class LeadsWorkbench(QWidget):
             return
         # Without a Groq key every lead would come back "no model" after its
         # why-now search was already paid for — say so before spending anything.
-        if not (self.cfg.get("api_key") or "").strip():
+        if self._pooled():
+            blocked = self._pool_blocker("llm")
+            if blocked:
+                self._status.setText(blocked)
+                return
+        elif not (self.cfg.get("api_key") or "").strip():
             self._status.setText(i18n.t(
                 "Qualifying needs your Groq key — add it in Settings, then try again."))
             return
@@ -1618,6 +2722,13 @@ class LeadsWorkbench(QWidget):
         paces them — so a batch past ten asks first. Tests patch this."""
         if n <= 10:
             return True
+        if self._pooled():
+            each = (gateway.rate("signals") + gateway.rate("ai_qualify")
+                    + gateway.rate("ai_draft"))
+            return self._confirm_pool(i18n.t("Qualify & draft"), [
+                i18n.t("Qualify and draft {n} leads — up to {c}.").format(
+                    n=n, c=self._cr(n * each)),
+                i18n.t("Each lead is a why-now news search, a score and a draft.")])
         answer = QMessageBox.question(
             self, i18n.t("Qualify & draft"),
             i18n.t("Qualify and draft {n} leads now? Prism researches each one and "
@@ -1656,13 +2767,13 @@ class LeadsWorkbench(QWidget):
         if idle:
             self._set_running(False)
         text = i18n.t("Qualified {n} — {d} drafted, {r} ready to send.").format(
-            n=len(good), d=len(new_drafts), r=len(self._pending(self._drafts)))
+            n=len(good), d=len(new_drafts), r=len(self._sendable(self._drafts)))
         if failed:
             why = (failed[0].note or "").strip() or i18n.t("the qualify pass failed")
             text += "  " + i18n.t(
                 "{n} couldn't be qualified ({why}) — tick them and try again.").format(
                     n=len(failed), why=why.rstrip("."))
-        self._status.setText(text)
+        self._status.setText(text + self._used_note())
 
     def _save_list(self, dossiers):
         """Write the checked leads to a named CSV in the Prism Leads folder — a
@@ -1684,7 +2795,7 @@ class LeadsWorkbench(QWidget):
                 "and try again.").format(path=path, err=e))
             return
         self._cockpit.refresh_lists()      # show it on the Lists tab at once
-        self._keep_as_contacts([d.lead for d in dossiers], "list")
+        self._keep_as_contacts([d.lead for d in dossiers], "list", list_name=safe)
         QMessageBox.information(
             self, i18n.t("Save to list"),
             i18n.t("Saved {n} lead(s) to:\n{path}").format(n=n, path=path))
@@ -1763,8 +2874,6 @@ class LeadsWorkbench(QWidget):
                    "engine — for now this sends touch 1.").format(
                        n=len(drafts), addr=addr))
         if confirm == QMessageBox.StandardButton.Yes:
-            # Apollo: "Adding prospects to a sequence saves them as contacts."
-            self._keep_as_contacts([dr.dossier.lead for dr in drafts], "sequence")
             self._run_send(drafts)
 
     def _run_summary(self, res, drafts) -> str:
@@ -1835,8 +2944,9 @@ class LeadsWorkbench(QWidget):
                    "password, then come back and send."))
 
     def _on_send(self):
-        """'Send all' — every drafted lead not already mailed."""
-        pending = self._pending(self._drafts)
+        """'Send all' — every drafted lead not already mailed, and not taken
+        off the list."""
+        pending = self._sendable(self._drafts)
         if not pending or self._jobs:
             return
         if not CB.mailer.is_configured(self.cfg):
@@ -1853,7 +2963,11 @@ class LeadsWorkbench(QWidget):
         self._run_send(pending)
 
     def _run_send(self, drafts):
-        """Shared sender for 'Send all' and 'Add to sequence' (selected)."""
+        """Shared sender for 'Send all' and 'Add to sequence' (selected).
+        Apollo: "Adding prospects to a sequence saves them as contacts" — so
+        everyone about to be written to is saved first, and _on_sent moves
+        them on from Cold (Apollo's stage trigger)."""
+        self._keep_as_contacts([dr.dossier.lead for dr in drafts], "sequence")
         self._set_running(True, sending=True)
         self._status.setText(i18n.t("Sending…"))
         self._send_worker = LeadsSendWorker(drafts, self.cfg)
@@ -1871,10 +2985,27 @@ class LeadsWorkbench(QWidget):
     def _on_sent(self, sent, failed):
         if self._job_done():
             self._set_running(False)
+        # Apollo's stage trigger: "Approaching — you have sent the contact at
+        # least one message". Only a contact still Cold moves; a stage the
+        # owner set by hand stands.
+        worker = self._send_worker
+        sent_drafts = [dr for dr in getattr(worker, "drafts", None) or ()
+                       if getattr(dr, "status", "") == "sent"]
+        mailed = [dr.dossier.lead for dr in sent_drafts]
+        if sent_drafts:
+            # Each send, with its subject, in the contact's Activities.
+            from addons.leads import contacts as CT
+            try:
+                CT.log_sent(self._contacts_dir(),
+                            [(dr.dossier.lead, dr.subject) for dr in sent_drafts])
+            except CT.StoreError as e:
+                self._status.setText(str(e))
+        moved = self._advance_stage(mailed, "Approaching", ("Cold",)) if mailed else 0
         if getattr(self, "_res", None) is not None:
             # A sent draft reads "Mailed" in Status — and under Email status.
             self._cockpit.set_run(self._res.dossiers, self._drafts)
-            self._rebuild_pool_keep_page()
+        if moved or getattr(self, "_res", None) is not None:
+            self._rebuild_pool_keep_page()      # …and a new stage under Stage
         self._save_session()
         self._status.setText(i18n.t("Sent {s}, failed {f}.").format(
             s=len(sent), f=len(failed)))
@@ -1919,14 +3050,22 @@ class LeadsWorkbench(QWidget):
         self._announce_export = announce
         # The drafts CSV is quick — write it inline; the xlsx go to the worker.
         from prospector import reach
+        # Whoever the owner took off the list is off the sheets too.
+        def kept(lead):
+            return not self._is_removed(lead)
+
+        drafts = [d for d in self._drafts
+                  if kept(getattr(getattr(d, "dossier", None), "lead", None))]
         try:
-            reach.write_outreach(self._drafts, os.path.join(folder, "outreach.csv"))
+            reach.write_outreach(drafts, os.path.join(folder, "outreach.csv"))
         except Exception:                                   # noqa: BLE001
             pass
         self._set_running(True)
         self._status.setText(i18n.t("Verifying e-mails and writing the sheets…"))
         self._export_worker = LeadsExportWorker(
-            self._res.all_leads, self._res.dossiers, folder)
+            [lead for lead in self._res.all_leads or () if kept(lead)],
+            [d for d in self._res.dossiers or () if kept(getattr(d, "lead", None))],
+            folder)
         self._export_worker.progress.connect(self._status.setText)
         self._export_worker.done.connect(self._on_exported)
         self._export_worker.failed.connect(self._on_failed)
@@ -1987,8 +3126,9 @@ class LeadsWorkbench(QWidget):
         cockpit = getattr(self, "_cockpit", None)
         if cockpit is not None:
             for b in cockpit.leads._bulk_actions():
-                if b is cockpit.leads._b_contact:
-                    continue                # Save is a local write, not a job
+                if b in (cockpit.leads._b_contact, cockpit.leads._b_stage,
+                         cockpit.leads._b_remove):
+                    continue                # Save, Set stage, Remove: local writes
                 b.setEnabled(not running)
             if not running:
                 # Each button's real, selection-driven state — not just
@@ -1997,24 +3137,53 @@ class LeadsWorkbench(QWidget):
                 cockpit.leads._refresh_bulk()
         if not running:
             self._refresh_prepare()
-            self._send_btn.setEnabled(bool(self._pending(self._drafts)))
+            self._send_btn.setEnabled(bool(self._sendable(self._drafts)))
+            # After the finishing job's own bookkeeping (the page rebuilt):
+            # the open person as they now stand, then the next enrichment.
+            QTimer.singleShot(0, self, self._after_job)
             self._export_btn.setEnabled(self._res is not None
                                         and bool(getattr(self._res, "dossiers", None)
                                                  or getattr(self._res, "all_leads", None)))
 
+    def _after_job(self) -> None:
+        if getattr(self, "_cockpit", None) is not None:
+            self._cockpit.leads.refresh_person()
+        if self._enrich_queue and not self._jobs:
+            self._next_enrichment()
+
     # ── background jobs ───────────────────────────────────────────────────────
     def _job_started(self):
+        if self._jobs == 0 and self._pooled():
+            gateway.reset()             # a new run: its spend counts from zero
         self._jobs += 1
 
     def _job_done(self) -> bool:
         """One background job finished; True when none are left running."""
         self._jobs = max(0, self._jobs - 1)
+        if self._jobs == 0:
+            self._refresh_credits()     # what the run cost is now off the balance
         return self._jobs == 0
 
     @staticmethod
     def _pending(drafts) -> list:
         """Drafts not yet mailed — what Send may still send."""
         return [d for d in (drafts or []) if getattr(d, "status", "") != "sent"]
+
+    def _sendable(self, drafts) -> list:
+        """What Send all may send: drafts not yet mailed, to nobody the owner
+        took off the list (Remove), and to someone Prism holds a real address
+        for. A guessed one is set aside when a lead is read back (24-Sep-2026),
+        and reach.send skips a draft with no address — so the count says the
+        same."""
+        out = []
+        for d in self._pending(drafts):
+            lead = getattr(getattr(d, "dossier", None), "lead", None)
+            if lead is None or self._is_removed(lead):
+                continue
+            if not (getattr(lead, "email", "") or "").strip():
+                continue
+            out.append(d)
+        return out
 
     # ── sessions: every run is kept, and no run repeats people ────────────────
     def _sessions_dir(self) -> str:

@@ -47,15 +47,16 @@ CONTRACT = {
     "facet_functions", "facet_industries", "facet_headcount", "facet_revenue",
     "facet_companies", "facet_company_hq", "facet_years", "facet_changed_jobs",
     "facet_keywords", "facet_contact_imports", "facet_account_imports",
-    "facet_email_status", "facet_scores",
+    "facet_email_status", "facet_scores", "facet_lists", "facet_stages",
+    "facet_custom_fields",
     # addons/leads/cockpit.py — Apollo's title row and toolbar, the three
     # tabs, the table, the pages, the action bar, the drawer, the tab strip
     "import_menu", "views_menu", "hide_filters", "people_search",
     "research_menu", "save_as_search", "view_toggle", "sort",
     "search_settings", "people_tabs", "table", "select_all", "col_lead",
     "col_focus", "col_fit", "col_status", "col_signal", "pager", "bulk_bar",
-    "bulk_save", "bulk_verify", "bulk_emails", "bulk_list", "bulk_export",
-    "bulk_qualify", "bulk_sequence", "drawer", "tab_people", "tab_sessions",
+    "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_list", "bulk_export",
+    "bulk_stage", "bulk_qualify", "bulk_sequence", "drawer", "tab_people", "tab_sessions",
     "tab_lists", "tab_saved", "tab_sequences", "tab_analytics",
 }
 
@@ -159,21 +160,23 @@ class TheSteps(unittest.TestCase):
         """The whole reason the help exists: nothing on the screen said which
         buttons spend money."""
         body = dict((k, b) for k, _, b in T.STEPS)
-        self.assertIn("credit", body["bulk_emails"])
-        self.assertIn("Groq", body["bulk_qualify"])
-        self.assertIn("Groq", body["research_menu"])
-        self.assertIn("costs nothing", body["bulk_verify"])
+        # Leads runs on the Prism credit pool: every paid step says "credits",
+        # and none of them names a vendor key the customer no longer holds.
+        for key in ("bulk_emails", "bulk_qualify", "bulk_verify", "research_menu",
+                    "btn_find", "search_settings"):
+            self.assertIn("credit", body[key].lower(), key)
+            for vendor in ("Groq", "Exa", "Apollo", "Hunter", "your keys"):
+                self.assertNotIn(vendor, body[key], (key, vendor))
         self.assertIn("costs nothing", body["people_search"])
         self.assertIn("spends", body["btn_find"])
         self.assertIn("Nothing is searched", body["import_menu"])
         self.assertIn("free", body["filters_head"])
         # What the search it runs costs, where the settings are.
-        for word in ("Exa", "Apollo", "credit", "Reveal up to"):
-            self.assertIn(word, body["search_settings"], word)
+        self.assertIn("finds nobody is not", body["search_settings"])
 
     def test_the_status_tags_are_all_named(self):
         body = dict((k, b) for k, _, b in T.STEPS)["col_status"]
-        for tag in ("Verified", "Guessed", "Catch-all", "Unknown", "Invalid",
+        for tag in ("Verified", "Unverified", "Catch-all", "Unknown", "Invalid",
                     "No email", "Mailed"):
             self.assertIn(tag, body, tag)
 

@@ -56,11 +56,27 @@ IMPORT_FACETS = ("contact_imports", "account_imports")
 # (addons/leads/pool.py). They live on the spec anyway so a saved search keeps
 # them, as Apollo's does. Option keys, not labels, like every band.
 EMAIL_STATUS = (
-    ("verified", "Verified"), ("guessed", "Guessed"), ("catch_all", "Catch-all"),
+    ("verified", "Verified"), ("guessed", "Unverified"), ("catch_all", "Catch-all"),
     ("unknown", "Unknown"), ("invalid", "Invalid"), ("no_email", "No email"),
     ("mailed", "Mailed"),
 )
 LOCAL_FACETS = ("email_status",)
+# Apollo's filters over the owner's OWN records (knowledge.apollo.io, "Search
+# filters glossary", read 23-Sep-2026): "Stage" — "Click Stage > Contact or
+# Account. Check each stage you want to include or exclude"; "Lists" — "Click
+# People or Company, then choose People lists or Company lists", "is any of" /
+# "is none of"; "Custom fields" — "select a custom field. Select a value to
+# filter by." Like the local filters above, no search can ask them: the pool
+# applies them (addons/leads/pool.py). Stage and Lists hold names on an include
+# and an exclude side, a contact's and an account's apiece; custom fields are
+# {"contact:<column>" | "account:<column>": [values]}, include-only.
+RECORD_FACETS = ("contact_stages", "account_stages", "contact_lists", "account_lists")
+# The rail shows each pair as ONE filter with a Contact / Account switch, the
+# way Apollo does; count() answers for the pair by its group name.
+RECORD_GROUPS = {"stages": ("contact_stages", "account_stages"),
+                 "lists": ("contact_lists", "account_lists")}
+CUSTOM_SCOPES = ("contact", "account")
+_MAX_CUSTOM = 20          # custom fields in one spec
 
 FACET_LABELS = {
     "locations": "Location", "job_titles": "Job title", "seniority": "Seniority",
@@ -72,6 +88,10 @@ FACET_LABELS = {
     "account_imports": "Account CSV import",
     "email_status": "Email status",
     "scores": "Fit score",
+    "stages": "Stage", "contact_stages": "Contact stage",
+    "account_stages": "Account stage",
+    "lists": "Lists", "contact_lists": "People lists", "account_lists": "Company lists",
+    "custom_fields": "Custom fields",
 }
 
 # Management levels, Apollo's set. (key, label). A title can hold more than one
@@ -270,6 +290,37 @@ def _fit_floor(value) -> int:
     if isinstance(value, float) and not value.is_integer():
         return 0
     return min(100, max(0, int(value)))
+
+
+def custom_key(scope: str, column: str) -> str:
+    """"contact:Lead Quality" — how a custom field is named in a spec."""
+    return f"{scope}:{' '.join(str(column or '').split())[:_MAX_LEN]}"
+
+
+def split_custom_key(key: str) -> tuple:
+    """("contact", "Lead Quality") from custom_key's form; ("", "") for
+    anything else."""
+    scope, _sep, column = str(key or "").partition(":")
+    column = " ".join(column.split())
+    return (scope, column) if scope in CUSTOM_SCOPES and column else ("", "")
+
+
+def _custom(raw) -> dict:
+    """{custom_key: [values]} — a field named the way custom_key names one, at
+    least one value, fields matched without regard to case (first spelling
+    wins), at most _MAX_CUSTOM of them."""
+    out, seen = {}, set()
+    for key, values in (raw.items() if isinstance(raw, dict) else ()):
+        scope, column = split_custom_key(key)
+        chosen = _values(values if isinstance(values, (list, tuple)) else [values])
+        fold = (scope, column.casefold())
+        if not (scope and chosen) or fold in seen:
+            continue
+        seen.add(fold)
+        out[custom_key(scope, column)] = chosen
+        if len(out) >= _MAX_CUSTOM:
+            break
+    return out
 
 
 def label_of(options, key: str) -> str:
@@ -504,6 +555,13 @@ class SearchSpec:
     email_status: list = field(default_factory=list)
     min_fit: int = 0
     qualified_only: bool = False
+    # The owner's own records (RECORD_FACETS): stage and list names, included
+    # or excluded, on the contact or on their account — and custom fields.
+    contact_stages: Facet = field(default_factory=Facet)
+    account_stages: Facet = field(default_factory=Facet)
+    contact_lists: Facet = field(default_factory=Facet)
+    account_lists: Facet = field(default_factory=Facet)
+    custom_fields: dict = field(default_factory=dict)
     # Apollo's "Include people with similar titles": on, a job-title include
     # only steers the search; off, the person's title must carry one of them.
     similar_titles: bool = True
@@ -522,6 +580,9 @@ class SearchSpec:
         out["email_status"] = list(self.email_status)
         out["min_fit"] = int(self.min_fit)
         out["qualified_only"] = bool(self.qualified_only)
+        for name in RECORD_FACETS:
+            out[name] = getattr(self, name).to_dict()
+        out["custom_fields"] = {k: list(v) for k, v in self.custom_fields.items()}
         out["similar_titles"] = bool(self.similar_titles)
         out["changed_jobs_90d"] = bool(self.changed_jobs_90d)
         return out
@@ -542,6 +603,8 @@ class SearchSpec:
                    email_status=_bands(raw.get("email_status"), EMAIL_STATUS),
                    min_fit=_fit_floor(raw.get("min_fit")),
                    qualified_only=_bool(raw.get("qualified_only"), False),
+                   **{name: Facet.from_dict(raw.get(name)) for name in RECORD_FACETS},
+                   custom_fields=_custom(raw.get("custom_fields")),
                    similar_titles=_bool(raw.get("similar_titles"), True),
                    changed_jobs_90d=_bool(raw.get("changed_jobs_90d"), False))
 
@@ -575,10 +638,16 @@ class SearchSpec:
         return getattr(self, name)
 
     def count(self, name: str) -> int:
-        """How many values one facet (chip, band, import or local) holds.
-        "scores" is the fit floor and the qualified switch, one each."""
+        """How many values one facet (chip, band, import, local or record)
+        holds. "scores" is the fit floor and the qualified switch, one each;
+        "stages" and "lists" (RECORD_GROUPS) are the contact's and the
+        account's together; "custom_fields" is every value of every field."""
         if name == "scores":
             return int(self.min_fit > 0) + int(self.qualified_only)
+        if name in RECORD_GROUPS:
+            return sum(self.count(n) for n in RECORD_GROUPS[name])
+        if name == "custom_fields":
+            return sum(len(v) for v in self.custom_fields.values())
         if name in BAND_FACETS or name in IMPORT_FACETS or name in LOCAL_FACETS:
             return len(getattr(self, name))
         return getattr(self, name).count()
@@ -586,8 +655,14 @@ class SearchSpec:
     def active_count(self) -> int:
         """Every value set, across the panel — the badge on "Lead filters"."""
         return (sum(self.count(n) for n in
-                    CHIP_FACETS + BAND_FACETS + IMPORT_FACETS + LOCAL_FACETS)
-                + self.count("scores") + int(self.changed_jobs_90d))
+                    CHIP_FACETS + BAND_FACETS + IMPORT_FACETS + LOCAL_FACETS
+                    + RECORD_FACETS)
+                + self.count("custom_fields") + self.count("scores")
+                + int(self.changed_jobs_90d))
+
+    def has_record_filters(self) -> bool:
+        """Any Stage, Lists or Custom fields value set."""
+        return bool(sum(self.count(n) for n in RECORD_FACETS) or self.custom_fields)
 
     def role_terms(self) -> list:
         """The roles a search asks Exa for: the job titles, or — with none —
@@ -1280,6 +1355,14 @@ def _article(word: str) -> str:
     return "an" if word[:1].lower() in "aeiou" else "a"
 
 
+def _any_of(words) -> str:
+    """"Owner", "Owner or Director", "Owner, Founder, Chief or Director"."""
+    words = [w for w in words if w]
+    if len(words) <= 1:
+        return "".join(words)
+    return ", ".join(words[:-1]) + " or " + words[-1]
+
+
 def _phrase(variant: int, role: str, target: str, is_company: bool, size: str,
             kind: str, place: str, kw: str) -> str:
     """One query. Variant 0 is the first pass; 1-4 are the top-up rounds, each
@@ -1362,6 +1445,24 @@ def _queries(spec: SearchSpec, variant: int) -> list:
         # stays the industry when there is exactly one to name.
         label = spec.industries.include[0] if len(spec.industries.include) == 1 else ""
         targets = [(label, c, True) for c in spec.companies.include]
+        # …and it is asked ONCE, for every role at the same time: "Owner,
+        # Founder, Chief or Director at Acme". The owner, 24-Sep-2026: a
+        # search per role found the same few people at four times the cost —
+        # a run keeps at most three from any one company — and the cap on a
+        # run's calls meant most companies were never asked for most roles.
+        # A role an exclusion names leaves the list, not the company.
+        wanted = [r for r in roles if not _names_any(_tokens(r), banned)]
+        if not wanted:
+            return []
+        roles = [_any_of(wanted)]
+        # One search a company, so no spread over places either: a place goes
+        # in only when the owner named exactly one ("…at Acme in India").
+        # A rotation through the regions left outside an exclusion would send
+        # "…at Acme in Oceania"; the location filter is still checked on
+        # everyone who comes back (match_person).
+        named = spec.locations if kind == "person" else spec.company_hq
+        if not (len(named.include) == 1 and not named.exclude):
+            kind, places_ = "", []
     else:
         targets = [(ind, ind, False) for ind in (spec.industries.include or [""])]
     # Role + target pick the place, so every industry meets every place across
@@ -1371,7 +1472,8 @@ def _queries(spec: SearchSpec, variant: int) -> list:
     # place a round uses when the list is longer (the world minus India is
     # ~190 countries), else by one.
     n, pairings = len(places_), len(roles) * len(targets)
-    per_pairing = min(n, -(-_FIRST_PASS_FLOOR // pairings)) if n else 1
+    per_pairing = (1 if spec.companies.include or not n
+                   else min(n, -(-_FIRST_PASS_FLOOR // pairings)))
     width = len(roles) + len(targets) + per_pairing - 2
     shift = variant * width if n > width else variant
     out, seen = [], set()
@@ -1391,6 +1493,20 @@ def _queries(spec: SearchSpec, variant: int) -> list:
     return out
 
 
+def company_chunks(spec: SearchSpec, companies) -> list:
+    """`spec` once per MAX_FACET_VALUES of `companies` — the most one Current
+    company facet holds — for a search over more companies than that (an
+    Account CSV import searched whole in one press, 24-Sep-2026). Each copy
+    asks for the same people at its own companies; [] for none."""
+    names = [c.strip() for c in (companies or ()) if isinstance(c, str) and c.strip()]
+    out = []
+    for start in range(0, len(names), _MAX_VALUES):
+        part = spec.copy()
+        part.companies.include = names[start:start + _MAX_VALUES]
+        out.append(part)
+    return out
+
+
 def plan(spec: SearchSpec) -> list:
     """The first-pass Exa queries as (industry_label, query) pairs, breadth-
     first across industries (role-outer, like source.queries). Never contains an
@@ -1406,6 +1522,11 @@ def top_up(spec: SearchSpec, round_no: int) -> list:
     did not. Nothing the first pass or an earlier round already sent; the same
     exclusion rule as `plan`. [] once the phrasings run out."""
     if not isinstance(round_no, int) or not 1 <= round_no <= _TOPUP_ROUNDS:
+        return []
+    if spec.companies.include:
+        # The first pass asked every named company for everyone the search
+        # wants (_queries); asking again in other words pays to meet the
+        # same people, and a press says exactly what it will spend.
         return []
     sent = {_qkey(q) for _, q in plan(spec)}
     for earlier in range(1, round_no):

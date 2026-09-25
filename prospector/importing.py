@@ -12,7 +12,8 @@ This module is the mapping step's model, for the Import wizard
 (addons/leads/import_wizard.py):
 
   · tabs(path)                        the sheets a file holds, with row counts
-  · read_table(path, sheet)           one tab: (name, header, rows)
+  · read_table(path, sheet)           one tab: (name, header, rows) — or, with
+                                      ALL_SHEETS, every tab as one table
   · guess_mapping(header, kind)       a field for every column, best guess
   · contacts_from_rows(…)             rows → Leads    (kind "contacts")
   · accounts_from_rows(…)             rows → companies (kind "accounts")
@@ -34,23 +35,27 @@ from .models import Lead
 CUSTOM = "custom"
 SKIP = "skip"
 
-# (key, label) — what the mapping step's drop-down offers, in its order.
+# (key, label) — what the mapping step's drop-down offers, in its order, named
+# the way Apollo's importer names them ("contact first name", "account name").
 CONTACT_FIELDS = (
-    ("first_name", "First name"), ("last_name", "Last name"),
-    ("name", "Full name"), ("title", "Job title"),
-    ("company", "Company name"), ("website", "Company website"),
-    ("email", "Email"), ("phone", "Phone"), ("linkedin", "LinkedIn URL"),
-    ("city", "City"), ("state", "State"), ("country", "Country"),
-    ("location", "Location"), ("industry", "Industry"),
-    ("seniority", "Seniority"), ("department", "Department"),
-    ("headcount", "# Employees"), ("since", "In role since"),
+    ("first_name", "Contact first name"), ("last_name", "Contact last name"),
+    ("name", "Contact full name"), ("title", "Contact title"),
+    ("company", "Account name"), ("website", "Account website"),
+    ("email", "Contact email"), ("phone", "Contact phone"),
+    ("linkedin", "Contact LinkedIn URL"),
+    ("city", "Contact city"), ("state", "Contact state"),
+    ("country", "Contact country"), ("location", "Contact location"),
+    ("industry", "Account industry"), ("seniority", "Contact seniority"),
+    ("department", "Contact department"), ("headcount", "Account # employees"),
+    ("since", "In role since"), ("stage", "Contact stage"),
 )
 ACCOUNT_FIELDS = (
     ("name", "Account name"), ("website", "Account website"),
-    ("city", "City"), ("state", "State"), ("country", "Country"),
-    ("location", "Location"), ("industry", "Industry"),
-    ("headcount", "# Employees"), ("phone", "Phone"),
-    ("linkedin", "Company LinkedIn URL"),
+    ("city", "Account city"), ("state", "Account state"),
+    ("country", "Account country"), ("location", "Account location"),
+    ("industry", "Account industry"), ("headcount", "Account # employees"),
+    ("phone", "Account phone"), ("linkedin", "Account LinkedIn URL"),
+    ("stage", "Account stage"),
 )
 FIELDS = {"contacts": CONTACT_FIELDS, "accounts": ACCOUNT_FIELDS}
 EXTRA_CHOICES = ((CUSTOM, "Keep as a custom field"), (SKIP, "Do not import"))
@@ -90,6 +95,7 @@ _CONTACT_ALIASES = {
                   "headcount", "approx employee size", "no. of employees",
                   "number of employees", "size"),
     "since": ("in role since", "role since", "since", "start date", "tenure"),
+    "stage": ("stage", "contact stage", "lead stage", "prospect stage"),
 }
 _ACCOUNT_ALIASES = {
     "name": ("account name", "company name", "company", "name", "organisation",
@@ -109,6 +115,7 @@ _ACCOUNT_ALIASES = {
               "contact no", "number"),
     "linkedin": ("company linkedin url", "linkedin", "linkedin url",
                  "company linkedin"),
+    "stage": ("account stage", "stage", "company stage"),
 }
 _ALIASES = {"contacts": _CONTACT_ALIASES, "accounts": _ACCOUNT_ALIASES}
 # Fields a file commonly spreads over several columns, any one of them filled:
@@ -128,6 +135,13 @@ def _reader(path: str):
             else _sheet._read_csv)
 
 
+# read_table's `sheet` for every tab at once, and what the table is called.
+ALL_SHEETS = "*"
+ALL_SHEETS_NAME = "All sheets"
+# The column an all-tabs table adds: which tab each row came from.
+SHEET_COLUMN = "Sheet"
+
+
 def tabs(path: str) -> list:
     """[(sheet name, data rows)] for every tab with a header — what the wizard
     offers when a workbook holds more than one."""
@@ -136,18 +150,47 @@ def tabs(path: str) -> list:
 
 def read_table(path: str, sheet: str = ""):
     """(sheet name, header, rows) for one tab — the named one (exact, any
-    case), else the first. Raises ValueError for a file with no rows at all;
-    OSError / zipfile errors pass through for the caller to word."""
-    first = None
-    for name, header, rows in _reader(path)(path):
-        cells = [str(h or "").strip() for h in header]
-        if first is None:
-            first = (name, cells, rows)
+    case), else the first. With ALL_SHEETS, every tab as ONE table
+    (_all_tabs). Raises ValueError for a file with no rows at all; OSError /
+    zipfile errors pass through for the caller to word."""
+    tables = [(name, [str(h or "").strip() for h in header], rows)
+              for name, header, rows in _reader(path)(path)]
+    if not tables:
+        raise ValueError("This file has no rows to import.")
+    if sheet == ALL_SHEETS:
+        return _all_tabs(tables) if len(tables) > 1 else tables[0]
+    for name, cells, rows in tables:
         if sheet and _norm(name) == _norm(sheet):
             return name, cells, rows
-    if first is None:
-        raise ValueError("This file has no rows to import.")
-    return first
+    return tables[0]
+
+
+def _all_tabs(tables) -> tuple:
+    """Every tab as one table: the columns of all of them in the order met
+    (one header in two tabs, any case, is ONE column; a blank header stays its
+    own column), each row under its own tab's columns and blank where its tab
+    has none — and a last column, SHEET_COLUMN, naming the tab each row came
+    from, which the mapping step keeps as a custom field."""
+    header, at = [], {}
+    for t, (_name, cells, _rows) in enumerate(tables):
+        for c, h in enumerate(cells):
+            key = _norm(h) or f"\x00{t}:{c}"
+            if key not in at:
+                at[key] = len(header)
+                header.append(h)
+    sheet_at = len(header)
+    header.append(SHEET_COLUMN)
+    out = []
+    for t, (name, cells, rows) in enumerate(tables):
+        place = [at[_norm(h) or f"\x00{t}:{c}"] for c, h in enumerate(cells)]
+        for row in rows:
+            merged = [""] * len(header)
+            for c, value in enumerate(row):
+                if c < len(place) and value not in (None, ""):
+                    merged[place[c]] = value
+            merged[sheet_at] = name
+            out.append(merged)
+    return ALL_SHEETS_NAME, header, out
 
 
 def guess_mapping(header, kind: str) -> list:
@@ -175,9 +218,26 @@ def guess_mapping(header, kind: str) -> list:
     return out
 
 
+# What a researched sheet writes where it found nothing. In a mapped field this
+# means "blank", never a value: "Not Found" in a Website column is not a website
+# (it once made 132 of 215 companies look like duplicates of each other), and
+# "Not Found" in City is not a place to search. A CUSTOM column keeps what the
+# owner typed, verbatim.
+_PLACEHOLDERS = frozenset({
+    "not found", "not available", "not applicable", "not provided", "not disclosed",
+    "not listed", "not known", "no website", "no data", "n/a", "n.a.", "n.a", "nil",
+    "none", "null", "nan", "unknown", "tbd", "-", "--", "—", "?"})
+
+
+def is_placeholder(value) -> bool:
+    """True for a cell that says there is nothing here ("Not Found", "N/A", "-")."""
+    return _norm(value) in _PLACEHOLDERS
+
+
 def _cells(row, header, mapping):
     """{field: value} and {header: value} (the CUSTOM columns) for one row.
-    A field mapped twice keeps its first non-empty value."""
+    A field mapped twice keeps its first non-empty value; a placeholder
+    ("Not Found", "N/A") in a field is a blank one."""
     fields, custom = {}, {}
     for i, target in enumerate(mapping):
         raw = row[i] if i < len(row) else None
@@ -187,7 +247,7 @@ def _cells(row, header, mapping):
         if target == CUSTOM:
             key = str(header[i]).strip() if i < len(header) else f"Column {i + 1}"
             custom.setdefault(key, value)
-        else:
+        elif not is_placeholder(value):
             fields.setdefault(target, value)
     return fields, custom
 
@@ -229,11 +289,16 @@ def contacts_from_rows(header, rows, mapping, sheet_name: str = "") -> tuple:
                     industry=industry or sheet_name)
         if found[1:]:
             lead.extra["other_emails"] = found[1:]
+        if email:
+            lead.extra["email_source"] = "sheet"     # the owner's own file had it
+        # "stage" rides on the lead only as far as the import: the saved
+        # contact keeps it as its own field (addons/leads/contacts.py).
         for key, value in (("linkedin", linkedin), ("website", f.get("website", "")),
                            ("location", _place(f)), ("since", f.get("since", "")),
                            ("seniority", f.get("seniority", "")),
                            ("department", f.get("department", "")),
-                           ("headcount", f.get("headcount", ""))):
+                           ("headcount", f.get("headcount", "")),
+                           ("stage", f.get("stage", ""))):
             if value:
                 lead.extra[key] = value
         if custom:
@@ -245,7 +310,7 @@ def contacts_from_rows(header, rows, mapping, sheet_name: str = "") -> tuple:
 def accounts_from_rows(header, rows, mapping) -> tuple:
     """(companies, skipped) — every row that names a company (a name or a
     website) as {"name", "website", "location", "industry", "headcount",
-    "phone", "linkedin", "custom"}. Rows naming none are skipped and counted;
+    "phone", "linkedin", "stage", "custom"}. Rows naming none are skipped and counted;
     blank spacer rows are neither."""
     companies, skipped = [], 0
     for row in rows or ():
@@ -258,7 +323,8 @@ def accounts_from_rows(header, rows, mapping) -> tuple:
         company = {"name": name, "website": website, "location": _place(f),
                    "industry": f.get("industry", ""),
                    "headcount": f.get("headcount", ""),
-                   "phone": f.get("phone", ""), "linkedin": f.get("linkedin", "")}
+                   "phone": f.get("phone", ""), "linkedin": f.get("linkedin", ""),
+                   "stage": f.get("stage", "")}
         if custom:
             company["custom"] = custom
         companies.append(company)

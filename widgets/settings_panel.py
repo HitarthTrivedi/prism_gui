@@ -1022,7 +1022,12 @@ class SettingsPanel(QDialog):
             key_edit, lambda: self._save_key(key_edit)))
 
         col.addWidget(self._agents_editor(chosen, premium))
-        col.addWidget(self._verifier_card())
+        # Leads & Outreach runs on the credit pool: the licence server holds every
+        # e-mail verifier and finder key, so a customer has none to bring
+        # (prospector/gateway.py). The card stays for the developer's direct mode.
+        from prospector import gateway
+        if not gateway.pooled():
+            col.addWidget(self._verifier_card())
 
         picked = [(stage, chosen.get(stage))
                   for stage in CB.agents.PIPELINE_ORDER

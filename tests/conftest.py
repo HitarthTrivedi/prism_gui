@@ -209,6 +209,27 @@ def _the_suite_must_not_touch_the_real_home():
 
 
 @pytest.fixture(autouse=True)
+def _leads_run_direct_by_default(request, monkeypatch):
+    """Leads & Outreach runs on the credit pool: every paid lookup goes to
+    Prism's licence server, which holds the provider keys (prospector/gateway.py).
+    The engine's own tests are about what the engine DOES with an answer, and
+    they hand it a provider double directly — so they run in the developer's
+    direct mode, PRISM_LEADS_DIRECT=1, which is what the engine did before the
+    pool. A test about the pool marks itself `@pytest.mark.pooled` and gets the
+    real default. Either way the gateway starts each test with no remembered
+    balance, refusal or transport, so one test's out-of-credits cannot stop the
+    next test's run."""
+    if request.node.get_closest_marker("pooled"):
+        monkeypatch.delenv("PRISM_LEADS_DIRECT", raising=False)
+    else:
+        monkeypatch.setenv("PRISM_LEADS_DIRECT", "1")
+    from prospector import gateway
+    gateway.forget()
+    yield
+    gateway.forget()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ambient_state(request):
     """Close the offline-dev bypass for the duration of every test, then put
     the environment back exactly as it was; and let no licensing thread cross

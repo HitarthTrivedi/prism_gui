@@ -92,6 +92,24 @@ _STROKED: dict[str, list[str]] = {
     "sparkles":   ["M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"],
     "film":       ["M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
                    "M2 8h20", "M2 16h20", "M6 4v4", "M6 16v4", "M18 4v4", "M18 16v4"],
+    # Leads & Outreach (Apollo's Find People): the import cards, the person
+    # panel's actions and the all-filters window.
+    "users":      ["M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 1 0 0 7z", "M2.5 20a6.5 6.5 0 0 1 13 0",
+                   "M16 4.6a3.5 3.5 0 0 1 0 6.3", "M18.5 14.2a6.5 6.5 0 0 1 3 5.8"],
+    "building":   ["M5 21V4h10v17", "M15 9h4v12", "M3 21h18", "M8.5 8h.01", "M11.5 8h.01",
+                   "M8.5 12h.01", "M11.5 12h.01", "M8.5 16h.01", "M11.5 16h.01"],
+    "upload":     ["M12 16V4", "M7 9l5-5 5 5", "M4 16v4h16v-4"],
+    "download":   ["M12 4v12", "M7 11l5 5 5-5", "M4 16v4h16v-4"],
+    "phone":      ["M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"],
+    "calendar":   ["M4 6h16v14H4z", "M4 10h16", "M8 3v4", "M16 3v4"],
+    "check-square": ["M4 4h16v16H4z", "M8 12l3 3 5-6"],
+    "send":       ["M21 3L10 14", "M21 3l-7 18-4-7-7-4z"],
+    "maximize":   ["M14 4h6v6", "M20 4l-7 7", "M10 20H4v-6", "M4 20l7-7"],
+    "pin":        ["M9 4h6", "M10 4v6l-3 4h10l-3-4V4", "M12 14v6"],
+    "linkedin":   ["M4 4h16v16H4z", "M8 10v6", "M8 7v.01", "M12 16v-6", "M12 12a2 2 0 0 1 4 0v4"],
+    "list-plus":  ["M4 6h12", "M4 12h12", "M4 18h7", "M17 15v6", "M14 18h6"],
+    "activity":   ["M3 12h4l3-8 4 16 3-8h4"],
+    "drag":       ["M9 6h.01", "M15 6h.01", "M9 12h.01", "M15 12h.01", "M9 18h.01", "M15 18h.01"],
 }
 
 # Icons the design fills rather than strokes.

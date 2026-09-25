@@ -25,10 +25,17 @@ from __future__ import annotations
 import os
 import re
 
+from . import gateway
 from .models import HOT, WARM
+
+# The finders the licence server tries for a pooled lookup — the names it
+# reports back, kept on a lead so the one that sold an address is not asked
+# for it again.
+_POOL_FINDERS = ("tomba", "hunter")
 
 FINDER = "https://api.hunter.io/v2/email-finder"
 VERIFIER = "https://api.hunter.io/v2/email-verifier"
+ACCOUNT = "https://api.hunter.io/v2/account"       # free: the plan and what is left
 
 # Hunter status -> the Email-check value the leads/hotlist sheets colour-code on.
 _MAP = {"valid": "valid", "invalid": "invalid", "accept_all": "catch-all",
@@ -60,6 +67,29 @@ def _name_parts(name: str):
 def _domain_of(lead) -> str:
     return ((lead.extra or {}).get("company_domain")
             or (lead.email.split("@")[-1] if "@" in (lead.email or "") else ""))
+
+
+# Second-level suffixes a registrable domain keeps a third label under.
+_TWO_LEVEL = frozenset({
+    "co.in", "net.in", "org.in", "firm.in", "gen.in", "ind.in", "ac.in", "gov.in",
+    "co.uk", "org.uk", "ac.uk", "com.au", "net.au", "org.au", "co.jp", "com.sg",
+    "com.my", "co.za", "com.br", "com.cn", "com.hk", "co.nz", "com.tr", "com.mx",
+    "co.id", "com.sa", "com.eg", "co.ae", "com.ph", "com.vn", "co.kr", "com.bd",
+    "com.pk", "com.np", "co.th"})
+
+
+def _registrable(host: str) -> str:
+    """A company's own domain from a website host: "new.abb.com" → "abb.com",
+    "www.parleelizabeth.com" → "parleelizabeth.com", "acme.co.in" kept whole.
+    A finder asked at a website's sub-domain knows nobody there."""
+    host = (host or "").strip().lower().rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [p for p in host.split(".") if p]
+    if len(parts) <= 2:
+        return ".".join(parts)
+    last_two = ".".join(parts[-2:])
+    return ".".join(parts[-3:]) if last_two in _TWO_LEVEL else last_two
 
 
 def _get(url: str, params: dict, timeout: int = 40) -> dict:
@@ -156,27 +186,101 @@ def _tomba_find(lead, key: str):
         return "", ""
 
 
+class FinderRefused(Exception):
+    """A finder turned the whole ACCOUNT away — a plan without API access, a
+    used-up monthly quota, a key it does not know — not just this person. The
+    message says which, in words the owner can act on. Anyone else asked would
+    get the same answer, so find_and_verify stops asking that finder for the
+    batch (`refused`) and the caller says why. 24-Sep-2026: Apollo's Free plan
+    (no people/match) and Hunter's spent quota refused every lookup, both were
+    swallowed as "not found", and 159 people were checked in silence."""
+
+
+def _apollo_refusal(exc) -> str:
+    if getattr(exc, "error_code", "") == "API_INACCESSIBLE":
+        # Apollo names the plan: "…not included in your Basic (Trial) plan…" —
+        # a trial of a paid plan is refused too (25-Sep-2026), so "Free" alone
+        # would tell the owner who just started one that nothing changed.
+        named = re.search(r"not included in your (.{1,40}?) plan", getattr(exc, "detail", "") or "")
+        plan = f"your {named.group(1)} plan" if named else "your Apollo plan"
+        return (f"Apollo: finding e-mails isn't in {plan}. Only paid Apollo plans "
+                "include it.")
+    if getattr(exc, "code", 0) == 401:
+        return "Apollo: the API key was not accepted."
+    return ("Apollo: this API key isn't allowed to find people. In Apollo's API "
+            "settings, give it people/match.")
+
+
 def _apollo_find(lead, key: str):
     """Apollo's people/match FINDER (the profile link or the Apollo id when the
     lead carries one, else name + domain -> the real address). One credit, and
-    only when Apollo finds the person. Returns (email, verification_status)."""
-    from .apollo import find_email          # lazily: apollo pulls in the filters
-    return find_email(lead, key)
+    only when Apollo finds the person. Returns (email, verification_status);
+    raises FinderRefused when Apollo refuses the key itself."""
+    from .apollo import ApolloError, find_email     # lazily: apollo pulls in the filters
+    try:
+        return find_email(lead, key)
+    except ApolloError as exc:                      # only 401 / 403 get this far
+        raise FinderRefused(_apollo_refusal(exc)) from exc
+
+
+def _hunter_reset(key: str) -> str:
+    """"27 Sep": when Hunter's searches come back — its account call, which
+    costs nothing — or ""."""
+    import datetime
+    import requests
+    try:
+        data = requests.get(ACCOUNT, params={"api_key": key}, timeout=15).json().get("data") or {}
+        day = datetime.date.fromisoformat(str(data.get("reset_date") or "")[:10])
+    except Exception:                                   # noqa: BLE001
+        return ""
+    return f"{day.day} {day:%b}"
+
+
+def _hunter_refusal(code: int, body, key: str) -> str:
+    """Why Hunter turned the ACCOUNT away, or "" for anything about this one
+    person or this one moment. Its quota answer (429, "…the number of searches
+    per billing period included in your plan") is told apart from its
+    per-second rate limit, which is also a 429 and passes."""
+    errors = body.get("errors") if isinstance(body, dict) else None
+    details = " ".join(str(e.get("details") or "") for e in errors or ()
+                       if isinstance(e, dict)).lower()
+    if code == 401:
+        return "Hunter: the API key was not accepted."
+    if code in (403, 429) and ("billing period" in details or "your plan" in details):
+        back = _hunter_reset(key)
+        return ("Hunter: this month's searches are used up. "
+                + (f"They come back on {back}." if back else "They come back next month."))
+    return ""
 
 
 def _hunter_find(lead, key: str):
-    """Hunter Email FINDER only (name + domain -> the real address). NO verify
-    call — so ALL of Hunter's ~50 monthly credits go to finding, and the free
-    verifiers do the confirming. Returns (email, verification_status)."""
+    """Hunter Email FINDER only (name + the company's domain -> the real
+    address; the company's NAME when no domain is known — Hunter finds the
+    domain itself). NO verify call — so ALL of Hunter's monthly credits go to
+    finding, and the free verifiers do the confirming. Returns (email,
+    verification_status); raises FinderRefused when Hunter refuses the account
+    (a key it does not know, this month's searches used up)."""
     first, last = _name_parts(lead.name)
-    dom = _domain_of(lead)
-    if not (first and last and dom):
+    dom = _registrable(_domain_of(lead))
+    company = (getattr(lead, "company", "") or "").strip()
+    if not (first and last and (dom or company)):
         return "", ""
+    params = {"first_name": first, "last_name": last, "api_key": key}
+    if dom:
+        params["domain"] = dom
+    else:
+        params["company"] = company
     import requests
     try:
-        d = (requests.get(FINDER, params={
-            "domain": dom, "first_name": first, "last_name": last,
-            "api_key": key}, timeout=30).json().get("data") or {})
+        reply = requests.get(FINDER, params=params, timeout=30)
+        body = reply.json()
+    except Exception:                                   # noqa: BLE001
+        return "", ""
+    why = _hunter_refusal(getattr(reply, "status_code", 200), body, key)
+    if why:
+        raise FinderRefused(why)
+    try:
+        d = (body.get("data") or {})
         email = d.get("email") or ""
         if email and d.get("linkedin_url") and not (lead.extra or {}).get("linkedin"):
             lead.extra["linkedin"] = d["linkedin_url"]
@@ -185,24 +289,29 @@ def _hunter_find(lead, key: str):
         return "", ""
 
 
-# Dedicated FINDERS (name + domain -> the real address, replacing a pattern
-# guess), tried BEFORE verification, free-first. Hunter is a FINDER ONLY now —
-# every credit goes to finding; confirmation is left to the free verifiers.
-# Apollo is here too because a list SOURCED from Apollo already carries each
-# person's Apollo id, which finds them outright — and because a seller who
-# brought an Apollo key has credits of their own to spend on recovery.
+# The FINDERS — the only way Prism gets an address it was not handed (the
+# owner, 24-Sep-2026: "hunter + apollo only to find mails"; addresses are never
+# guessed). Apollo first (broader database, often has the id already for leads
+# sourced from Apollo); Hunter next as a fallback, spending its monthly credits
+# only for people Apollo missed. Both charge only when they know the person.
+# Hunter is a FINDER ONLY — confirmation is left to the free verifiers.
 _FINDERS = [
-    ("tomba_key",       "Tomba",  _tomba_find),         # ~25/mo free
     ("apollo_api_key",  "Apollo", _apollo_find),        # 1 credit per person FOUND
-    ("hunter_api_key",  "Hunter", _hunter_find),        # ~50/mo, FIND only
+    ("hunter_api_key",  "Hunter", _hunter_find),        # monthly credits, FIND only
 ]
 # Every finder/verifier config key — collected from config/env by collect_keys.
 VERIFIER_KEYS = [k for k, _, _ in _FINDERS] + [k for k, _, _ in _VERIFIERS]
 
 
 def collect_keys(cfg: dict | None = None) -> dict:
-    """{cfg_key: value} for every verifier key present in config or env."""
+    """{cfg_key: value} for every verifier/finder key present in config or env.
+    Pooled (`gateway.effective_cfg`): ONE entry, the pool sentinel — the licence
+    server holds every verifier and finder key, tries them free-first, and
+    charges the customer per address checked or found. No key of the
+    customer's is read (owner, 25-Sep-2026: pooled credits only)."""
     cfg = cfg or {}
+    if cfg.get("leads_pool"):
+        return {"pool": gateway.POOL_KEY}
     out = {}
     for k in VERIFIER_KEYS:
         v = (cfg.get(k) or os.environ.get(k.upper()) or "").strip()
@@ -230,6 +339,8 @@ def verify_email(email: str, keys: dict | None = None) -> str:
     email = (email or "").strip()
     if not email:
         return ""
+    if gateway.is_pool(keys):
+        return gateway.check_email(email)       # the server runs the waterfall
     best = ""
     for cfg_key, _name, fn in _VERIFIERS:
         k = keys.get(cfg_key)
@@ -243,19 +354,25 @@ def verify_email(email: str, keys: dict | None = None) -> str:
     return best
 
 
-def find_and_verify(lead, keys: dict | None = None) -> None:
-    """VERIFY-first, FIND-on-failure for ONE lead — the credit-thrifty order:
-      1) VERIFIERS (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox) —
-         confirm the address we ALREADY have (a pattern guess), most-free-first.
-         A guess that comes back 'valid' is deliverable and costs nothing.
-      2) FINDERS (Tomba, Apollo, Hunter) — ONLY when there's no address, or the
-         free check couldn't confirm it (invalid/unknown) — fetch the person's
-         REAL address, then verify that too. A confirmed or catch-all guess
-         never triggers a finder, so a paid credit is spent only where it can
-         help — and neither does the finder that SOLD us the address we hold
-         (extra["email_source"]), which would charge again for the same answer.
-    Hunter is FIND-ONLY throughout, so its ~50 credits go purely to recovery.
-    BYO-key; a missing key is skipped, errors are ignored."""
+def find_and_verify(lead, keys: dict | None = None, refused: dict | None = None) -> None:
+    """FIND the person's real address, and CHECK it — never a guess (the
+    owner, 24-Sep-2026: "the emails shouldn't be guessed any day — hunter +
+    apollo only to find mails"):
+      1) An address the lead already has came from somewhere real — their own
+         sheet, Apollo, a finder (an old guess is set aside when it is read
+         back: enrich.forget_guess). It is checked with the free verifiers
+         (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox); 'valid' or
+         'catch-all' is as sure as it gets and ends here.
+      2) No address, or one the check could not confirm — the FINDERS, Apollo
+         then Hunter, asked with the person's name and their company's domain,
+         or its name when no domain is known. A credit only when one of them
+         knows the person, and what comes back is checked too. The finder that
+         SOLD us the address we hold (extra["email_source"]) is not asked again.
+    Nobody found keeps no address — "No email", never a made-up one. BYO-key;
+    a missing key is skipped, errors are ignored. `refused` ({finder name:
+    why}), shared across a batch, collects the finders that turned the account
+    away (FinderRefused) — they are not asked again, and the caller says why;
+    a refusal never ends the run."""
     keys = keys or {}
 
     def _verify(addr: str) -> str:
@@ -276,17 +393,38 @@ def find_and_verify(lead, keys: dict | None = None) -> None:
     #    confirmed either way, so we don't spend a credit chasing it.
     check = (lead.extra or {}).get("email_check", "")
     source = (lead.extra or {}).get("email_source", "")
-    if (lead.name or "") and _domain_of(lead) and check not in ("valid", "catch-all"):
+    if (lead.name or "") and _domain_of(lead) and check not in ("valid", "catch-all") \
+            and gateway.is_pool(keys):
+        # Pooled: one finder lookup, made (and billed) by the licence server,
+        # which asks Hunter and charges only when it knows the person. (Tomba
+        # is out; "tomba" stays in _POOL_FINDERS only for old saved leads.)
+        first, last = _name_parts(lead.name)
+        if first and email and source in _POOL_FINDERS:
+            return                  # that finder already sold us this address
+        if first:
+            found, _status, by = gateway.find_email(first, last, _domain_of(lead))
+            if found and found.strip().lower() != email.lower():
+                lead.email = found
+                lead.extra["email_source"] = by or "pool"
+                _verify(found)
+        return                      # pooled means pooled: nobody found is "No email"
+    somewhere = _domain_of(lead) or (getattr(lead, "company", "") or "").strip()
+    if (lead.name or "") and somewhere and check not in ("valid", "catch-all"):
         for cfg_key, name, fn in _FINDERS:
             k = keys.get(cfg_key)
-            if not k:
+            if not k or (refused is not None and name in refused):
                 continue
             # The finder that supplied the address we are holding has nothing
             # left to sell: asked again it looks the same person up and returns
             # the same address, for another credit.
             if email and source == name.lower():
                 continue
-            found, _status = fn(lead, k)
+            try:
+                found, _status = fn(lead, k)
+            except FinderRefused as why:
+                if refused is not None:
+                    refused[name] = str(why)
+                continue
             if found and found.strip().lower() != email.lower():
                 lead.email = found
                 # Whoever supplied the address is who must not be asked for it
@@ -299,9 +437,9 @@ def find_and_verify(lead, keys: dict | None = None) -> None:
 
 def verify_reachable(dossiers, keys: dict | None = None, limit: int = 25,
                      on_progress=None) -> int:
-    """FIND + VERIFY the hot/warm slice: finders (Tomba, Hunter) recover the
-    real address, then the FREE verifier waterfall (Verifalia → Reoon →
-    ZeroBounce → AbstractAPI → Kickbox) confirms it. Runs only on the people
+    """FIND + VERIFY the hot/warm slice: the finders (Apollo, then Hunter)
+    find the real address, then the FREE verifier waterfall (Verifalia → Reoon
+    → ZeroBounce → AbstractAPI → Kickbox) confirms it. Runs only on the people
     about to be emailed, staying inside the free tiers. Sequential on purpose —
     free tiers are rate-limited and this list is short. With no keys it is
     skipped and the sheet keeps its free MX check."""
@@ -309,8 +447,11 @@ def verify_reachable(dossiers, keys: dict | None = None, limit: int = 25,
     if not any(keys.values()):
         return 0
     targets = [d for d in dossiers if d.verdict in (HOT, WARM) and d.lead.name][:limit]
+    refused: dict = {}              # a finder that refused the key is asked once a run
     for i, d in enumerate(targets, 1):
+        if gateway.exhausted():
+            return i - 1            # the pool ran dry: stop here, keep what was checked
         if on_progress:
             on_progress(i, len(targets), d.lead)
-        find_and_verify(d.lead, keys)
+        find_and_verify(d.lead, keys, refused)
     return len(targets)

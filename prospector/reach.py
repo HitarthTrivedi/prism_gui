@@ -254,10 +254,16 @@ def draft_for(dossier: Dossier, offer: str, cfg: dict, sender: str = "",
         return _fallback(dossier, offer, sender, claims,
                          "No Groq key — used the grounded opener instead of a fresh draft.")
     import core_bridge as CB                 # lazy: wires the engine + submodule
+    from . import gateway
     prompt = build_prompt(dossier, offer, sender, claims)
     try:
-        raw = CB.router.groq_chat(api_key, cfg.get("model", ""), prompt,
-                                  temperature=0.4, json_mode=False, retries=3)
+        if gateway.is_pool(api_key):
+            # Pooled: the licence server writes the draft with its own model
+            # key and charges the customer's credits for it.
+            raw = gateway.ask(prompt, "draft", json_mode=False, temperature=0.4)
+        else:
+            raw = CB.router.groq_chat(api_key, cfg.get("model", ""), prompt,
+                                      temperature=0.4, json_mode=False, retries=3)
     except Exception as e:                   # noqa: BLE001 — one bad draft can't sink the batch
         return _fallback(dossier, offer, sender, claims,
                          f"Draft model unreachable ({e}); used the grounded opener.")

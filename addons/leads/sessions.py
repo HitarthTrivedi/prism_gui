@@ -301,10 +301,24 @@ def lead_to_row(lead) -> dict:
     return {n: _jsonable(getattr(lead, n, None)) for n in _LEAD_FIELDS}
 
 
+def _settled(lead):
+    """A lead as it may be shown, sent and exported now (the owner,
+    24-Sep-2026): an address an older build GUESSED is set aside (enrich.
+    forget_guess — Prism finds addresses with Hunter and Apollo only), and a
+    link filed as LinkedIn that is not one moves to profile_url (identity.
+    move_profile_link). Neither deletes anything; both are idempotent."""
+    from prospector.enrich import forget_guess
+    from prospector.identity import move_profile_link
+    forget_guess(lead)
+    move_profile_link(lead)
+    return lead
+
+
 def lead_from_row(row):
     """lead_to_row, reversed — load()'s own forgiving read (unknown keys
-    ignored, a wrong-typed cell defaulted). None for a row that is not a dict."""
-    return _build(Lead, row, _LEAD_PROTO) if isinstance(row, dict) else None
+    ignored, a wrong-typed cell defaulted), settled (_settled). None for a row
+    that is not a dict."""
+    return _settled(_build(Lead, row, _LEAD_PROTO)) if isinstance(row, dict) else None
 
 
 # ── the header ────────────────────────────────────────────────────────────────
@@ -624,7 +638,7 @@ def load(folder, session_id) -> dict:
     leads, lead_at = [], {}
     for i, row in enumerate(data["leads"]):
         if isinstance(row, dict):
-            lead_at[i] = _build(Lead, row, _LEAD_PROTO)
+            lead_at[i] = _settled(_build(Lead, row, _LEAD_PROTO))
             leads.append(lead_at[i])
 
     dossiers, dossier_at = [], {}

@@ -33,7 +33,7 @@ from collections import defaultdict
 from urllib.parse import urlsplit
 
 from . import filters
-from .identity import SeenIndex, norm_company
+from .identity import SeenIndex, is_linkedin, norm_company
 from .models import Lead
 
 EXA_SEARCH_URL = "https://api.exa.ai/search"
@@ -51,7 +51,14 @@ def _exa_people(query: str, api_key: str, n: int = 50, timeout: int = 60) -> lis
     answered, None when the call itself failed (an exception, a non-200, a body
     with no results list). The two must stay apart: read as an empty page, a
     spent key or a dropped connection looks exactly like "no more people", and
-    the run comes back short with nothing to say why."""
+    the run comes back short with nothing to say why.
+
+    Pooled (`api_key` is gateway.POOL_KEY): the same search is asked of Prism's
+    licence server, which holds the Exa key and charges the credit pool per
+    person returned. Same return contract: a list, or None when it failed."""
+    from . import gateway
+    if gateway.is_pool(api_key):
+        return gateway.search_people(query, n)
     import requests  # lazy, like the rest of the engine
     try:
         r = requests.post(
@@ -157,18 +164,22 @@ def _exa_company(name: str, api_key: str, timeout: int = 30) -> dict | None:
     want = norm_company(name)
     if not want:
         return None
-    import requests  # lazy, like the rest of the engine
-    try:
-        r = requests.post(
-            EXA_SEARCH_URL,
-            headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json={"query": f"{name} company", "category": "company", "type": "auto",
-                  "numResults": 3}, timeout=timeout)
-        if r.status_code != 200:
+    from . import gateway
+    if gateway.is_pool(api_key):
+        results = gateway.company_rows(name)            # the licence server asks Exa
+    else:
+        import requests  # lazy, like the rest of the engine
+        try:
+            r = requests.post(
+                EXA_SEARCH_URL,
+                headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                json={"query": f"{name} company", "category": "company", "type": "auto",
+                      "numResults": 3}, timeout=timeout)
+            if r.status_code != 200:
+                return None
+            results = r.json().get("results")
+        except Exception:                               # noqa: BLE001 — a lookup is best-effort
             return None
-        results = r.json().get("results")
-    except Exception:                                   # noqa: BLE001 — a lookup is best-effort
-        return None
     if not isinstance(results, list):
         return None
     best, best_score = None, 0.0
@@ -243,7 +254,11 @@ def _lead_of(row: dict, entity: dict, ind: str) -> Lead | None:
     lead = Lead(name=name, title=title, company=company, industry=ind)
     lead.extra["location"] = p.get("location", "")
     lead.extra["since"] = since
-    lead.extra["linkedin"] = row.get("url", "")
+    # LinkedIn only when it IS LinkedIn: Exa answers with its own people-search
+    # page now, which is a profile of a kind but not the owner's LinkedIn
+    # column (24-Sep-2026).
+    url = row.get("url", "") or ""
+    lead.extra["linkedin" if is_linkedin(url) else "profile_url"] = url
     return lead
 
 
@@ -314,6 +329,35 @@ def _qkey(query: str) -> str:
     """A query as "the same question?" sees it: case and spacing are not a
     different search, so they must not buy a second identical page."""
     return " ".join(query.casefold().split())
+
+
+def planned_searches(spec, *, max_queries: int = 30, max_extra_queries: int = 30) -> tuple:
+    """(first, more): the Exa people searches source(spec=...) makes to
+    start with, and the most its top-up rounds may add when too few new
+    people come back — the same cut and the same rounds source() uses, so a
+    confirmation can say what a press really spends (24-Sep-2026: it said
+    "about 200" for a press that stopped at 60). A search over named
+    companies asks each once and adds nothing."""
+    if isinstance(spec, dict):
+        spec = filters.SearchSpec.from_dict(spec)
+    grid = [(str(ind), str(q)) for ind, q in (filters.plan(spec) or [])]
+    if not grid:
+        return 0, 0
+    first = len(grid) if spec.companies.include else min(len(grid), max(1, max_queries))
+    sent = {_qkey(q) for _, q in grid[:first]}
+    fresh = 0
+    rounds = [grid[first:]]
+    for round_no in range(1, _MAX_TOP_UP_ROUNDS + 1):
+        more = [(str(ind), str(q)) for ind, q in (filters.top_up(spec, round_no) or [])]
+        if not more:
+            break
+        rounds.append(more)
+    for rnd in rounds:
+        for _ind, q in rnd:
+            if _qkey(q) not in sent:
+                sent.add(_qkey(q))
+                fresh += 1
+    return first, min(max(0, max_extra_queries), fresh)
 
 
 def source(industries: list, roles: list, api_key: str, *, location: str = "India",
@@ -396,6 +440,10 @@ def source(industries: list, roles: list, api_key: str, *, location: str = "Indi
     else:
         grid = [(str(ind), str(q)) for ind, q in (filters.plan(spec) or [])]
         labels = [ind for ind, _ in grid]
+        if spec.companies.include:
+            # Every named company is asked, once (filters._queries): a cut
+            # here asked some and let the caller count them all as asked.
+            max_queries = max(max_queries, len(grid))
     qs = grid[:max(1, max_queries)]
     # Per-industry cap so ONE productive industry can't fill the whole target and
     # starve the rest of the ICP. Each industry may take up to its fair share

@@ -198,6 +198,10 @@ COPY_TABLES = {
     # reaches the screen through a variable.
     "FACET_LABELS", "_SORTS", "_PEOPLE_TABS", "_EMPTY_TITLE", "_EMPTY_BODY",
     "_NO_MATCH_TITLE", "_NO_MATCH_BODY", "_STARTERS",
+    # …and Stage / Lists / Custom fields: the Contact | Account switch's
+    # labels, and what each says with nothing to pick yet. (Stage and list
+    # NAMES are records' values, shown as kept — never looked up.)
+    "_RECORD_SIDES", "_CUSTOM_SIDES", "_RECORD_EMPTY", "_CUSTOM_EMPTY",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's

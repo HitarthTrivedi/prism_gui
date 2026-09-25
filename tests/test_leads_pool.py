@@ -241,5 +241,149 @@ class SortingAndPaging(unittest.TestCase):
         self.assertEqual((empty["start"], empty["end"], empty["pages"]), (0, 0, 1))
 
 
+def _records_pool():
+    """Four people: two saved contacts with a stage and lists, one saved with
+    the defaults, one net new — and the saved accounts two of them work at."""
+    from addons.leads.accounts import Account
+    asha = _lead("Asha Rao", "Owner", "Rao Precision Works", "asha@raoprecision.example")
+    asha.extra["custom"] = {"Lead Quality": "A", "Region": "West"}
+    bo = _lead("Bo Lund", "CEO", "Lund Steel", "bo@lundsteel.example")
+    bo.extra["custom"] = {"lead quality": "b"}
+    cy = _lead("Cy Das", "Director", "Das Forgings", "cy@dasforgings.example")
+    saved = [Contact(lead=asha, saved_at="2026-09-23T10:00:00+05:30", via=["import"],
+                     stage="Interested", lists=["Expo leads", "Vadodara owners"]),
+             Contact(lead=bo, saved_at="2026-09-23T10:00:00+05:30", via=["save"],
+                     stage="Do Not Contact", lists=["Expo leads"]),
+             Contact(lead=cy, saved_at="2026-09-23T10:00:00+05:30", via=["save"])]
+    run = [_lead("Dev Net", "Owner", "Rao Precision Works")]       # net new, same company
+    people = P.build(saved, [("s1", "2026-09-23T11:00:00+05:30", run, [])])
+    accounts = [Account(name="Rao Precision Works", domain="raoprecision.example",
+                        stage="Current Client", lists=["Top 50"], custom={"Tier": "Gold"}),
+                Account(name="Lund Steel", domain="lundsteel.example",
+                        stage="Dead Opportunity")]
+    return people, accounts
+
+
+class StageListsAndCustomFields(unittest.TestCase):
+    """Apollo's filters over the owner's own records (knowledge.apollo.io
+    glossary): Stage > Contact or Account, include or exclude; Lists > People
+    lists or Company lists, "is any of" / "is none of"; Custom fields > a
+    field > its values."""
+
+    def names(self, raw, people=None, accounts=None):
+        base_people, base_accounts = _records_pool()
+        spec = SearchSpec.from_dict(raw)
+        return {p.lead.name for p in P.filter_people(
+            people or base_people, spec,
+            saved_accounts=base_accounts if accounts is None else accounts)}
+
+    def test_the_pool_carries_each_contacts_stage_and_lists(self):
+        people, _accounts = _records_pool()
+        by = {p.lead.name: p for p in people}
+        self.assertEqual((by["Asha Rao"].stage, by["Asha Rao"].lists),
+                         ("Interested", ("Expo leads", "Vadodara owners")))
+        self.assertEqual((by["Cy Das"].stage, by["Cy Das"].lists), ("Cold", ()))
+        self.assertEqual((by["Dev Net"].stage, by["Dev Net"].saved), ("", False))
+
+    def test_contact_stage_include_and_exclude(self):
+        self.assertEqual(self.names({"contact_stages": {"include": ["interested", "Cold"]}}),
+                         {"Asha Rao", "Cy Das"})
+        # An exclude lets through everyone not in that stage — net new too.
+        self.assertEqual(self.names({"contact_stages": {"exclude": ["Do Not Contact"]}}),
+                         {"Asha Rao", "Cy Das", "Dev Net"})
+
+    def test_account_stage_reads_the_account_they_work_at(self):
+        self.assertEqual(self.names({"account_stages": {"include": ["Current Client"]}}),
+                         {"Asha Rao", "Dev Net"})        # Dev by his company's name
+        self.assertEqual(self.names({"account_stages": {"exclude": ["Dead Opportunity"]}}),
+                         {"Asha Rao", "Cy Das", "Dev Net"})
+
+    def test_people_lists_are_any_of_and_none_of(self):
+        self.assertEqual(self.names({"contact_lists": {"include": ["Expo leads"]}}),
+                         {"Asha Rao", "Bo Lund"})
+        self.assertEqual(self.names({"contact_lists": {"include": ["Expo leads"],
+                                                       "exclude": ["Vadodara owners"]}}),
+                         {"Bo Lund"})
+
+    def test_company_lists_exclude_everyone_at_those_companies(self):
+        # Apollo's "One Contact, Whole Company": exclude a company list from a
+        # people search and nobody at those companies is left.
+        self.assertEqual(self.names({"account_lists": {"exclude": ["Top 50"]}}),
+                         {"Bo Lund", "Cy Das"})
+
+    def test_custom_fields_match_a_value_on_the_person_or_their_account(self):
+        self.assertEqual(self.names({"custom_fields": {"contact:Lead Quality": ["a", "B"]}}),
+                         {"Asha Rao", "Bo Lund"})
+        self.assertEqual(self.names({"custom_fields": {"contact:Lead Quality": ["A"],
+                                                       "contact:Region": ["West"]}}),
+                         {"Asha Rao"})               # AND across fields
+        self.assertEqual(self.names({"custom_fields": {"account:tier": ["gold"]}}),
+                         {"Asha Rao", "Dev Net"})
+
+    def test_what_the_filters_can_offer(self):
+        people, accounts = _records_pool()
+        got = P.record_options(people, accounts)
+        self.assertEqual(got["contact_stages"][:3], ["Cold", "Approaching", "Replied"])
+        self.assertEqual(got["contact_lists"], ["Expo leads", "Vadodara owners"])
+        self.assertEqual(got["account_lists"], ["Top 50"])
+        self.assertEqual(got["custom"]["contact"]["Lead Quality"], ["A"])
+        self.assertEqual(got["custom"]["contact"]["lead quality"], ["b"])
+        self.assertEqual(got["custom"]["account"], {"Tier": ["Gold"]})
+
+    def test_the_spec_keeps_them_and_counts_them(self):
+        spec = SearchSpec.from_dict({
+            "contact_stages": {"include": ["Interested"]},
+            "account_lists": {"exclude": ["Top 50"]},
+            "custom_fields": {"contact:Lead  Quality": ["A", "A"], "bogus": ["x"],
+                              "account:": ["y"], "contact:lead quality": ["B"]}})
+        self.assertEqual(spec.custom_fields, {"contact:Lead Quality": ["A"]})
+        self.assertEqual((spec.count("stages"), spec.count("lists"),
+                          spec.count("custom_fields"), spec.active_count()), (1, 1, 1, 3))
+        self.assertEqual(SearchSpec.from_dict(spec.to_dict()), spec)
+        self.assertTrue(spec.has_record_filters())
+        self.assertFalse(SearchSpec().has_record_filters())
+
+
+class BulkSelection(unittest.TestCase):
+    """Apollo's "Select number of people" and "Max people per company"."""
+
+    def _people(self):
+        rows = [("A1", "Acme Pvt Ltd"), ("A2", "Acme"), ("B1", "Beta"), ("A3", "ACME Ltd."),
+                ("N1", ""), ("B2", "Beta"), ("N2", "")]
+        return [P.Person(lead=_lead(n, company=c, email=f"{n.lower()}@x{i}.example"))
+                for i, (n, c) in enumerate(rows)]
+
+    def test_the_first_n_in_the_results_order(self):
+        self.assertEqual([p.lead.name for p in P.pick(self._people(), 3)], ["A1", "A2", "B1"])
+        self.assertEqual(len(P.pick(self._people())), 7)      # 0: everyone
+
+    def test_at_most_so_many_from_one_company(self):
+        got = P.pick(self._people(), 4, per_company=1)
+        # Acme's second and third are passed over and don't count towards 4.
+        self.assertEqual([p.lead.name for p in got], ["A1", "B1", "N1", "N2"])
+        self.assertEqual([p.lead.name for p in P.pick(self._people(), 0, per_company=2)],
+                         ["A1", "A2", "B1", "N1", "B2", "N2"])
+
+
+class APersonsHandles(unittest.TestCase):
+    def test_keys_gather_every_record_of_theirs(self):
+        from prospector.identity import keys_of
+        saved = _lead("Pratik Mungra", "Owner", "Gurukrupa Aluminium", "pratik@gurukrupa.example")
+        found = _lead("Pratik Mungra", "Owner", "Gurukrupa Aluminium", "pratik@gurukrupa.example")
+        found.extra["linkedin"] = "https://www.linkedin.com/in/pratik-mungra"
+        [pratik] = P.build([Contact(lead=saved)], [("s1", "2026-09-23", [found], [])])
+        self.assertEqual(pratik.keys, keys_of(saved) | keys_of(found))
+        self.assertGreater(len(pratik.keys), len(keys_of(saved)))
+
+    def test_the_row_is_the_dossier_or_one_placeholder(self):
+        people = _pool()
+        ketan = next(p for p in people if p.lead.name == "Ketan Patel")
+        amit = next(p for p in people if p.lead.name == "Amit Patel")
+        self.assertIs(ketan.row(), ketan.dossier)
+        self.assertIs(amit.row(), amit.row())                # made once
+        self.assertEqual(amit.row().status, P.UNQUALIFIED)
+        self.assertIs(amit.row().lead, amit.lead)
+
+
 if __name__ == "__main__":
     unittest.main()

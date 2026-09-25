@@ -180,12 +180,19 @@ class Qualifier:
         if not self.api_key:
             return Dossier(lead=lead, signals=signals, status=NO_MODEL,
                            note="No Groq API key configured — set it in Prism Setup.")
-        import core_bridge as CB           # lazy: wires the engine + submodule
+        from . import gateway
         prompt = build_prompt(lead, signals, offer)
         try:
-            raw = CB.router.groq_chat(self.api_key, self.model, prompt,
-                                      temperature=self.temperature,
-                                      json_mode=True, retries=3)
+            if gateway.is_pool(self.api_key):
+                # Pooled: the licence server makes the model call (its key, its
+                # choice of model) and charges the customer's credits for it.
+                raw = gateway.ask(prompt, "qualify", json_mode=True,
+                                  temperature=self.temperature)
+            else:
+                import core_bridge as CB   # lazy: wires the engine + submodule
+                raw = CB.router.groq_chat(self.api_key, self.model, prompt,
+                                          temperature=self.temperature,
+                                          json_mode=True, retries=3)
         except Exception as e:              # noqa: BLE001 — surface, don't crash a batch
             # A rate-limited/unreachable lead is status=qualify_error — NOT a
             # default COLD verdict indistinguishable from a genuinely cold lead.

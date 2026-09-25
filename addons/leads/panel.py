@@ -99,6 +99,11 @@ class LeadsPanel(QWidget):
         from addons.leads.workbench import LeadsWorkbench
         self._workbench = LeadsWorkbench(self.cfg, self)
         self._body_lay.addWidget(self._workbench)
+        # The credit pool's balance, first: what every paid action below is
+        # charged to. None when Leads runs on the developer's own keys.
+        pill = self._workbench.credits_button()
+        if pill is not None:
+            self.header.add_action(pill)
         # Export sheets + Send all act on the whole run: page-level actions,
         # so they sit in the header, primary last.
         for button in self._workbench.action_buttons():

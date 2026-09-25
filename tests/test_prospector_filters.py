@@ -579,3 +579,45 @@ def test_plan_drops_a_query_that_names_an_excluded_place():
              industries={"include": ["Automobile", "Mumbai Port Trust"]},
              locations={"include": ["Europe"]}, company_hq={"exclude": ["India"]})
     assert [q for _, q in F.plan(s)] == ["Plant Head at Automobile companies in Europe"]
+
+
+# ── named companies: one search each (24-Sep-2026) ─────────────────────────────
+
+def test_a_named_company_is_asked_once_for_every_role():
+    s = spec(companies={"include": ["Acme Tooling", "Beta Corp"]},
+             seniority={"include": ["owner", "founder", "c_suite", "director"]})
+    assert [q for _, q in F.plan(s)] == [
+        "Owner, Founder, Chief or Director at Acme Tooling",
+        "Owner, Founder, Chief or Director at Beta Corp"]
+    # …and never again in other words: a press says exactly what it spends.
+    assert F.top_up(s, 1) == [] and F.top_up(s, 2) == []
+
+
+def test_an_excluded_role_leaves_the_list_not_the_company():
+    s = spec(companies={"include": ["Acme"]}, seniority={"include": ["owner", "director"]},
+             job_titles={"exclude": ["Director"]})
+    assert [q for _, q in F.plan(s)] == ["Owner at Acme"]
+
+
+def test_company_chunks_split_what_one_facet_cannot_hold():
+    s = spec(seniority={"include": ["owner"]})
+    names = [f"C{i}" for i in range(72)]
+    parts = F.company_chunks(s, names)
+    assert [len(p.companies.include) for p in parts] == [F.MAX_FACET_VALUES, 72 - F.MAX_FACET_VALUES]
+    assert parts[0].companies.include + parts[1].companies.include == names
+    assert s.companies.include == []                    # the spec itself untouched
+    assert F.company_chunks(s, []) == []
+
+
+def test_a_named_company_gets_a_place_only_when_one_was_named():
+    base = {"companies": {"include": ["Acme Tooling", "Beta Corp"]},
+            "seniority": {"include": ["owner"]}}
+    one = spec(**base, locations={"include": ["India"]})
+    assert [q for _, q in F.plan(one)] == ["Owner at Acme Tooling in India",
+                                           "Owner at Beta Corp in India"]
+    # Everywhere but India: no tour of the regions left — one search each,
+    # the exclusion checked on who comes back.
+    out = spec(**base, locations={"exclude": ["India"]})
+    assert [q for _, q in F.plan(out)] == ["Owner at Acme Tooling", "Owner at Beta Corp"]
+    two = spec(**base, locations={"include": ["India", "Germany"]})
+    assert len(F.plan(two)) == 2

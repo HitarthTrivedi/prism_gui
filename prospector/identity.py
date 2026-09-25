@@ -93,6 +93,32 @@ def norm_profile(url) -> str:
     return f"{host}{path.lower()}"
 
 
+def is_linkedin(url) -> bool:
+    """Whether a link is a LinkedIn page (linkedin.com or a country
+    sub-domain of it)."""
+    raw = (url if isinstance(url, str) else "").strip()
+    if not raw:
+        return False
+    try:
+        host = (urlsplit(raw if "://" in raw else "https://" + raw).hostname or "").lower()
+    except ValueError:
+        return False
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+def move_profile_link(lead) -> bool:
+    """A link filed as LinkedIn that is not one — an Exa people-search page,
+    which is what Exa returns now (24-Sep-2026: the exported LinkedIn column was
+    full of exa.ai links) — moved to extra["profile_url"]. True when moved."""
+    extra = getattr(lead, "extra", None)
+    link = (extra or {}).get("linkedin")
+    if not link or is_linkedin(link):
+        return False
+    extra.setdefault("profile_url", link)
+    del extra["linkedin"]
+    return True
+
+
 def keys_of(lead) -> frozenset:
     """Every identity key this lead carries right now. Recompute after enrich
     or verify: both can change the e-mail."""
@@ -106,9 +132,13 @@ def keys_of(lead) -> frozenset:
         email = norm_email(addr)
         if email:
             keys.add("e:" + email)
-    profile = norm_profile(extra.get("linkedin"))
-    if profile:
-        keys.add("u:" + profile)
+    # A LinkedIn link, and the page a search result came from (an Exa
+    # people-search page, profile_url) — the same "u:" key it always made, so
+    # someone found before is still someone found before.
+    for link in (extra.get("linkedin"), extra.get("profile_url")):
+        profile = norm_profile(link)
+        if profile:
+            keys.add("u:" + profile)
     apollo_id = str(extra.get("apollo_id") or "").strip()
     if apollo_id:
         keys.add("a:" + apollo_id)

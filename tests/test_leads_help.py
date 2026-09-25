@@ -60,23 +60,33 @@ class TheCopy(unittest.TestCase):
         self.assertIn("Find new people", body)
         self.assertIn("the one button that spends", body)
 
-    def test_the_costs_name_groq_exa_and_the_apollo_credit(self):
+    def test_the_costs_are_in_credits_and_name_no_vendor(self):
+        """Leads runs on the Prism credit pool (23-Sep-2026): the customer
+        holds no Exa, Groq, Apollo or Hunter key, so the section that says
+        what each thing costs speaks in credits and names none of them. It
+        says what a search, an address and a qualify each cost, and where the
+        balance and the price list are."""
         body = dict(H.SECTIONS)["What each thing costs"]
-        for word in ("Groq", "Exa", "Apollo", "credit"):
-            self.assertIn(word, body)
+        self.assertIn("credit", body)
+        for vendor in ("Groq", "Exa", "Apollo", "Hunter"):
+            self.assertNotIn(vendor, body, vendor)
+        for thing in ("Find new people", "Find e-mails", "Qualify and draft"):
+            self.assertIn(thing, body, thing)
+        self.assertIn("per search", body)
+        self.assertIn("finds nobody is not charged", body)
+        self.assertIn("Click your balance", body)
+        self.assertIn("ask Alphakore for a plan or a top-up", " ".join(body.split()))
 
-    def test_apollo_is_never_called_free_without_the_reveal_caveat(self):
+    def test_a_paid_thing_is_never_called_free(self):
         """The panel that exists to stop an accidental spend once said "Find
-        people is free on Apollo". Apollo's SEARCH is free; every person it
-        reveals is about a credit, and the rail's Reveal up to sits at 300 —
-        so one press could bill 300 credits while the help said nothing."""
+        people is free on Apollo" — one press could bill 300 credits while
+        the help said nothing. Any line that says free must be about what
+        really is free here: filtering, sorting, paging, Import, Save, Send."""
         body = dict(H.SECTIONS)["What each thing costs"]
         for line in body.split("\n"):
-            if "Apollo" in line and "free" in line:
-                self.assertIn("credit", line, line)
-        # And it names the cap the rail actually shows, so the two agree.
-        from addons.leads.workbench import LeadsWorkbench
-        self.assertIn(LeadsWorkbench._TARGET_LABEL["apollo"], body)
+            if "free" in line.lower():
+                for paid in ("Find new people", "Find e-mails", "Qualify"):
+                    self.assertNotIn(paid, line.split("free")[0], line)
 
     def test_the_filters_separate_steering_from_enforcing(self):
         body = dict(H.SECTIONS)["The filters"]

@@ -61,7 +61,7 @@ _COLS = ("", "Lead", "Focus", "Fit", "Status", "Signal")
 # The deliverability statuses a lead can carry, each with its (ink, tint) tone.
 _TONE = {
     "Verified":  (theme.OK_INK,   theme.OK_BG),
-    "Guessed":   (theme.WARN_INK, theme.WARN_BG),
+    "Unverified": (theme.WARN_INK, theme.WARN_BG),
     "Catch-all": (theme.WARN_INK, theme.WARN_BG),
     "Unknown":   (theme.WARN_INK, theme.WARN_BG),
     "Invalid":   (theme.ERR_INK,  theme.ERR_BG),
@@ -70,18 +70,18 @@ _TONE = {
     "Not qualified": (theme.NEUTRAL[700], theme.NEUTRAL[200]),
 }
 # Dossier.status of a display-only row: someone a search sourced whom the
-# qualify pass never reached (a leads-sheet-only run, or past the Qualify count).
-UNQUALIFIED = "not_qualified"
-# Rows "Qualify & draft" can (re)run: never qualified, or a qualify pass that
-# failed — no Groq key, a Groq error, a reply that wasn't JSON (models.py).
-RETRYABLE = frozenset({UNQUALIFIED, "no_model", "qualify_error", "non_json"})
+# qualify pass never reached (a leads-sheet-only run, or past the Qualify count)
+# — and the rows "Qualify & draft" can (re)run. One value with the pool's own
+# placeholder rows (pool.Person.row).
+from addons.leads.pool import RETRYABLE, UNQUALIFIED                # noqa: E402
 _MONO = theme.FONT_MONO_STACK.split(",")[0].strip().strip('"')
 
 
 def status_of(dos, draft=None) -> str:
     """The deliverability label for a dossier — the one thing a bulk sender
     must see per row. A lead already sent to reads 'Mailed'; otherwise the free
-    verify verdict (or 'Guessed' for an un-checked pattern address). One rule
+    verify verdict (or 'Unverified' for an address no verifier has ruled on
+    — nothing is guessed since 24-Sep-2026). One rule
     with the "Email status" filter: addons/leads/pool.py decides, this names."""
     from addons.leads.pool import EMAIL_STATUS_LABEL, email_status_of
     return EMAIL_STATUS_LABEL[email_status_of(dos.lead, draft)]
@@ -158,9 +158,9 @@ _AVATAR_TEXT = theme.NEUTRAL[700]
 _RAIL_W = 340          # the rail's default width
 _RAIL_MIN = 280        # a drag on the rail's edge stays between these
 _RAIL_MAX = 520
-_DRAWER_W = 360        # the dossier drawer: its default width, and its width floating
-_DRAWER_MIN = 320
-_DRAWER_MAX = 600
+_DRAWER_W = 760        # the person panel: its default width, and its width floating —
+_DRAWER_MIN = 420      # wide enough for Apollo's two columns (person._WIDE)
+_DRAWER_MAX = 1000
 _DOCK_MIN = 1180       # floor for docking; _dock_room also measures the centre
 _TABLE_MIN = 560       # a docked drawer never leaves the results less than this
 _HANDLE_W = 6          # a splitter handle's grab area — it draws a 1px rule
@@ -169,6 +169,8 @@ _ROW_H = 52
 _HEAD_H = 36
 _PAD = 12              # a cell's edge to its text; the header labels share it
 _BOX = 16              # the painted checkbox
+_TICK_BOX = 40         # the tick column's box, centred in its first 40px; the
+                       # header's caret for Apollo's Bulk Selection takes the rest
 _STEP = 20             # one scroll step, in px — the table scrolls per pixel
 _SLIDE_MS = 160        # the bulk bar's slide
 _DRAWER_MS = 180       # the drawer's
@@ -179,7 +181,7 @@ _FIT_ROLE = Qt.UserRole + 2         # Fit cell: the score as a number
 _C_TICK, _C_LEAD, _C_FOCUS, _C_FIT, _C_STATUS, _C_SIGNAL = range(len(_COLS))
 # Default widths, and the least a drag may leave. Focus has neither: it takes
 # whatever the others leave, and _fit_columns keeps that at _FOCUS_MIN or more.
-_COL_WIDTH = {_C_TICK: 44, _C_LEAD: 300, _C_FIT: 76, _C_STATUS: 124, _C_SIGNAL: 136}
+_COL_WIDTH = {_C_TICK: 58, _C_LEAD: 300, _C_FIT: 76, _C_STATUS: 124, _C_SIGNAL: 136}
 _COL_MIN = {_C_LEAD: 180, _C_FIT: 60, _C_STATUS: 100, _C_SIGNAL: 112}
 _FOCUS_MIN = 150
 # Every column at its minimum, and a scrollbar's width to spare: what a docked
@@ -207,8 +209,8 @@ _SORTS = (("relevance", "Relevance"), ("name", "Name A–Z"),
 # keys answer with a region of the header instead (_section_rect).
 _HELP_COLS = {"col_lead": _C_LEAD, "col_focus": _C_FOCUS, "col_fit": _C_FIT,
               "col_status": _C_STATUS, "col_signal": _C_SIGNAL}
-_HELP_BULK = ("bulk_save", "bulk_verify", "bulk_emails", "bulk_list", "bulk_export",
-              "bulk_qualify", "bulk_sequence")
+_HELP_BULK = ("bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_list",
+              "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
 _HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_search",
                         "research_menu", "save_as_search", "sort", "search_settings",
                         "view_toggle", "people_tabs", "pager",
@@ -410,7 +412,10 @@ class _TickDelegate(_CellDelegate):
         hot = (getattr(view, "hover_row", -1) == index.row()
                and getattr(view, "hover_col", -1) == _C_TICK)
         state = Qt.Checked if _ticked(index.data(Qt.CheckStateRole)) else Qt.Unchecked
-        _paint_check(painter, rect, state, hot)
+        # In the header's box's column, not the cell's middle: the header
+        # keeps the rest of the width for its Bulk Selection caret.
+        _paint_check(painter, QRect(rect.left(), rect.top(), _TICK_BOX, rect.height()),
+                     state, hot)
 
 
 class _LeadDelegate(_CellDelegate):
@@ -510,17 +515,21 @@ class _PillDelegate(_CellDelegate):
 class _LeadHeader(QHeaderView):
     """The table's header, painted whole: 11px uppercase labels lined up with
     the cell content, a hairline beneath, a quiet rule on each edge you can
-    drag (accent while hovered), and a select-all checkbox over the tick
-    column. Painted rather than styled so no platform style can float a sort
-    arrow or a grid line into it."""
+    drag (accent while hovered), and over the tick column Apollo's "Bulk
+    Selection" — the box ticks or clears this page, the caret beside it opens
+    the choices (select this page, all, a number of people). Painted rather
+    than styled so no platform style can float a sort arrow or a grid line
+    into it."""
 
     toggleAll = Signal()
+    bulkMenuRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(Qt.Horizontal, parent)
         self._state = Qt.Unchecked
         self._hot_edge = -1                 # the column whose right edge is under the mouse
         self._hot_box = False               # the mouse is on the select-all box
+        self._hot_caret = False             # …or on the Bulk Selection caret
         self.setSectionsClickable(False)    # the Sort combo is the one sort control
         self.setHighlightSections(False)
         self.setSortIndicatorShown(False)
@@ -553,7 +562,9 @@ class _LeadHeader(QHeaderView):
         painter.fillRect(QRect(rect.left(), rect.bottom(), rect.width(), 1),
                          theme.qcolor(theme.HAIRLINE))
         if logical == _C_TICK:
-            _paint_check(painter, rect, self._state, self._hot_box)
+            _paint_check(painter, QRect(rect.left(), rect.top(), _TICK_BOX, rect.height()),
+                         self._state, self._hot_box)
+            self._paint_caret(painter, self._caret_rect(rect))
         else:
             label = str(self.model().headerData(logical, Qt.Horizontal, Qt.DisplayRole) or "")
             f = _font(11, QFont.DemiBold, theme.FONT_HEADING)
@@ -574,39 +585,81 @@ class _LeadHeader(QHeaderView):
                              QColor(theme.ACCENT if hot else theme.NEUTRAL[200]))
         painter.restore()
 
-    def _hover(self, edge: int, box: bool) -> None:
-        if (edge, box) != (self._hot_edge, self._hot_box):
-            self._hot_edge, self._hot_box = edge, box
+    def _tick_section(self) -> QRect:
+        """The tick column's heading, in the viewport's coordinates."""
+        return QRect(self.sectionViewportPosition(_C_TICK), 0,
+                     self.sectionSize(_C_TICK), self.viewport().height())
+
+    @staticmethod
+    def _caret_rect(section: QRect) -> QRect:
+        """The Bulk Selection caret: what the tick column has right of its box."""
+        return QRect(section.left() + _TICK_BOX - 8, section.top(),
+                     max(0, section.width() - _TICK_BOX + 8), section.height())
+
+    def caret_rect(self) -> QRect:
+        """The caret in the header's own coordinates — what the tour rings and
+        where the Bulk Selection popup opens under."""
+        vp = self.viewport()
+        box = self._caret_rect(self._tick_section())
+        at = self.mapFromGlobal(vp.mapToGlobal(box.topLeft()))
+        return QRect(at, box.size())
+
+    def _paint_caret(self, painter, rect: QRect) -> None:
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(theme.qcolor(theme.ACCENT if self._hot_caret else theme.NEUTRAL[500]), 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        cx, cy = rect.center().x() - 2, rect.center().y() + 1
+        path = QPainterPath()
+        path.moveTo(cx - 4, cy - 2)
+        path.lineTo(cx, cy + 2)
+        path.lineTo(cx + 4, cy - 2)
+        painter.drawPath(path)
+        painter.restore()
+
+    def _hover(self, edge: int, box: bool, caret: bool = False) -> None:
+        if (edge, box, caret) != (self._hot_edge, self._hot_box, self._hot_caret):
+            self._hot_edge, self._hot_box, self._hot_caret = edge, box, caret
             self.viewport().update()
+
+    def _part_at(self, x: int) -> str:
+        """"box", "caret" or "" — what of the tick column's heading is at x."""
+        if self._edge_at(x) >= 0 or self.logicalIndexAt(x) != _C_TICK:
+            return ""
+        return "caret" if x >= self._caret_rect(self._tick_section()).left() else "box"
 
     def mouseMoveEvent(self, event):
         x = event.position().toPoint().x()
         if event.buttons():
             self._hover(self._hot_edge, False)          # mid-drag: keep the grip lit
         else:
-            edge = self._edge_at(x)
-            self._hover(edge, edge < 0 and self.logicalIndexAt(x) == _C_TICK)
+            part = self._part_at(x)
+            self._hover(self._edge_at(x), part == "box", part == "caret")
         super().mouseMoveEvent(event)
 
-    def _on_box(self, event) -> bool:
-        x = event.position().toPoint().x()
-        return (event.button() == Qt.LeftButton and self._edge_at(x) < 0
-                and self.logicalIndexAt(x) == _C_TICK)
+    def _press(self, event) -> bool:
+        if event.button() != Qt.LeftButton:
+            return False
+        part = self._part_at(event.position().toPoint().x())
+        if part == "box":
+            self.toggleAll.emit()
+        elif part == "caret":
+            self.bulkMenuRequested.emit()
+        else:
+            return False
+        event.accept()
+        return True
 
     def mousePressEvent(self, event):
-        if self._on_box(event):
-            self.toggleAll.emit()
-            event.accept()
-            return
-        super().mousePressEvent(event)
+        if not self._press(event):
+            super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         # The second press of a double click is a click too, as on any checkbox.
-        if self._on_box(event):
-            self.toggleAll.emit()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
+        if not self._press(event):
+            super().mouseDoubleClickEvent(event)
 
     def viewportEvent(self, event):
         if event.type() in (QEvent.Leave, QEvent.HoverLeave):
@@ -702,6 +755,97 @@ class _LeadTable(QTableWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+class _BulkSelect(QFrame):
+    """Apollo's Bulk Selection, under the header's caret (knowledge.apollo.io
+    "Search for People": "Select number of people lets you specify how many
+    people to select from your search results. Max people per company limits
+    how many people Apollo selects from any single company. Select this page
+    selects everyone on the current page. Select all selects all available
+    people from the search results.") — and Clear selection. A popup: it
+    closes on any pick, or on a click anywhere else."""
+
+    pageRequested = Signal()
+    allRequested = Signal()
+    numberRequested = Signal(int, int)      # how many, at most this many per company (0: any)
+    clearRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Popup)
+        self.setObjectName("bulkSelect")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(
+            f"QFrame#bulkSelect{{background:{theme.CARD};border:1px solid {theme.BORDER};"
+            f"border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#bulkSelect QPushButton#bulkPick{{background:transparent;border:none;"
+            f"text-align:left;padding:6px 8px;border-radius:{theme.R_CHIP}px;"
+            f"color:{theme.TEXT};font-size:13px;font-weight:500;}}"
+            f"QFrame#bulkSelect QPushButton#bulkPick:hover{{background:{theme.WELL};}}"
+            f"QFrame#bulkSelect QLabel{{color:{theme.NEUTRAL[700]};font-size:12px;"
+            f"font-weight:600;background:transparent;}}"
+            f"QFrame#bulkSelect QSpinBox{{padding:4px 8px;min-height:20px;font-size:13px;}}")
+        from PySide6.QtWidgets import QSpinBox
+        col = QVBoxLayout(self)
+        col.setContentsMargins(theme.SPACE_2, theme.SPACE_2, theme.SPACE_2, theme.SPACE_2)
+        col.setSpacing(2)
+        self.page_btn = self._pick(self.pageRequested)
+        self.all_btn = self._pick(self.allRequested)
+        col.addWidget(self.page_btn)
+        col.addWidget(self.all_btn)
+        col.addWidget(self._rule())
+        form = QVBoxLayout()
+        form.setContentsMargins(8, 6, 8, 6)
+        form.setSpacing(4)
+        form.addWidget(QLabel(i18n.t("Select number of people")))
+        self.number = QSpinBox()
+        self.number.setRange(1, 100000)
+        self.number.setValue(25)
+        self.number.setAccessibleName(i18n.t("Select number of people"))
+        form.addWidget(self.number)
+        form.addSpacing(4)
+        form.addWidget(QLabel(i18n.t("Max people per company")))
+        self.per_company = QSpinBox()
+        self.per_company.setRange(0, 1000)
+        self.per_company.setSpecialValueText(i18n.t("No limit"))
+        self.per_company.setAccessibleName(i18n.t("Max people per company"))
+        form.addWidget(self.per_company)
+        form.addSpacing(4)
+        self.apply_btn = C.button(i18n.t("Select"), "primary", on_click=self._apply)
+        form.addWidget(self.apply_btn, 0, Qt.AlignRight)
+        col.addLayout(form)
+        col.addWidget(self._rule())
+        self.clear_btn = self._pick(self.clearRequested)
+        self.clear_btn.setText(i18n.t("Clear selection"))
+        col.addWidget(self.clear_btn)
+        self.setMinimumWidth(248)
+
+    def _pick(self, signal) -> QPushButton:
+        b = QPushButton()
+        b.setObjectName("bulkPick")
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(lambda _=False: (self.hide(), signal.emit()))
+        return b
+
+    @staticmethod
+    def _rule() -> QFrame:
+        rule = QFrame()
+        rule.setObjectName("bulkRule")
+        rule.setFixedHeight(1)
+        rule.setStyleSheet(f"QFrame#bulkRule{{background:{theme.HAIRLINE};border:none;}}")
+        return rule
+
+    def set_counts(self, page: int, total: int, selected: int) -> None:
+        """What each choice would take: this page's people, and all of them."""
+        self.page_btn.setText(i18n.t("Select this page ({n})").format(n=f"{page:,}"))
+        self.all_btn.setText(i18n.t("Select all ({n})").format(n=f"{total:,}"))
+        self.number.setMaximum(max(1, total))
+        self.clear_btn.setEnabled(selected > 0)
+        self.apply_btn.setEnabled(total > 0)
+
+    def _apply(self) -> None:
+        self.hide()
+        self.numberRequested.emit(int(self.number.value()), int(self.per_company.value()))
 
 
 class _SplitHandle(QSplitterHandle):
@@ -842,6 +986,11 @@ class LeadsCockpit(QWidget):
     sequenceRequested = Signal(list)
     qualifyRequested = Signal(list)
     saveContactsRequested = Signal(list)    # Apollo's "Save": make them contacts
+    stageRequested = Signal(list, str)      # Apollo's Edit > Set stage: rows, stage
+    # Remove: take the rows off the list (removed.py) — the owner's "Clear",
+    # 23-Sep-2026. removedRequested: the rail's "N removed", to restore.
+    removeRequested = Signal(list)
+    removedRequested = Signal()
     importRequested = Signal(str)           # "contacts" | "accounts"
     tabChanged = Signal(str)                # "total" | "net_new" | "saved"
     pageRequested = Signal(int)             # 0-based
@@ -862,6 +1011,11 @@ class LeadsCockpit(QWidget):
         self._tab = "total"
         self._draft_by: dict = {}
         self._checked: set = set()          # dossier indices ticked (shared view)
+        # A pooled page's selection outlives the page (Apollo's: tick people
+        # on page 1, go on to page 2, the count keeps them): everyone in the
+        # result, in its order, and the identity keys of everyone selected.
+        self._universe: list = []
+        self._sel_keys: set = set()
         self._hidden: set = set()           # dossier indices hidden by the filters
         self._card_cbs: dict = {}           # idx → the gallery card's checkbox
         self._view = "table"                # "table" (dense) or "cards" (gallery)
@@ -969,6 +1123,22 @@ class LeadsCockpit(QWidget):
         lay.setSpacing(theme.SPACE_3)
 
         lay.addWidget(self._tabs_bar())
+        # Whoever was taken off the list (Remove), one click from coming back.
+        # Only there while somebody is: an empty "0 removed" is noise.
+        self._removed_link = QPushButton()
+        self._removed_link.setObjectName("removedLink")
+        self._removed_link.setCursor(Qt.PointingHandCursor)
+        self._removed_link.setToolTip(i18n.t("People you took off the list. Open "
+                                             "to put any of them back."))
+        self._removed_link.setStyleSheet(
+            f"QPushButton#removedLink{{background:transparent;border:none;"
+            f"color:{theme.NEUTRAL[600]};padding:0px 2px;font-size:12px;"
+            f"font-weight:600;text-align:right;}}"
+            f"QPushButton#removedLink:hover{{color:{theme.TEXT};"
+            f"text-decoration:underline;}}")
+        self._removed_link.clicked.connect(lambda _=False: self.removedRequested.emit())
+        self._removed_link.hide()
+        lay.addWidget(self._removed_link, 0, Qt.AlignRight)
 
         self._search_slot = QVBoxLayout()
         self._search_slot.setContentsMargins(0, 0, 0, 0)
@@ -1038,6 +1208,13 @@ class LeadsCockpit(QWidget):
         if key in self._tab_btns:
             self._tab = key
             self._paint_tabs()
+
+    def set_removed_count(self, n: int) -> None:
+        """How many people are off the list — the rail's "N removed" link,
+        hidden while nobody is."""
+        n = max(0, int(n or 0))
+        self._removed_link.setText(i18n.t("{n} removed · Restore").format(n=f"{n:,}"))
+        self._removed_link.setVisible(n > 0)
 
     def set_counts(self, counts: dict) -> None:
         """The three tabs' counts, {"total", "net_new", "saved"}."""
@@ -1428,6 +1605,13 @@ class LeadsCockpit(QWidget):
                 head.resizeSection(c, _COL_WIDTH[c])
         head.sectionResized.connect(self._on_section_resized)
         head.toggleAll.connect(self._toggle_all_visible)
+        head.bulkMenuRequested.connect(self._open_bulk_select)
+        self._bulk_select = _BulkSelect(self)
+        self._bulk_select.hide()
+        self._bulk_select.pageRequested.connect(lambda: self._set_many(self._visible(), True))
+        self._bulk_select.allRequested.connect(self._select_all)
+        self._bulk_select.numberRequested.connect(self._select_number)
+        self._bulk_select.clearRequested.connect(self._clear_ticks)
         t.tickRequested.connect(self._tick_row)
         t.escapePressed.connect(self._dismiss_drawer)
         t.itemChanged.connect(self._on_item_changed)
@@ -1627,9 +1811,12 @@ class LeadsCockpit(QWidget):
         lay.addWidget(self._sel_lbl)
         lay.addSpacing(theme.SPACE_2)
         self._sel_all = self._link("Select all")
-        self._sel_all.clicked.connect(lambda: self._set_many(self._visible(), True))
+        self._sel_all.clicked.connect(self._select_all)
         lay.addWidget(self._sel_all)
-        self._bulk_clear = self._link("Clear")
+        # "Clear selection", not "Clear": it only unticks. The owner read a
+        # bare "Clear" as taking the people away (23-Sep-2026) — that is
+        # Remove's job, beside Save.
+        self._bulk_clear = self._link("Clear selection")
         self._bulk_clear.clicked.connect(self._clear_ticks)
         lay.addWidget(self._bulk_clear)
         lay.addStretch(1)
@@ -1638,17 +1825,51 @@ class LeadsCockpit(QWidget):
         self._b_contact = QPushButton("Save")
         self._b_contact.setToolTip("Save the selected people as contacts — they "
                                    "move from Net New to Saved.")
-        self._b_verify = QPushButton("Verify free")
+        # Remove: off the list — out of Total, Net New and Saved, and out of
+        # every new search — until restored from the rail's "N removed".
+        # Nothing is deleted (removed.py); the workbench asks first.
+        self._b_remove = QPushButton("Remove")
+        self._b_remove.setToolTip("Take the selected people off the list. They leave "
+                                  "People and new searches skip them. Restore them "
+                                  "any time from Removed, under Total · Net New · Saved.")
         # A Find-people run brings back nobody's address (finding people is
         # free; finding addresses is not) — this is where that is spent, on the
         # rows the owner ticked.
         self._b_emails = QPushButton("Find e-mails")
-        self._b_emails.setToolTip("Look up a real e-mail for every selected "
-                                  "lead and check it — free verifiers first, "
-                                  "then a finder credit where they cannot "
-                                  "confirm it.")
+        from prospector import gateway
+        if gateway.pooled():
+            # Every check is one credit, taken only when a verifier answers.
+            self._b_verify = QPushButton("Verify")
+            self._b_verify.setToolTip("Check the selected people's e-mails. A "
+                                      "credit is used for each address a "
+                                      "verifier answers for.")
+            self._b_emails.setToolTip("Find each selected person's real e-mail "
+                                      "and check it. A credit is used only when "
+                                      "a finder knows the person. Nothing is "
+                                      "guessed.")
+        else:
+            self._b_verify = QPushButton("Verify free")
+            self._b_emails.setToolTip("Find each selected person's real e-mail "
+                                      "with Apollo, then Hunter, and check it with "
+                                      "the free verifiers. A credit is used only "
+                                      "when a finder knows the person. Nothing is "
+                                      "guessed.")
         self._b_save = QPushButton("Add to list")
         self._b_export = QPushButton("Export")
+        # Apollo's Edit > Set stage: where the selected contacts stand with
+        # you. Someone not saved yet is saved first — only a contact has one.
+        self._b_stage = QPushButton("Set stage")
+        self._b_stage.setToolTip("Move the selected people to a stage — Cold, "
+                                 "Approaching, Interested… Anyone not saved yet "
+                                 "is saved as a contact first.")
+        self._stage_menu = QMenu(self._b_stage)
+        from addons.leads.contacts import STAGES
+        for stage in STAGES:
+            # A stage is a record's value, like a list's name — shown as kept.
+            act = self._stage_menu.addAction(stage)
+            act.triggered.connect(lambda _=False, s=stage: self.stageRequested.emit(
+                self.selected(), s))
+        self._b_stage.setMenu(self._stage_menu)
         # Runs the qualify pass on the ticked people a run sourced but never
         # qualified. "&&": a lone & in a button label is eaten as a mnemonic.
         self._b_qualify = QPushButton("Qualify && draft")
@@ -1658,6 +1879,7 @@ class LeadsCockpit(QWidget):
         self._b_seq.setObjectName("primary")
         self._b_contact.clicked.connect(
             lambda: self.saveContactsRequested.emit(self.selected()))
+        self._b_remove.clicked.connect(lambda: self.removeRequested.emit(self.selected()))
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
         self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
@@ -1673,8 +1895,9 @@ class LeadsCockpit(QWidget):
         self._emails_wanted = False         # …and someone without a verified address
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
-        for b in (self._b_contact, self._b_verify, self._b_emails, self._b_save,
-                  self._b_export, self._b_qualify, self._b_more, self._b_seq):
+        for b in (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
+                  self._b_save, self._b_export, self._b_stage, self._b_qualify,
+                  self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
         self._bulk_bar_w = bar
@@ -1759,10 +1982,11 @@ class LeadsCockpit(QWidget):
         self._toolbar_level = level
 
     def _bulk_actions(self) -> tuple:
-        """In _HELP_BULK's order: Save, Verify, Find e-mails, Add to list,
-        Export, Qualify & draft, Add to sequence."""
-        return (self._b_contact, self._b_verify, self._b_emails, self._b_save,
-                self._b_export, self._b_qualify, self._b_seq)
+        """In _HELP_BULK's order: Save, Remove, Verify, Find e-mails, Add to
+        list, Export, Set stage, Qualify & draft, Add to sequence."""
+        return (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
+                self._b_save, self._b_export, self._b_stage, self._b_qualify,
+                self._b_seq)
 
     def _wanted(self, button: QPushButton) -> bool:
         """An action the run can still use. Qualify and Find e-mails are about
@@ -1775,14 +1999,16 @@ class LeadsCockpit(QWidget):
 
     @staticmethod
     def _fold_set(level: int, actions: tuple) -> tuple:
-        """Which actions sit in More at a compaction level: from 2 the two
+        """Which actions sit in More at a compaction level: from 2 the three
         least used, from 3 all but Save, the primary and Find e-mails (a list
         with no addresses is unusable, so that stays on the bar as long as it
         fits). Save never folds: it is Apollo's first action, and the one that
-        moves people from Net New to Saved."""
-        _contact, verify, emails, add_list, export, qualify, _seq = actions
-        return {2: (verify, add_list), 3: (verify, add_list, export, qualify),
-                4: (verify, add_list, export, qualify, emails)}.get(level, ())
+        moves people from Net New to Saved. Nor does Remove: the owner asked
+        for it by name, and a folded one is a button he cannot find."""
+        _contact, _remove, verify, emails, add_list, export, stage, qualify, _seq = actions
+        return {2: (verify, add_list, stage),
+                3: (verify, add_list, stage, export, qualify),
+                4: (verify, add_list, stage, export, qualify, emails)}.get(level, ())
 
     def _bulk_need(self, level: int) -> int:
         """The width the bulk bar needs at a compaction level: 0 is all of it;
@@ -1820,6 +2046,14 @@ class LeadsCockpit(QWidget):
         It opens upwards — the bar sits at the foot of the window."""
         menu = QMenu(self)
         for b in self._bulk_folded:
+            if b is self._b_stage:
+                # Its stages, not a click that would open the button's own
+                # menu over a folded-away button.
+                sub = menu.addMenu(b.text())
+                sub.setEnabled(b.isEnabled())
+                for act in self._stage_menu.actions():
+                    sub.addAction(act)
+                continue
             act = menu.addAction(b.text())
             act.setEnabled(b.isEnabled())
             act.triggered.connect(b.click)
@@ -1830,48 +2064,30 @@ class LeadsCockpit(QWidget):
         self._more_menu = menu              # alive while it shows
 
     def _drawer(self) -> QWidget:
-        """The dossier drawer. Hidden until a lead is picked; docks beside the
-        results on a wide window and floats over their right edge on a narrow
-        one — so opening it never squeezes the table into a sliver."""
+        """The person panel's drawer — Apollo's contact profile (addons/leads/
+        person.py). Hidden until a person is picked; docks beside the results
+        on a wide window and floats over them on a narrow one, so opening it
+        never squeezes the table into a sliver; Expand spreads it over the
+        whole page."""
+        from addons.leads.person import PersonPanel
         panel = QFrame()
         panel.setObjectName("leadDrawer")
         panel.setAttribute(Qt.WA_StyledBackground, True)
         col = QVBoxLayout(panel)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
-        head = QHBoxLayout()
-        head.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_3, theme.SPACE_3)
-        head.setSpacing(theme.SPACE_3)
-        self._drawer_head = QHBoxLayout()
-        self._drawer_head.setContentsMargins(0, 0, 0, 0)
-        self._drawer_head.setSpacing(theme.SPACE_3)
-        head.addLayout(self._drawer_head, 1)
-        head.addWidget(C.icon_button("x", "Close", on_click=self._dismiss_drawer),
-                       alignment=Qt.AlignTop)
-        col.addLayout(head)
-        rule = QFrame()
-        rule.setObjectName("drawerRule")
-        rule.setFixedHeight(1)
-        rule.setStyleSheet(f"QFrame#drawerRule{{background:{theme.HAIRLINE};border:none;}}")
-        col.addWidget(rule)
-        scroll = QScrollArea()
-        scroll.setObjectName("drawerScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.verticalScrollBar().setSingleStep(_STEP)
-        scroll.setStyleSheet("QScrollArea#drawerScroll{background:transparent;border:none;}")
-        inner = QWidget()
-        inner.setObjectName("drawerInner")
-        inner.setAttribute(Qt.WA_StyledBackground, True)
-        inner.setStyleSheet(f"QWidget#drawerInner{{background:{theme.CARD};}}")
-        self._drawer_lay = QVBoxLayout(inner)
-        self._drawer_lay.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
-                                            theme.SPACE_4, theme.SPACE_4)
-        self._drawer_lay.setSpacing(theme.SPACE_3)
-        self._drawer_lay.addStretch(1)
-        scroll.setWidget(inner)
-        col.addWidget(scroll, 1)
+        self.person_panel = PersonPanel()
+        self.person_panel.closeRequested.connect(self._dismiss_drawer)
+        self.person_panel.expandToggled.connect(self._set_expanded)
+        self.person_panel.personPicked.connect(self._open_person)
+        col.addWidget(self.person_panel, 1)
+        # The Prospect tab's column, where the qualification leads — what the
+        # dossier drawer used to be.
+        self._drawer_lay = self.person_panel.prospect_lay
+        self._drawer_expanded = False
+        self._person_provider = None        # (dos, person) -> PersonView, the workbench's
+        self._drawer_dos = None             # the row the panel shows
+        self._drawer_person = None
         self._drawer_panel = panel
         self._drawer_w = _Reveal(panel, Qt.Horizontal, self._body)
         self._drawer_w.setObjectName("leadDrawerSlot")
@@ -1923,7 +2139,9 @@ class LeadsCockpit(QWidget):
         at its minimum (_TABLE_FLOOR) beside the rail and the drawer. The
         toolbar spans the whole page above all three (Apollo's), so docking
         never squeezes it — and nothing here changes with the drawer, so this
-        can't flip-flop."""
+        can't flip-flop. Expanded, it never docks: it covers the page."""
+        if getattr(self, "_drawer_expanded", False):
+            return False
         rail = 0 if self._rail.isHidden() else self._rail_pref + _HANDLE_W
         need = max(_DOCK_MIN, rail + _TABLE_FLOOR + _HANDLE_W + self._drawer_pref)
         return self._body.width() >= need
@@ -1937,8 +2155,22 @@ class LeadsCockpit(QWidget):
         if not self._toolbar.isHidden():
             top = body.mapFromGlobal(self._toolbar.mapToGlobal(QPoint(0, self._toolbar.height()))).y()
         bottom = body.mapFromGlobal(self._view_stack.mapToGlobal(QPoint(0, self._view_stack.height()))).y()
+        if getattr(self, "_drawer_expanded", False):
+            # Apollo's expanded profile: the whole page under the toolbar.
+            return QRect(0, top, body.width(), max(0, body.height() - top))
         width = min(_DRAWER_W + _SHADOW, body.width())
         return QRect(body.width() - width, top, width, max(0, bottom - top))
+
+    def _set_expanded(self, on: bool) -> None:
+        """Expand (or back to the list): the panel spreads over the whole page
+        — floating, never docked — and comes back to its place."""
+        self._drawer_expanded = bool(on)
+        self.person_panel.set_expanded(on)
+        if not self._drawer_w.isHidden():
+            if on and self._drawer_docked:
+                self._move_drawer(False)
+            self._place_drawer()
+            self._settle_drawer()
 
     def _move_drawer(self, dock: bool, sized: bool = True) -> None:
         """Put the drawer in the splitter (dock) or back over the body (float)."""
@@ -1997,6 +2229,10 @@ class LeadsCockpit(QWidget):
             self._settle_drawer()
 
     def _close_drawer(self) -> None:
+        if self._drawer_expanded:
+            # Shut, it comes back at its own size next time.
+            self._drawer_expanded = False
+            self.person_panel.set_expanded(False)
         w = self._drawer_w
         if w.isHidden() or (self._drawer_sliding() and not self._drawer_opening):
             return                          # shut, or already on its way
@@ -2076,26 +2312,26 @@ class LeadsCockpit(QWidget):
         cockpit always did. No pool, no pages."""
         self._pooled = False
         self._people = []
+        self._universe, self._sel_keys = [], set()
         self._load_rows(list(dossiers or []) + unqualified_rows(dossiers, all_leads),
                         drafts)
         self._pager.hide()
 
-    def set_people(self, people, page=None, counts=None, empty_text=None) -> None:
+    def set_people(self, people, page=None, counts=None, empty_text=None,
+                   universe=None) -> None:
         """One page of the pool — pool.Person rows the workbench has already
         filtered, split into Total / Net New / Saved, sorted and paged — shown
         in exactly that order. `page` is pool.page()'s dict, `counts` the three
-        tabs', `empty_text` (title, body) what to say when the page is empty."""
-        from prospector.models import Dossier
+        tabs', `empty_text` (title, body) what to say when the page is empty,
+        `universe` everyone in the result on every page, in order — what
+        Select all and Select number of people choose from (the page alone
+        when not given). Whoever was selected stays selected."""
         self._pooled = True
         self._people = list(people or ())
+        self._universe = list(universe) if universe is not None else list(self._people)
         rows, drafts = [], []
         for person in self._people:
-            dos = person.dossier
-            if dos is None:
-                dos = Dossier(lead=person.lead, verdict="", generated_at="",
-                              status=UNQUALIFIED,
-                              score=int(getattr(person.lead, "fit_score", 0) or 0))
-            rows.append(dos)
+            rows.append(person.row())
             if person.draft is not None:
                 drafts.append(person.draft)
         if empty_text:
@@ -2113,14 +2349,51 @@ class LeadsCockpit(QWidget):
         return None
 
     def _load_rows(self, dossiers: list, drafts) -> None:
+        # A pooled page rebuilt under an open person (a stage set in their
+        # panel, a page turned) keeps them open, as Apollo's profile stays.
+        keep = (self._pooled and self._drawer_person is not None
+                and not self._drawer_w.isHidden())
         self._dossiers = list(dossiers)
         self._draft_by = {id(d.dossier): d for d in (drafts or [])}
-        self._checked = set()               # a fresh page starts with nothing ticked
+        # A run's rows start with nothing ticked; a pooled page ticks whoever
+        # the selection holds, however they got into it (another page).
+        self._checked = ({i for i, p in enumerate(self._people) if self._is_sel(p)}
+                         if self._pooled else set())
         self._hidden = set()
         self._card_cbs = {}
         self._show_empty(not self._dossiers)
-        self._fill_table()                  # _apply_filters() fills the gallery too
+        # Emptying the table moves its current cell, which would shut the
+        # panel before it can be kept open.
+        self._keeping = keep and bool(self._dossiers)
+        try:
+            self._fill_table()              # _apply_filters() fills the gallery too
+        finally:
+            self._keeping = False
+        if keep and self._dossiers and self._keep_person_open():
+            return
         self._show_selected()               # nothing picked → the drawer stays shut
+
+    def _keep_person_open(self) -> bool:
+        """The open person again, on the rebuilt page: their row highlighted
+        when they are on it, and their panel drawn from the records as they
+        now stand either way."""
+        person = self._drawer_person
+        keys = getattr(person, "keys", None) or frozenset()
+        for idx, p in enumerate(self._people):
+            if keys and not keys.isdisjoint(p.keys):
+                for row in range(self._table.rowCount()):
+                    item = self._table.item(row, _C_TICK)
+                    if item is not None and item.data(Qt.UserRole) == idx:
+                        self._table.blockSignals(True)
+                        self._table.setCurrentCell(row, _C_LEAD)
+                        self._table.blockSignals(False)
+                        break
+                self._render_drawer(p.row(), p)
+                return True
+        if self._drawer_dos is None:
+            return False
+        self._render_drawer(self._drawer_dos, None)
+        return True
 
     def _fill_table(self):
         t = self._table
@@ -2136,7 +2409,7 @@ class LeadsCockpit(QWidget):
 
             chk = QTableWidgetItem()
             chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            chk.setCheckState(Qt.Unchecked)
+            chk.setCheckState(Qt.Checked if idx in self._checked else Qt.Unchecked)
             chk.setData(Qt.UserRole, idx)          # sort-safe dossier pointer
             t.setItem(row, _C_TICK, chk)
 
@@ -2286,7 +2559,78 @@ class LeadsCockpit(QWidget):
         self._set_many(shown, not all(i in self._checked for i in shown))
 
     def _clear_ticks(self) -> None:
+        """Clear — everyone selected, on every page."""
+        self._sel_keys = set()
         self._set_many(list(self._checked), False)
+
+    # ── a pooled page's selection, across its pages ─────────────────────────
+    def _is_sel(self, person) -> bool:
+        keys = getattr(person, "keys", None)
+        return bool(keys) and not keys.isdisjoint(self._sel_keys)
+
+    def _mark(self, people, on: bool) -> None:
+        """Select or unselect people by their identity keys (pool.Person.keys):
+        the handle that survives a page change and a pool rebuild."""
+        for person in people or ():
+            keys = getattr(person, "keys", None) or frozenset()
+            if on:
+                self._sel_keys |= keys
+            else:
+                self._sel_keys -= keys
+
+    def _resync_ticks(self) -> None:
+        """This page's ticks from the selection, after it changed off the page."""
+        if self._pooled:
+            want = {i for i, p in enumerate(self._people) if self._is_sel(p)}
+            self._set_many(set(self._checked) - want, False, mark=False)
+            self._set_many(want - self._checked, True, mark=False)
+            self._refresh_bulk()
+
+    def _select_all(self) -> None:
+        """Select all — everyone in the result, on every page."""
+        if self._pooled:
+            self._mark(self._universe, True)
+            self._resync_ticks()
+        else:
+            self._set_many(self._visible(), True)
+
+    def _select_number(self, n: int, per_company: int = 0) -> None:
+        """Select number of people: the first `n` of the result in its order,
+        at most `per_company` from any one company (pool.pick). It replaces
+        the selection, as Apollo's does."""
+        from addons.leads.pool import pick
+        if self._pooled:
+            self._sel_keys = set()
+            self._mark(pick(self._universe, n, per_company), True)
+            self._resync_ticks()
+            return
+        order = [self._table.item(r, _C_TICK).data(Qt.UserRole)
+                 for r in range(self._table.rowCount())
+                 if self._table.item(r, _C_TICK) is not None
+                 and not self._table.isRowHidden(r)]
+        chosen = pick([self._dossiers[i] for i in order], n, per_company)
+        ids = {id(d) for d in chosen}
+        self._set_many(list(self._checked), False)
+        self._set_many([i for i in order if id(self._dossiers[i]) in ids], True)
+
+    def clear_selection(self) -> None:
+        """Forget who is selected — the workbench asks when the filters, the
+        tab or the search box change what the result IS (Apollo starts a new
+        search with nothing selected); a new page or a new sort keeps it."""
+        self._sel_keys = set()
+        if self._checked:
+            self._set_many(list(self._checked), False, mark=False)
+
+    def _open_bulk_select(self) -> None:
+        """The header caret: Bulk Selection, opening under the tick column."""
+        pop = self._bulk_select
+        total = len(self._universe) if self._pooled else len(self._visible())
+        pop.set_counts(len(self._visible()), total, len(self.selected()))
+        pop.adjustSize()
+        at = self._head.mapToGlobal(self._head.caret_rect().bottomLeft())
+        pop.move(at.x() - _TICK_BOX // 2, at.y() + 2)
+        pop.show()
+        pop.raise_()
 
     def _on_item_changed(self, item):
         if item.column() == _C_TICK:
@@ -2302,17 +2646,22 @@ class LeadsCockpit(QWidget):
             self._checked.add(idx)
         else:
             self._checked.discard(idx)
+        if self._pooled and 0 <= idx < len(self._people):
+            self._mark([self._people[idx]], on)
         self._sync_check(idx)
         self._refresh_bulk()
 
-    def _set_many(self, idxs, on: bool) -> None:
+    def _set_many(self, idxs, on: bool, mark: bool = True) -> None:
         """Tick or clear many leads at once — select all, clear — in one pass
-        over the rows and one bulk-bar refresh, not one per lead."""
+        over the rows and one bulk-bar refresh, not one per lead. `mark` False
+        only redraws ticks the selection already says."""
         idxs = set(idxs)
         if on:
             self._checked |= idxs
         else:
             self._checked -= idxs
+        if self._pooled and mark:
+            self._mark([self._people[i] for i in idxs if 0 <= i < len(self._people)], on)
         state = Qt.Checked if on else Qt.Unchecked
         self._table.blockSignals(True)
         for row in range(self._table.rowCount()):
@@ -2347,25 +2696,29 @@ class LeadsCockpit(QWidget):
     def _refresh_bulk(self):
         picked = self.selected()
         n = len(picked)
-        shown = len(self._dossiers) - len(self._hidden)
-        self._sel_lbl.setText(f"{n} selected")
-        self._sel_all.setText(f"Select all {shown}")
+        on_page = len(self._dossiers) - len(self._hidden)
+        # Select all is everyone in the result, every page — Apollo's.
+        shown = len(self._universe) if self._pooled else on_page
+        self._sel_lbl.setText(i18n.t("{n} selected").format(n=f"{n:,}"))
+        self._sel_all.setText(i18n.t("Select all {n}").format(n=f"{shown:,}"))
         self._sel_all_wanted = 0 < n < shown
-        for b in (self._b_contact, self._b_verify, self._b_save, self._b_export,
-                  self._b_seq):
+        for b in (self._b_contact, self._b_remove, self._b_verify, self._b_save,
+                  self._b_export, self._b_seq, self._b_stage):
             b.setEnabled(n > 0)
         # Qualify only means something while the run holds people to qualify
         # (never qualified, or a failed pass), and arms when one of them is ticked.
         self._qualify_wanted = any(getattr(d, "status", "") in RETRYABLE
-                                   for d in self._dossiers)
+                                   for d in self._dossiers + picked)
         self._b_qualify.setEnabled(any(getattr(d, "status", "") in RETRYABLE
                                        for d in picked))
         # The same rule for addresses: a confirmed one has nothing left to find,
         # so the button is for the rows that are blank, guessed or unconfirmed.
-        self._emails_wanted = any(needs_email(d) for d in self._dossiers)
+        self._emails_wanted = any(needs_email(d) for d in self._dossiers + picked)
         self._b_emails.setEnabled(any(needs_email(d) for d in picked))
-        self._head.set_check_state(Qt.Unchecked if n == 0 else
-                                   Qt.Checked if n >= shown else Qt.PartiallyChecked)
+        # The header's box speaks for THIS page, as Apollo's does.
+        ticked = len([i for i in self._checked if i not in self._hidden])
+        self._head.set_check_state(Qt.Unchecked if ticked == 0 else
+                                   Qt.Checked if ticked >= on_page else Qt.PartiallyChecked)
         self._table.viewport().update()     # a tick tints its whole row, not one cell
         self._slide_bulk(n > 0)
         # Fold after the slide has put the bar up: measured while it was still
@@ -2374,6 +2727,11 @@ class LeadsCockpit(QWidget):
         self._fit_bulk()
 
     def selected(self) -> list:
+        """The rows the bulk actions act on: on a pooled page everyone
+        selected on ANY page of the result, in its order; else the ticked
+        rows of this one."""
+        if self._pooled:
+            return [p.row() for p in self._universe if self._is_sel(p)]
         return [self._dossiers[i] for i in sorted(self._checked)
                 if i not in self._hidden and 0 <= i < len(self._dossiers)]
 
@@ -2588,6 +2946,8 @@ class LeadsCockpit(QWidget):
 
     # ── drawer ────────────────────────────────────────────────────────────────
     def _show_selected(self):
+        if getattr(self, "_keeping", False):
+            return                          # a rebuild keeping the open person
         row = self._table.currentRow()
         dos = self._dossier_at(row) if row >= 0 else None
         if dos is None:
@@ -2595,107 +2955,60 @@ class LeadsCockpit(QWidget):
         else:
             self._open_drawer(dos)
 
-    def _render_drawer(self, dos):
-        lay = self._drawer_lay
-        _clear(lay)
-        _clear(self._drawer_head)
+    def _render_drawer(self, dos, person=None):
+        """Show one person in the panel: their PersonView from the workbench's
+        provider (set_person_provider) — contact, account, colleagues and
+        the rest — or, with no provider (a run shown on its own), what this
+        page holds: the row, its draft, its pool person."""
+        self._drawer_dos = dos
         if dos is None:
-            lay.addStretch(1)
+            self._drawer_person = None
+            self.person_panel.show_person(None)
             return
-        lead = dos.lead
+        if person is None:
+            person = self.person_for(dos)
+        self._drawer_person = person
+        self.person_panel.show_person(self._person_view(dos, person))
+
+    def _person_view(self, dos, person):
+        from addons.leads.person import PersonView
+        if self._person_provider is not None:
+            try:
+                view = self._person_provider(dos, person)
+            except Exception:                                   # noqa: BLE001
+                view = None
+            if view is not None:
+                return view
         draft = self._draft_by.get(id(dos))
+        if draft is None and person is not None:
+            draft = person.draft
+        return PersonView(row=dos, draft=draft, person=person)
 
-        self._drawer_head.addWidget(_avatar(lead.name, 42), alignment=Qt.AlignTop)
-        who = QVBoxLayout()
-        who.setContentsMargins(0, 0, 0, 0)
-        who.setSpacing(1)
-        name = QLabel(lead.name or "(no name)")
-        name.setWordWrap(True)
-        name.setStyleSheet(f"color:{theme.TEXT};font-size:16px;font-weight:600;")
-        who.addWidget(name)
-        role = " · ".join(p for p in (lead.title, lead.company) if p)
-        if role:
-            who.addWidget(_muted(role, 12))
-        self._drawer_head.addLayout(who, 1)
+    def set_person_provider(self, provider) -> None:
+        """How the panel learns everything about someone: provider(dos,
+        person) -> person.PersonView (the workbench's, which reads the stores)."""
+        self._person_provider = provider
 
-        # The verdict leads: it is what the rest of the drawer is the proof of.
-        for part in evidence.headline(dos):
-            lay.addWidget(part)
-        lay.addWidget(self._d_card("Fit", f"{getattr(lead,'fit_score',0) or 0:g} / 100 · "
-                                          f"{lead.fit_reason or ''}"))
-        status = status_of(dos, draft)
-        lay.addWidget(self._d_card(i18n.t("Deliverability"), status))
-        if lead.email:
-            em = QLabel(lead.email)
-            em.setStyleSheet(f"color:{theme.INFO_INK};font-family:'{_MONO}';font-size:11px;")
-            lay.addWidget(em)
-        where = (lead.extra or {}).get("location") or ""
-        if where:
-            lay.addWidget(self._d_card("Location", str(where)))
-        if getattr(dos, "status", "") in RETRYABLE - {UNQUALIFIED}:
-            # A pass that failed says why, and how to run it again.
-            why = (getattr(dos, "note", "") or "The qualify pass failed.").strip()
-            lay.addWidget(self._d_card(
-                "Qualification", f"Couldn't be qualified: {why} Tick this lead and "
-                                 "press Qualify & draft to try again."))
-        if getattr(dos, "status", "") == UNQUALIFIED:
-            # Nothing researched or drafted yet: no opener, no sequence to preview.
-            lay.addWidget(self._d_card(
-                "Qualification", "Not qualified yet. Prism sourced this person but "
-                                 "hasn't researched them or drafted an email."))
-            lay.addStretch(1)
+    def refresh_person(self) -> None:
+        """Draw the open person again from the records as they now stand —
+        after an act on them. Their row on the page may be a new object once
+        the pool was rebuilt, so they are found again by who they are."""
+        dos = self._drawer_dos
+        if dos is None or self._drawer_w.isHidden():
             return
-        # The six dimensions with their evidence and the why-now news with its
-        # source — what "hot" and "why-now" in the table rest on.
-        for part in evidence.detail(dos):
-            lay.addWidget(part)
-        opener = (draft.body if draft is not None else "") or dos.opener or ""
-        if opener:
-            lay.addWidget(self._d_card("Drafted opener", opener, mono=False, well=True))
+        person = self._drawer_person
+        if self._pooled and person is not None:
+            keys = getattr(person, "keys", None) or frozenset()
+            again = next((p for p in self._people if keys and not keys.isdisjoint(p.keys)),
+                         None)
+            if again is not None:
+                person, dos = again, again.row()
+        self._render_drawer(dos, person)
 
-        seq = QLabel("STOP-ON-REPLY SEQUENCE · 3 touches")
-        seq.setStyleSheet(f"color:{theme.NEUTRAL[600]};font-family:'{theme.FONT_HEADING}';"
-                          f"font-size:11px;letter-spacing:1px;font-weight:600;margin-top:6px;")
-        lay.addWidget(seq)
-        for i, (t, when) in enumerate((("First touch", "today"),
-                                       ("Follow-up", "+3 days"),
-                                       ("Last touch", "+7 days")), 1):
-            step = QLabel(f"<b>{i}</b>&nbsp;&nbsp;{t} · "
-                          f"<span style='color:{theme.NEUTRAL[600]}'>{when}</span>")
-            step.setTextFormat(Qt.RichText)     # the app never auto-detects markup
-            step.setWordWrap(True)
-            lay.addWidget(step)
-        stop = QLabel("Stops automatically the moment they reply")
-        stop.setStyleSheet(f"color:{theme.OK_INK};background:{theme.OK_BG};"
-                           f"border-radius:{theme.R_CONTROL}px;padding:7px 10px;font-size:11px;")
-        stop.setWordWrap(True)
-        lay.addWidget(stop)
-        guard = QLabel("Target reply 2–4% · auto-stop if bounce > 2% · re-verify 60d")
-        guard.setStyleSheet(f"color:{theme.NEUTRAL[600]};font-size:11px;")
-        guard.setWordWrap(True)
-        lay.addWidget(guard)
-        lay.addStretch(1)
-
-    def _d_card(self, label: str, body: str, mono=False, well=False) -> QWidget:
-        w = QFrame()
-        w.setObjectName("dcard")           # scope: QLabel is-a QFrame (see _card)
-        bg = theme.WELL if well else "transparent"
-        w.setStyleSheet(
-            f"QFrame#dcard{{background:{bg};border:1px solid {theme.HAIRLINE};"
-            f"border-radius:{theme.R_CONTROL}px;}}")
-        v = QVBoxLayout(w)
-        v.setContentsMargins(theme.SPACE_3, theme.SPACE_2, theme.SPACE_3, theme.SPACE_2)
-        v.setSpacing(3)
-        lab = QLabel(label.upper())
-        lab.setStyleSheet(f"color:{theme.NEUTRAL[600]};font-family:'{theme.FONT_HEADING}';"
-                          f"font-size:10px;letter-spacing:1px;font-weight:600;")
-        v.addWidget(lab)
-        val = QLabel(body)
-        val.setWordWrap(True)
-        val.setStyleSheet(f"color:{theme.TEXT};font-size:12px;"
-                          + (f"font-family:'{_MONO}';" if mono else ""))
-        v.addWidget(val)
-        return w
+    def _open_person(self, person) -> None:
+        """A colleague picked in the panel: their profile, in the same drawer."""
+        if person is not None:
+            self._render_drawer(person.row(), person)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3221,7 +3534,7 @@ class _AnalyticsTab(QWidget):
             for d in dos:
                 s = status_of(d, self._draft_by.get(id(d)))
                 counts[s] = counts.get(s, 0) + 1
-            order = ("Verified", "Guessed", "Catch-all", "Unknown", "Invalid",
+            order = ("Verified", "Unverified", "Catch-all", "Unknown", "Invalid",
                      "No email", "Mailed")
             for s in order:
                 if counts.get(s):
@@ -3515,6 +3828,9 @@ class LeadsWorkspace(QWidget):
     sequenceRequested = Signal(list)
     qualifyRequested = Signal(list)
     saveContactsRequested = Signal(list)
+    stageRequested = Signal(list, str)
+    removeRequested = Signal(list)
+    removedRequested = Signal()
     openSessionRequested = Signal(str)
     useSavedSearchRequested = Signal(str)
     deleteSavedSearchRequested = Signal(str)
@@ -3537,7 +3853,8 @@ class LeadsWorkspace(QWidget):
         self.leads = LeadsCockpit()
         for name in ("verifyRequested", "emailsRequested", "exportRequested",
                      "saveListRequested", "sequenceRequested", "qualifyRequested",
-                     "saveContactsRequested", "importRequested", "tabChanged",
+                     "saveContactsRequested", "stageRequested", "removeRequested",
+                     "removedRequested", "importRequested", "tabChanged",
                      "pageRequested", "sortChanged", "queryChanged",
                      "settingsRequested", "saveSearchRequested",
                      "findPrepareRequested", "starterPicked"):
@@ -3591,9 +3908,16 @@ class LeadsWorkspace(QWidget):
             self._tabs.append(b)
             lay.addWidget(b)
         lay.addStretch(1)
-        badge = _pill("Local · BYO-key · your inbox", theme.INFO_INK, theme.INFO_BG)
-        badge.setToolTip("Runs on this computer with your own API keys; every "
-                         "message leaves from your own mailbox.")
+        from prospector import gateway
+        if gateway.pooled():
+            badge = _pill("Your credits · your inbox", theme.INFO_INK, theme.INFO_BG)
+            badge.setToolTip("Finding and qualifying people is charged to your Prism "
+                             "credits — you hold no API keys; every message leaves "
+                             "from your own mailbox.")
+        else:
+            badge = _pill("Local · BYO-key · your inbox", theme.INFO_INK, theme.INFO_BG)
+            badge.setToolTip("Runs on this computer with your own API keys; every "
+                             "message leaves from your own mailbox.")
         lay.addWidget(badge)
         return bar
 
@@ -3681,8 +4005,9 @@ class LeadsWorkspace(QWidget):
         """Mount the workbench's Find new people under the filters."""
         self.leads.set_find_panel(widget)
 
-    def set_people(self, people, page=None, counts=None, empty_text=None) -> None:
-        self.leads.set_people(people, page, counts, empty_text)
+    def set_people(self, people, page=None, counts=None, empty_text=None,
+                   universe=None) -> None:
+        self.leads.set_people(people, page, counts, empty_text, universe)
 
     def show_people_tab(self) -> None:
         self._select(0)

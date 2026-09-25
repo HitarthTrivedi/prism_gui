@@ -99,8 +99,9 @@ STEPS = (
 
     ("research_menu", "Research with AI",
      "Qualify and draft the people you ticked, or find new people and "
-     "qualify them in one run. Both spend — a Groq call and a why-now "
-     "search each — and both ask before a big batch."),
+     "qualify them in one run. Both spend your credits — a why-now search, "
+     "a score and a draft for each person — and both ask before a big "
+     "batch."),
 
     ("save_as_search", "Save as new search",
      "Keeps this whole set of filters under a name, in Default view and "
@@ -115,10 +116,10 @@ STEPS = (
      "newest or company — across every page. It never removes anybody."),
 
     ("search_settings", "Search settings",
-     "What Find new people runs with — Exa or Apollo, how many to find, what "
-     "you sell and your keys. An Exa search costs about five cents. Apollo "
-     "charges about a credit for each person it hands over, up to Reveal up "
-     "to — left at 300 it can spend 300. Hover any setting for what it does."),
+     "What Find new people runs with — how many to find, what you sell and "
+     "the claims you approve. Every search is charged to your credits, and a "
+     "search that finds nobody is not. Find new people tells you the most it "
+     "can cost before it asks. Hover any setting for what it does."),
 
     ("people_tabs", "Total, Net New and Saved",
      "Total is everyone Prism holds who passes the filters. Saved is the "
@@ -161,13 +162,23 @@ STEPS = (
 
     ("facet_account_imports", "Account CSV import",
      "Tick an import to see the people Prism holds at its companies — and "
-     "press Find new people to search for more there, fifty companies at "
-     "a time."),
+     "press Find new people to search for more there, one search a company, "
+     "every company in one press."),
 
     ("more_filters", "More filters",
-     "Function, keywords, company size, revenue, HQ, time in role, recent "
-     "job changes, e-mail status and fit score — folded here until you "
-     "need them."),
+     "Opens every filter at once, grouped and searchable: lists, stage, "
+     "function, company size, revenue, your own columns and the rest. Pin the "
+     "ones you use to keep them here. A filter that is set always stays."),
+
+    ("facet_lists", "Lists",
+     "The lists you put people and companies on. Include a list to work "
+     "through it, or exclude one — a company list takes out everyone who "
+     "works at those companies."),
+
+    ("facet_stages", "Stage",
+     "Where each saved contact, or their company, stands with you: Cold, "
+     "Approaching, Interested and the rest. Exclude Do Not Contact before a "
+     "send. People you have not saved have no stage."),
 
     ("facet_functions", "Function",
      "The part of the business the person runs, such as operations or "
@@ -200,12 +211,16 @@ STEPS = (
      "the strongest reason to write this week rather than next quarter."),
 
     ("facet_email_status", "Email status",
-     "Verified, Guessed, Catch-all, Unknown, Invalid, No email or Mailed. "
-     "Verified and Guessed together is the usual view just before a send."),
+     "Verified, Unverified, Catch-all, Unknown, Invalid, No email or Mailed. "
+     "Verified alone is the usual view just before a send."),
 
     ("facet_scores", "Fit score",
      "The lowest fit to show, and whether to show only the people Prism has "
      "qualified. Nobody is deleted — lower it and they come back."),
+
+    ("facet_custom_fields", "Custom fields",
+     "The columns your own sheets brought in that Prism has no field for, "
+     "such as Lead Quality or Region. Pick a column, then the values to keep."),
 
     ("count_badge", "How many filters are on",
      "The number of filters across every facet, including the folded ones. "
@@ -217,8 +232,9 @@ STEPS = (
 
     ("btn_find", "Find new people",
      "The one button here that spends. It searches with these filters for "
-     "people Prism does not hold yet, says what that costs, and asks first. "
-     "No e-mail lookups and no Groq — you choose afterwards who is worth it."),
+     "people Prism does not hold yet, says what that costs in credits, and "
+     "asks first. No e-mail lookups and no drafting — you choose afterwards "
+     "who is worth it."),
 
     ("notice", "The run line",
      "Live progress on the left while something runs, and on the right the "
@@ -230,8 +246,8 @@ STEPS = (
 
     ("select_all", "Tick what you want",
      "The box on a row picks that person and the box in the header picks "
-     "everyone on this page. Every action works on the ticked rows and on "
-     "nothing else."),
+     "this page. The arrow beside it picks all of them, or a number — at "
+     "most so many from one company. Picks stay when you turn the page."),
 
     ("col_lead", "Lead",
      "The person's name, with the company they work at under it. The name is "
@@ -247,8 +263,9 @@ STEPS = (
      "anybody."),
 
     ("col_status", "Status",
-     "Deliverability, never interest. Verified is checked and good, Guessed "
-     "is a pattern nobody has checked, Catch-all is a domain that accepts "
+     "Deliverability, never interest. Verified is checked and good, "
+     "Unverified is a real address no verifier has ruled on yet, Catch-all is "
+     "a domain that accepts "
      "anything, Unknown is a check that could not tell, Invalid means do not "
      "send, No email means Prism has not found one, and Mailed means you "
      "already wrote."),
@@ -263,19 +280,28 @@ STEPS = (
 
     ("bulk_bar", "The action bar",
      "It appears the moment you tick a row, and everything on it acts on the "
-     "ticked rows only. Nothing here can run on the whole list by accident."),
+     "people you picked, on every page, and no one else. Nothing here can "
+     "run on the whole list by accident."),
 
     ("bulk_save", "Save",
      "Saves the ticked people as contacts, so they move from Net New to "
      "Saved. Exporting, e-mailing or sequencing someone saves them too."),
 
-    ("bulk_verify", "Verify free",
-     "Checks the ticked addresses with the free verifiers first and reports "
-     "only what it can prove. It costs nothing."),
+    ("bulk_remove", "Remove",
+     "Takes the ticked people off the list. They leave Total, Net New and "
+     "Saved, and new searches skip them. Nothing is deleted. The line under "
+     "the three tabs counts them and brings any of them back."),
+
+    ("bulk_verify", "Verify",
+     "Checks the ticked addresses and reports only what it can prove. A "
+     "credit is used for each address a verifier answers for, and none for "
+     "one it could not reach."),
 
     ("bulk_emails", "Find e-mails",
-     "Looks up an address for every ticked person. One verifier or Apollo "
-     "credit each, for every row you ticked and not a sample of them."),
+     "Looks up a real address for every ticked person and checks it. Credits "
+     "are used for every row you ticked and not a sample of them, and an "
+     "address is only charged when a finder knows the person. Nothing is "
+     "guessed."),
 
     ("bulk_list", "Add to list",
      "Writes the ticked people to a sheet on your own machine, which then "
@@ -285,18 +311,25 @@ STEPS = (
      "The same ticked people as a file to hand to somebody else. It sends "
      "nothing and spends nothing."),
 
+    ("bulk_stage", "Set stage",
+     "Moves the ticked people to a stage: Cold, Approaching, Interested and "
+     "the rest. Anyone not saved yet is saved first. Sending someone a "
+     "message moves Cold to Approaching on its own."),
+
     ("bulk_qualify", "Qualify and draft",
-     "Researches each ticked person and writes them an opener. One Groq call "
-     "and one why-now search each, so spend it on the people you actually "
-     "want."),
+     "Researches each ticked person and writes them an opener. A why-now "
+     "search, a score and a draft each, all charged to your credits, so "
+     "spend them on the people you actually want."),
 
     ("bulk_sequence", "Add to sequence",
      "Puts the ticked people into the follow-up steps that run after the "
      "first message. Nothing leaves until you send it."),
 
-    ("drawer", "The dossier",
-     "Everything Prism holds on one person — the signal it found, the address "
-     "it has and the draft it wrote. Any row opens it."),
+    ("drawer", "The person",
+     "Everything Prism holds on one person, the way Apollo lays a contact "
+     "out: their details, stage, tasks, company and notes on the left, then "
+     "why they fit, their activity, the e-mail drafted for them and every "
+     "field. Any row opens it. Acting here saves them first."),
 
     ("tab_people", "People",
      "This screen. Everyone Prism holds — imported, saved or found by a "

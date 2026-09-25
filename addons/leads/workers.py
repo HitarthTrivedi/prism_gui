@@ -13,15 +13,30 @@ from PySide6.QtCore import Signal
 from workers import _Worker
 
 
-def _seen_index(sessions_dir: str, include_earlier: bool):
-    """Everyone an earlier session already pulled, as a SeenIndex — or None when
-    the user asked to include earlier people (or there is nowhere to look).
-    Built inside run(): reading the session index is disk I/O."""
-    if include_earlier or not sessions_dir:
-        return None
-    from addons.leads import sessions
+def _run_cfg(cfg):
+    """The config an engine run should use. Pooled (the default): the provider
+    keys are the credit-pool sentinel and any key a customer still has saved is
+    dropped, so nothing below can reach a provider directly and every paid
+    lookup goes through Prism's licence server (prospector/gateway.py). The
+    developer switch PRISM_LEADS_DIRECT=1 leaves it untouched."""
+    from prospector import gateway
+    return gateway.effective_cfg(cfg)
+
+
+def _seen_index(sessions_dir: str, include_earlier: bool, removed_dir: str = ""):
+    """Everyone a search must skip, as a SeenIndex — or None when nobody is:
+    whoever an earlier session already pulled (unless the user asked to
+    include earlier people), and whoever the owner took off the list
+    (removed.py), always — "new searches never bring them back" does not
+    bend to that switch. Built inside run(): both are disk reads."""
     from prospector.identity import SeenIndex
-    keys = sessions.seen_keys(sessions_dir)
+    keys: set = set()
+    if sessions_dir and not include_earlier:
+        from addons.leads import sessions
+        keys |= set(sessions.seen_keys(sessions_dir) or ())
+    if removed_dir:
+        from addons.leads import removed
+        keys |= removed.keys(removed.list_removed(removed_dir))
     return SeenIndex(keys) if keys else None
 
 
@@ -68,6 +83,21 @@ def _nobody_left(skipped: int, filtered, source: str = "exa",
         return (f"Everyone this search found ({skipped}) was already pulled in an "
                 f"earlier search — they are on the People page already. Widen the "
                 f"filters, or turn off {switch}.")
+    from prospector import gateway
+    if gateway.pooled():
+        # No key of the customer's to blame: either the credits ran out (the
+        # server said so, and gateway remembered) or the provider could not be
+        # reached — and a search that failed was never charged.
+        if gateway.exhausted():
+            return ("You've run out of credits, so the search stopped. Ask "
+                    "Alphakore to top up and search again.")
+        if queries_used and query_errors >= queries_used:
+            return (f"Every one of the {queries_used} searches failed to reach "
+                    "the data provider — you haven't been charged. Try again in "
+                    "a moment; if it keeps happening, contact Alphakore.")
+        note = (f" ({query_errors} of {queries_used} searches failed — those "
+                "were not charged)" if query_errors else "")
+        return f"No people came back — widen the filters.{note}"
     db = "Apollo" if source == "apollo" else "Exa"
     if queries_used and query_errors >= queries_used:
         # Not a guess: every single call to the database failed outright —
@@ -107,6 +137,29 @@ def _filter_new(leads: list, skip):
     return fresh, len(kept) - len(fresh), len(dropped)
 
 
+# At most this many people from any one company in a run — source()'s own
+# default, passed by name where a search over named companies relies on it.
+_PER_COMPANY = 3
+
+
+def _add_stats(into: dict, part: dict) -> None:
+    """One group's search stats added into the run's: counts summed, the
+    per-reason counts summed reason by reason, anything else kept from the
+    first group that had it."""
+    for key, value in (part or {}).items():
+        if isinstance(value, bool):
+            into.setdefault(key, value)
+        elif isinstance(value, (int, float)):
+            into[key] = into.get(key, 0) + value
+        elif isinstance(value, dict):
+            bucket = into.setdefault(key, {})
+            for k, v in value.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    bucket[k] = bucket.get(k, 0) + v
+        else:
+            into.setdefault(key, value)
+
+
 class ProspectorWorker(_Worker):
     """Qualify a sheet of leads and draft an email for each, off the UI thread.
 
@@ -131,7 +184,7 @@ class ProspectorWorker(_Worker):
                  sender: str = "", claims: list = None,
                  exclude_domains: list = None):
         super().__init__()
-        self.path, self.offer, self.cfg = path, offer, cfg
+        self.path, self.offer, self.cfg = path, offer, _run_cfg(cfg)
         self.sheet, self.limit, self.focus = sheet, limit, focus
         self.verify_limit = verify_limit
         self.sender, self.claims = sender, claims or []
@@ -225,6 +278,51 @@ class LeadsExportWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class CreditsWorker(_Worker):
+    """Read the credit pool — the balance, the price list and which lookups
+    Prism's licence server can make right now — off the UI thread, so the
+    balance pill never holds the screen up on a slow connection. A failure is a
+    quiet `failed`: the pill says it could not be read, and no run is blocked
+    by it (a run asks the server itself and is told there)."""
+    done = Signal(dict)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            from prospector import gateway
+            self.done.emit(gateway.status())
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(getattr(e, "message", "") or str(e))
+
+
+class CreditsCallWorker(_Worker):
+    """One call to the customer's own credit account — the usage read, the plans
+    on offer, or a request for one (prospector.gateway.credit_usage /
+    credit_offers / request_offer) — off the UI thread. `done` carries which
+    call it was, so a screen can hand several to one slot; `failed` carries the
+    server's own customer-facing sentence, or a plain one when it was not
+    reached."""
+    done = Signal(str, dict)
+    failed = Signal(str, str)
+
+    WHAT = ("usage", "offers", "request")
+
+    def __init__(self, what: str, **params):
+        super().__init__()
+        if what not in self.WHAT:
+            raise ValueError(what)
+        self.what, self.params = what, params
+
+    def run(self):
+        try:
+            from prospector import gateway
+            call = {"usage": gateway.credit_usage, "offers": gateway.credit_offers,
+                    "request": gateway.request_offer}[self.what]
+            self.done.emit(self.what, call(**self.params))
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(self.what, getattr(e, "message", "") or str(e))
+
+
 class LeadsVerifyWorker(_Worker):
     """Re-verify the SELECTED leads' e-mails with the free-first verifier
     waterfall (verifiers only — never a paid finder), off the UI thread. Each
@@ -236,14 +334,17 @@ class LeadsVerifyWorker(_Worker):
 
     def __init__(self, dossiers: list, cfg: dict):
         super().__init__()
-        self.dossiers, self.cfg = dossiers, cfg
+        self.dossiers, self.cfg = dossiers, _run_cfg(cfg)
 
     def run(self):
         try:
             from prospector import verify
             keys = verify.collect_keys(self.cfg)
+            from prospector import gateway
             targets = [d for d in self.dossiers if (d.lead.email or "").strip()]
             for i, d in enumerate(targets, 1):
+                if gateway.exhausted():
+                    break               # the credit pool ran dry: keep what was checked
                 self.progress.emit(i, len(targets), d.lead)
                 status = verify.verify_email(d.lead.email, keys)
                 if status:
@@ -263,31 +364,31 @@ class LeadsEmailWorker(_Worker):
     where that money is spent, on the people the owner ticked — or on the rows
     of a sheet they exported and brought back.
 
-    Two stages, in the order that costs least:
-      1) `enrich` — ONE Exa lookup per unique company for its real domain, then
-         the working-pattern address. Blank addresses only; a sheet that came
-         in with real ones keeps them.
-      2) `verify.find_and_verify` per lead — the free verifier waterfall first,
-         and a paid finder (Tomba, Apollo, Hunter) only where its key is set and
-         only when the free pass could not confirm the address.
-    NEITHER stage is capped by the rail's Verify setting. That number is a
-    budget for a RUN, which verifies whatever its top slice happens to be —
-    this action is the owner naming people, row by row, and the workbench asks
-    before a batch past ten. Capping stage 2 and not stage 1 was worse than
-    either: it wrote a guessed address for everyone and confirmed the first
-    twenty-five, so the rest reached the exported sheet as unchecked guesses
-    that read like findings."""
+    One pass, `verify.find_and_verify` per lead: an address they came with (a
+    sheet's, Apollo's) is checked with the free verifiers; anyone without one,
+    or whose address the check could not confirm, is looked up by the FINDERS
+    — Apollo, then Hunter, each only where its key is set, each charging only
+    when it knows the person — and what they find is checked too. Nothing is
+    ever guessed (the owner, 24-Sep-2026: "hunter + apollo only to find
+    mails"): someone neither finder knows keeps no address. A finder that
+    turns the ACCOUNT away (a Free plan, a spent quota, a wrong key) is asked
+    once, and `refused` says why before `done`.
+    Not capped by the rail's Verify setting. That number is a budget for a
+    RUN, which verifies whatever its top slice happens to be — this action is
+    the owner naming people, row by row, and the workbench asks before a batch
+    past ten."""
     progress = Signal(int, int, object)     # i, total, lead
     done = Signal(int, int)                 # addresses found, of them verified
     failed = Signal(str)
+    refused = Signal(object)                # {finder: why} — verify.FinderRefused
 
     def __init__(self, leads: list, cfg: dict):
         super().__init__()
-        self.leads, self.cfg = list(leads or []), cfg
+        self.leads, self.cfg = list(leads or []), _run_cfg(cfg)
 
     def run(self):
         try:
-            from prospector import enrich, signals, verify
+            from prospector import verify
             keys = verify.collect_keys(self.cfg)
             # Apollo's people/match is not in a free Apollo plan either, and the
             # workbench has already learnt that from a refused run — so don't
@@ -295,19 +396,19 @@ class LeadsEmailWorker(_Worker):
             if self.cfg.get("apollo_api_blocked"):
                 keys.pop("apollo_api_key", None)
             blank = [l for l in self.leads if not (l.email or "").strip()]
-            if blank:
-                self.progress.emit(0, len(self.leads), blank[0])
-                enrich.enrich(blank, signals.exa_key(self.cfg))
+            refused: dict = {}
             for i, lead in enumerate(self.leads, 1):
                 self.progress.emit(i, len(self.leads), lead)
                 lead.extra = lead.extra or {}
-                verify.find_and_verify(lead, keys)
+                verify.find_and_verify(lead, keys, refused=refused)
             # "Found" is people who had NO address and have one now — the thing
             # this action was pressed for. Confirming one they already had is
             # counted as a verification, not as a find.
             found = sum(1 for l in blank if (l.email or "").strip())
             ok = sum(1 for l in self.leads
                      if (l.extra or {}).get("email_check") == "valid")
+            if refused:
+                self.refused.emit(dict(refused))
             self.done.emit(found, ok)
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))
@@ -329,7 +430,7 @@ class LeadsQualifyWorker(_Worker):
                  verify_limit: int = 25, focus: str = "", sender: str = "",
                  claims: list = None, exclude_domains: list = None):
         super().__init__()
-        self.leads, self.offer, self.cfg = list(leads or []), offer, cfg
+        self.leads, self.offer, self.cfg = list(leads or []), offer, _run_cfg(cfg)
         self.roles, self.verify_limit, self.focus = roles or [], verify_limit, focus
         self.sender, self.claims = sender, claims or []
         self.exclude_domains = exclude_domains or []
@@ -396,17 +497,29 @@ class LeadsPoolWorker(_Worker):
     created_at, all_leads, dossiers, drafts, params) tuple — params being what
     the run was asked, which the pool reads to know what its search was
     steered by. A run that cannot be read is left out, not the whole page: one
-    damaged file must not hide everyone else."""
+    damaged file must not hide everyone else. With `accounts_dir`, the saved
+    accounts (accounts.py) come first, by accounts_read — the Stage, Lists and
+    Custom fields filters read a person's account from them. With
+    `removed_dir`, the people taken off the list (removed.py) come before
+    `done` too, by removed_read — the pool leaves them out."""
     done = Signal(object, object)
+    accounts_read = Signal(object)
+    removed_read = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, contacts_dir: str, sessions_dir: str):
+    def __init__(self, contacts_dir: str, sessions_dir: str, accounts_dir: str = "",
+                 removed_dir: str = ""):
         super().__init__()
         self.contacts_dir, self.sessions_dir = contacts_dir, sessions_dir
+        self.accounts_dir, self.removed_dir = accounts_dir, removed_dir
 
     def run(self):
         try:
-            from addons.leads import contacts, sessions
+            from addons.leads import accounts, contacts, removed, sessions
+            if self.accounts_dir:
+                self.accounts_read.emit(accounts.list_accounts(self.accounts_dir))
+            if self.removed_dir:
+                self.removed_read.emit(removed.list_removed(self.removed_dir))
             saved = contacts.list_contacts(self.contacts_dir) if self.contacts_dir else []
             runs = []
             for head in sessions.list_sessions(self.sessions_dir) if self.sessions_dir else ():
@@ -422,10 +535,74 @@ class LeadsPoolWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class LeadsAccountEnrichWorker(_Worker):
+    """An accounts import's "Intelligent enrichment", off the UI thread: one
+    Exa company lookup (prospector.source._exa_company — its website,
+    headcount, revenue, HQ and a line about it) for each company that needs
+    it. `mode` "websites" asks only for the companies with a name and no
+    website (Apollo's "infer a website for rows with only account names");
+    "all" asks for every company. Only what is MISSING is filled: the sheet's
+    own values stand. A company Exa cannot confidently match is left as it
+    was — a wrong website is worse than none. Emits progress(i, n, name)
+    and done(companies, filled)."""
+    progress = Signal(int, int, str)
+    done = Signal(object, int)
+    failed = Signal(str)
+
+    def __init__(self, companies, cfg, mode: str = "websites"):
+        super().__init__()
+        self.companies = [dict(c) for c in companies or ()]
+        self.cfg = _run_cfg(dict(cfg or {}))
+        self.mode = mode if mode in ("websites", "all") else "websites"
+
+    @staticmethod
+    def wants(company: dict, mode: str) -> bool:
+        """Whether this company is one `mode` looks up."""
+        site = (company.get("website") or company.get("domain") or "").strip()
+        if mode == "websites":
+            return bool((company.get("name") or "").strip()) and not site
+        return bool((company.get("name") or "").strip() or site)
+
+    def run(self):
+        try:
+            from prospector import signals
+            from prospector.source import _exa_company
+            key = signals.exa_key(self.cfg)
+            if not key:
+                self.failed.emit("Looking companies up needs an Exa API key — add it "
+                                 "under Search settings › Keys & claims.")
+                return
+            targets = [i for i, c in enumerate(self.companies) if self.wants(c, self.mode)]
+            filled = 0
+            for n, i in enumerate(targets, 1):
+                company = self.companies[i]
+                ask = company.get("name") or company.get("website") or company.get("domain")
+                self.progress.emit(n, len(targets), str(ask or ""))
+                facts = _exa_company(str(ask or ""), key)
+                if not facts:
+                    continue
+                changed = False
+                for field, value in (("domain", facts.get("domain")),
+                                     ("website", facts.get("domain")),
+                                     ("headcount", facts.get("headcount")),
+                                     ("revenue", facts.get("revenue")),
+                                     ("location", facts.get("hq")),
+                                     ("description", (facts.get("description") or "")[:600])):
+                    if value and not str(company.get(field) or "").strip():
+                        company[field] = str(value)
+                        changed = True
+                filled += changed
+            self.done.emit(self.companies, filled)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class SourceWorker(_Worker):
     """The full from-scratch pipeline off the UI thread: find people who match
     the lead FILTERS (every person checked against the filters before they take
-    a slot), enrich them with real-domain e-mails, then qualify and draft.
+    a slot), then qualify and draft — the hot and warm have their real
+    addresses FOUND on the way (verify.verify_reachable: Apollo, then Hunter).
+    No address is ever guessed (24-Sep-2026).
     Emits the SAME (RunResult, drafts) as ProspectorWorker, so the dialog
     treats the sheet path and the search path identically.
 
@@ -451,6 +628,10 @@ class SourceWorker(_Worker):
     # another run finding the same wall: the workbench switches back to Exa
     # and puts Apollo's reason on the switch it disables.
     blocked = Signal(str)
+    # A search over `companies`: how many of them have been asked so far,
+    # after each group — the workbench counts an import's companies as
+    # searched only once they really were.
+    companiesAsked = Signal(int)
 
     def __init__(self, industries: list, roles: list, offer: str, cfg: dict, *,
                  location: str = "India", target: int = 300, limit: int = 25,
@@ -458,13 +639,18 @@ class SourceWorker(_Worker):
                  claims: list = None, exclude_domains: list = None,
                  leads_only: bool = False, sessions_dir: str = "",
                  include_earlier: bool = False, spec: dict | None = None,
-                 source: str = "exa", emails: str = "now"):
+                 source: str = "exa", emails: str = "now", removed_dir: str = "",
+                 companies: list | None = None):
         super().__init__()
         self.spec = spec
+        # An Account CSV import searched whole (24-Sep-2026): every company
+        # of it, more than the spec's Current company facet can hold. Asked
+        # in groups of that size, one after another, in this one run.
+        self.companies = [c for c in (companies or ()) if isinstance(c, str) and c.strip()]
         self.source = "apollo" if source == "apollo" else "exa"
         self.emails = "later" if emails == "later" else "now"
         self.industries, self.roles = industries, roles
-        self.offer, self.cfg = offer, cfg
+        self.offer, self.cfg = offer, _run_cfg(cfg)
         self.location, self.target, self.limit = location, target, limit
         self.verify_limit = verify_limit
         self.focus, self.sender = focus, sender
@@ -472,6 +658,7 @@ class SourceWorker(_Worker):
         self.exclude_domains = exclude_domains or []
         self.leads_only = leads_only
         self.sessions_dir, self.include_earlier = sessions_dir, include_earlier
+        self.removed_dir = removed_dir      # the people taken off the list
 
     def _apollo_progress(self, stage, done, total, found):
         """Apollo's two phases, said in what each costs: paging its index is
@@ -483,18 +670,31 @@ class SourceWorker(_Worker):
         else:
             self.progress.emit(f"Searching Apollo — page {done} · {found} found")
 
+    def _asked(self, part, asked: int) -> int:
+        """After one group of an import's companies: how many are asked now,
+        said to the workbench (companiesAsked)."""
+        if not self.companies or part is None:
+            return asked
+        asked += len(part.companies.include)
+        self.companiesAsked.emit(asked)
+        return asked
+
     def run(self):
         try:
-            from prospector import enrich, engine, reach, signals, verify
-            from prospector.filters import SearchSpec
+            from prospector import engine, reach, signals, verify
+            from prospector.filters import SearchSpec, company_chunks
             spec = SearchSpec.from_dict(self.spec) if isinstance(self.spec, dict) else None
             # The roles triage and qualification read: the job titles, or the
             # seniority x function the filters ask for when there are none.
             roles = (spec.role_terms() if spec is not None else None) or self.roles
-            skip = _seen_index(self.sessions_dir, self.include_earlier)
+            skip = _seen_index(self.sessions_dir, self.include_earlier, self.removed_dir)
             stats: dict = {}
             apollo_run = self.source == "apollo"
             exa_key = signals.exa_key(self.cfg)
+            # One search, or — over an import's companies — one per group.
+            parts = (company_chunks(spec, self.companies)
+                     if spec is not None and self.companies else [spec])
+            leads, asked = [], 0
             if apollo_run:
                 # Lazy, like every engine import here: the Exa path must not
                 # pay for a module it never calls.
@@ -513,17 +713,24 @@ class SourceWorker(_Worker):
                 # it does NOT emit as a failure is the plan/scope refusal:
                 # that wall is there for every later run too, so it goes out
                 # as `blocked` and the rail stops offering Apollo.
-                try:
-                    leads = apollo.search_people(
-                        spec if spec is not None else (self.spec or {}), key,
-                        target=self.target, skip=skip, stats=stats,
-                        on_progress=self._apollo_progress)
-                except apollo.ApolloError as exc:
-                    why = _plan_refusal(exc, apollo)
-                    if not why:
-                        raise
-                    self.blocked.emit(why)
-                    return
+                for part in parts:
+                    room = self.target - len(leads)     # Apollo bills each reveal
+                    if room <= 0:
+                        break
+                    got: dict = {}
+                    try:
+                        leads += apollo.search_people(
+                            part if part is not None else (self.spec or {}), key,
+                            target=room, skip=skip, stats=got,
+                            on_progress=self._apollo_progress)
+                    except apollo.ApolloError as exc:
+                        why = _plan_refusal(exc, apollo)
+                        if not why:
+                            raise
+                        self.blocked.emit(why)
+                        return
+                    _add_stats(stats, got)
+                    asked = self._asked(part, asked)
             else:
                 # `as people_search`: self.source is the name of the database,
                 # the module is the Exa people search itself.
@@ -536,14 +743,34 @@ class SourceWorker(_Worker):
                 self.progress.emit("Finding people who match your filters…"
                                    if skip is None else
                                    "Finding new people — skipping anyone already pulled…")
-                # Only a spec'd run passes spec=, so an engine without filters
-                # still takes the call.
-                extra = {"spec": spec} if spec is not None else {}
-                leads = people_search.source(
-                    self.industries, roles, key, location=self.location,
-                    target=self.target, skip=skip, stats=stats,
-                    on_progress=lambda qi, n, ind, got: self.progress.emit(
-                        f"Sourcing {ind} — {got} found ({qi}/{n} searches)"), **extra)
+                for part in parts:
+                    got: dict = {}
+                    if self.companies:
+                        # One search a company, every one of them asked: the
+                        # press was approved as exactly that, so the run's
+                        # target does not cut a group short.
+                        n = len(part.companies.include)
+                        span = (f"companies {asked + 1}–{asked + n} of "
+                                f"{len(self.companies)}")
+                        leads += people_search.source(
+                            self.industries, roles, key, location=self.location,
+                            target=n * _PER_COMPANY, per_company=_PER_COMPANY,
+                            skip=skip, stats=got, spec=part,
+                            on_progress=lambda qi, total, _ind, found, span=span:
+                                self.progress.emit(f"Searching {span} — {found} "
+                                                   f"found ({qi}/{total} searches)"))
+                    else:
+                        # Only a spec'd run passes spec=, so an engine without
+                        # filters still takes the call.
+                        extra = {"spec": part} if part is not None else {}
+                        leads += people_search.source(
+                            self.industries, roles, key, location=self.location,
+                            target=self.target, skip=skip, stats=got,
+                            on_progress=lambda qi, n, ind, found: self.progress.emit(
+                                f"Sourcing {ind} — {found} found ({qi}/{n} searches)"),
+                            **extra)
+                    _add_stats(stats, got)
+                    asked = self._asked(part, asked)
             skipped, dups = stats.get("skipped_seen", 0), stats.get("duplicates", 0)
             filtered = dict(stats.get("filtered") or {})
             unverified = int(stats.get("company_unverified") or 0)
@@ -562,24 +789,12 @@ class SourceWorker(_Worker):
                 # they are kept, nothing is guessed on top.)
                 self.progress.emit(f"Found {len(leads)} new people — e-mails left "
                                    f"for later.")
-            elif apollo_run:
-                # Apollo hands over the address it holds; only the people it had
-                # none for need a domain looked up and a pattern address guessed.
-                need = [lead for lead in leads if not (lead.email or "").strip()]
-                if need:
-                    self.progress.emit(f"Found {len(leads)} new people. Finding "
-                                       f"real e-mail domains for {len(need)}…")
-                    enrich.enrich(need, exa_key)
-                else:
-                    self.progress.emit(f"Found {len(leads)} new people, every one "
-                                       f"with an address.")
             else:
-                self.progress.emit(f"Found {len(leads)} new people. Finding real e-mail domains…")
-                enrich.enrich(leads, key)
-            # Someone first pulled from a SHEET is on file only by e-mail; now that
-            # enrich has guessed addresses, look once more before spending Groq.
-            # (An e-mails-later run learns no new keys here — it only pays the
-            # in-run dedupe, which is free.)
+                # Apollo hands over the addresses it holds; nobody else's is
+                # made up — the hot and warm have theirs found after
+                # qualifying (verify_reachable), anyone else by Find e-mails.
+                self.progress.emit(f"Found {len(leads)} new people.")
+            # The in-run dedupe once more before spending Groq (free).
             leads, late_skipped, late_dups = _filter_new(leads, skip)
             skipped += late_skipped
             dups += late_dups

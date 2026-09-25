@@ -595,5 +595,44 @@ class TheCompanyLookupCall(unittest.TestCase):
                                                             json=lambda: {}))[0])
 
 
+class NamedCompaniesAreEachAskedOnce(unittest.TestCase):
+    """24-Sep-2026: a press over an Account CSV import said "about 200 Exa
+    searches" and could make 60 — the cap on a run's calls cut the per-role
+    grid, so every company was asked for an Owner, ten for a Founder and none
+    for a Chief or a Director, and all fifty were then counted as searched.
+    Now a named company is ONE search asking for every role at once, every
+    one is asked whatever the cap, nothing is asked again in top-up rounds,
+    and planned_searches says what a press will really make."""
+
+    def _companies(self, n):
+        return SearchSpec.from_dict({
+            "companies": {"include": [f"Company {i:02d}" for i in range(1, n + 1)]},
+            "seniority": {"include": ["owner", "founder", "c_suite", "director"]}})
+
+    def test_every_company_is_asked_once_however_low_the_cap(self):
+        exa = _Exa(lambda q, i: [])
+        with mock.patch.object(source, "_exa_people", exa):
+            source.source([], [], "k", target=300, spec=self._companies(45), max_queries=30,
+                          skip=SeenIndex(["e:someone@else.example"]))
+        self.assertEqual(len(exa.queries), 45)
+        self.assertEqual(len({q.split(" at ", 1)[1] for q in exa.queries}), 45)
+        self.assertTrue(all(q.startswith("Owner, Founder, Chief or Director at ")
+                            for q in exa.queries))
+
+    def test_planned_searches_is_what_a_press_really_makes(self):
+        self.assertEqual(source.planned_searches(self._companies(45)), (45, 0))
+        wide = SearchSpec.from_dict({
+            "job_titles": {"include": [f"Title {i}" for i in range(8)]},
+            "industries": {"include": [f"Industry {i}" for i in range(5)]}})
+        first, more = source.planned_searches(wide)
+        self.assertEqual((first, more), (30, 30))       # the cut, then the top-up budget
+        exa = _Exa(lambda q, i: [])
+        with mock.patch.object(source, "_exa_people", exa):
+            source.source([], [], "k", target=300, spec=wide,
+                          skip=SeenIndex(["e:someone@else.example"]))
+        self.assertLessEqual(len(exa.queries), first + more)
+        self.assertEqual(source.planned_searches(SearchSpec()), (0, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

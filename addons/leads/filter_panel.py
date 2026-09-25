@@ -37,8 +37,9 @@ from widgets import icons
 from prospector.filters import (
     BAND_FACETS, CLOSED_FACETS, EMAIL_STATUS, FACET_LABELS, GUIDES_ONLY,
     HEADCOUNT, IMPORT_FACETS, INDUSTRY_SUGGESTIONS, LOCAL_FACETS,
-    LOCATION_SUGGESTIONS, REVENUE, TITLE_SUGGESTIONS, YEARS_IN_ROLE, SearchSpec,
-    label_of, parse_location_text, read_place_text,
+    LOCATION_SUGGESTIONS, RECORD_GROUPS, REVENUE, TITLE_SUGGESTIONS,
+    YEARS_IN_ROLE, SearchSpec, custom_key, label_of, parse_location_text,
+    read_place_text, split_custom_key,
 )
 
 # Apollo's rail, top to bottom (23-Sep-2026: "copy the entire architecture and
@@ -51,8 +52,43 @@ from prospector.filters import (
 # "changed_jobs_90d" is the one switch, not a facet.
 _PINNED = ("job_titles", "seniority", "companies", "locations", "industries",
            "contact_imports", "account_imports")
-_MORE = ("functions", "keywords", "headcount", "revenue", "company_hq",
-         "years_in_role", "changed_jobs_90d", "email_status", "scores")
+_MORE = ("lists", "stages", "functions", "keywords", "headcount", "revenue",
+         "company_hq", "years_in_role", "changed_jobs_90d", "email_status", "scores",
+         "custom_fields")
+# Stage and Lists: ONE filter each with Apollo's switch between the contact's
+# and the account's side ("Stage > Contact or Account"; "Lists > People or
+# Company"). (facet, switch label, what a chip says before an account value).
+_RECORD_SIDES = {
+    "stages": (("contact_stages", "Contact", ""), ("account_stages", "Account", "Account")),
+    "lists": (("contact_lists", "People", ""), ("account_lists", "Company", "Company")),
+}
+_CUSTOM_SIDES = (("contact", "Contact"), ("account", "Account"))
+# What a record facet says when there is nothing to pick yet.
+_RECORD_EMPTY = {
+    "contact_stages": "",
+    "account_stages": "",
+    "contact_lists": "No lists yet — tick people and use Add to list.",
+    "account_lists": "No company lists yet — an accounts import can add its "
+                     "companies to one.",
+}
+# The All filters window's groups (addons/leads/all_filters.py), and which
+# group each filter sits in.
+CATEGORIES = (("person", "Person"), ("company", "Company"),
+              ("records", "Your records"), ("scores", "Scores"))
+CATEGORY_OF = {
+    "job_titles": "person", "seniority": "person", "functions": "person",
+    "locations": "person", "years_in_role": "person", "changed_jobs_90d": "person",
+    "email_status": "person",
+    "companies": "company", "industries": "company", "keywords": "company",
+    "headcount": "company", "revenue": "company", "company_hq": "company",
+    "contact_imports": "records", "account_imports": "records", "lists": "records",
+    "stages": "records", "custom_fields": "records",
+    "scores": "scores",
+}
+_CUSTOM_EMPTY = ("No custom fields yet — the columns an imported sheet brings that "
+                 "Prism has no field for show up here.")
+_MAX_CUSTOM_VALUES = 24      # a custom field's most-used values offered
+_SEP = "\x1f"               # a record chip's value: facet, then the value
 _IMPORT_KIND = {"contact_imports": "contacts", "account_imports": "accounts"}
 # Where nearly every search starts, so these two open with the panel.
 _OPEN_AT_START = frozenset({"locations", "job_titles"})
@@ -75,6 +111,8 @@ _PLACEHOLDERS = {
     "companies": "Add a company",
     "company_hq": "Add a country, region or city",
     "keywords": "Add a keyword",
+    "stages": "Find a stage",
+    "lists": "Find a list",
 }
 _STATIC = {
     "locations": LOCATION_SUGGESTIONS, "company_hq": LOCATION_SUGGESTIONS,
@@ -107,6 +145,9 @@ _HELP_FACETS = {
     "facet_account_imports": "account_imports",
     "facet_email_status": "email_status",
     "facet_scores": "scores",
+    "facet_lists": "lists",
+    "facet_stages": "stages",
+    "facet_custom_fields": "custom_fields",
 }
 # Every key help_targets() can answer. Public because the rail these live in is
 # not this panel's to unfold — the workbench does that for them (help_reveal).
@@ -240,6 +281,19 @@ def _sheet() -> str:
         f"QPushButton#fband:checked{{background:{t.INFO_BG};color:{t.INFO_INK};"
         f"border-color:{t.ACCENT};}}",
         f"QPushButton#fband:focus{{border-color:{t.ACCENT};}}",
+        # Stage / Lists / Custom fields: Apollo's Contact | Account switch
+        f"QFrame#fseg{{background:{t.WELL};border:1px solid {t.HAIRLINE};"
+        f"border-radius:{t.R_CONTROL}px;}}",
+        f"QFrame#fseg QPushButton{{background:transparent;border:none;"
+        f"border-radius:{t.R_CHIP}px;padding:3px 10px;min-height:18px;font-size:12px;"
+        f"font-weight:600;color:{t.NEUTRAL[600]};}}",
+        f"QFrame#fseg QPushButton:hover{{color:{t.TEXT};}}",
+        f"QFrame#fseg QPushButton:checked{{background:{t.CARD};color:{t.TEXT};}}",
+        f"QComboBox#fcustomField{{padding:4px 10px;min-height:20px;font-size:13px;}}",
+        f"QToolButton#fpin{{background:transparent;border:1px solid transparent;"
+        f"border-radius:{t.R_CHIP}px;padding:3px;}}",
+        f"QToolButton#fpin:hover{{background:{t.WELL};}}",
+        f"QToolButton#fpin:checked{{background:{t.INFO_BG};border-color:{t.ACCENT};}}",
         # chips
         f"#fchipInc{{background:{t.INFO_BG};border:1px solid {t.INFO_BG};"
         f"border-radius:{t.R_CHIP}px;}}",
@@ -854,6 +908,152 @@ class _ImportEditor(QWidget):
             row.set_checked(import_id in ids)
 
 
+def _side_switch(sides, on_pick, parent) -> tuple:
+    """Apollo's small Contact | Account (People | Company) switch over a
+    record filter: (frame, {key: button}). `on_pick(key)` on a click."""
+    frame = QFrame(parent)
+    frame.setObjectName("fseg")
+    frame.setAttribute(Qt.WA_StyledBackground, True)
+    row = QHBoxLayout(frame)
+    row.setContentsMargins(2, 2, 2, 2)
+    row.setSpacing(2)
+    buttons = {}
+    for key, label in sides:
+        btn = QPushButton(i18n.t(label), frame)
+        btn.setCheckable(True)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFocusPolicy(Qt.TabFocus)
+        btn.clicked.connect(lambda _=False, k=key: on_pick(k))
+        row.addWidget(btn, 1)
+        buttons[key] = btn
+    return frame, buttons
+
+
+class _RecordEditor(_ChipEditor):
+    """Stage or Lists — Apollo's "Stage > Contact or Account", "Lists >
+    People or Company": the switch, then the names there are (stages, list
+    names) under a box that narrows them, each with Include and Exclude. Only
+    names that exist are offered — a stage or a list nobody has matches
+    nobody."""
+
+    def __init__(self, group: str, placeholder: str, parent=None):
+        super().__init__(placeholder, parent)
+        self.group = group
+        self.sides = _RECORD_SIDES[group]
+        self.facet = self.sides[0][0]               # the side being edited
+        frame, self.side_btns = _side_switch([(f, label) for f, label, _p in self.sides],
+                                             self.set_facet, self)
+        self._col.insertWidget(0, frame)
+        self.on_side = None                         # set by the panel: redraw rows
+        self._sync_side()
+
+    def set_facet(self, facet: str) -> None:
+        if facet in self.side_btns:
+            self.facet = facet
+            self._sync_side()
+            if self.on_side is not None:
+                self.on_side()
+
+    def _sync_side(self) -> None:
+        for facet, btn in self.side_btns.items():
+            btn.setChecked(facet == self.facet)
+
+
+class _CustomEditor(QWidget):
+    """Apollo's "Custom fields": "select a custom field. Select a value to
+    filter by." The Contact | Account switch, a field picker holding the
+    columns imported sheets brought in, then that column's values, most used
+    first, each a toggle — a value checked is kept, OR within the field."""
+
+    def __init__(self, on_value, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QComboBox
+        self._on_value = on_value                   # (custom key, value, on)
+        self.scope = _CUSTOM_SIDES[0][0]
+        self.options: dict = {"contact": {}, "account": {}}
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 2, 0, theme.SPACE_3)
+        col.setSpacing(theme.SPACE_1 + 2)
+        frame, self.side_btns = _side_switch(_CUSTOM_SIDES, self.set_scope, self)
+        col.addWidget(frame)
+        self.field = QComboBox(self)
+        self.field.setObjectName("fcustomField")
+        self.field.setAccessibleName(i18n.t("Select a custom field"))
+        self.field.currentIndexChanged.connect(lambda _i: self._fill_values())
+        col.addWidget(self.field)
+        self._values_box = QWidget(self)
+        self._flow = C.FlowLayout(self._values_box, margin=0, h_space=6, v_space=6)
+        col.addWidget(self._values_box)
+        self.empty = C.label(i18n.t(_CUSTOM_EMPTY), level="META", wrap=True)
+        col.addWidget(self.empty)
+        self.buttons: dict = {}                     # value → its toggle
+        self._chosen: dict = {}                     # custom key → [values]
+        self._sync()
+
+    def column(self) -> str:
+        return self.field.currentData() or ""
+
+    def key(self) -> str:
+        return custom_key(self.scope, self.column()) if self.column() else ""
+
+    def set_options(self, options) -> None:
+        """{"contact" | "account": {column: [values, most used first]}}."""
+        options = options if isinstance(options, dict) else {}
+        self.options = {scope: dict(options.get(scope) or {}) for scope, _l in _CUSTOM_SIDES}
+        self._sync()
+
+    def set_scope(self, scope: str) -> None:
+        self.scope = scope
+        self._sync()
+
+    def set_chosen(self, custom: dict) -> None:
+        self._chosen = {k: list(v) for k, v in (custom or {}).items()}
+        self._fill_values()
+
+    def _sync(self) -> None:
+        for scope, btn in self.side_btns.items():
+            btn.setChecked(scope == self.scope)
+        keep = self.column()
+        columns = list(self.options.get(self.scope, {}))
+        self.field.blockSignals(True)
+        self.field.clear()
+        self.field.addItem(i18n.t("Select a custom field"), "")
+        for column in columns:
+            self.field.addItem(column, column)
+        at = self.field.findData(keep) if keep else -1
+        self.field.setCurrentIndex(at if at > 0 else (1 if len(columns) == 1 else 0))
+        self.field.blockSignals(False)
+        self.field.setVisible(bool(columns))
+        self.empty.setVisible(not columns)
+        self._fill_values()
+
+    def _fill_values(self) -> None:
+        for btn in self.buttons.values():
+            self._flow.removeWidget(btn)
+            btn.setParent(None)
+            btn.deleteLater()
+        self.buttons = {}
+        column = self.column()
+        values = list(self.options.get(self.scope, {}).get(column, ()))[:_MAX_CUSTOM_VALUES]
+        key = self.key()
+        chosen = {v.casefold() for v in self._chosen.get(key, ())}
+        # A value chosen earlier that no record carries any more stays offered,
+        # so it can be unticked.
+        values += [v for v in self._chosen.get(key, ())
+                   if v.casefold() not in {x.casefold() for x in values}]
+        for value in values:
+            btn = QPushButton(value, self._values_box)
+            btn.setObjectName("fband")
+            btn.setCheckable(True)
+            btn.setChecked(value.casefold() in chosen)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.TabFocus)
+            btn.clicked.connect(lambda on=False, v=value, k=key: self._on_value(k, v, on))
+            self._flow.addWidget(btn)
+            self.buttons[value] = btn
+        self._values_box.setVisible(bool(values))
+
+
 class _Section(QWidget):
     """One facet: header, its chips (always visible, Sales-Nav style), and the
     editor that opening the header reveals, over a hairline."""
@@ -872,7 +1072,11 @@ class _Section(QWidget):
         col.setSpacing(0)
         self.head = _Head(title, self)
         self.head.clicked.connect(lambda _=False: self._toggle())
-        col.addWidget(self.head)
+        self._head_row = QHBoxLayout()
+        self._head_row.setContentsMargins(0, 0, 0, 0)
+        self._head_row.setSpacing(theme.SPACE_1)
+        self._head_row.addWidget(self.head, 1)
+        col.addLayout(self._head_row)
         self.chips = _ChipBox(lambda chip: on_flip(facet, chip),
                               lambda chip: on_remove(facet, chip), self)
         self.chips.hide()
@@ -884,6 +1088,10 @@ class _Section(QWidget):
 
     def is_open(self) -> bool:
         return self._open
+
+    def add_pin(self, pin: QWidget) -> None:
+        """The All filters window's pin, beside the header."""
+        self._head_row.addWidget(pin, 0, Qt.AlignVCenter)
 
     def set_open(self, open_: bool) -> None:
         self._open = bool(open_)
@@ -975,15 +1183,33 @@ class FilterPanel(QWidget):
 
     changed = Signal()
     saveRequested = Signal()
+    pinnedChanged = Signal(list)            # the filters kept in the rail, in its order
 
-    def __init__(self, suggest=None, parent=None):
+    def __init__(self, suggest=None, parent=None, catalog: bool = False):
         super().__init__(parent)
         self._spec = SearchSpec()
         self._suggest = suggest or static_suggest
         self._sections: dict = {}
+        # The rail keeps its PINNED filters in view — Apollo's own few until
+        # the owner pins others in the All filters window — and any filter
+        # that holds a value. `catalog` is that window's copy of this panel:
+        # every filter, narrowed by its search and group, each with a pin.
+        self._catalog = bool(catalog)
+        self._pinned = set(_PINNED)
+        self._pin_btns: dict = {}
+        self._query = ""
+        self._category = ""
         # What the two CSV-import facets offer: import headers, newest first
         # (addons/leads/imports.py). The workbench hands them over.
         self._imports = {name: [] for name in IMPORT_FACETS}
+        # What Stage, Lists and Custom fields offer (pool.record_options):
+        # the names on the owner's own records. Apollo's stages until told.
+        from addons.leads.accounts import STAGES as ACCOUNT_STAGES
+        from addons.leads.contacts import STAGES as CONTACT_STAGES
+        self._records = {"contact_stages": list(CONTACT_STAGES),
+                         "account_stages": list(ACCOUNT_STAGES),
+                         "contact_lists": [], "account_lists": [],
+                         "custom": {"contact": {}, "account": {}}}
         self._more_open = False
         self.setStyleSheet(_sheet())
         root = QVBoxLayout(self)
@@ -997,6 +1223,8 @@ class FilterPanel(QWidget):
                 root.addWidget(self._build_section(name))
         root.addSpacing(theme.SPACE_3)
         root.addLayout(self._build_footer())
+        if self._catalog:
+            self._build_pins()
         self._render()
 
     # ── the public surface ────────────────────────────────────────────────────
@@ -1044,12 +1272,72 @@ class FilterPanel(QWidget):
             self._sections[name].editor.set_imports(self._imports[name], label)
         self._render()
 
+    def set_record_options(self, options) -> None:
+        """What Stage, Lists and Custom fields offer — pool.record_options():
+        the stages, list names and imported columns the owner's own contacts
+        and accounts carry. A chosen value no record carries any more stays
+        chosen until the owner removes it: a filter never changes itself."""
+        options = options if isinstance(options, dict) else {}
+        for name in ("contact_stages", "account_stages", "contact_lists", "account_lists"):
+            if isinstance(options.get(name), (list, tuple)):
+                self._records[name] = [str(v) for v in options[name] if str(v).strip()]
+        if isinstance(options.get("custom"), dict):
+            self._records["custom"] = options["custom"]
+            self._sections["custom_fields"].editor.set_options(options["custom"])
+        self._render()
+
     def import_name(self, name: str, import_id: str) -> str:
         """The file name an import facet shows for an id ("" when unknown)."""
         for header in self._imports.get(name, ()):
             if header.get("id") == import_id:
                 return header.get("name", "")
         return ""
+
+    def pinned(self) -> list:
+        """The filters kept in the rail, in the rail's order."""
+        return [n for n in _PINNED + _MORE if n in self._pinned]
+
+    def set_pinned(self, names) -> None:
+        """Which filters the rail keeps in view (an unknown name is ignored;
+        None or nothing known: Apollo's defaults). Emits nothing."""
+        known = [n for n in (names or ()) if n in CATEGORY_OF]
+        self._pinned = set(known) if known else set(_PINNED)
+        for name, btn in self._pin_btns.items():
+            btn.setChecked(name in self._pinned)
+        self._sync_more()
+
+    def set_catalog_filter(self, text: str = "", category: str = "") -> None:
+        """The All filters window: show the filters whose name holds `text`
+        in the chosen group ("" is every group)."""
+        self._query = _clean(text).casefold()
+        self._category = category if category in dict(CATEGORIES) else ""
+        self._sync_more()
+
+    def catalog_names(self) -> list:
+        """The filters the window shows now, in order."""
+        return [n for n in _PINNED + _MORE if self._matches(n)]
+
+    def open_all_filters(self) -> None:
+        """"More filters": the window of every filter (addons/leads/
+        all_filters.py) over a copy of these; Apply brings its filters and
+        pins back here, Cancel leaves everything as it was."""
+        from addons.leads.all_filters import AllFiltersDialog
+        dlg = AllFiltersDialog(self, parent=self.window())
+        if not self._ask(dlg):
+            return
+        spec, pinned = dlg.result()
+        if pinned != self.pinned():
+            self.set_pinned(pinned)
+            self.pinnedChanged.emit(self.pinned())
+        if spec.to_dict() != self._spec.to_dict():
+            self.set_spec(spec)
+
+    def _ask(self, dlg) -> bool:
+        """Show the window and wait. A test seam: no modal in a test."""
+        from PySide6.QtWidgets import QDialog
+        # Off the CLASS: PySide 6.11 has no instance attribute for it, so
+        # dlg.Accepted raised after every close (live crash, 24-Sep-2026).
+        return dlg.exec() == QDialog.Accepted
 
     def more_open(self) -> bool:
         return self._more_open
@@ -1143,7 +1431,7 @@ class FilterPanel(QWidget):
         self._badge = _count_badge("fcount", self)
         self._more_btn = QPushButton(self)
         self._more_btn.setObjectName("fmore")
-        self._more_btn.clicked.connect(lambda _=False: self.set_more_open(not self._more_open))
+        self._more_btn.clicked.connect(lambda _=False: self.open_all_filters())
         for btn in (self._clear_btn, self._more_btn):
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.TabFocus)
@@ -1157,20 +1445,82 @@ class FilterPanel(QWidget):
         return self._jobs_box if name == "changed_jobs_90d" else self._sections[name]
 
     def _sync_more(self) -> None:
-        """A facet under "More filters" shows when the fold is open or when it
-        holds a value — an applied filter is never hidden."""
+        """Which filters show. In the rail: the pinned ones, any that holds a
+        value (an applied filter is never hidden) and, while the tour has the
+        rail unfolded, all of them. In the All filters window: every filter
+        its search and group let through."""
         folded = 0
-        for name in _MORE:
-            on = (self._spec.changed_jobs_90d if name == "changed_jobs_90d"
-                  else self._spec.count(name) > 0)
-            show = self._more_open or on
+        for name in _PINNED + _MORE:
+            if self._catalog:
+                show = self._matches(name)
+            else:
+                on = (self._spec.changed_jobs_90d if name == "changed_jobs_90d"
+                      else self._spec.count(name) > 0)
+                show = self._more_open or on or name in self._pinned
+                folded += 0 if show else 1
             self._more_widget(name).setVisible(show)
-            folded += 0 if show else 1
-        self._more_btn.setText(i18n.t("Fewer filters") if self._more_open else
-                               i18n.t("More filters ({n})").format(n=folded))
-        self._more_btn.setVisible(self._more_open or folded > 0)
+        self._more_btn.setText(i18n.t("More filters ({n})").format(n=folded) if folded
+                               else i18n.t("More filters"))
+        self._more_btn.setVisible(not self._catalog)
+
+    def _matches(self, name: str) -> bool:
+        if self._category and CATEGORY_OF.get(name) != self._category:
+            return False
+        if not self._query:
+            return True
+        title = (i18n.t("Changed jobs in the last 90 days") if name == "changed_jobs_90d"
+                 else i18n.t(FACET_LABELS[name]))
+        return self._query in title.casefold() or self._query in name.replace("_", " ")
+
+    def _build_pins(self) -> None:
+        """The All filters window's pins: one beside every filter's header."""
+        for name in _PINNED + _MORE:
+            pin = QToolButton(self)
+            pin.setObjectName("fpin")
+            pin.setCheckable(True)
+            pin.setCursor(Qt.PointingHandCursor)
+            pin.setFocusPolicy(Qt.TabFocus)
+            pin.setIcon(icons.icon("pin", 14, theme.NEUTRAL[600]))
+            pin.setToolTip(i18n.t("Keep this filter in the rail"))
+            pin.setAccessibleName(i18n.t("Pin {filter}").format(
+                filter=i18n.t(FACET_LABELS.get(name, "Changed jobs in the last 90 days"))))
+            pin.setChecked(name in self._pinned)
+            pin.toggled.connect(lambda on, n=name: self._toggle_pin(n, on))
+            if name == "changed_jobs_90d":
+                self._jobs_row.addWidget(pin, 0, Qt.AlignVCenter)
+            else:
+                self._sections[name].add_pin(pin)
+            self._pin_btns[name] = pin
+
+    def _toggle_pin(self, name: str, on: bool) -> None:
+        if on:
+            self._pinned.add(name)
+        else:
+            self._pinned.discard(name)
+        self.pinnedChanged.emit(self.pinned())
 
     def _build_section(self, name: str) -> _Section:
+        if name == "custom_fields":
+            editor = _CustomEditor(self._custom_value, self)
+            editor.set_options(self._records["custom"])
+            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+                               self._flip, self._remove, self)
+            self._sections[name] = section
+            return section
+        if name in RECORD_GROUPS:
+            editor = _RecordEditor(name, i18n.t(_PLACEHOLDERS[name]), self)
+            editor.on_side = lambda n=name: self._refresh_rows(n)
+            editor.input.textChanged.connect(lambda _t, n=name: self._refresh_rows(n))
+            editor.input.returnPressed.connect(lambda n=name: self._enter(n))
+            for row in editor.rows:
+                row.includeRequested.connect(
+                    lambda n=name, r=row: self._pick(n, r, "include"))
+                row.excludeRequested.connect(
+                    lambda n=name, r=row: self._pick(n, r, "exclude"))
+            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+                               self._flip, self._remove, self)
+            self._sections[name] = section
+            return section
         if name in IMPORT_FACETS or name == "scores":
             if name == "scores":
                 editor = _ScoreEditor(
@@ -1231,7 +1581,11 @@ class FilterPanel(QWidget):
             i18n.t("Only people whose current role started in the last 90 days"), box)
         self._jobs.switch.clicked.connect(
             lambda on=False: self._set_flag("changed_jobs_90d", on))
-        col.addWidget(self._jobs)
+        self._jobs_row = QHBoxLayout()
+        self._jobs_row.setContentsMargins(0, 0, 0, 0)
+        self._jobs_row.setSpacing(theme.SPACE_1)
+        self._jobs_row.addWidget(self._jobs, 1)
+        col.addLayout(self._jobs_row)
         col.addWidget(C.hairline())
         return box
 
@@ -1263,9 +1617,10 @@ class FilterPanel(QWidget):
         if not pairs:
             return
         self._clear_input(name)         # the redraw below refreshes the rows once
+        into = self._target(name)
 
         def change(spec):
-            facet = spec.facet(name)
+            facet = spec.facet(into)
             for value, side in pairs:
                 fold = value.casefold()
                 target = facet.exclude if side == "exclude" else facet.include
@@ -1274,6 +1629,37 @@ class FilterPanel(QWidget):
                 facet.include = [v for v in facet.include if v.casefold() != fold]
                 facet.exclude = [v for v in facet.exclude if v.casefold() != fold]
                 (facet.exclude if side == "exclude" else facet.include).append(value)
+        self._edit(change)
+
+    def _target(self, name: str) -> str:
+        """The spec facet an edit in a section lands on: a Stage or Lists
+        section edits the side its switch is on."""
+        if name in RECORD_GROUPS:
+            return self._sections[name].editor.facet
+        return name
+
+    @staticmethod
+    def _decode(name: str, value: str) -> tuple:
+        """(facet, value) from a chip: a Stage, Lists or Custom fields chip
+        carries which facet (or custom field) it belongs to (_SEP)."""
+        if (name in RECORD_GROUPS or name == "custom_fields") and _SEP in value:
+            facet, _sep, raw = value.partition(_SEP)
+            return facet, raw
+        return name, value
+
+    def _custom_value(self, key: str, value: str, on) -> None:
+        """A custom field's value ticked on or off."""
+        if not key:
+            return
+
+        def change(spec):
+            values = [v for v in spec.custom_fields.get(key, []) if v.casefold() != value.casefold()]
+            if on:
+                values.append(value)
+            if values:
+                spec.custom_fields[key] = values
+            else:
+                spec.custom_fields.pop(key, None)
         self._edit(change)
 
     def _clear_input(self, name: str) -> None:
@@ -1290,6 +1676,11 @@ class FilterPanel(QWidget):
         editor = self._sections[name].editor
         typed = _clean(editor.input.text())
         if not typed:
+            return
+        if name in RECORD_GROUPS:
+            # Only a stage or a list that exists: the first one offered.
+            if editor.values:
+                self._add(name, editor.values[0], "include")
             return
         if name in _PLACE_FACETS:
             self._enter_place(name, typed)
@@ -1359,10 +1750,10 @@ class FilterPanel(QWidget):
     def _flip(self, name: str, chip: _Chip) -> None:
         if not chip.flippable or not chip.value:
             return
-        value = chip.value
+        target, value = self._decode(name, chip.value)
 
         def change(spec):
-            facet = spec.facet(name)
+            facet = spec.facet(target)
             if value in facet.include:
                 facet.include.remove(value)
                 facet.exclude.append(value)
@@ -1372,9 +1763,9 @@ class FilterPanel(QWidget):
         self._edit(change)
 
     def _remove(self, name: str, chip: _Chip) -> None:
-        value = chip.value
-        if not value:
+        if not chip.value:
             return
+        target, value = self._decode(name, chip.value)
 
         def change(spec):
             if name == "scores":
@@ -1382,10 +1773,16 @@ class FilterPanel(QWidget):
                     spec.min_fit = 0
                 elif value == "qualified_only":
                     spec.qualified_only = False
+            elif name == "custom_fields":
+                left = [v for v in spec.custom_fields.get(target, []) if v != value]
+                if left:
+                    spec.custom_fields[target] = left
+                else:
+                    spec.custom_fields.pop(target, None)
             elif name in BAND_FACETS or name in IMPORT_FACETS or name in LOCAL_FACETS:
                 setattr(spec, name, [k for k in getattr(spec, name) if k != value])
             else:
-                facet = spec.facet(name)
+                facet = spec.facet(target)
                 facet.include = [v for v in facet.include if v != value]
                 facet.exclude = [v for v in facet.exclude if v != value]
         self._edit(change)
@@ -1412,7 +1809,26 @@ class FilterPanel(QWidget):
     def _render(self) -> None:
         spec = self._spec
         for name, section in self._sections.items():
-            if name == "scores":
+            if name in RECORD_GROUPS:
+                chips = []
+                for facet, _label, prefix in _RECORD_SIDES[name]:
+                    lead = f"{i18n.t(prefix)}: " if prefix else ""
+                    f = spec.facet(facet)
+                    chips += [(facet + _SEP + v, lead + v, "include", True) for v in f.include]
+                    chips += [(facet + _SEP + v, lead + v, "exclude", True) for v in f.exclude]
+                section.set_chips(chips)
+                self._refresh_rows(name)
+            elif name == "custom_fields":
+                chips = []
+                for key, values in spec.custom_fields.items():
+                    scope, column = split_custom_key(key)
+                    shown = column if scope == "contact" else \
+                        i18n.t("{field} (account)").format(field=column)
+                    chips += [(key + _SEP + v, f"{shown}: {v}", "include", False)
+                              for v in values]
+                section.set_chips(chips)
+                section.editor.set_chosen(spec.custom_fields)
+            elif name == "scores":
                 chips = []
                 if spec.min_fit:
                     chips.append(("min_fit", i18n.t("Fit {n}+").format(n=spec.min_fit),
@@ -1452,15 +1868,34 @@ class FilterPanel(QWidget):
 
     def _refresh_rows(self, name: str) -> None:
         section = self._sections.get(name)
-        if section is None or name in _SHOWS_CHOSEN:
+        if section is None or name in _SHOWS_CHOSEN or name == "custom_fields":
             return
         rows, hint = self._suggestions(name, section.editor.input.text())
         section.editor.show_rows(rows, hint)
+
+    def _record_rows(self, name: str, typed: str):
+        """(rows, hint) for Stage or Lists: the names on the switch's side
+        that exist and are not chosen yet, narrowed by what is typed."""
+        target = self._target(name)
+        facet = self._spec.facet(target)
+        chosen = {v.casefold() for v in facet.include + facet.exclude}
+        names = [v for v in self._records.get(target, ()) if v.casefold() not in chosen]
+        if not self._records.get(target):
+            return [], i18n.t(_RECORD_EMPTY.get(target, "")) if _RECORD_EMPTY.get(target) else ""
+        fold = typed.casefold()
+        if fold:
+            first = [v for v in names if v.casefold().startswith(fold)]
+            names = first + [v for v in names if fold in v.casefold() and v not in first]
+            return [(v, v) for v in names[:_MAX_ROWS]], ("" if names else i18n.t("No match"))
+        more = len(names) > _MAX_ROWS
+        return [(v, v) for v in names[:_MAX_ROWS]], (i18n.t("Type to filter") if more else "")
 
     def _suggestions(self, name: str, text: str):
         """(rows, hint) for a facet's input. Rows are (value, label). A value
         already chosen, on either side and in any case, is never offered."""
         typed = _clean(text)
+        if name in RECORD_GROUPS:
+            return self._record_rows(name, typed)
         fold = typed.casefold()
         facet = self._spec.facet(name)
         chosen = {v.casefold() for v in facet.include + facet.exclude}

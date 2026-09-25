@@ -63,6 +63,37 @@ def build_email_checks(leads) -> dict:
         return dict(zip(uniq, ex.map(one, uniq)))
 
 
+# Where an address came from, in words. Nothing is guessed any more (the
+# owner, 24-Sep-2026), so every address has one: a finder, Apollo, the owner's
+# own sheet, or the owner typing it in. An address with none recorded came in
+# with the person — a sheet from before sources were kept.
+_SOURCE_WORDS = {"hunter": "Hunter", "apollo": "Apollo", "tomba": "Tomba",
+                 "pool": "Prism credits", "sheet": "Your sheet", "you": "Typed by you"}
+
+
+def email_source_of(lead) -> str:
+    """"Hunter", "Apollo", "Your sheet"… — or "" for no address."""
+    if not (getattr(lead, "email", "") or "").strip():
+        return ""
+    src = ((getattr(lead, "extra", None) or {}).get("email_source") or "").strip().lower()
+    return _SOURCE_WORDS.get(src, src.title() if src else "Your sheet")
+
+
+def _linkedin_of(extra: dict) -> str:
+    """The LinkedIn column holds LinkedIn only — never the Exa page a search
+    result came from (that is Profile link)."""
+    from .identity import is_linkedin
+    link = (extra or {}).get("linkedin", "")
+    return link if is_linkedin(link) else ""
+
+
+def _profile_of(extra: dict) -> str:
+    from .identity import is_linkedin
+    extra = extra or {}
+    link = extra.get("linkedin", "")
+    return extra.get("profile_url", "") or ("" if is_linkedin(link) else link)
+
+
 def check_of(lead, mx: dict) -> str:
     # A verifier's status on the lead (Hunter) wins over the domain-only MX ping.
     ec = (getattr(lead, "extra", None) or {}).get("email_check")
@@ -111,8 +142,9 @@ def _save(wb, path: str) -> str:
 # ── the LEADS sheet — industry-tabbed, e-mail-verified ────────────────────────
 
 _LEAD_COLS = ["No.", "Industry", "Company", "Name", "Designation", "E-mail",
-              "Email check", "Phone No.", "Location", "In role since", "LinkedIn"]
-_LEAD_WIDTH = [5, 20, 30, 22, 44, 34, 12, 13, 22, 12, 34]
+              "Email check", "Email source", "Phone No.", "Location", "In role since",
+              "LinkedIn", "Profile link"]
+_LEAD_WIDTH = [5, 20, 30, 22, 44, 34, 12, 14, 13, 22, 12, 34, 34]
 
 
 def leads_xlsx(leads, path: str) -> str:
@@ -147,8 +179,9 @@ def leads_xlsx(leads, path: str) -> str:
                 x = l.extra or {}
                 vals = [cno if first else "", ind if first else "",
                         company if first else "", l.name, l.title, l.email,
-                        check_of(l, mx), l.phone, x.get("location", ""),
-                        x.get("since", ""), x.get("linkedin", "")]
+                        check_of(l, mx), email_source_of(l), l.phone,
+                        x.get("location", ""), x.get("since", ""),
+                        _linkedin_of(x), _profile_of(x)]
                 for ci, v in enumerate(vals, 1):
                     c = ws.cell(rn, ci, v)
                     c.alignment = al
@@ -166,8 +199,8 @@ def leads_xlsx(leads, path: str) -> str:
 
 _DIMS = ["Fit", "Need", "Timing", "Authority", "Budget", "Competition"]
 _HOT_COLS = (["Verdict", "Score", "Company", "Name", "Designation", "E-mail",
-              "Email check", "Industry"] + _DIMS + ["Why-now opener"])
-_HOT_WIDTH = [8, 6, 24, 20, 32, 30, 12, 14] + [32] * 6 + [54]
+              "Email check", "Email source", "Industry"] + _DIMS + ["Why-now opener"])
+_HOT_WIDTH = [8, 6, 24, 20, 32, 30, 12, 14, 14] + [32] * 6 + [54]
 _RANK = {HOT: 0, WARM: 1, COLD: 2}
 
 
@@ -193,7 +226,8 @@ def hotlist_xlsx(dossiers, path: str) -> str:
         dims = {dim.name: dim for dim in d.dimensions}
         verdict = d.verdict.upper()
         cells = [verdict, d.score, d.lead.company, d.lead.name, d.lead.title,
-                 d.lead.email, check_of(d.lead, mx), d.lead.industry]
+                 d.lead.email, check_of(d.lead, mx), email_source_of(d.lead),
+                 d.lead.industry]
         for name in _DIMS:
             dim = dims.get(name)
             if dim and (dim.evidence or dim.source):

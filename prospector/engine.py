@@ -39,7 +39,7 @@ def filter_new(leads: list, skip=None, stats: dict | None = None) -> list:
     """The leads worth a slot in this run: each person once (first row wins,
     `identity.dedupe`), minus anyone `in skip` — the people earlier sessions
     already pulled. Pure, and separate from `run_leads` so a caller can ask
-    again once enrich has given leads e-mails, and with them new identity keys.
+    again once a finder has given leads e-mails, and with them new identity keys.
 
     Repeats go first, so a person listed twice and also seen before is one
     duplicate and one skip, not two skips. If `stats` is a dict,
@@ -86,8 +86,7 @@ def run_leads(leads: list, offer: str, cfg: dict, *,
     hand back fewer than `limit`. `total_in_sheet` still counts every lead
     passed in. The two counts land on the RunResult and are ADDED into `stats`
     when a dict is given, so one dict carried across stages keeps totals."""
-    from . import triage, enrich as _enrich
-    from .signals import exa_key
+    from . import triage
 
     total = len(leads)
     counts: dict = {}
@@ -97,22 +96,18 @@ def run_leads(leads: list, offer: str, cfg: dict, *,
             stats[name] = stats.get(name, 0) + n
     ranked = triage.rank(fresh, offer, roles)           # score ALL new, best-first
     picked = ranked[: max(0, limit)]
-
-    # Enrich blank-email picked leads — covers the SHEET path (which otherwise
-    # never gets addresses); a no-op on the ICP path that already enriched.
-    key = exa_key(cfg)
-    need = [l for l in picked if not (l.email or "").strip()]
-    if need and key:
-        try:
-            _enrich.enrich(need, key)
-        except Exception:                               # noqa: BLE001 — never sink a run on enrich
-            pass
+    # No address is made up for anyone here (24-Sep-2026): the hot and warm
+    # get theirs FOUND after qualifying (verify.verify_reachable — Hunter, then
+    # Apollo), and anyone else from "Find e-mails" on the rows the owner ticks.
 
     provider = provider or NullSignalProvider()
     qual = Qualifier.from_config(cfg)
 
+    from . import gateway
     out: list[Dossier] = []
     for i, lead in enumerate(picked, 1):
+        if gateway.exhausted():
+            break       # the credit pool ran dry: leave the rest unqualified, not "failed"
         if on_progress:
             on_progress(i, len(picked), lead)
         # focus is a NEWS topic, NEVER the seller's own offer.

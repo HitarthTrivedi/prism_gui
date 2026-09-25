@@ -662,26 +662,31 @@ class Layout(_PanelCase):
         self.assertEqual(list(self.p._sections),
                          ["job_titles", "seniority", "companies", "locations",
                           "industries", "contact_imports", "account_imports",
-                          "functions", "keywords", "headcount", "revenue",
-                          "company_hq", "years_in_role", "email_status", "scores"])
+                          "lists", "stages", "functions", "keywords", "headcount",
+                          "revenue", "company_hq", "years_in_role", "email_status",
+                          "scores", "custom_fields"])
         opened = {n for n, s in self.p._sections.items() if s.is_open()}
         self.assertEqual(opened, {"locations", "job_titles"})
         self.assertFalse(self.editor("locations").isHidden())
         self.assertTrue(self.editor("industries").isHidden())
 
-    def test_more_filters_folds_the_rest_until_opened_or_set(self):
-        # Apollo's "View 60+ Filters": the rarer facets wait under a fold…
+    def test_more_filters_opens_every_filter_and_the_rail_keeps_its_pins(self):
+        # Apollo's "More Filters": the rarer facets wait behind a window of
+        # every filter (was: a fold in the rail — Apollo's is a window, with
+        # search and pins; addons/leads/all_filters.py)…
         self.assertTrue(self.section("revenue").isHidden())
         self.assertTrue(self.p._jobs_box.isHidden())
-        self.assertEqual(self.p._more_btn.text(), "More filters (9)")
+        self.assertEqual(self.p._more_btn.text(), "More filters (12)")
+        opened = []
+        self.p._ask = lambda dlg: opened.append(dlg) or False      # Cancel
         self.p._more_btn.click()
-        self.assertFalse(self.section("revenue").isHidden())
-        self.assertEqual(self.p._more_btn.text(), "Fewer filters")
-        self.p._more_btn.click()
-        # …but an APPLIED filter is pinned into the rail, open fold or not.
+        [dlg] = opened
+        self.assertEqual(len(dlg.panel.catalog_names()), 19)       # every filter
+        self.assertTrue(self.section("revenue").isHidden())        # Cancel: nothing moved
+        # …but an APPLIED filter is pinned into the rail, window or not.
         self.p.set_spec({"revenue": ["10m-50m"]})
         self.assertFalse(self.section("revenue").isHidden())
-        self.assertEqual(self.p._more_btn.text(), "More filters (8)")
+        self.assertEqual(self.p._more_btn.text(), "More filters (11)")
 
     def test_the_old_refine_controls_are_facets_now(self):
         # Deliverability, minimum fit and "qualified only" used to sit in the
@@ -841,6 +846,163 @@ class Suggestions(unittest.TestCase):
         self.assertEqual(p._save_btn.objectName(), "fsave")
 
 
+class AllFiltersWindow(_PanelCase):
+    """Apollo's "More Filters" window (addons/leads/all_filters.py): every
+    filter, searchable and grouped, each with a pin that keeps it in the
+    rail; its edits reach the page only on Apply."""
+
+    def _window(self, answer):
+        got = []
+
+        def ask(dlg):
+            got.append(dlg)
+            return answer(dlg)
+        self.p._ask = ask
+        self.p._more_btn.click()
+        return got[0]
+
+    def test_search_and_groups_narrow_it(self):
+        from addons.leads.all_filters import AllFiltersDialog
+        dlg = AllFiltersDialog(self.p)
+        dlg.search.setText("stage")
+        self.assertEqual(dlg.panel.catalog_names(), ["stages"])
+        dlg.search.setText("")
+        dlg.group_btns["records"].click()
+        self.assertEqual(dlg.panel.catalog_names(),
+                         ["contact_imports", "account_imports", "lists", "stages",
+                          "custom_fields"])
+        self.assertTrue(dlg.panel._sections["revenue"].isHidden())
+
+    def test_apply_brings_back_its_filters_and_pins(self):
+        pins = []
+        self.p.pinnedChanged.connect(pins.append)
+
+        def answer(dlg):
+            dlg.panel._pin_btns["lists"].setChecked(True)
+            dlg.panel._pin_btns["seniority"].setChecked(False)
+            dlg.panel.set_spec({"revenue": ["10m-50m"]})
+            return True
+        self._window(answer)
+        self.assertIn("lists", self.p.pinned())
+        self.assertNotIn("seniority", self.p.pinned())
+        self.assertEqual(pins, [self.p.pinned()])
+        self.assertFalse(self.section("lists").isHidden())         # pinned: in the rail
+        self.assertTrue(self.section("seniority").isHidden())      # unpinned, not set
+        self.assertEqual(self.p.spec().revenue, ["10m-50m"])
+        self.assertEqual(self.changes.n, 1)
+
+    def test_cancel_changes_nothing(self):
+        def answer(dlg):
+            dlg.panel._pin_btns["lists"].setChecked(True)
+            dlg.panel.set_spec({"revenue": ["10m-50m"]})
+            return False
+        self._window(answer)
+        self.assertNotIn("lists", self.p.pinned())
+        self.assertEqual(self.p.spec().revenue, [])
+        self.assertEqual(self.changes.n, 0)
+
+    def test_the_window_starts_from_the_rail(self):
+        self.p.set_spec({"job_titles": {"include": ["Plant Head"]}})
+        self.p.set_record_options({"contact_lists": ["Expo leads"]})
+        dlg = self._window(lambda d: False)
+        self.assertEqual(dlg.panel.spec().job_titles.include, ["Plant Head"])
+        self.assertEqual(dlg.panel._records["contact_lists"], ["Expo leads"])
+        self.assertTrue(dlg.panel._more_btn.isHidden())            # no window in the window
+
+    def test_no_pins_known_is_apollos_few(self):
+        self.p.set_pinned(["not-a-filter"])
+        self.assertEqual(self.p.pinned(), list(FP._PINNED))
+
+
+class StageListsCustomFields(_PanelCase):
+    """Apollo's filters over the owner's own records: "Stage > Contact or
+    Account. Check each stage you want to include or exclude"; "Lists > People
+    or Company", is any of / is none of; "Custom fields > a field > a value"."""
+
+    OPTIONS = {"contact_lists": ["Expo leads", "Vadodara owners"],
+               "account_lists": ["Top 50"],
+               "custom": {"contact": {"Lead Quality": ["A", "B"], "Region": ["West"]},
+                          "account": {"Tier": ["Gold"]}}}
+
+    def setUp(self):
+        super().setUp()
+        self.p.set_record_options(self.OPTIONS)
+
+    def test_stage_offers_apollos_stages_on_each_side(self):
+        self.section("stages").set_open(True)
+        self.assertEqual([v for v, _l in self.rows("stages")][:3],
+                         ["Cold", "Approaching", "Replied"])
+        self.editor("stages").side_btns["account_stages"].click()
+        self.assertEqual([v for v, _l in self.rows("stages")][:2],
+                         ["Cold", "Current Client"])
+
+    def test_a_stage_is_included_or_excluded_on_the_side_the_switch_is_on(self):
+        ed = self.type_in("stages", "interes")
+        self.assertEqual(self.rows("stages"), [("Interested", "Interested"),
+                                               ("Not Interested", "Not Interested")])
+        ed.rows[0].include_btn.click()
+        ed.side_btns["account_stages"].click()
+        self.type_in("stages", "dead")
+        ed.rows[0].exclude_btn.click()
+        spec = self.p.spec()
+        self.assertEqual(spec.contact_stages.include, ["Interested"])
+        self.assertEqual(spec.account_stages.exclude, ["Dead Opportunity"])
+        self.assertEqual(self.chip_view("stages"), [("Interested", "include"),
+                                                    ("Account: Dead Opportunity", "exclude")])
+        self.assertEqual(self.section("stages").head.badge.text(), "2")
+
+    def test_a_chip_flips_and_removes_on_its_own_side(self):
+        self.p.set_spec({"contact_stages": {"include": ["Interested"]},
+                         "account_stages": {"include": ["Interested"]}})
+        contact_chip, account_chip = self.chips("stages")
+        account_chip.click()                            # flip the ACCOUNT one only
+        spec = self.p.spec()
+        self.assertEqual((spec.contact_stages.include, spec.account_stages.exclude),
+                         (["Interested"], ["Interested"]))
+        self.chips("stages")[0].removeRequested.emit()
+        self.assertEqual(self.p.spec().contact_stages.include, [])
+
+    def test_only_a_name_that_exists_is_taken_on_enter(self):
+        ed = self.type_in("lists", "Nowhere list")
+        ed.input.returnPressed.emit()
+        self.assertEqual(self.p.spec().contact_lists.include, [])
+        self.type_in("lists", "vado")
+        ed.input.returnPressed.emit()
+        self.assertEqual(self.p.spec().contact_lists.include, ["Vadodara owners"])
+
+    def test_no_company_lists_says_where_they_come_from(self):
+        self.p.set_record_options({"account_lists": []})
+        ed = self.editor("lists")
+        ed.side_btns["account_lists"].click()
+        self.assertEqual(self.rows("lists"), [])
+        self.assertIn("accounts import", ed.hint.text())
+
+    def test_custom_fields_pick_a_column_then_its_values(self):
+        ed = self.editor("custom_fields")
+        self.assertEqual([ed.field.itemText(i) for i in range(ed.field.count())],
+                         ["Select a custom field", "Lead Quality", "Region"])
+        ed.field.setCurrentIndex(ed.field.findData("Lead Quality"))
+        self.assertEqual(list(ed.buttons), ["A", "B"])
+        ed.buttons["A"].click()
+        ed.buttons["B"].click()
+        self.assertEqual(self.p.spec().custom_fields, {"contact:Lead Quality": ["A", "B"]})
+        ed.side_btns["account"].click()
+        self.assertEqual(ed.column(), "Tier")           # the only one: picked for you
+        ed.buttons["Gold"].click()
+        self.assertEqual(self.chip_view("custom_fields"),
+                         [("Lead Quality: A", "include"), ("Lead Quality: B", "include"),
+                          ("Tier (account): Gold", "include")])
+        self.chips("custom_fields")[0].removeRequested.emit()
+        self.assertEqual(self.p.spec().custom_fields,
+                         {"contact:Lead Quality": ["B"], "account:Tier": ["Gold"]})
+
+    def test_no_imported_columns_says_where_they_come_from(self):
+        self.p.set_record_options({"custom": {"contact": {}, "account": {}}})
+        ed = self.editor("custom_fields")
+        self.assertTrue(ed.field.isHidden())
+        self.assertFalse(ed.empty.isHidden())
+
+
 # Every key the "?" walkthrough asks this panel for. Spelled out so renaming a
 # widget the tour points at fails here rather than on the owner's screen.
 _KEYS = ("filters_head", "count_badge", "clear_all", "more_filters",
@@ -849,7 +1011,8 @@ _KEYS = ("filters_head", "count_badge", "clear_all", "more_filters",
          "facet_headcount", "facet_revenue", "facet_companies",
          "facet_company_hq", "facet_years", "facet_changed_jobs",
          "facet_keywords", "facet_contact_imports", "facet_account_imports",
-         "facet_email_status", "facet_scores")
+         "facet_email_status", "facet_scores", "facet_lists", "facet_stages",
+         "facet_custom_fields")
 
 
 def _descends(widget, root) -> bool:
@@ -962,6 +1125,31 @@ class PointAtMe(_PanelCase):
         self.assertFalse(self.p.more_open())            # the fold, as found
         self.assertEqual(self.p.spec().to_dict(), before)
         self.assertEqual(self.changes.n, 0)
+
+
+
+class DialogResultsAreReadOffTheClass(unittest.TestCase):
+    """24-Sep-2026, a live crash: PySide 6.11 has no `Accepted` on a dialog
+    INSTANCE, so `dlg.exec() == dlg.Accepted` raised the moment the All
+    filters window closed ("More filters" did nothing but crash). Tests never
+    reach that line — they answer the window through a seam, since exec()
+    would block — so it is held here by reading the source: every dialog
+    result in the Leads add-on is read off the class, QDialog.Accepted."""
+
+    def test_no_dialog_result_is_read_off_an_instance(self):
+        import re
+        folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "addons", "leads")
+        bad = []
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".py"):
+                continue
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    code = line.split("#", 1)[0]
+                    if re.search(r"\b[a-z_][a-z0-9_]*\.(Accepted|Rejected)\b", code):
+                        bad.append(f"{name}:{n}: {line.strip()}")
+        self.assertEqual(bad, [], "read it off the class: QDialog.Accepted")
 
 
 if __name__ == "__main__":
