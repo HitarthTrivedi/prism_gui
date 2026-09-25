@@ -826,7 +826,7 @@ class WorkbenchAndPanel(_Workbench):
         self.assertIsNone(p._workbench)                 # nothing built at rest
         p._build()                                       # what showEvent triggers
         self.assertIsNotNone(p._workbench)
-        self.assertEqual(p.header.actions_row.count(), 4)  # ?, AI tools, Export, Send all
+        self.assertEqual(p.header.actions_row.count(), 3)  # ?, Export, Send all
         self.assertTrue(all(hasattr(p, s)
                             for s in ("opened", "navigate", "open_run", "refresh")))
 

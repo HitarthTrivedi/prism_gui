@@ -572,7 +572,12 @@ class TheScreenOnThePool(_PooledScreen):
         from addons.leads.panel import LeadsPanel
         panel = LeadsPanel({})
         panel._build()
-        self.assertEqual(panel.header.actions_row.count(), 5)   # ?, AI tools, pill, Export, Send
+        row = panel.header.actions_row
+        self.assertEqual(row.count(), 4)                        # ?, pill, Export, Send all
+        # The pill is the workbench's first action, right after the "?" and ahead of
+        # the batch actions. (There used to be an "AI tools" button between them;
+        # the header dropped it, 788c29a, so this counts from the "?" now.)
+        self.assertIs(row.itemAt(1).widget(), panel._workbench.credits_button())
 
     def test_the_customer_is_shown_no_key_boxes(self):
         wb = self._bench()

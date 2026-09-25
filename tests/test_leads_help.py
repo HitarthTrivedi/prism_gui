@@ -228,8 +228,9 @@ class FromTheHeader(unittest.TestCase):
     def test_the_other_header_actions_are_still_there(self):
         p = self._panel()
         p._build()                                        # what showEvent does
-        # "?", AI tools, then the workbench's own Export sheets and Send all.
-        self.assertEqual(p.header.actions_row.count(), 4)
+        # "?", then the workbench's own Export sheets and Send all. (The "AI tools"
+        # button that used to sit between them was dropped from the header, 788c29a.)
+        self.assertEqual(p.header.actions_row.count(), 3)
 
     def test_clicking_it_opens_the_panel_and_clicking_again_shuts_it(self):
         p = self._panel()
