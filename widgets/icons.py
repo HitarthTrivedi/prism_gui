@@ -119,11 +119,21 @@ _STROKED: dict[str, list[str]] = {
     "list-plus":  ["M4 6h12", "M4 12h12", "M4 18h7", "M17 15v6", "M14 18h6"],
     "activity":   ["M3 12h4l3-8 4 16 3-8h4"],
     "drag":       ["M9 6h.01", "M15 6h.01", "M9 12h.01", "M15 12h.01", "M9 18h.01", "M15 18h.01"],
+    "chat-dots":  ["M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8A8.5 8.5 0 1 1 21 11.5z",
+                   "M8.5 11.5h.01", "M12 11.5h.01", "M15.5 11.5h.01"],
+    "calendar-dots": ["M4 6h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+                      "M8 2v4", "M16 2v4", "M2 10h20",
+                      "M8 15h.01", "M12 15h.01", "M16 15h.01"],
+    "headphones-mic": ["M4 14v-3a8 8 0 0 1 16 0v3",
+                       "M2 15a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z",
+                       "M17 15a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2z",
+                       "M19 19c0 1.5-1 2.5-2.5 2.5H14"],
 }
 
 # Icons the design fills rather than strokes.
 _FILLED: dict[str, list[str]] = {
     "play": ["M7 5l12 7-12 7z"],
+    "send-plane": ["M22 2L15 22l-4-9-9-4 22-9z"],
 }
 
 _cache: dict[tuple, QPixmap] = {}

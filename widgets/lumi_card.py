@@ -8,12 +8,14 @@ Recreates the Lumi Help Center card popup and floating launcher, featuring:
 """
 from __future__ import annotations
 
+import math
 import os
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QIcon, QPainter, QPainterPath, QPixmap,
+    QBrush, QColor, QCursor, QFont, QIcon, QLinearGradient, QPainter,
+    QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit,
@@ -125,13 +127,12 @@ class _QuickCard(QFrame):
         self.setObjectName("lumiQuickCard")
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(125)
+        self.setFixedHeight(124)
         self.setStyleSheet(
             "QFrame#lumiQuickCard {"
             "  background: #ffffff;"
-            "  border: 1.5px solid #e2e8f0;"
-            "  border-radius: 16px;"
-            "  padding: 8px;"
+            "  border: 1px solid #e2e8f0;"
+            "  border-radius: 18px;"
             "}"
             "QFrame#lumiQuickCard:hover {"
             "  background: #f0fdfa;"
@@ -140,24 +141,24 @@ class _QuickCard(QFrame):
         )
 
         box = QVBoxLayout(self)
-        box.setContentsMargins(8, 10, 8, 10)
+        box.setContentsMargins(12, 12, 12, 12)
         box.setSpacing(5)
 
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(icons.pixmap(icon_name, 22, "#0d9488"))
-        icon_lbl.setStyleSheet("background: transparent;")
+        icon_lbl.setPixmap(icons.pixmap(icon_name, 28, "#0d9488", stroke=2.0))
+        icon_lbl.setStyleSheet("background: transparent; border: none; padding: 0;")
         box.addWidget(icon_lbl, alignment=Qt.AlignLeft)
 
         t_lbl = QLabel(title)
         t_lbl.setStyleSheet(
-            "font-size: 12px; font-weight: 700; color: #0f172a; background: transparent;"
+            "font-size: 13px; font-weight: 700; color: #0f172a; background: transparent; border: none; padding: 0;"
         )
         t_lbl.setWordWrap(True)
         box.addWidget(t_lbl)
 
         s_lbl = QLabel(subtitle)
         s_lbl.setStyleSheet(
-            "font-size: 10.5px; color: #64748b; font-weight: 500; line-height: 125%; background: transparent;"
+            "font-size: 11.5px; color: #64748b; font-weight: 500; line-height: 125%; background: transparent; border: none; padding: 0;"
         )
         s_lbl.setWordWrap(True)
         box.addWidget(s_lbl)
@@ -167,6 +168,214 @@ class _QuickCard(QFrame):
         if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
             self.clicked.emit()
         super().mouseReleaseEvent(event)
+
+
+# ── WELCOME VIEW HEADER WITH WAVES, MASCOT, AND CLOUD SHELF ───────────────────
+class LumiWelcomeHeader(QWidget):
+    """Header with flowing waves, sparkles, animated Lumi mascot, and fluffy cloud shelf."""
+
+    minimize_requested = Signal()
+    close_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(225)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setCursor(Qt.ArrowCursor)
+
+        self._frames: list[QPixmap] = []
+        self._mode = "waving"
+        self._current_seq_idx = 0
+        self._load_spritesheet()
+
+        self._waving_seq = [4, 5, 6, 7, 6, 5, 4, 5, 6, 7]
+        self._idle_seq = [0, 1, 2, 3, 2, 1]
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._next_frame)
+        self._timer.start(160)
+
+        # Child layouts for window controls and header text
+        vbox = QVBoxLayout(self)
+        vbox.setContentsMargins(24, 16, 24, 0)
+        vbox.setSpacing(4)
+
+        # Top Bar
+        top_bar = QHBoxLayout()
+        top_bar.addStretch(1)
+
+        min_btn = QPushButton("—")
+        min_btn.setFixedSize(26, 26)
+        min_btn.setCursor(Qt.PointingHandCursor)
+        min_btn.setToolTip(i18n.t("Minimize"))
+        min_btn.setStyleSheet(
+            "QPushButton {"
+            "  border: none; background: transparent; font-size: 16px; font-weight: 700; color: #1e293b;"
+            "}"
+            "QPushButton:hover { background: rgba(0,0,0,0.06); border-radius: 6px; }"
+        )
+        min_btn.clicked.connect(self.minimize_requested.emit)
+        top_bar.addWidget(min_btn)
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(26, 26)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setToolTip(i18n.t("Close"))
+        close_btn.setStyleSheet(
+            "QPushButton {"
+            "  border: none; background: transparent; font-size: 15px; font-weight: 700; color: #1e293b;"
+            "}"
+            "QPushButton:hover { background: rgba(0,0,0,0.06); border-radius: 6px; }"
+        )
+        close_btn.clicked.connect(self.close_requested.emit)
+        top_bar.addWidget(close_btn)
+        vbox.addLayout(top_bar)
+
+        # Header Text
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 6, 0, 0)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(6)
+        text_col.addStretch(1)
+
+        title = QLabel(i18n.t("Hi, I’m Lumi"))
+        title.setStyleSheet(
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 30px; font-weight: 800; color: #0f172a; background: transparent; border: none; padding: 0;"
+        )
+        text_col.addWidget(title)
+
+        sub = QLabel(i18n.t("I can answer questions, find docs, and\nconnect you to support."))
+        sub.setStyleSheet(
+            "font-size: 13.5px; color: #334155; font-weight: 500; line-height: 135%; background: transparent; border: none; padding: 0;"
+        )
+        sub.setWordWrap(True)
+        text_col.addWidget(sub)
+        text_col.addStretch(1)
+
+        content_row.addLayout(text_col, stretch=5)
+        content_row.addSpacing(210)  # Space reserved for animated mascot on the right
+        vbox.addLayout(content_row)
+
+    def _load_spritesheet(self):
+        sheet_path = paths.resource("assets", "lumi", "lumi_spritesheet.png")
+        if not os.path.exists(sheet_path):
+            return
+        sheet = QPixmap(sheet_path)
+        if sheet.isNull():
+            return
+        fw = sheet.width() // 4
+        fh = sheet.height() // 2
+        for r in range(2):
+            for c in range(4):
+                frame = sheet.copy(c * fw, r * fh, fw, fh)
+                self._frames.append(frame)
+
+    def _next_frame(self):
+        seq = self._waving_seq if self._mode == "waving" else self._idle_seq
+        if not seq:
+            return
+        self._current_seq_idx = (self._current_seq_idx + 1) % len(seq)
+        self.update()
+
+    def set_mode(self, mode: str):
+        if self._mode != mode:
+            self._mode = mode
+            self._current_seq_idx = 0
+            self._timer.setInterval(160 if mode == "waving" else 220)
+            self.update()
+
+    def enterEvent(self, event):
+        self.set_mode("waving")
+        super().enterEvent(event)
+
+    def _draw_star(self, painter: QPainter, cx: float, cy: float, r_outer: float, r_inner: float, color: QColor):
+        path = QPainterPath()
+        for i in range(8):
+            angle = i * math.pi / 4.0
+            r = r_outer if i % 2 == 0 else r_inner
+            px = cx + r * math.cos(angle)
+            py = cy + r * math.sin(angle)
+            if i == 0:
+                path.moveTo(px, py)
+            else:
+                path.lineTo(px, py)
+        path.closeSubpath()
+        painter.fillPath(path, color)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        w = float(self.width())
+        h = float(self.height())
+
+        # 1. Base gradient
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0.0, QColor(220, 252, 231, 230))
+        grad.setColorAt(0.35, QColor(204, 251, 241, 180))
+        grad.setColorAt(0.8, QColor(230, 255, 250, 240))
+        grad.setColorAt(1.0, QColor(240, 253, 250, 255))
+        painter.fillRect(self.rect(), grad)
+
+        # 2. Organic flowing waves on top-left (matching reference)
+        wave1 = QPainterPath()
+        wave1.moveTo(0, 0)
+        wave1.lineTo(w * 0.42, 0)
+        wave1.cubicTo(w * 0.46, h * 0.16, w * 0.34, h * 0.42, w * 0.18, h * 0.38)
+        wave1.cubicTo(w * 0.06, h * 0.34, 0, h * 0.42, 0, h * 0.46)
+        wave1.closeSubpath()
+        painter.fillPath(wave1, QColor(167, 243, 208, 85))
+
+        wave2 = QPainterPath()
+        wave2.moveTo(0, h * 0.22)
+        wave2.cubicTo(w * 0.16, h * 0.14, w * 0.32, h * 0.30, w * 0.38, h * 0.48)
+        wave2.cubicTo(w * 0.28, h * 0.62, w * 0.12, h * 0.66, 0, h * 0.58)
+        wave2.closeSubpath()
+        painter.fillPath(wave2, QColor(153, 246, 228, 70))
+
+        # 3. Draw Sparkles
+        sparkle_color = QColor(45, 212, 191, 230)
+        # Left sparkles
+        self._draw_star(painter, w * 0.45, h * 0.58, 9.5, 3.2, sparkle_color)
+        self._draw_star(painter, w * 0.48, h * 0.70, 6.5, 2.2, sparkle_color)
+        dash_pen = QPen(sparkle_color, 2.5, Qt.SolidLine, Qt.RoundCap)
+        painter.setPen(dash_pen)
+        painter.drawLine(QPointF(w * 0.45, h * 0.45), QPointF(w * 0.465, h * 0.425))
+        painter.drawLine(QPointF(w * 0.43, h * 0.48), QPointF(w * 0.44, h * 0.50))
+        # Right sparkles
+        self._draw_star(painter, w * 0.93, h * 0.65, 7.5, 2.5, sparkle_color)
+        painter.drawLine(QPointF(w * 0.89, h * 0.59), QPointF(w * 0.905, h * 0.57))
+        painter.drawLine(QPointF(w * 0.92, h * 0.54), QPointF(w * 0.93, h * 0.56))
+
+        # 4. Animated Lumi Mascot - perfectly scaled to fill right side
+        mw = int(w * 0.54)
+        mh = mw
+        mx = int(w * 0.45)
+        my = int(h * 0.05)
+
+        if self._frames:
+            seq = self._waving_seq if self._mode == "waving" else self._idle_seq
+            frame_idx = seq[self._current_seq_idx % len(seq)]
+            frame = self._frames[frame_idx]
+            scaled = frame.scaled(mw, mh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(mx, my, scaled)
+        else:
+            fallback = QPixmap(paths.resource("assets", "lumi", "lumi_character.png"))
+            if not fallback.isNull():
+                scaled = fallback.scaled(mw, mh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                painter.drawPixmap(mx, my, scaled)
+
+        # 5. Fluffy White Cloud Shelf under Lumi
+        cloud = QPainterPath()
+        cloud.moveTo(w * 0.32, h)
+        cloud.cubicTo(w * 0.38, h * 0.90, w * 0.46, h * 0.74, w * 0.59, h * 0.74)
+        cloud.cubicTo(w * 0.70, h * 0.69, w * 0.82, h * 0.73, w * 0.90, h * 0.82)
+        cloud.cubicTo(w * 0.95, h * 0.87, w, h * 0.89, w, h)
+        cloud.lineTo(w, h + 30)
+        cloud.lineTo(w * 0.32, h + 30)
+        cloud.closeSubpath()
+        painter.fillPath(cloud, QColor(255, 255, 255, 255))
 
 
 # ── LUMI CARD (POPUP WINDOW) ─────────────────────────────────────────────────
@@ -182,15 +391,15 @@ class LumiCard(QFrame):
         super().__init__(parent)
         self._support_panel = support_panel
         self.setObjectName("lumiMainCard")
-        self.setFixedSize(455, 570)
+        self.setFixedSize(465, 520)
         self._is_expanded = False
         self._exp_btns: list[QPushButton] = []
 
         self.setStyleSheet(
             "QFrame#lumiMainCard {"
-            "  background: #ffffff;"
-            "  border: 2px solid #5eead4;"
-            "  border-radius: 28px;"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #dcfce7, stop:0.35 #e6fffa, stop:0.7 #f0fdfa, stop:1.0 #e6fffa);"
+            "  border: 3px solid #5eead4;"
+            "  border-radius: 36px;"
             "}"
         )
 
@@ -225,7 +434,7 @@ class LumiCard(QFrame):
                 icons.button_icon(b, "minimize", 14, "#475569")
                 b.setToolTip(i18n.t("Restore size"))
         else:
-            self.setFixedSize(455, 570)
+            self.setFixedSize(465, 520)
             for b in self._exp_btns:
                 icons.button_icon(b, "maximize", 14, "#475569")
                 b.setToolTip(i18n.t("Expand"))
@@ -237,97 +446,15 @@ class LumiCard(QFrame):
     def _build_welcome_view(self) -> QWidget:
         root = QWidget()
         box = QVBoxLayout(root)
-        box.setContentsMargins(0, 0, 0, 18)
-        box.setSpacing(14)
+        box.setContentsMargins(0, 0, 0, 16)
+        box.setSpacing(12)
 
-        # Header with soft mint gradient and wavy cloud
-        header = QFrame()
-        header.setFixedHeight(230)
-        header.setStyleSheet(
-            "QFrame {"
-            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
-            "    stop:0 #dcfce7, stop:0.45 #ccfbf1, stop:0.85 #f0fdfa, stop:1.0 #ffffff);"
-            "  border-top-left-radius: 26px;"
-            "  border-top-right-radius: 26px;"
-            "}"
-        )
-
-        h_layout = QVBoxLayout(header)
-        h_layout.setContentsMargins(20, 14, 20, 0)
-        h_layout.setSpacing(6)
-
-        # Top bar: minimize, expand and close buttons
-        top_bar = QHBoxLayout()
-        top_bar.addStretch(1)
-
-        min_btn = QPushButton()
-        min_btn.setFixedSize(28, 28)
-        min_btn.setCursor(Qt.PointingHandCursor)
-        min_btn.setToolTip(i18n.t("Minimize"))
-        icons.button_icon(min_btn, "minus", 14, "#475569")
-        min_btn.setStyleSheet(
-            "QPushButton { border: none; background: transparent; padding: 0; }"
-            "QPushButton:hover { background: rgba(0,0,0,0.07); border-radius: 6px; }"
-        )
-        min_btn.clicked.connect(self.minimize_requested.emit)
-        top_bar.addWidget(min_btn)
-
-        exp_btn = QPushButton()
-        exp_btn.setFixedSize(28, 28)
-        exp_btn.setCursor(Qt.PointingHandCursor)
-        exp_btn.setToolTip(i18n.t("Expand"))
-        icons.button_icon(exp_btn, "maximize", 14, "#475569")
-        exp_btn.setStyleSheet(
-            "QPushButton { border: none; background: transparent; padding: 0; }"
-            "QPushButton:hover { background: rgba(0,0,0,0.07); border-radius: 6px; }"
-        )
-        exp_btn.clicked.connect(self.toggle_expand)
-        self._exp_btns.append(exp_btn)
-        top_bar.addWidget(exp_btn)
-
-        close_btn = QPushButton()
-        close_btn.setFixedSize(28, 28)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setToolTip(i18n.t("Close"))
-        icons.button_icon(close_btn, "x", 14, "#475569")
-        close_btn.setStyleSheet(
-            "QPushButton { border: none; background: transparent; padding: 0; }"
-            "QPushButton:hover { background: rgba(0,0,0,0.07); border-radius: 6px; }"
-        )
-        close_btn.clicked.connect(self.close_requested.emit)
-        top_bar.addWidget(close_btn)
-        h_layout.addLayout(top_bar)
-
-        # Content row: Text on left, Animated Lumi on right
-        content_row = QHBoxLayout()
-        content_row.setContentsMargins(4, 0, 0, 0)
-        content_row.setSpacing(8)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(6)
-        text_col.addStretch(1)
-
-        title = QLabel(i18n.t("Hi, I’m Lumi"))
-        title.setStyleSheet(
-            f"font-family: '{theme.FONT_HEADING}'; font-size: 27px; font-weight: 800; color: #0f172a; background: transparent;"
-        )
-        text_col.addWidget(title)
-
-        subtitle = QLabel(i18n.t("I can answer questions, find docs, and connect you to support."))
-        subtitle.setStyleSheet(
-            "font-size: 13.5px; color: #334155; font-weight: 500; line-height: 140%; background: transparent;"
-        )
-        subtitle.setWordWrap(True)
-        text_col.addWidget(subtitle)
-        text_col.addStretch(1)
-        content_row.addLayout(text_col, stretch=3)
-
-        # Animated Lumi mascot
-        self._mascot = LumiSpriteWidget(mode="waving", size=QSize(175, 175), parent=header)
-        content_row.addWidget(self._mascot, stretch=2, alignment=Qt.AlignRight | Qt.AlignBottom)
-        h_layout.addLayout(content_row)
-
-        box.addWidget(header)
+        # Header with flowing waves, animated mascot, and fluffy cloud shelf
+        self._welcome_header = LumiWelcomeHeader(root)
+        self._mascot = self._welcome_header
+        self._welcome_header.minimize_requested.connect(self.minimize_requested.emit)
+        self._welcome_header.close_requested.connect(self.close_requested.emit)
+        box.addWidget(self._welcome_header)
 
         # Middle: Pill search bar
         search_wrap = QWidget()
@@ -336,23 +463,23 @@ class LumiCard(QFrame):
 
         pill = QFrame()
         pill.setObjectName("lumiSearchPill")
-        pill.setFixedHeight(46)
+        pill.setFixedHeight(52)
         pill.setStyleSheet(
             "QFrame#lumiSearchPill {"
             "  background: #ffffff;"
-            "  border: 1.5px solid #a7f3d0;"
-            "  border-radius: 23px;"
+            "  border: 1px solid #cbd5e1;"
+            "  border-radius: 26px;"
             "}"
             "QFrame#lumiSearchPill:focus-within {"
             "  border-color: #2dd4bf;"
             "}"
         )
         p_row = QHBoxLayout(pill)
-        p_row.setContentsMargins(16, 2, 6, 2)
-        p_row.setSpacing(8)
+        p_row.setContentsMargins(18, 2, 6, 2)
+        p_row.setSpacing(10)
 
         self._input = QLineEdit()
-        self._input.setPlaceholderText(i18n.t("Ask me anything about Prism…"))
+        self._input.setPlaceholderText(i18n.t("Ask me anything about Prism..."))
         self._input.setStyleSheet(
             "QLineEdit { border: none; background: transparent; font-size: 13.5px; color: #0f172a; }"
         )
@@ -360,15 +487,16 @@ class LumiCard(QFrame):
         p_row.addWidget(self._input, stretch=1)
 
         send_btn = QPushButton()
-        send_btn.setFixedSize(34, 34)
+        send_btn.setFixedSize(38, 38)
         send_btn.setCursor(Qt.PointingHandCursor)
         send_btn.setToolTip(i18n.t("Send"))
-        icons.button_icon(send_btn, "arrow-right", 16, "#0f766e")
+        send_btn.setIcon(icons.icon("send-plane", 18, "#0d9488"))
+        send_btn.setIconSize(QSize(18, 18))
         send_btn.setStyleSheet(
             "QPushButton {"
             "  background: #99f6e4;"
             "  border: none;"
-            "  border-radius: 17px;"
+            "  border-radius: 19px;"
             "}"
             "QPushButton:hover {"
             "  background: #5eead4;"
@@ -383,18 +511,18 @@ class LumiCard(QFrame):
         # Bottom: 3 Quick Action Cards
         cards_wrap = QWidget()
         cards_layout = QHBoxLayout(cards_wrap)
-        cards_layout.setContentsMargins(14, 0, 14, 0)
+        cards_layout.setContentsMargins(16, 0, 16, 0)
         cards_layout.setSpacing(8)
 
-        card1 = _QuickCard(i18n.t("Ask assistant"), i18n.t("Get help and find docs"), "chat")
+        card1 = _QuickCard(i18n.t("Ask assistant"), i18n.t("Get help and find docs"), "chat-dots")
         card1.clicked.connect(self._open_assistant_chat)
         cards_layout.addWidget(card1)
 
-        card2 = _QuickCard(i18n.t("Book a meeting"), i18n.t("Talk to the team"), "calendar")
+        card2 = _QuickCard(i18n.t("Book a meeting"), i18n.t("Talk to the team"), "calendar-dots")
         card2.clicked.connect(self._open_book_meeting)
         cards_layout.addWidget(card2)
 
-        card3 = _QuickCard(i18n.t("Contact support"), i18n.t("Get help from our team"), "headset")
+        card3 = _QuickCard(i18n.t("Contact support"), i18n.t("Get help from our team"), "headphones-mic")
         card3.clicked.connect(self._open_contact_sheet)
         cards_layout.addWidget(card3)
 
