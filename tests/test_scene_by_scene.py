@@ -694,3 +694,31 @@ class TheWindowSaysWhichSceneItIsOn(unittest.TestCase):
         ask = Recorder([scene_reply() for _ in range(3)])
         self.assertEqual(
             len(RW.build_spec(TURN_ONE, ask, script=SCRIPT)["scenes"]), 3)
+
+
+class KeyframeScopingAndNoneSafety(unittest.TestCase):
+    """Verify keyframe animations are renamed without crashing re.sub with NoneType,
+    and all preflight/scoping functions safely handle None values."""
+
+    def test_keyframes_scoping_returns_valid_string(self):
+        css = """
+        .card { animation: fadeUp 1s ease both; }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: none; }
+        }
+        """
+        scoped = RW.scope_css(css, 5)
+        self.assertIsInstance(scoped, str)
+        self.assertIn("@keyframes s5-fadeUp", scoped)
+        self.assertIn("s5-fadeUp 1s", scoped)
+
+    def test_scope_css_and_sanitize_safely_handle_none(self):
+        self.assertEqual(RW.scope_css(None, 0), "")
+        self.assertEqual(RW.sanitize_scene_css(None), "")
+
+    def test_ensure_accent_applied_with_none_css(self):
+        spec = {"brand": {"accent": "#00ff00"}, "design": {"css": None}, "scenes": []}
+        healed = RW.ensure_accent_applied(spec)
+        self.assertIn("--accent: #00ff00", healed["design"]["css"])
+

@@ -58,7 +58,10 @@ _installed = False
 
 def log_dir() -> str:
     path = paths.user_dir("logs")
-    os.makedirs(path, exist_ok=True)
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        pass
     return path
 
 

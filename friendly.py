@@ -441,14 +441,14 @@ _GENERIC = Problem(
     "Prism hit a problem it doesn't recognise. Nothing you have already "
     "produced has been lost.",
     ("Try the same thing once more — many problems are momentary.",
-     "Open Help & support if it happens again — it has a written answer for "
+     "Ask Lumi if it happens again — she has a written answer for "
      "most things, and opens the way to us when none of them fits.",
      "Everything already finished is still in History."),
     ask_support=True,
     # The one entry where we genuinely do not know what went wrong, so it is
     # the one that most needs a route onwards rather than a shrug. Saving the
     # diagnostics file is still offered beside it; this is the faster half.
-    action="support", action_label="Open Help & support")
+    action="support", action_label="Ask Lumi")
 
 
 def explain(error: object, context: str = "") -> Problem:

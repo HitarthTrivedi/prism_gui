@@ -288,10 +288,12 @@ class ArtifactsPanel(Page):
             "external", i18n.t("Open"),
             lambda _=False, p=target_path: self._open_file(p))]
 
-        if single_target and single_target.lower().endswith(".mp4") and _editable_reel(single_target):
+        reel_target = (single_target if single_target and single_target.lower().endswith(".mp4") and _editable_reel(single_target)
+                       else self._primary_reel(path))
+        if reel_target and _editable_reel(reel_target):
             actions.append(C.icon_button(
                 "pencil", i18n.t("Edit the layout"),
-                lambda _=False, p=single_target: self.edit_reel.emit(p)))
+                lambda _=False, p=reel_target: self.edit_reel.emit(p)))
 
         link = _chat_link(single_target) if single_target else _chat_link(path)
         if link:
@@ -330,6 +332,24 @@ class ArtifactsPanel(Page):
             return files[0] if len(files) == 1 else None
         except Exception:
             return None
+
+    @staticmethod
+    def _primary_reel(folder: str) -> str | None:
+        """Find the main editable reel .mp4 in a run folder (if any)."""
+        try:
+            candidates = []
+            for root, _dirs, names in os.walk(folder):
+                for n in names:
+                    if n.lower().endswith(".mp4"):
+                        p = os.path.join(root, n)
+                        if _editable_reel(p):
+                            candidates.append(p)
+            if candidates:
+                candidates.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0, reverse=True)
+                return candidates[0]
+        except Exception:
+            pass
+        return None
 
     def _open_file(self, path: str):
         # In-app, not handed to the OS — see dialogs/preview_dialog.py's own

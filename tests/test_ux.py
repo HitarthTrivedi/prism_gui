@@ -348,6 +348,22 @@ class AClosedBrowserWindow(unittest.TestCase):
                         "disconnected: not connected to DevTools"):
             self.assertTrue(AU._browser_is_gone(wording), wording)
 
+    def test_blank_native_chromedriver_error_is_recoverable(self):
+        """ChromeDriver sometimes returns only Message plus stack addresses."""
+        import core_bridge  # noqa: F401  (puts core on sys.path)
+        from core import automation as AU
+        native = RuntimeError(
+            "Message:\nStacktrace:\n#0 0x581cc40b99fa <unknown>\n"
+            "#1 0x74d170e9cb84 <unknown>")
+        try:
+            raise native
+        except RuntimeError as cause:
+            try:
+                raise RuntimeError("ChatGPT: waiting for the message box") from cause
+            except RuntimeError as wrapped:
+                self.assertTrue(AU._blank_native_webdriver_error(wrapped))
+                self.assertTrue(AU._browser_is_gone(wrapped))
+
     def test_an_ordinary_stage_failure_is_not_mistaken_for_it(self):
         """Stopping the whole run on a normal error would throw away every
         stage after it for no reason."""

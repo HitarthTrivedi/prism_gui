@@ -11,6 +11,7 @@ The work column is a two-page stack: composing (task + plan) and running
 (live output). Those are the only two things you can be doing, they never
 want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
+import json
 import os
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
 from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient
@@ -223,6 +224,8 @@ class DashboardCentral(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_cache()
+        if hasattr(self, "_lumi_overlay"):
+            self._lumi_overlay.reposition()
 
     def _update_cache(self):
         if self._bg_orig and not self._bg_orig.isNull():
@@ -335,6 +338,10 @@ class MainWindow(QMainWindow):
         self._task_runs: list[dict] = []
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
+        self._current_run_file = None
+        self._is_followup_run = False
+        self._followup_session = None
+        self._followup_text = ""
 
         self._build_ui()
         self._wire()
@@ -505,11 +512,23 @@ class MainWindow(QMainWindow):
         shell.addWidget(columns, stretch=1)
         self.setCentralWidget(central)
 
+        # Global floating Lumi Help Center (animated mascot, cards, chat)
+        from widgets.lumi_card import LumiOverlay
+        self.lumi_panel = SupportPanel(self.cfg)
+        self.lumi_panel.command_requested.connect(self._handle_command)
+        self.lumi_overlay = LumiOverlay(central, self.lumi_panel)
+        self.lumi_overlay.command_requested.connect(self._handle_command)
+        central._lumi_overlay = self.lumi_overlay
+
         self.home_panel.describe_task.connect(
             lambda: self._handle_command("workbench"))
         self.home_panel.task_submitted.connect(self._on_home_task_submitted)
         self.home_panel.open_addon.connect(self._handle_command)
         self.home_panel.open_history.connect(lambda: self._handle_command("runs"))
+        # Lumi is a floating Home assistant. Its content is the same support
+        # panel used by every recovery route, mounted in the popover on demand.
+        self.home_panel.lumi_open_requested.connect(self._open_lumi)
+        self.home_panel.lumi_close_requested.connect(self._close_lumi)
         self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
         self.inquiry_panel.check_requested.connect(
             lambda: self._open_inquiry_dialog(auto_check=True))
@@ -566,6 +585,14 @@ class MainWindow(QMainWindow):
         # the guide uses, so reading about a setting and reaching it are one
         # gesture.
         self.support_panel.command_requested.connect(self._handle_command)
+
+    def _open_lumi(self):
+        """Open the global floating Lumi assistant."""
+        self.lumi_overlay.open()
+
+    def _close_lumi(self):
+        """Close the global floating Lumi assistant."""
+        self.lumi_overlay.close()
 
     def _workbench_screen(self) -> QWidget:
         wrap = QWidget()
@@ -1209,6 +1236,7 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
+        CB.config.reset_run()
         self._stage_agents = {}
         self._stage_results = []
         self._run_shortfall = []
@@ -1315,7 +1343,7 @@ class MainWindow(QMainWindow):
         elif key == "guide":
             self._show_screen("guide")
         elif key == "support":
-            self._show_screen("support")
+            self._open_lumi()
         elif key == "tour":
             self._start_tour()
         elif key in ("agents", "profile", "key", "chrome", "licence",
@@ -1738,7 +1766,7 @@ class MainWindow(QMainWindow):
                 configured = {}
             agents = {s: configured.get(s, "") for s in responses}
         target_path = record.get("_path") or record.get("path") or ""
-        self._current_run_file = target_path or self._current_run_file
+        self._current_run_file = target_path or getattr(self, "_current_run_file", None)
         self._is_followup_run = True
         # The record is the truth here, not whatever ran last.
         self._followup_session = {
@@ -2112,6 +2140,7 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
+        CB.config.reset_run()
         if len(self._task_queue) > 1:
             self.statusBar().showMessage(
                 f"Planning task {self._task_pos} of {len(self._task_queue)}…", 0)
@@ -2497,6 +2526,11 @@ class MainWindow(QMainWindow):
             return
 
         self._run_id = getattr(auth, "run_id", "")
+        if not getattr(self, "_is_followup_run", False):
+            self._current_run_file = None
+            self._followup_session = None
+            self._followup_text = ""
+            CB.config.reset_run()
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
@@ -2597,7 +2631,13 @@ class MainWindow(QMainWindow):
             return
         self._reel_edit_ctx = {"spec": spec, "spec_path": spec_path,
                                "mp4_path": mp4_path}
-        QDesktopServices.openUrl(QUrl(url))
+        opened = QDesktopServices.openUrl(QUrl(url))
+        if not opened:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:
+                pass
         self.statusBar().showMessage(i18n.t(
             "The reel is open in your browser — drag things into place, "
             "then press Save & render there."), 12000)
@@ -2635,14 +2675,46 @@ class MainWindow(QMainWindow):
                            f"reel_{int(_time.time())}.mp4")
         self.statusBar().showMessage(
             i18n.t("Rendering the fixed reel…"))
+
+        stop_fn = getattr(self, "_reel_edit_stop", None)
+        if stop_fn and hasattr(stop_fn, "reset_progress"):
+            stop_fn.reset_progress()
+
+        start_time = _time.time()
+
+        def _handle_progress(d: int, t: int):
+            if stop_fn and hasattr(stop_fn, "set_progress"):
+                stop_fn.set_progress(d, t)
+            now = _time.time()
+            elapsed = max(0.001, now - start_time)
+            pct = int(d / max(1, t) * 100)
+            if d > 0 and t > d:
+                fps_rate = d / elapsed
+                rem_sec = int((t - d) / max(0.1, fps_rate))
+                eta_text = f"~{rem_sec}s remaining"
+            elif d >= t:
+                eta_text = "finishing…"
+            else:
+                eta_text = "calculating…"
+            self.statusBar().showMessage(
+                i18n.t("Rendering the fixed reel… {p}% ({eta})").format(
+                    p=pct, eta=eta_text))
+
+        def _handle_done(path: str):
+            if stop_fn and hasattr(stop_fn, "set_done"):
+                stop_fn.set_done(path)
+            self._on_reel_edit_rendered_done(path)
+
+        def _handle_failed(e: str):
+            if stop_fn and hasattr(stop_fn, "set_error"):
+                stop_fn.set_error(e)
+            self.statusBar().clearMessage()
+            QMessageBox.warning(self, "Reel", e)
+
         worker = ReelWorker(ctx["spec"], out, studio=True)
-        worker.progress.connect(lambda d, t: self.statusBar().showMessage(
-            i18n.t("Rendering the fixed reel… {p}%").format(
-                p=int(d / max(1, t) * 100))))
-        worker.done.connect(self._on_reel_edit_rendered_done)
-        worker.failed.connect(lambda e: (
-            self.statusBar().clearMessage(),
-            QMessageBox.warning(self, "Reel", e)))
+        worker.progress.connect(_handle_progress)
+        worker.done.connect(_handle_done)
+        worker.failed.connect(_handle_failed)
         self._reel_edit_worker = worker
         worker.start()
 
@@ -3831,6 +3903,11 @@ class MainWindow(QMainWindow):
         if self._record_worker is None:
             self._toggle_mic()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "lumi_overlay"):
+            self.lumi_overlay.reposition()
+
     def closeEvent(self, event):
         self._stop_reel_editor()
         worker = getattr(self, "_reel_edit_worker", None)
@@ -3854,6 +3931,8 @@ class MainWindow(QMainWindow):
         # The support assistant keeps its own worker — wound up here beside
         # everything else, or its thread aborts the teardown the same way.
         self.support_panel.shutdown()
+        if hasattr(self, "lumi_panel"):
+            self.lumi_panel.shutdown()
         # Every worker still running has to be stopped and JOINED before the
         # process is allowed to tear down.
         #

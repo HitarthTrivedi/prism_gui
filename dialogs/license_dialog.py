@@ -24,8 +24,8 @@ import time
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDesktopServices, QFont
-from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
+                               QLineEdit, QPushButton, QVBoxLayout, QWidget)
 
 import app_meta
 import i18n
@@ -164,6 +164,13 @@ class LicenseDialog(PrismDialog):
         # emailed against what they typed cannot do it through an ellipsis.
         self.setMinimumWidth(580)
         self._worker: _ActivateWorker | None = None
+        # A licence can be pasted from an email in seconds. Put the legal
+        # notice at that exact point, rather than burying it in Settings where
+        # a first-time customer cannot reach it. The boxes are deliberately
+        # per activation: accepting a replacement key must not silently reuse
+        # an acknowledgement from a previous licence.
+        self._terms_opened = False
+        self._privacy_opened = False
 
         # A stacked sheet, not a grid of cards: the 16px card gutter between
         # five single-column elements is what left a third of this small window
@@ -171,6 +178,7 @@ class LicenseDialog(PrismDialog):
         self.body.setSpacing(theme.ROW_GAP)
         self.body.addWidget(self._explainer())
         self.body.addLayout(self._key_row())
+        self.body.addWidget(self._legal_acknowledgement())
         self.body.addWidget(self._message_label())
         self.body.addWidget(self._seats_panel())
         self.body.addWidget(self._support())
@@ -181,7 +189,8 @@ class LicenseDialog(PrismDialog):
         self._build_footer()
 
         self.key_edit.setFocus()
-        self.tab_chain(self.key_edit, self.activate_btn)
+        self.tab_chain(self.key_edit, self.terms_btn, self.privacy_btn,
+                       self.terms_check, self.privacy_check, self.activate_btn)
 
     # ── chrome ─────────────────────────────────────────────────────────────
     def _lede(self) -> str:
@@ -273,6 +282,82 @@ class LicenseDialog(PrismDialog):
         self.activate_btn.setMinimumHeight(C.MIN_TARGET + 10)
         row.addWidget(self.activate_btn)
         return row
+
+    def _legal_acknowledgement(self) -> QWidget:
+        """The clear, local notice required before a customer activates.
+
+        The policy and terms are bundled with Prism, so these links work
+        without an internet connection and always show the exact text shipped
+        with this build. A tick alone is not enough: each document must have
+        been opened in this activation session first.
+        """
+        wrap = QFrame()
+        wrap.setObjectName("licLegal")
+        wrap.setAttribute(Qt.WA_StyledBackground, True)
+        wrap.setStyleSheet(
+            f"#licLegal {{ background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
+        col = QVBoxLayout(wrap)
+        col.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                               theme.SPACE_3, theme.SPACE_2)
+        col.setSpacing(theme.SPACE_2)
+        col.addWidget(kicker(i18n.t("Before you activate"), muted=True))
+        notice = QLabel(i18n.t(
+            "Please read the terms and privacy notice. Prism uses limited "
+            "licence, device and usage information to provide and protect "
+            "your licence; it does not send your task content to Alphakore."))
+        notice.setObjectName("body")
+        notice.setWordWrap(True)
+        col.addWidget(notice)
+
+        links = QHBoxLayout()
+        links.setSpacing(theme.SPACE_2)
+        self.terms_btn = C.button(i18n.t("Read Terms of Use"), "secondary",
+                                  small=True, on_click=self._read_terms)
+        self.privacy_btn = C.button(i18n.t("Read Privacy Policy"), "secondary",
+                                    small=True, on_click=self._read_privacy)
+        links.addWidget(self.terms_btn)
+        links.addWidget(self.privacy_btn)
+        links.addStretch(1)
+        col.addLayout(links)
+
+        self.terms_check = QCheckBox(i18n.t("I have read and agree to the Terms of Use."))
+        self.privacy_check = QCheckBox(i18n.t(
+            "I have read the Privacy Policy and understand this licence data use."))
+        self.terms_check.setEnabled(False)
+        self.privacy_check.setEnabled(False)
+        self.terms_check.toggled.connect(self._update_activation_ready)
+        self.privacy_check.toggled.connect(self._update_activation_ready)
+        col.addWidget(self.terms_check)
+        col.addWidget(self.privacy_check)
+        return wrap
+
+    def _read_terms(self):
+        self._open_legal(i18n.t("Terms of Use"), "TERMS_OF_USE.md")
+        self._terms_opened = True
+        self.terms_check.setEnabled(True)
+
+    def _read_privacy(self):
+        self._open_legal(i18n.t("Privacy Policy"), "PRIVACY_POLICY.md")
+        self._privacy_opened = True
+        self.privacy_check.setEnabled(True)
+
+    def _open_legal(self, title: str, resource_name: str):
+        # Local import avoids a widgets ↔ dialogs import cycle at start-up.
+        from dialogs.legal_dialog import LegalDialog
+        LegalDialog(title, resource_name, self).exec()
+
+    def _legal_acknowledged(self) -> bool:
+        return (self._terms_opened and self._privacy_opened
+                and self.terms_check.isChecked()
+                and self.privacy_check.isChecked())
+
+    def _update_activation_ready(self):
+        if hasattr(self, "key_edit"):
+            self.activate_btn.setEnabled(
+                licensing.keyformat.is_well_formed(self.key_edit.text())
+                and self._legal_acknowledged())
 
     def _message_label(self) -> QLabel:
         self.message = QLabel(self)
@@ -438,7 +523,7 @@ class LicenseDialog(PrismDialog):
             self.key_edit.blockSignals(False)
         # The checksum catches a typo here, offline, before we spend a network
         # round trip and a rate-limit slot on it.
-        self.activate_btn.setEnabled(licensing.keyformat.is_well_formed(formatted))
+        self._update_activation_ready()
         self.message.setVisible(False)
         # A different key means a different licence — the seat list was
         # for the old one.
@@ -466,7 +551,10 @@ class LicenseDialog(PrismDialog):
         self.message.setVisible(True)
 
     def _busy(self, on: bool):
-        self.activate_btn.setEnabled(not on)
+        if on:
+            self.activate_btn.setEnabled(False)
+        else:
+            self._update_activation_ready()
         self.activate_btn.setText(i18n.t("Checking…") if on else i18n.t("Activate"))
         self.key_edit.setEnabled(not on)
 

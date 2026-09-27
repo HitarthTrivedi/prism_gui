@@ -27,7 +27,7 @@ import os
 import re
 import zipfile
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPlainTextEdit, QSizePolicy, QSlider, QTabWidget,
@@ -68,7 +68,26 @@ def _classify(path: str) -> str:
         return "presentation"
     if ext in _TEXT_EXTS:
         return "text"
-    return "other"
+def _trigger_edit_reel(path: str, origin_widget=None) -> bool:
+    """Find MainWindow and launch the reel layout editor."""
+    from PySide6.QtWidgets import QApplication
+    curr = origin_widget
+    while curr is not None:
+        if hasattr(curr, "_edit_reel_layout"):
+            curr._edit_reel_layout(path)
+            return True
+        if hasattr(curr, "edit_reel"):
+            curr.edit_reel.emit(path)
+            return True
+        curr = curr.parent()
+    for w in QApplication.topLevelWidgets():
+        if hasattr(w, "_edit_reel_layout"):
+            w._edit_reel_layout(path)
+            return True
+        if hasattr(w, "artifacts_panel") and hasattr(w.artifacts_panel, "edit_reel"):
+            w.artifacts_panel.edit_reel.emit(path)
+            return True
+    return False
 
 
 def open_preview(path: str, parent=None):
@@ -159,11 +178,7 @@ class PreviewDialog(PrismDialog):
 
     def _edit_layout(self):
         self.accept()
-        win = self.window()
-        if hasattr(win, "_edit_reel_layout"):
-            win._edit_reel_layout(self.path)
-        elif self.parent() and hasattr(self.parent(), "edit_reel"):
-            self.parent().edit_reel.emit(self.path)
+        _trigger_edit_reel(self.path, self)
 
     def _open_externally(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
@@ -412,6 +427,8 @@ class FolderPreviewDialog(PrismDialog):
     recursively, so a nested folder (Gerber's cleaned-copy output keeps its
     own previews/ subfolder) is just another row rather than a dead end."""
 
+    edit_reel = Signal(str)
+
     def __init__(self, path: str, parent=None):
         super().__init__(os.path.basename(path), icon="folder",
                          parent=parent, scrollable=True)
@@ -483,9 +500,7 @@ class FolderPreviewDialog(PrismDialog):
 
     def _edit_child_layout(self, p: str):
         self.accept()
-        win = self.window()
-        if hasattr(win, "_edit_reel_layout"):
-            win._edit_reel_layout(p)
+        _trigger_edit_reel(p, self)
 
     def _open_externally(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))

@@ -51,6 +51,14 @@ _STROKED: dict[str, list[str]] = {
     "inbox":      ["M3 13h5l1.5 3h5L16 13h5", "M3 13l3-8h12l3 8v6H3z"],
     # A speech bubble with a tail — WhatsApp, and any messaging surface.
     "message":    ["M4 5h16v10H8l-4 4z"],
+    "chat":       ["M4 5h16v10H8l-4 4z"],
+    "message-circle": ["M4 5h16v10H8l-4 4z"],
+    "film":       ["M3 4h18v12H3z", "M12 16v4", "M8 20h8"],
+    "file-text":  ["M6 3h8l4 4v14H6z", "M14 3v4h4", "M9 13h6", "M9 17h4"],
+    "users":      ["M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2", "M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"],
+    "settings":   ["M4 8h9", "M17 8h3", "M13 8a2 2 0 1 0 4 0 2 2 0 1 0-4 0z", "M4 16h3", "M11 16h9", "M7 16a2 2 0 1 0 4 0 2 2 0 1 0-4 0z"],
+    "calendar":   ["M4 4h16v16H4z", "M4 9h16", "M9 2v4", "M15 2v4"],
+    "headset":    ["M4 14v-3a8 8 0 0 1 16 0v3", "M18 19c0 1.1-.9 2-2 2h-1", "M4 14a2 2 0 0 1 2-2h1v5H6a2 2 0 0 1-2-2z", "M20 14a2 2 0 0 0-2-2h-1v5h1a2 2 0 0 0 2-2z"],
     "key":        ["M14 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8z", "M14 11h7", "M18 11v3"],
     "book":       ["M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z", "M8 7h7"],
     "globe":      ["M4 12a8 8 0 1 0 16 0 8 8 0 1 0-16 0z", "M4 12h16",
@@ -105,6 +113,7 @@ _STROKED: dict[str, list[str]] = {
     "check-square": ["M4 4h16v16H4z", "M8 12l3 3 5-6"],
     "send":       ["M21 3L10 14", "M21 3l-7 18-4-7-7-4z"],
     "maximize":   ["M14 4h6v6", "M20 4l-7 7", "M10 20H4v-6", "M4 20l7-7"],
+    "minimize":   ["M4 14h6v6", "M10 14l-7 7", "M20 10h-6V4", "M14 10l7-7"],
     "pin":        ["M9 4h6", "M10 4v6l-3 4h10l-3-4V4", "M12 14v6"],
     "linkedin":   ["M4 4h16v16H4z", "M8 10v6", "M8 7v.01", "M12 16v-6", "M12 12a2 2 0 0 1 4 0v4"],
     "list-plus":  ["M4 6h12", "M4 12h12", "M4 18h7", "M17 15v6", "M14 18h6"],
@@ -161,7 +170,7 @@ def _svg(name: str, color: str, stroke: float) -> bytes:
     else:
         paths = _STROKED.get(name)
         if paths is None:
-            raise KeyError(f"unknown icon {name!r}")
+            paths = _STROKED.get("chevron-right", ["M9 6l6 6-6 6"])
         d = " ".join(paths)
         stroke_attr = _svg_color_attrs(color, "stroke")
         body = (f'<path d="{d}" fill="none" {stroke_attr} stroke-width="{stroke}" '

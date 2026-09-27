@@ -277,12 +277,12 @@ class FollowupDialog(PrismDialog):
         path = item["path"]
         open_btn = self.button(
             i18n.t("Open"), icon_name="external", small=True,
-            on_click=lambda p=path: paths.open_result(p))
+            on_click=lambda *_, p=path: paths.open_result(p))
         lay.addWidget(open_btn)
 
         folder_btn = self.button(
             i18n.t("Folder"), icon_name="folder", small=True,
-            on_click=lambda p=path: paths.reveal_result(p))
+            on_click=lambda *_, p=path: paths.reveal_result(p))
         lay.addWidget(folder_btn)
 
         return row

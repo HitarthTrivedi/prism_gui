@@ -652,6 +652,7 @@ class ReelDialog(PrismDialog):
         self._busy(True, f"{'Filming' if studio else 'Drawing'} "
                          f"{len(spec['scenes'])} scenes, {secs:.0f}s, "
                          "1080x1920…")
+        self._render_start_time = time.time()
         self._render_worker = ReelWorker(spec, self.out_path, studio=studio)
         self._render_worker.progress.connect(self._on_frames)
         self._render_worker.done.connect(self._on_rendered)
@@ -693,9 +694,26 @@ class ReelDialog(PrismDialog):
         self._start_render(spec)
 
     def _on_frames(self, done: int, total: int):
-        self.progress.setValue(int(done / max(1, total) * 100))
+        pct = int(done / max(1, total) * 100)
+        self.progress.setValue(pct)
+        stop_fn = getattr(self, "_edit_stop", None)
+        if stop_fn and hasattr(stop_fn, "set_progress"):
+            stop_fn.set_progress(done, total)
+        st = getattr(self, "_render_start_time", 0.0)
+        if st and done > 0 and total > done:
+            el = max(0.001, time.time() - st)
+            fps_speed = done / el
+            rem = int((total - done) / max(0.1, fps_speed))
+            self.status.setText(i18n.t("Rendering… {p}% (~{rem}s remaining)").format(p=pct, rem=rem))
+        elif done >= total:
+            self.status.setText(i18n.t("Finishing render… {p}%").format(p=pct))
+        else:
+            self.status.setText(i18n.t("Rendering… {p}%").format(p=pct))
 
     def _on_rendered(self, path: str):
+        stop_fn = getattr(self, "_edit_stop", None)
+        if stop_fn and hasattr(stop_fn, "set_done"):
+            stop_fn.set_done(path)
         self.play_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
         self._refresh_edit_btn()
@@ -762,6 +780,9 @@ class ReelDialog(PrismDialog):
             except Exception:
                 pass
         self._busy(False, "")
+        stop_fn = getattr(self, "_edit_stop", None)
+        if stop_fn and hasattr(stop_fn, "set_error"):
+            stop_fn.set_error(error)
         QMessageBox.warning(self, "Reel", error)
 
     def _busy(self, busy: bool, message: str):

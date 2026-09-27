@@ -230,6 +230,22 @@ _START = Topic(
             keywords=("what to write", "examples", "task", "wording", "how to "
                       "ask", "phrase", "vague"),
             related=("what-is-prism", "attach-file")),
+
+        Question(
+            "guided-tour",
+            "How do I take a guided tour of Prism?",
+            Answer(
+                "Prism has a built-in guided walkthrough that highlights the "
+                "navigation sidebar, task composer, plan controls, and "
+                "settings so you can learn the layout in two minutes.",
+                ("Open Guide from the left sidebar.",
+                 "Press Start interactive tour at the top of the guide.",
+                 "Follow the callout rings explaining each part of the screen.",
+                 "Press Exit tour when you are ready to begin."),
+                action="tour", action_label="Start the tour"),
+            keywords=("tour", "walkthrough", "tutorial", "learn prism",
+                      "guide tour", "getting oriented", "introduction"),
+            related=("what-is-prism", "first-setup", "what-to-type")),
     ))
 
 
@@ -371,7 +387,7 @@ _RUNNING = Topic(
                 action="runs", action_label="Open History"),
             keywords=("history", "output", "results", "saved", "where", "past",
                       "previous", "find my work"),
-            related=("delete-history", "where-data")),
+            related=("delete-history", "where-data", "where-artifacts")),
 
         Question(
             "how-long",
@@ -387,7 +403,41 @@ _RUNNING = Topic(
                  "watching.",
                  "Press Stop the run if a step has clearly hung.")),
             keywords=("slow", "how long", "speed", "time", "minutes",
-                      "waiting", "taking ages", "hung")),
+                "waiting", "taking ages", "hung")),
+
+        Question(
+            "followup-task",
+            "How do I ask for changes on a finished task?",
+            Answer(
+                "When a job finishes, click Follow-up at the bottom of the "
+                "card. Describe what you want changed or added in plain words, "
+                "and Prism will re-run only the necessary steps while keeping "
+                "everything else intact.",
+                ("Open the completed task card in Workbench or History.",
+                 "Press Follow-up at the bottom of the screen.",
+                 "Describe what to refine, adjust, or produce next.",
+                 "Press Start follow-up to run only the needed adjustments."),
+                action="runs", action_label="Open History"),
+            keywords=("followup", "follow-up", "changes", "modify result",
+                      "revise", "adjust task", "iterate", "ask again", "tweak"),
+            related=("stop-run", "where-results", "where-artifacts")),
+
+        Question(
+            "inspect-prompt",
+            "Can I see and edit what Prism will ask the AI?",
+            Answer(
+                "Yes. When Prism proposes a plan, click Prompt on any step "
+                "card to see the exact text it prepared for that tool. You "
+                "can edit the text directly before starting the work.",
+                ("Type your task and press Make a plan.",
+                 "Click Prompt on any step card you want to review.",
+                 "Change any wording or add specific details you want included.",
+                 "Press Save, then press Start the work."),
+                action="workbench", action_label="Open New task"),
+            keywords=("prompt", "instructions", "what ai is asked",
+                      "custom prompt", "review prompt", "edit instructions",
+                      "see prompt"),
+            related=("change-tool", "drop-step", "empty-step")),
     ))
 
 
@@ -498,6 +548,22 @@ _SIGNIN = Topic(
             keywords=("edge", "safari", "firefox", "brave", "browser",
                       "default browser", "opera"),
             related=("chrome-wont-open", "what-do-i-need")),
+
+        Question(
+            "two-factor-auth",
+            "What if an AI website asks for a two-factor verification code?",
+            Answer(
+                "When an AI account asks for a verification code, text message, "
+                "or authenticator prompt, sign in directly through Prism's "
+                "Login tabs. Chrome saves the login session so you will not "
+                "have to repeat it each run.",
+                ("Click More settings in the left sidebar, then Login tabs.",
+                 "Sign in with your email and password.",
+                 "Type the verification code or confirm the prompt on your phone.",
+                 "Close the window once you see your account dashboard.")),
+            keywords=("2fa", "two factor", "otp", "verification code",
+                      "sms code", "authenticator", "login code", "security code"),
+            related=("not-signed-in", "robot-check")),
     ))
 
 
@@ -521,7 +587,41 @@ _LICENCE = Topic(
                 action="licence", action_label="Open Licence settings"),
             keywords=("activate", "key", "licence key", "license", "enter",
                       "activation", "code"),
-            related=("how-many-computers", "wrong-version")),
+            related=("terms-before-activation", "how-many-computers", "wrong-version")),
+
+        Question(
+            "terms-before-activation",
+            "Why do I have to read the Terms of Use and Privacy Policy before activating?",
+            Answer(
+                "A licence is an agreement to use Prism on the number of "
+                "computers and features you bought. The privacy notice also "
+                "explains the small amount of licence information Prism uses "
+                "to make that agreement work. Both are shown in the app so "
+                "you can read them before the key is used.",
+                ("Press Read Terms of Use on the activation screen.",
+                 "Press Read Privacy Policy on the same screen.",
+                 "Tick both acknowledgements once you have read them, then "
+                 "paste the key and press Activate.")),
+            keywords=("terms", "privacy policy", "agree", "consent", "checkbox",
+                      "before activation", "why accept", "legal", "read terms"),
+            related=("licence-data", "india-data-rights", "enter-key")),
+
+        Question(
+            "invoice-gst-payment",
+            "Can you send an invoice, GST details, or help with payment and renewal?",
+            Answer(
+                "Yes. Payments and renewal are arranged with Alphakore, not "
+                "inside Prism, so there is no payment button or automatic "
+                "charge in the app. Contact us with your company name and the "
+                "licence or invoice details you have, and we will confirm the "
+                "next step.",
+                ("Use Contact support below.",
+                 "Include your company name and the email or invoice reference "
+                 "used for the purchase.",
+                 "Do not include your full licence key in the message.")),
+            keywords=("invoice", "gst", "payment", "pay", "renewal", "renew",
+                      "purchase order", "price", "refund", "receipt", "billing"),
+            related=("licence-ended", "enter-key")),
 
         Question(
             "cant-check-licence",
@@ -701,7 +801,7 @@ _FILES = Topic(
                  "Press Detach all to clear them and start again.")),
             keywords=("attach", "upload", "add file", "document", "pdf",
                       "folder", "paperclip", "include"),
-            related=("cloud-files", "first-part-only", "favorites")),
+            related=("cloud-files", "first-part-only", "favorites", "supported-files")),
 
         Question(
             "cloud-files",
@@ -796,6 +896,55 @@ _FILES = Topic(
             keywords=("favourites", "favorites", "star", "bookmark",
                       "shortcut", "pinned", "often"),
             related=("attach-file",)),
+
+        Question(
+            "where-artifacts",
+            "Where do I find my generated videos and files?",
+            Answer(
+                "The Artifacts panel in the left sidebar gathers every file "
+                "Prism has produced — videos, spreadsheets, presentations, "
+                "and documents — grouped by task so you can open or view the "
+                "folder immediately.",
+                ("Click Artifacts in the left sidebar.",
+                 "Find the job in the list of deliverables.",
+                 "Click Open to launch the file, or Folder to open the folder "
+                 "where it is saved on this computer."),
+                action="artifacts", action_label="Open Artifacts"),
+            keywords=("artifacts", "deliverables", "where are videos",
+                      "video files", "video deliverables", "find spreadsheets",
+                      "generated files", "downloads", "output folder"),
+            related=("where-results", "where-data", "reel-or-studio", "where-is-export")),
+
+        Question(
+            "where-is-export",
+            "How do I export or find the Export option for my videos and files?",
+            Answer(
+                "Files created by Prism are saved directly to your disk as you work — there is no separate top-level 'Export' button. Finished videos are saved to disk upon rendering, while spreadsheets, BOQ tables, and lead sheets provide export buttons right inside each tool.",
+                ("For videos: Click 'Make my reel' (or 'Save & render' in the editor) — then click 'Show file' or open Artifacts.",
+                 "For all generated files: Open 'Artifacts' in the left sidebar and click 'Open' or 'Folder'.",
+                 "For BOQ / BOM: Click the 'Price & export' tab, then choose Excel (.xlsx), CSV, or PDF.",
+                 "For Leads: Click 'Export sheets' in the top action bar."),
+                action="artifacts", action_label="Open Artifacts"),
+            keywords=("export", "where is export", "export option", "export button",
+                      "cant find export", "export not visible", "how to export",
+                      "export video", "download video", "save mp4", "exporting"),
+            related=("where-artifacts", "edit-existing-video", "reel-edit")),
+
+        Question(
+            "supported-files",
+            "What kinds of files can I attach to a task?",
+            Answer(
+                "Prism accepts PDF documents, Word documents, Excel "
+                "spreadsheets, plain text, CSV files, CAD drawings in DXF "
+                "format, 3D models in STEP format, PCB Gerber archives, "
+                "and standard image and audio files.",
+                ("Press Add file beside the task box.",
+                 "Choose any document, drawing, 3D model, or audio recording.",
+                 "Verify the file appears in the Files you mentioned list "
+                 "before making a plan.")),
+            keywords=("file types", "supported formats", "pdf", "word",
+                      "excel", "docx", "xlsx", "formats", "can i attach"),
+            related=("attach-file", "boq-file", "cloud-files")),
     ))
 
 
@@ -804,26 +953,46 @@ _FILES = Topic(
 # ════════════════════════════════════════════════════════════════════════════
 _ADDONS = Topic(
     "addons", "grid", "The add-ons",
-    "Email inquiry automation, BOQ, Email and Reel / Studio",
+    "Inquiry, BOQ & BOM, Leads, WhatsApp, Reel, Motion, Gerber and STEP",
     (
         Question(
             "which-addons",
             "What add-ons are there, and which ones do I have?",
             Answer(
-                "Email inquiry automation reads your mailboxes and keeps your "
-                "inquiry register. BOQ measures a drawing. Email writes and "
-                "sends from your own account. Reel / Studio makes a short "
-                "video. Whichever ones your licence covers are in the "
-                "sidebar without a padlock.",
+                "Prism provides specialized add-ons: Inquiry for email "
+                "registers and quotes, BOQ & BOM for CAD takeoffs and parts "
+                "shortages, Leads & Outreach for finding decision makers, "
+                "WhatsApp for team messaging, Email for cold outreach, "
+                "Reel & Studio and Motion for video marketing, and Gerber "
+                "and STEP for PCB and 3D CAD analysis. Whichever ones your "
+                "licence covers are in the sidebar without a padlock.",
                 ("Look at the ADD-ONS group in the left sidebar.",
-                 "Click any padlocked one to read what it does and what it "
-                 "costs.",
-                 "Open Settings to see everything your licence covers in one "
+                 "Click any padlocked one to read what it does and see pricing.",
+                 "Open Settings to check everything your licence covers in one "
                  "list."),
                 action="licence", action_label="See what my plan covers"),
             keywords=("add-ons", "addons", "features", "what do i have",
                       "plan", "included", "extras", "modules"),
             related=("padlock", "paid-accounts")),
+
+        Question(
+            "how-to-use-email-inquiries",
+            "How do I use Email Inquiries automation?",
+            Answer(
+                "Email Inquiry automation monitors incoming customer RFQs, quote requests, and parts lists from your mailbox. It parses drawing attachments and component specifications into an organized inquiry register, and prepares structured responses for you to review.",
+                ("Open Email Inquiries from the left sidebar under ADD-ONS (or click Open Email Inquiries below).",
+                 "Click Setup to configure your email server, address, and password (or a 16-letter App Password for Gmail).",
+                 "Click Check Mail to sync and catalog recent customer RFQs without altering your mailbox.",
+                 "Review extracted inquiry cards, verify part requirements, and approve drafted replies."),
+                action="inquiry", action_label="Open Email Inquiries",
+                feature="inbox"),
+            keywords=("email inquiry", "email inquiries", "email inquiries automation",
+                      "email inquiry automation", "how do i use email inquiries automation",
+                      "how do i use email inquiries", "how to use email inquiries",
+                      "how do i use email", "use email", "inquiries automation",
+                      "inquiry automation", "inquiry setup", "rfq automation", "inbox automation",
+                      "mail automation", "email automation", "how to use email automation"),
+            related=("gmail-inquiry-setup", "inquiry-safe", "many-mailboxes")),
 
         Question(
             "inquiry-safe",
@@ -843,7 +1012,23 @@ _ADDONS = Topic(
                 feature="inbox"),
             keywords=("inbox", "mailbox", "imap", "outlook", "read", "safe",
                       "mark as read", "delete", "gmail"),
-            related=("inquiry-stops", "many-mailboxes", "do-you-see")),
+            related=("inquiry-stops", "many-mailboxes", "do-you-see", "gmail-inquiry-setup")),
+
+        Question(
+            "gmail-inquiry-setup",
+            "How do I use Email Inquiries with my Gmail account?",
+            Answer(
+                "You can connect your Gmail account to Email Inquiry automation using a Google App Password. Google requires an App Password rather than your standard account password so your email stays protected over encrypted IMAP.",
+                ("Go to myaccount.google.com/apppasswords and generate a 16-letter App Password.",
+                 "Open Email inquiry automation from the sidebar or Add-ons and click Setup.",
+                 "Enter your Gmail address and paste the 16-letter App Password into the Password field.",
+                 "Click Test connection — Prism connects securely and registers your incoming inquiries."),
+                action="inquiry", action_label="Open Email Inquiries",
+                feature="inbox"),
+            keywords=("gmail", "gmail account", "email inquiries", "email inuires", "email inquiry",
+                      "use gmail", "connect gmail", "setup gmail", "inbox setup", "app password",
+                      "google mail", "how do i use email inquiries with my gmail account"),
+            related=("email-password", "inquiry-safe", "many-mailboxes")),
 
         Question(
             "many-mailboxes",
@@ -949,7 +1134,7 @@ _ADDONS = Topic(
                 feature="boq"),
             keywords=("boq", "dxf", "cad", "drawing", "bill of quantities",
                       "takeoff", "measure", "autocad"),
-            related=("boq-dwg", "boq-blank-columns")),
+            related=("boq-dwg", "boq-blank-columns", "bom-shortage")),
 
         Question(
             "boq-dwg",
@@ -1040,7 +1225,7 @@ _ADDONS = Topic(
                      "instead — nothing fails silently."),
             keywords=("studio", "quick", "reel", "difference", "template",
                       "custom", "video style", "which video", "greyed"),
-            related=("reel-ffmpeg", "which-addons")),
+            related=("reel-ffmpeg", "which-addons", "motion-overview", "reel-audio", "reel-edit")),
 
         Question(
             "reel-ffmpeg",
@@ -1057,9 +1242,258 @@ _ADDONS = Topic(
                  "Carry on. Nothing else on this computer changes, and "
                  "everything else in Prism works without it."),
                 feature="reel"),
-            keywords=("ffmpeg", "video", "reel", "codec", "encode", "missing "
-                      "program", "install"),
+            keywords=("ffmpeg", "codec", "encode", "missing program", "install ffmpeg",
+                      "download ffmpeg", "extra program"),
             related=("reel-or-studio", "disk-full")),
+
+        Question(
+            "email-outreach",
+            "How do I use Email Outreach and send emails to leads?",
+            Answer(
+                "Prism's **Leads & Outreach** workbench lets you find targeted B2B decision makers, verify their deliverability, and automatically generate personalized cold outreach emails based on each prospect's background.",
+                ("Open Leads & Outreach from the left sidebar under ADD-ONS (or click Open Leads & Outreach below).",
+                 "Use the filters (industry, job titles, location, company size) to find target decision makers.",
+                 "Select the verified contacts you want to reach and click 'Draft outreach'.",
+                 "Review the generated personalized emails, make edits if needed, and export or send your campaign."),
+                action="leads", action_label="Open Leads & Outreach",
+                feature="leads"),
+            keywords=("email outreach", "outreach", "cold outreach", "send outreach",
+                      "email leads", "b2b outreach", "and email outreach", "outreach campaign",
+                      "cold email", "reach leads", "sales outreach", "how do i use email outreach",
+                      "draft outreach", "outreach emails"),
+            related=("leads-find", "leads-verify", "leads-export", "how-to-use-email-inquiries")),
+
+        Question(
+            "leads-find",
+            "How does Leads and Outreach find prospective customers?",
+            Answer(
+                "Leads searches verified business directories to find "
+                "companies matching your target industry, location, and size, "
+                "and pulls direct contact details of real decision makers. "
+                "It writes personalized outreach emails for each person so "
+                "you never have to buy stale contact lists.",
+                ("Open Leads in the left sidebar.",
+                 "Enter the industry, city, or company profile you want to reach.",
+                 "Review the matching companies and verified contacts that appear.",
+                 "Draft and review personalized emails before sending them."),
+                action="leads", action_label="Open Leads & Outreach",
+                feature="leads"),
+            keywords=("leads", "prospecting", "find clients", "cold outreach", "outreach",
+                      "email outreach", "cold email", "companies", "apollo", "contacts",
+                      "b2b", "sales leads", "new customers"),
+            related=("leads-verify", "leads-export", "email-send", "email-outreach")),
+
+        Question(
+            "leads-verify",
+            "Does Leads verify email addresses before sending?",
+            Answer(
+                "Yes. Leads verifies that email addresses are active and "
+                "deliverable before placing them in your outreach list, "
+                "protecting your sender reputation and preventing bounced "
+                "emails.",
+                ("Review the verification status beside each contact in the table.",
+                 "Keep verified contacts selected for your outreach campaign.",
+                 "Send test emails to confirm delivery if using a brand-new sender address."),
+                action="leads", action_label="Open Leads & Outreach",
+                feature="leads"),
+            keywords=("verify email", "bounce", "deliverability", "valid email",
+                      "clean list", "spam rating", "email check"),
+            related=("leads-find", "email-send", "email-password")),
+
+        Question(
+            "leads-export",
+            "Can I export my found leads to Excel or a spreadsheet?",
+            Answer(
+                "Yes. Every list of leads you find can be exported directly "
+                "into an Excel or CSV spreadsheet to share with your sales "
+                "team or import into your existing customer book.",
+                ("Open Leads and complete your company or contact search.",
+                 "Click Export to spreadsheet at the top right of the table.",
+                 "Save the file to your documents or shared team folder."),
+                action="leads", action_label="Open Leads & Outreach",
+                feature="leads"),
+            keywords=("export leads", "csv", "excel", "save contacts",
+                      "download sheet", "spreadsheet export"),
+            related=("leads-find", "shared-register")),
+
+        Question(
+            "bom-shortage",
+            "How do I check parts lists and stock shortages with BOM?",
+            Answer(
+                "The BOM tool takes a bill of materials parts list and your "
+                "current warehouse stock file, compares the required "
+                "quantities against what you have on hand, and flags every "
+                "shortage before production starts.",
+                ("Open BOQ from the sidebar and switch to the BOM tab.",
+                 "Attach your assembly parts list or drawing schedule.",
+                 "Attach your current stock list spreadsheet.",
+                 "Review the shortage report to see exactly which items need ordering."),
+                action="bom", action_label="Open BOM",
+                feature="boq"),
+            keywords=("bom", "bill of materials", "parts list", "stock shortage",
+                      "inventory check", "material requirement", "warehouse stock"),
+            related=("boq-file", "boq-blank-columns")),
+
+        Question(
+            "whatsapp-safe",
+            "How does the WhatsApp add-on work, and does it send on its own?",
+            Answer(
+                "WhatsApp connects your business number so your team can read "
+                "incoming customer inquiries, manage contacts, and prepare "
+                "replies from one desktop screen. Nothing is sent without your "
+                "approval — Prism drafts replies for you to review and confirm.",
+                ("Open WhatsApp from the left sidebar.",
+                 "Scan the QR code with your business phone to link the number.",
+                 "Read customer conversations and review suggested replies.",
+                 "Press Send yourself when the message is ready."),
+                action="whatsapp", action_label="Open WhatsApp",
+                feature="marketing"),
+            keywords=("whatsapp", "whatsapp web", "qr code", "messages",
+                      "customer chat", "send whatsapp", "marketing"),
+            related=("email-send", "inquiry-stops")),
+
+        Question(
+            "motion-overview",
+            "What is Motion graphics, and how is it different from Reel?",
+            Answer(
+                "Motion graphics creates kinetic text, animated titles, "
+                "transparent video overlays, and dynamic promotional cards, "
+                "whereas Reel produces complete scene-by-scene videos with "
+                "voiceover and background visuals.",
+                ("Open Motion from the left sidebar.",
+                 "Enter the text, announcement, or promotional hook you want animated.",
+                 "Choose a typography style and visual animation template.",
+                 "Press Render to produce the finished video clip."),
+                action="motion", action_label="Open Motion graphics",
+                feature="reel"),
+            keywords=("motion", "animation", "motion graphics", "typography",
+                      "kinetic text", "animated card", "titles", "video overlay"),
+            related=("reel-or-studio", "reel-audio", "reel-ffmpeg")),
+
+        Question(
+            "reel-audio",
+            "Can I add voiceover narration or audio to a Reel?",
+            Answer(
+                "Yes. You can attach an audio recording or voiceover file "
+                "directly to the task, or include an audio generation step in "
+                "your plan. Prism automatically synchronizes and mixes the "
+                "speech track into the rendered video.",
+                ("Attach your voiceover audio file using Add file in the task composer.",
+                 "Describe the video topic, scenes, and visual style.",
+                 "Make a plan and ensure the reel step references your voiceover.",
+                 "Press Start the work to render the video with audio mixed in."),
+                action="reel", action_label="Open Reel / Studio",
+                feature="reel"),
+            keywords=("voiceover", "audio", "voice over", "narration",
+                      "speech", "soundtrack", "mix audio", "background music",
+                      "reel audio"),
+            related=("reel-or-studio", "reel-edit", "attach-file")),
+
+        Question(
+            "reel-edit",
+            "How do I edit scenes, timings, or pictures in a Reel?",
+            Answer(
+                "In Studio mode, Prism generates an interactive scene timeline "
+                "where you can change scene text, adjust durations, replace "
+                "generated pictures with your own photos, and re-render the "
+                "finished reel.",
+                ("Open Reel / Studio and generate or load your video project.",
+                 "Click on any scene in the editor timeline to select it.",
+                 "Adjust the scene duration slider or change the caption text.",
+                 "Drag in a new image to replace any scene background.",
+                 "Press Render to produce the updated video."),
+                action="reel", action_label="Open Reel / Studio",
+                feature="reel"),
+            keywords=("edit reel", "edit video", "studio editor", "change scene",
+                      "scene duration", "replace picture", "timeline", "re-render"),
+            related=("reel-or-studio", "reel-audio", "edit-existing-video")),
+
+        Question(
+            "edit-existing-video",
+            "How do I edit a saved video or edit it from Artifacts?",
+            Answer(
+                "You can edit any previously rendered Studio video directly from Artifacts or Reel Creator. Prism opens the full interactive visual editor in your browser, where you can reposition elements, rewrite scene script, change background music, and re-render.",
+                ("Click Artifacts in the left sidebar to see all your rendered deliverables.",
+                 "Find your video in the list and click the Pencil icon ('Edit the layout').",
+                 "Or open Reel Creator from the sidebar and click 'Edit layout' beside the video preview.",
+                 "Make your adjustments in the visual browser editor, then click 'Save & render'."),
+                action="artifacts", action_label="Open Artifacts",
+                feature="reel"),
+            keywords=("edit existing video", "edit video from artifacts", "edit it from artifacts",
+                      "edit from artifacts", "edit existing reel", "edit past video",
+                      "edit saved video", "modify existing video", "change existing video",
+                      "pencil icon", "edit layout", "artifacts edit", "how to edit existing video"),
+            related=("reel-edit", "where-artifacts", "reel-or-studio")),
+
+        Question(
+            "gerber-overview",
+            "What does the Gerber add-on measure from my PCB files?",
+            Answer(
+                "Gerber analyzes printed circuit board files to measure board "
+                "dimensions, count copper layers, find the minimum trace width "
+                "and track spacing, and tally drill hole counts and minimum "
+                "hole sizes.",
+                ("Open Gerber from the left sidebar.",
+                 "Attach your zip archive containing RS-274X Gerber and drill files.",
+                 "Review the instant measurement report for board area, minimum trace, and drill counts.",
+                 "Export the PCB specifications sheet to share with your fabricator."),
+                action="gerber", action_label="Open Gerber",
+                feature="gerber"),
+            keywords=("gerber", "pcb", "circuit board", "trace width",
+                      "drill count", "layer count", "electronics", "rs-274x",
+                      "drill file"),
+            related=("gerber-privacy", "step-overview", "boq-file")),
+
+        Question(
+            "gerber-privacy",
+            "Are my PCB Gerber files uploaded or shared with an AI?",
+            Answer(
+                "Never. All Gerber parsing and PCB geometric calculations are "
+                "performed locally on your computer using internal engineering "
+                "tools. Your proprietary board designs never leave this machine.",
+                ("Attach your Gerber archive with complete confidence.",
+                 "Check the measurement results computed directly by your processor.",
+                 "Verify in your network logs that no PCB files are ever uploaded."),
+                action="gerber", action_label="Open Gerber",
+                feature="gerber"),
+            keywords=("pcb confidential", "gerber privacy", "intellectual property",
+                      "offline calculation", "board design secret"),
+            related=("gerber-overview", "where-data", "do-you-see")),
+
+        Question(
+            "step-overview",
+            "What does the STEP add-on calculate from my 3D CAD model?",
+            Answer(
+                "STEP reads standard 3D CAD files to measure every individual "
+                "part's overall dimensions, bounding box, sheet metal thickness, "
+                "hole count, total volume, and estimated material weight.",
+                ("Open STEP from the left sidebar.",
+                 "Attach your .stp or .step 3D model file.",
+                 "Review the part-by-part breakdown of dimensions, thickness, and weights.",
+                 "Export the takeoff schedule for manufacturing quotation."),
+                action="step", action_label="Open STEP",
+                feature="step"),
+            keywords=("step file", "stp", "3d cad", "3d model", "solidworks",
+                      "sheet metal thickness", "weight calculation",
+                      "part dimensions", "bounding box"),
+            related=("step-privacy", "boq-file", "gerber-overview")),
+
+        Question(
+            "step-privacy",
+            "Are my STEP 3D CAD models kept private and offline?",
+            Answer(
+                "Yes. Just like the Gerber add-on, all 3D CAD geometric "
+                "calculations happen entirely on this computer. Your 3D models "
+                "and manufacturing designs are never uploaded to any cloud "
+                "service or AI.",
+                ("Attach your 3D CAD model without uploading it to third parties.",
+                 "Watch the dimensions and weights compute directly on your processor.",
+                 "Check your results offline if desired."),
+                action="step", action_label="Open STEP",
+                feature="step"),
+            keywords=("step privacy", "3d model secret", "confidential cad",
+                      "offline 3d calculation", "solidworks security"),
+            related=("step-overview", "where-data", "gerber-privacy")),
     ))
 
 
@@ -1242,6 +1676,43 @@ _PRIVACY = Topic(
                       "secret", "my data", "data protection", "spy",
                       "telemetry", "gdpr"),
             related=("where-data", "diagnostics-contents", "inquiry-safe")),
+
+        Question(
+            "licence-data",
+            "What information does Prism use for my licence?",
+            Answer(
+                "Prism sends only the information needed to issue and protect "
+                "your licence: its licence ID, a one-way device identifier, "
+                "your operating system and Prism version, the licence action, "
+                "and the internet address used for that request. It also sends "
+                "aggregate run counts for your plan. Your task wording, files, "
+                "outputs and filenames are not sent to Alphakore.",
+                ("Open the Privacy Policy from the activation screen or "
+                 "Settings for the full list and purpose of each item.",
+                 "Contact us if you need a copy or explanation of data linked "
+                 "to your licence.")),
+            keywords=("licence data", "license data", "device fingerprint", "ip",
+                      "address", "what do you collect", "telemetry", "tracking",
+                      "activation data", "usage data"),
+            related=("terms-before-activation", "india-data-rights", "do-you-see")),
+
+        Question(
+            "india-data-rights",
+            "I am in India — how do I ask about my personal data or make a complaint?",
+            Answer(
+                "You can ask Alphakore to explain, correct, update or delete "
+                "licence-related personal data where applicable, or raise a "
+                "privacy concern. Use the Grievance Officer contact in the "
+                "Privacy Policy. The request is handled by a person; Prism "
+                "does not make legal decisions inside the app.",
+                ("Open the Privacy Policy and find Contact / Grievance Officer.",
+                 "Email the contact with your name, company, and the licence "
+                 "email or device code you want us to find.",
+                 "Do not send your full licence key, passwords, or API key.")),
+            keywords=("india", "indian", "dpdp", "data protection", "rights",
+                      "grievance", "complaint", "delete my data", "erase", "access",
+                      "correct data", "withdraw consent"),
+            related=("licence-data", "terms-before-activation", "where-data")),
 
         Question(
             "diagnostics-contents",
@@ -1436,6 +1907,102 @@ _BROKEN = Topic(
             keywords=("send", "support", "report", "diagnostics", "help",
                       "contact", "email us", "problem"),
             related=("diagnostics-contents", "crash-log")),
+
+        Question(
+            "check-updates",
+            "How do I check for or install Prism updates?",
+            Answer(
+                "Prism checks for updates on launch, but you can also check "
+                "manually from Settings. When an update is ready, Prism "
+                "downloads the package and applies it smoothly when you restart.",
+                ("Open Settings from the left sidebar.",
+                 "Go to the Status section.",
+                 "Press Check for updates.",
+                 "Click Apply update when a new version is found, then restart Prism."),
+                action="status", action_label="Check for updates"),
+            keywords=("update", "upgrade version", "new version", "latest release",
+                      "install update", "check updates"),
+            related=("wrong-version", "worked-yesterday")),
+
+        Question(
+            "plan-or-json-error",
+            "It says Prism could not understand a plan or an answer format",
+            Answer(
+                "The service that turns your request into steps returned an "
+                "incomplete answer. Your job and files are still safe; Prism "
+                "has simply stopped before it could start the work.",
+                ("Press Make a plan again once — a short interruption often "
+                 "clears on the next request.",
+                 "Shorten or split a very large request, then make the plan "
+                 "again.",
+                 "Use Diagnose with AI if it repeats; it checks the recent "
+                 "Prism error and suggests the safest next step.",
+                 "Contact support with diagnostics if the same request still "
+                 "will not plan."),
+                action="workbench", action_label="Open New task"),
+            keywords=("json", "format", "malformed", "could not understand",
+                      "plan error", "parse", "invalid response", "bad response",
+                      "plan won't make"),
+            related=("make-a-plan-nothing", "rate-limit", "send-diagnostics")),
+
+        Question(
+            "agent-stopped-mid-task",
+            "An agent stopped or got stuck halfway through my task",
+            Answer(
+                "Prism keeps the completed steps and marks the one that needs "
+                "attention. It may try another available tool automatically; "
+                "if it does not recover, you can continue from the failed step "
+                "without throwing away the finished work.",
+                ("Wait while the step says Trying again or switching tools.",
+                 "Check the stopped step's red message and make sure that tool "
+                 "is still signed in through Login tabs.",
+                 "Run only the unfinished step again, leaving completed steps "
+                 "unticked.",
+                 "Use Open in tool on that step to finish it by hand if needed.",
+                 "Use Diagnose with AI if the reason is unclear."),
+                action="runs", action_label="Open History"),
+            keywords=("agent stopped", "agent stuck", "agent not working", "mid task",
+                      "halfway", "hung", "retrying", "switching tools", "step stuck",
+                      "unfinished step"),
+            related=("task-failed", "not-signed-in", "worked-yesterday")),
+
+        Question(
+            "render-failed",
+            "My video or render stopped before it finished",
+            Answer(
+                "The rest of your task is kept, so a render problem does not "
+                "erase the scenes, pictures, or text you already prepared. The "
+                "usual causes are low disk space, a missing video component, "
+                "or a source file the computer can no longer read.",
+                ("Check the red message on the render card first.",
+                 "Free some disk space, especially after video work.",
+                 "Check the original pictures, audio, or video files are still "
+                 "in the same place.",
+                 "Press Render again after fixing the message it shows.",
+                 "Use Diagnose with AI if the render stops again."),
+                action="artifacts", action_label="Open Artifacts"),
+            keywords=("render failed", "render error", "video failed", "video won't render",
+                      "render stopped", "export failed", "ffmpeg", "encode", "encoding"),
+            related=("reel-ffmpeg", "disk-full", "task-failed")),
+
+        Question(
+            "task-failed",
+            "Why did my task or run stop with an error?",
+            Answer(
+                "When a task stops with an error, the stopped step card shows "
+                "what happened in red text, and Prism records the diagnostic "
+                "trace in your log. Most errors come from an AI website "
+                "signing you out, a brief network drop, or a tool timing out.",
+                ("Check the red explanation message written on the stopped step card.",
+                 "Open Login tabs to verify you are still signed in to that website.",
+                 "Run just that step again by unticking the steps that already finished.",
+                 "Use Diagnose with AI below if the message is unclear — it "
+                 "checks a privacy-safe summary of recent Prism errors."),
+                action="runs", action_label="Open History"),
+            keywords=("task failed", "run failed", "stopped with an error",
+                      "why did it fail", "task stopped", "error during run",
+                      "check log error", "what went wrong"),
+            related=("empty-step", "not-signed-in", "crash-log", "send-diagnostics")),
     ))
 
 
@@ -1482,7 +2049,7 @@ _STOPWORDS = frozenset("""
 a an and are as at be but by can cant do does doesnt for from get got has have
 how i im in is it its me my not of on or our so that the their them then there
 these they this to up us was way we were what when where which who why will with
-you your prism
+you your prism use using
 """.split())
 # NB: "app" is deliberately NOT a stopword. "app password" is the exact term
 # Google puts on the screen the customer is stuck on, and dropping the first

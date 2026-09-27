@@ -39,7 +39,17 @@ class ReleaseFlow(unittest.TestCase):
         with mock.patch.object(licensing, "state") as st:
             st.return_value = mock.Mock(license_id="", features=[], usable=False,
                                         message="", kind="", license_ends=0)
-            return LD.LicenseDialog(mode="activate")
+            dialog = LD.LicenseDialog(mode="activate")
+        # Seat handling is downstream of the mandatory, local acknowledgement.
+        # The separate acknowledgement tests cover its UI; these tests begin
+        # at the point a customer can legitimately press Activate.
+        dialog._terms_opened = True
+        dialog._privacy_opened = True
+        dialog.terms_check.setEnabled(True)
+        dialog.privacy_check.setEnabled(True)
+        dialog.terms_check.setChecked(True)
+        dialog.privacy_check.setChecked(True)
+        return dialog
 
     def _run_worker(self, worker):
         # Synchronously, on this thread: the worker's run() is plain Python and

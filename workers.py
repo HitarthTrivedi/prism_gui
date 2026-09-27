@@ -7,6 +7,7 @@ job is ONLY to call into core_bridge and turn the result into a Qt signal;
 no decision-making lives here.
 """
 from __future__ import annotations
+import os
 import threading
 from PySide6.QtCore import QThread, Signal
 
@@ -281,10 +282,10 @@ class FollowupRouteWorker(_Worker):
             universal = {
                 "content": "write, summarize, draft prose, or produce a document (.docx, .pdf, markdown report, article)",
                 "audio": "generate audio, voiceover, podcast, speech, or narration",
-                "artwork": "make pictures, graphics, diagrams, or visual assets",
                 "presentation": "create slides, a deck, or presentation",
             }
             if self.reel:
+                universal["artwork"] = "make pictures, graphics, diagrams, or visual assets"
                 universal["reel"] = "change reel scenes or look in its design chat and film it again"
 
             for k in universal:
@@ -754,15 +755,11 @@ class POReadWorker(_Worker):
 # ── Help & support ────────────────────────────────────────────────────────────
 
 class SupportWorker(_Worker):
-    """One answer from the support assistant, off the UI thread.
+    """Run an explicitly requested Prism diagnosis through the user's key.
 
-    Uses the customer's own Groq key — the same one that plans their work —
-    because a support chat that needed a key of ours would be a bill that
-    grows with every confused customer, which is the wrong incentive to build
-    into a help desk.
-
-    Seconds, not minutes: this is a single question and answer, not a browser
-    pipeline, so there is no progress to report and nothing to stop.
+    This is not used for ordinary Help searches. The UI sends a constrained
+    diagnostic prompt containing only support material and a scrubbed log; no
+    task content, credentials, or raw diagnostics are added by this worker.
     """
     done = Signal(str)
     failed = Signal(str)
@@ -775,13 +772,7 @@ class SupportWorker(_Worker):
         try:
             reply = CB.router.groq_chat(
                 self.cfg.get("api_key", ""), self.cfg.get("model", "") or "",
-                self.prompt,
-                # Low, on purpose. Support answers are quotations from the
-                # manual, and a model feeling creative about which menu an
-                # option lives in is the one failure this whole tier cannot
-                # afford — a confidently invented step wastes more of the
-                # customer's time than no answer at all.
-                temperature=0.15, timeout=45, retries=1)
+                self.prompt, temperature=0.15, timeout=45, retries=1)
             self.done.emit((reply or "").strip())
         except Exception as e:
             self.failed.emit(str(e))

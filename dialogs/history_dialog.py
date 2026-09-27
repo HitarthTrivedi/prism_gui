@@ -331,8 +331,11 @@ class HistoryDialog(PrismDialog):
 
             art = (rec.get("artifacts") or "").strip()
             norm_art = os.path.normpath(art) if art else ""
+            title = (rec.get("title") or "").strip()
             if norm_art and norm_art != user_art_dir:
-                key = norm_art
+                # Key by artifacts dir + title so two separate tasks never collide
+                # even if artifact folders were mistakenly shared.
+                key = f"{norm_art}::{title}" if title else norm_art
             else:
                 key = path
 
@@ -351,6 +354,10 @@ class HistoryDialog(PrismDialog):
 
             # Merge legacy separate sibling files as followups
             for sib in chain_items[1:]:
+                sib_title = (sib.get("title") or "").strip()
+                root_title = (root_rec.get("title") or "").strip()
+                if sib_title and root_title and sib_title != root_title:
+                    continue
                 sib_query = (sib.get("query") or "").strip()
                 if sib_query and sib_query not in seen_fu_queries and sib_query != (root_rec.get("query") or "").strip():
                     followups.append({

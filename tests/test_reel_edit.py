@@ -170,6 +170,37 @@ class TheLocalServer(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             urllib.request.urlopen(self.url + "secret", timeout=5)
 
+    def test_render_progress_endpoint_and_updates(self):
+        import json
+        import urllib.request
+        with urllib.request.urlopen(self.url + "render-progress", timeout=5) as r:
+            data = json.loads(r.read())
+        self.assertIn("status", data)
+        self.assertEqual(data["status"], "idle")
+
+        # Simulate render start
+        self._post("/render", {"edits": []})
+        with urllib.request.urlopen(self.url + "render-progress", timeout=5) as r:
+            data = json.loads(r.read())
+        self.assertEqual(data["status"], "rendering")
+        self.assertEqual(data["percent"], 0)
+
+        # Update progress
+        self.stop.set_progress(150, 300)
+        with urllib.request.urlopen(self.url + "render-progress", timeout=5) as r:
+            data = json.loads(r.read())
+        self.assertEqual(data["status"], "rendering")
+        self.assertEqual(data["percent"], 50)
+        self.assertEqual(data["done"], 150)
+        self.assertEqual(data["total"], 300)
+
+        # Mark done
+        self.stop.set_done("/tmp/out.mp4")
+        with urllib.request.urlopen(self.url + "render-progress", timeout=5) as r:
+            data = json.loads(r.read())
+        self.assertEqual(data["status"], "done")
+        self.assertEqual(data["percent"], 100)
+
 
 def _playwright_ready() -> bool:
     try:

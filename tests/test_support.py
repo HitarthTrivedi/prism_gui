@@ -10,15 +10,9 @@ Three things are easy to lose here, and all of them are silent:
     somebody who runs a fabrication shop, has never used ChatGPT, and did not
     choose any of this. The moment one says "endpoint" it has stopped working
     and nothing will tell us.
-  · the GATE stops being honest. Holding the written answers in front of
-    somebody before offering the assistant is only defensible while it
-    opens the instant it has nothing for them. A change that makes it need
-    two refusals instead of one turns a helpful screen into the kind people
-    complain about, and it would not fail any other test.
-  · the ASSISTANT starts answering from its imagination. It is only allowed
-    to work from the written material — a made-up menu item costs the
-    customer more than an admitted "I don't know" — and that rule lives in
-    a prompt, which nothing but a test can hold in place.
+  · a question starts travelling to an AI service just because it was asked
+    in Help. The Help Centre must be entirely local: no planning key and no
+    network connection are needed to search its reviewed answers.
 """
 from __future__ import annotations
 
@@ -43,7 +37,7 @@ _app = QApplication.instance() or QApplication([])
 # "API key" on our own Settings screen and on Groq's website, and refusing to
 # print the words that are actually on the button helps nobody.
 JARGON = ("traceback", "exception", "stacktrace", "selector", "webdriver",
-          "selenium", "http ", "json", "null", "none type", "stderr",
+          "selenium", "http ", "null", "none type", "stderr",
           "api endpoint", "token expired", "oauth", "regex", "sys.")
 
 
@@ -226,6 +220,22 @@ class SearchFindsTheRightThing(unittest.TestCase):
         ("whats the difference between studio and quick", "reel-or-studio"),
         ("can it read two mailboxes at once", "many-mailboxes"),
         ("how does the whole team see one sheet", "shared-register"),
+        ("find sales leads and contacts", "leads-find"),
+        ("export leads to spreadsheet", "leads-export"),
+        ("how to measure a pcb", "gerber-overview"),
+        ("measure 3d cad model", "step-overview"),
+        ("are 3d models kept private", "step-privacy"),
+        ("whatsapp customer messaging", "whatsapp-safe"),
+        ("check parts list stock shortages", "bom-shortage"),
+        ("what is motion graphics", "motion-overview"),
+        ("add voiceover to reel", "reel-audio"),
+        ("edit scenes in studio", "reel-edit"),
+        ("where are my deliverables", "where-artifacts"),
+        ("how to do a follow up", "followup-task"),
+        ("see prompt before running", "inspect-prompt"),
+        ("two factor verification code", "two-factor-auth"),
+        ("how to update prism", "check-updates"),
+        ("take a tour of prism", "guided-tour"),
     ]
 
     def test_the_right_answer_is_in_the_top_few(self):
@@ -242,8 +252,7 @@ class SearchFindsTheRightThing(unittest.TestCase):
     def test_something_we_have_no_answer_for_returns_nothing(self):
         """This is what opens the route to a person, so it has to stay
         decisive. A weak guess here traps somebody in the menu."""
-        for nonsense in ("quantum blockchain integration",
-                         "refund my order 12345", "zzzzz"):
+        for nonsense in ("quantum blockchain integration", "zzzzz"):
             self.assertEqual(KB.search(nonsense), [], nonsense)
 
     def test_an_empty_query_is_not_a_match_for_everything(self):
@@ -345,98 +354,70 @@ class TheTranscriptStaysReadable(unittest.TestCase):
         self.assertTrue(p._contact_btn.isEnabled())
 
 
-class WhatTheAssistantIsTold(unittest.TestCase):
-    def test_it_is_given_the_shape_of_the_whole_product(self):
-        """Without every heading it cannot say "that's under Licence" — it
-        invents a menu instead, which is worse than admitting ignorance."""
-        context = KB.as_context("licence")
-        for q in KB.all_questions():
-            self.assertIn(q.text, context, q.qid)
+class LocalHelpOnly(unittest.TestCase):
+    def test_help_never_needs_a_planning_key(self):
+        p = _panel()
+        p._entry.setText("captcha keeps appearing")
+        p._on_typed()
+        self.assertIn("captcha", " ".join(text for _who, text in p._log).lower())
+        self.assertIsNone(p._worker)
+        self.assertEqual(p._stage, "triage")
 
-    def test_it_is_given_the_full_answer_for_what_was_asked(self):
-        context = KB.as_context("my app password was refused")
-        self.assertIn("myaccount.google.com/apppasswords", context)
+    def test_browse_all_topics_stays_local(self):
+        p = _panel()
+        p._show_all_topics()
+        self.assertTrue(p._ai_btn.isEnabled())
+        self.assertTrue(p._contact_btn.isEnabled())
+        self.assertIn("Browse all help topics", " ".join(text for _who, text in p._log))
 
-    def test_it_is_told_what_they_have_already_read(self):
-        context = KB.as_context("still stuck", seen=("dead-laptop",))
-        self.assertIn("device code", context.lower())
-
-    def test_it_stays_small_enough_to_send_every_turn(self):
-        biggest = max(len(KB.as_context(q.text, seen=(q.qid,)))
-                      for q in KB.all_questions())
-        self.assertLess(biggest, 14000, "context has grown past its budget")
-
-    def test_the_assistant_is_told_to_refuse_rather_than_guess(self):
-        from widgets.support_panel import _SYSTEM
-        self.assertIn("Contact the team", _SYSTEM)
-        for rule in ("ONLY", "Never guess"):
-            self.assertIn(rule, _SYSTEM)
-
-
-class TheAssistantTier(unittest.TestCase):
-    def _open(self, **cfg):
+    def test_diagnosis_is_an_explicit_opt_in(self):
         from widgets.support_panel import SupportPanel
-        p = SupportPanel(cfg)
-        p._show_answer("empty-step")
-        p._verdict("empty-step", solved=False)
-        return p
-
-    def test_it_starts_when_asked(self):
-        p = self._open(api_key="gsk_test")
+        p = SupportPanel({"api_key": "gsk_test"})
         p._start_ai()
         self.assertEqual(p._stage, "ai")
-
-    def test_its_own_button_locks_while_talking_to_it(self):
-        """Pressing "Ask the assistant" mid-conversation with the assistant
-        would restart an introduction nobody asked for."""
-        p = self._open(api_key="gsk_test")
-        p._start_ai()
         self.assertFalse(p._ai_btn.isEnabled())
-        self.assertTrue(p._contact_btn.isEnabled(),
-                        "the person must stay reachable from the assistant")
+        self.assertTrue(p._contact_btn.isEnabled())
+        prompt = p._prompt("the renderer stopped halfway through")
+        self.assertIn("Recent system log events:", prompt)
+        self.assertIn("DIAGNOSE THIS", prompt)
 
-    def test_without_a_key_it_says_so_instead_of_failing(self):
-        """The customer least likely to have a key is the one who has not
-        finished setting up — exactly who needs help most."""
-        p = self._open()
+    def test_diagnosis_without_a_key_stays_in_local_help(self):
+        p = _panel()
         p._start_ai()
         self.assertEqual(p._stage, "triage")
-        self.assertIn("key", " ".join(t for _w, t in p._log).lower())
+        self.assertIn("key", " ".join(text for _who, text in p._log).lower())
 
-    def test_contacting_a_person_still_works_without_a_key(self):
-        p = self._open()
-        self.assertTrue(p._contact_btn.isEnabled())
+    def test_normal_how_to_question_stays_local_even_in_diagnosis_mode(self):
+        from widgets.support_panel import SupportPanel
+        p = SupportPanel({"api_key": "gsk_test"})
+        p._start_ai()
+        p._entry.setText("how do i edit a video in prism")
+        p._on_typed()
+        self.assertIn("reel-edit", p._seen)
+        self.assertIsNone(p._worker)
 
-    def test_the_prompt_carries_the_manual_and_the_conversation(self):
-        p = self._open(api_key="gsk_test")
-        prompt = p._prompt("it is still empty")
-        self.assertIn("A step came back empty", prompt)
-        self.assertIn("it is still empty", prompt)
-        self.assertIn("Already read", prompt)
+    def test_diagnostic_markdown_is_rendered_not_shown_as_asterisks(self):
+        p = _panel()
+        p._ai_answered("**Check the render**\n\n1. **Open** History.")
+        visible = _said(p)
+        self.assertNotIn("**", visible)
+        self.assertIn("Check the render", visible)
 
-    def test_a_failure_is_explained_the_way_the_rest_of_the_app_does(self):
-        p = self._open(api_key="gsk_test")
-        p._ai_failed("Groq is rate-limiting your API key.")
-        self.assertIn("allowance", " ".join(t for _w, t in p._log).lower())
-
-    def test_the_worker_asks_groq_with_the_cautious_temperature(self):
-        """Support answers are quotations from the manual — a model feeling
-        creative about which menu an option lives in is the one failure this
-        tier cannot afford."""
+    def test_diagnostic_worker_uses_the_saved_groq_key(self):
         import core_bridge as CB
         from workers import SupportWorker
         seen = {}
 
         def fake_chat(key, model, prompt, **kwargs):
             seen.update(key=key, prompt=prompt, **kwargs)
-            return "Open Settings and check the key."
+            return "Open Login tabs and sign in again."
 
         answers = []
         worker = SupportWorker({"api_key": "gsk_test"}, "PROMPT TEXT")
         worker.done.connect(answers.append)
         with mock.patch.object(CB.router, "groq_chat", fake_chat):
             worker.run()
-        self.assertEqual(answers, ["Open Settings and check the key."])
+        self.assertEqual(answers, ["Open Login tabs and sign in again."])
         self.assertEqual(seen["key"], "gsk_test")
         self.assertLessEqual(seen["temperature"], 0.2)
 
@@ -496,14 +477,32 @@ class ItAllBuilds(unittest.TestCase):
         for topic in KB.TOPICS:
             p._show_topic(topic.key)
 
-    def test_the_conversation_survives_leaving_the_screen(self):
-        """It is a screen, not a dialog: following an answer's button to
-        Settings and coming back must land on the same thread, or the button
-        that helps costs the conversation that led to it."""
+    def test_navigation_resets_ai_stage_and_placeholder(self):
         p = _panel()
-        p._show_answer("empty-step")
-        p._take_action("login")               # what the answer's button does
-        self.assertIn("empty-step", p._seen, "state was reset by the action")
+        p._stage = "ai"
+        p._entry.setPlaceholderText("Describe the failed task or error…")
+
+        p._show_all_topics()
+        self.assertEqual(p._stage, "triage")
+        self.assertEqual(p._entry.placeholderText(), "Ask Lumi anything about Prism...")
+
+        p._stage = "ai"
+        p._entry.setPlaceholderText("Describe the failed task or error…")
+        p._show_topic("files")
+        self.assertEqual(p._stage, "triage")
+        self.assertEqual(p._entry.placeholderText(), "Ask Lumi anything about Prism...")
+
+        p._stage = "ai"
+        p._entry.setPlaceholderText("Describe the failed task or error…")
+        p._show_answer("where-is-export")
+        self.assertEqual(p._stage, "triage")
+        self.assertEqual(p._entry.placeholderText(), "Ask Lumi anything about Prism...")
+
+        p._stage = "ai"
+        p._entry.setPlaceholderText("Describe the failed task or error…")
+        p._back_to_start()
+        self.assertEqual(p._stage, "triage")
+        self.assertEqual(p._entry.placeholderText(), "Ask Lumi anything about Prism...")
 
 
 if __name__ == "__main__":

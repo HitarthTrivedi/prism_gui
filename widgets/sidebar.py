@@ -125,33 +125,20 @@ MORE = [
 ]
 
 # Lifted OUT of the rail and into the Settings screen's "More" section.
-#
-# "How to use Prism" and "Help & support" are not the same thing: the first is
-# for somebody who does not yet know what Prism does, the second for somebody
-# who knew exactly what they wanted and did not get it. Rolling them together
-# would bury sixty written answers inside a tutorial a stuck customer has no
-# reason to open.
+# Lumi's working help surface is on Home, where it can be found when a customer
+# needs it without spending a permanent navigation slot.
 #
 # AI tools stays here rather than coming back to the rail with History, and the
 # reason is the budget: the rail is at twelve of twelve. Of the two, History is
 # the one the rail cannot do without — it is a *stage of the work*, and nothing
 # else in the rail reports on finished runs. AI tools is a catalogue of what
 # Prism can drive and whether you are signed in to each: setup, consulted when
-# something will not log in, which is exactly what Settings is for. Both stay
-# one click away, and the Settings row now names them in its tooltip.
+# something will not log in, which is exactly what Settings is for.
 SECONDARY = [
     ("catalog", "AI tools", "grid", "Every tool Prism can drive, and whether "
      "you're signed in to it"),
     ("guide", "How to use Prism", "help",
      "What Prism can do and what to type"),
-    ("support", "Help & support", "help",
-     "Answers to the common questions, then our team"),
-]
-
-# Under HELP: ONLY Help & support
-HELP = [
-    ("support", "Help & support", "help",
-     "Answers to the common questions, then our team"),
 ]
 
 # Behind the disclosure under MORE. Every one of these is also a section of the
@@ -627,50 +614,6 @@ class Sidebar(QFrame):
             self._register(addon.key, row)
             self._addon_rows.append(row)
             root.addWidget(row)
-
-        # ── the HELP section: collapsible with dropdown arrow ────────────────
-        root.addSpacing(theme.SPACE_2)
-
-        help_head = QWidget()
-        help_head.setObjectName("helpHead")
-        help_head.setCursor(Qt.PointingHandCursor)
-        help_hlayout = QHBoxLayout(help_head)
-        help_hlayout.setContentsMargins(4, 2, 4, 2)
-        help_hlayout.setSpacing(theme.SPACE_1)
-
-        help_lbl = self._section("HELP")
-        help_hlayout.addWidget(help_lbl, stretch=1)
-
-        self._help_toggle_btn = QPushButton()
-        self._help_toggle_btn.setObjectName("helpChevron")
-        self._help_toggle_btn.setFlat(True)
-        self._help_toggle_btn.setFixedSize(22, 22)
-        self._help_toggle_btn.setCursor(Qt.PointingHandCursor)
-        self._help_toggle_btn.setToolTip(i18n.t("Collapse / expand Help"))
-        self._help_open = True
-        icons.button_icon(self._help_toggle_btn, "chevron-down", 11, theme.over(INK_CHROME))
-        help_hlayout.addWidget(self._help_toggle_btn)
-
-        help_head.mousePressEvent = lambda e: self._toggle_help()
-        self._help_toggle_btn.clicked.connect(lambda: self._toggle_help())
-
-        root.addWidget(help_head)
-        self._help_head = help_head
-        self._help_collapsed_rule = self._rule()
-        self._help_collapsed_rule.setVisible(False)
-        root.addWidget(self._help_collapsed_rule)
-
-        self._help_rows: list[QWidget] = []
-        for key, label, icon_name, tip in HELP:
-            btn = nav_button(i18n.t(label), icon_name, small=True, tip=i18n.t(tip))
-            if key == "tour":
-                btn.clicked.connect(lambda: self.tour_requested.emit())
-            else:
-                btn.clicked.connect(lambda _=False, k=key: self._go(k))
-            self._nav_glyph[key] = (icon_name, 15, INK_ITEM)
-            self._register(key, btn)
-            self._help_rows.append(btn)
-            root.addWidget(btn)
 
         # -- Settings ---------------------------------------------------------
         # Under a hairline rather than under a third heading: it is the one
@@ -1430,25 +1373,6 @@ class Sidebar(QFrame):
             else:
                 row.setVisible(getattr(self, "_addons_open", True))
 
-        # HELP
-        if hasattr(self, "_help_head"):
-            self._help_head.setVisible(not c)
-        if hasattr(self, "_help_collapsed_rule"):
-            self._help_collapsed_rule.setVisible(c)
-        for btn in getattr(self, "_help_rows", []):
-            if c:
-                btn.setText("")
-                btn.setFixedSize(48, 38)
-                btn.setToolTip(i18n.t("Help & support"))
-                btn.setVisible(True)
-            else:
-                btn.setText(f"  {_amp(i18n.t('Help & support'))}")
-                btn.setMinimumHeight(C.MIN_TARGET + 4)
-                btn.setMaximumWidth(16777215)
-                btn.setMinimumWidth(0)
-                btn.setMaximumHeight(16777215)
-                btn.setVisible(getattr(self, "_help_open", True))
-
         # Settings (MORE)
         for key, label, icon_name, tip in MORE:
             btn = self._nav.get(key)
@@ -1518,22 +1442,6 @@ class Sidebar(QFrame):
             for row in getattr(self, "_addon_rows", []):
                 row.setVisible(self._addons_open)
         self._place_pip()
-
-    def _toggle_help(self, open_: bool | None = None) -> None:
-        """Collapse or expand the help section."""
-        if open_ is None:
-            self._help_open = not getattr(self, "_help_open", True)
-        else:
-            self._help_open = open_
-
-        icons.button_icon(self._help_toggle_btn,
-                          "chevron-down" if self._help_open else "chevron-right",
-                          11, theme.over(INK_CHROME))
-        if not getattr(self, "_collapsed", False):
-            for row in getattr(self, "_help_rows", []):
-                row.setVisible(self._help_open)
-        self._place_pip()
-
 
     # ── favorites ─────────────────────────────────────────────────────────
     _FAV_ROW = 30

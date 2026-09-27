@@ -74,7 +74,7 @@ MORE_LINKS = [
     ("catalog", "AI tools", "Every tool Prism can drive, and whether you're "
      "signed in to it"),
     ("guide", "How to use Prism", "What Prism can do, and what to type"),
-    ("support", "Help & support", "The common questions, then our team"),
+    ("support", "Lumi", "Prism help, answers and a route to our team"),
 ]
 
 # The glyph each door wears, kept out of MORE_LINKS so that table stays the
@@ -1728,10 +1728,11 @@ class SettingsPanel(QDialog):
 
     # ── help & more ───────────────────────────────────────────────────────
     def _more(self, col):
-        # AI Help Centre Button
+        # Lumi's ordinary answers are bundled; live error diagnosis is an
+        # explicit opt-in that uses the customer's saved Groq key.
         col.addWidget(self._buttons([
-            C.button(i18n.t("Open AI Help Centre"), "primary",
-                     on_click=lambda: self.navigate.emit("support")),
+            C.button(i18n.t("Open Lumi"), "primary",
+                    on_click=lambda: self.navigate.emit("support")),
         ]))
         
         # Book a meeting card

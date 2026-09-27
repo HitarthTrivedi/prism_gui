@@ -43,7 +43,7 @@ import os
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QFontMetrics, QLinearGradient, QPainter,
-    QPainterPath, QPen, QPixmap,
+    QIcon, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
@@ -433,6 +433,142 @@ class ShowcaseTourCard(QFrame):
             self.tour_clicked.emit()
 
 
+class LumiLauncher(QWidget):
+    """A bottom-corner Lumi button with a real, detachable help popover.
+
+    It owns only the floating chrome.  The full SupportPanel is mounted in
+    ``_content`` by the window when open, so every answer and recovery action
+    stays in this popover instead of making a second, reduced help experience.
+    """
+
+    open_requested = Signal()
+    close_requested = Signal()
+
+    _EDGE = 22
+    _BUTTON = 66
+    _GAP = 12
+    _MAX_W = 460
+    _MAX_H = 650
+
+    def __init__(self, host: QWidget):
+        super().__init__(host)
+        self._host = host
+        self.setFixedSize(1, 1)
+
+        self._launcher = QPushButton(host)
+        self._launcher.hide()
+        self._launcher.setObjectName("lumiLauncher")
+        self._launcher.setFixedSize(self._BUTTON, self._BUTTON)
+        self._launcher.setCursor(Qt.PointingHandCursor)
+        self._launcher.setToolTip(i18n.t("Open Lumi, Prism’s help bot"))
+        self._launcher.setAccessibleName(i18n.t("Open Lumi"))
+        logo = QPixmap(paths.resource("assets", "lumi", "lumi_logo.png"))
+        if not logo.isNull():
+            self._launcher.setIcon(QIcon(logo))
+            self._launcher.setIconSize(QSize(56, 56))
+        self._launcher.setStyleSheet(
+            "QPushButton#lumiLauncher { background: #ffffff;"
+            " border: 2px solid #18c7c1; border-radius: 33px;"
+            " padding: 3px; }"
+            "QPushButton#lumiLauncher:hover { background: #edffff;"
+            " border-color: #00aeb2; }"
+            "QPushButton#lumiLauncher:focus { border: 3px solid #1376b9; }")
+        self._launcher.clicked.connect(self.open_requested.emit)
+
+        self._popover = QFrame(host)
+        self._popover.setObjectName("lumiPopover")
+        self._popover.setStyleSheet(
+            "QFrame#lumiPopover { background: #eefbff;"
+            " border: 1px solid rgba(17, 132, 167, 0.32);"
+            " border-radius: 22px; }"
+            "QPushButton#lumiClose { border: none; background: transparent;"
+            " color: #31536b; font-size: 20px; font-weight: 700; }"
+            "QPushButton#lumiClose:hover { color: #123247; }"
+            "QPushButton#lumiClose:focus { border: 2px solid #1376b9;"
+            " border-radius: 12px; }")
+        shell = QVBoxLayout(self._popover)
+        shell.setContentsMargins(16, 13, 16, 16)
+        shell.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(9)
+        mini_logo = QLabel()
+        if not logo.isNull():
+            mini_logo.setPixmap(logo.scaled(31, 31, Qt.KeepAspectRatio,
+                                             Qt.SmoothTransformation))
+        mini_logo.setFixedSize(32, 32)
+        mini_logo.setAlignment(Qt.AlignCenter)
+        header.addWidget(mini_logo)
+        copy = QVBoxLayout()
+        copy.setSpacing(0)
+        title = QLabel(i18n.t("Hi, I’m Lumi"))
+        title.setStyleSheet(
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 19px;"
+            " font-weight: 800; color: #17324a;")
+        copy.addWidget(title)
+        note = QLabel(i18n.t("Prism help, right here"))
+        note.setStyleSheet("font-size: 11.5px; font-weight: 600; color: #47718d;")
+        copy.addWidget(note)
+        header.addLayout(copy, stretch=1)
+        mascot = QLabel()
+        mascot_pix = QPixmap(paths.resource("assets", "lumi", "lumi_2d.png"))
+        if not mascot_pix.isNull():
+            mascot.setPixmap(mascot_pix.scaled(54, 54, Qt.KeepAspectRatio,
+                                                Qt.SmoothTransformation))
+        mascot.setFixedSize(56, 56)
+        mascot.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        header.addWidget(mascot)
+        close = QPushButton("×")
+        close.setObjectName("lumiClose")
+        close.setFixedSize(30, 30)
+        close.setToolTip(i18n.t("Close Lumi"))
+        close.setAccessibleName(i18n.t("Close Lumi"))
+        close.clicked.connect(self.close_requested.emit)
+        header.addWidget(close, alignment=Qt.AlignTop)
+        shell.addLayout(header)
+
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._content_layout.setSpacing(0)
+        shell.addWidget(self._content, stretch=1)
+        self._popover.hide()
+        self.reposition()
+
+    def is_open(self) -> bool:
+        return self._popover.isVisible()
+
+    def mount(self, panel: QWidget):
+        if self._content_layout.indexOf(panel) < 0:
+            self._content_layout.addWidget(panel)
+
+    def unmount(self, panel: QWidget):
+        self._content_layout.removeWidget(panel)
+        panel.setParent(None)
+
+    def open(self):
+        self.reposition()
+        self._popover.show()
+        self._popover.raise_()
+        self._launcher.raise_()
+
+    def close(self):
+        self._popover.hide()
+        self._launcher.setFocus()
+
+    def reposition(self):
+        area = self._host.rect()
+        launcher_x = max(self._EDGE, area.width() - self._EDGE - self._BUTTON)
+        launcher_y = max(self._EDGE, area.height() - self._EDGE - self._BUTTON)
+        self._launcher.move(launcher_x, launcher_y)
+
+        width = min(self._MAX_W, max(320, area.width() - self._EDGE * 2))
+        height = min(self._MAX_H, max(380, area.height() - self._EDGE * 2 - self._BUTTON))
+        pop_x = max(self._EDGE, area.width() - self._EDGE - width)
+        pop_y = max(self._EDGE, launcher_y - self._GAP - height)
+        self._popover.setGeometry(pop_x, pop_y, width, height)
+
+
 class ActiveRunCard(C.Card):
     """One in-flight task: its state, the tools it will pass through, how far
     along it is, and what is happening right now.
@@ -554,6 +690,8 @@ class HomePanel(QWidget):
     open_history = Signal()
     open_run = Signal()
     open_run_record = Signal(str)   # path of a saved run record — NEEDS WIRING
+    lumi_open_requested = Signal()
+    lumi_close_requested = Signal()
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -579,6 +717,12 @@ class HomePanel(QWidget):
                                      theme.PAGE_PAD, theme.PAGE_PAD + 40)
         self._col.setSpacing(theme.CARD_GAP)
         root.addWidget(self._scroll, stretch=1)
+
+        # It is deliberately a sibling of the scroll area, not a dashboard
+        # card: the button stays anchored while Home scrolls underneath.
+        self._lumi = LumiLauncher(self)
+        self._lumi.open_requested.connect(self.lumi_open_requested.emit)
+        self._lumi.close_requested.connect(self.lumi_close_requested.emit)
 
         # Active run host slot
         self._active_host = QWidget()
@@ -653,7 +797,7 @@ class HomePanel(QWidget):
         runs = DATA.recent_runs(self.cfg, RUN_WINDOW)
         done, failed, stalled = _split(runs)
 
-        # 1. Hero row (Left: Greeting + Composer + Try chips; Right: Tour card)
+        # 1. Hero row (Left: Greeting + Composer + Try chips; Right: Lumi)
         self._col.addLayout(self._hero_section())
 
         # 2. Active runs (if any)
@@ -815,6 +959,24 @@ class HomePanel(QWidget):
 
         col.addLayout(bar)
         return card
+
+    # ── Lumi floating assistant ─────────────────────────────────────────
+    def open_lumi(self, panel: QWidget):
+        self._lumi.mount(panel)
+        self._lumi.open()
+
+    def close_lumi(self, panel: QWidget):
+        if self._lumi.is_open():
+            self._lumi.close()
+        self._lumi.unmount(panel)
+
+    def lumi_is_open(self) -> bool:
+        return self._lumi.is_open()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_lumi"):
+            self._lumi.reposition()
 
     def _on_attach_clicked(self):
         menu = QMenu(self)
@@ -1187,4 +1349,3 @@ class _ToolTile(QFrame):
             event.accept()
             return
         super().keyPressEvent(event)
-

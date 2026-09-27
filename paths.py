@@ -140,6 +140,9 @@ def is_local_result(url: str) -> bool:
 
 def open_result(url: str) -> None:
     """Open a stage result — a file with its default app, a URL in Chrome."""
+    if not isinstance(url, (str, bytes, os.PathLike)) or not url:
+        return
+    url = str(url)
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices
     QDesktopServices.openUrl(
@@ -150,6 +153,9 @@ def reveal_result(path: str) -> None:
     """Show the file in Finder/Explorer. Worth its own button because output
     lands in ~/.prism/runs, and a dot-folder is invisible in Finder — a user
     who is told the path still cannot get to it."""
+    if not isinstance(path, (str, bytes, os.PathLike)) or not path:
+        return
+    path = str(path)
     import subprocess
     folder = os.path.dirname(path)
     try:

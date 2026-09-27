@@ -161,9 +161,9 @@ TOPICS: tuple[Topic, ...] = (
         "Prism tells you what happened and what to do about it. Follow the "
         "numbered steps in the message — they are in order of what usually "
         "fixes it.\n\n"
-        "If that isn't enough, Help & support has a written answer for most "
+        "If that isn't enough, Lumi has a written answer for most "
         "things, and opens the way to our team when none of them fits.",
-        action="support", action_label="Open Help & support",
+        action="support", action_label="Ask Lumi",
     ),
 )
 
