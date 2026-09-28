@@ -561,7 +561,7 @@ if IS_MAC:
 # *.dist-info/ and 8 of them .pyi type stubs, none of which anything reads
 # at runtime. Metadata that IS read at runtime (keyring's entry_points.txt,
 # every RECORD/METADATA importlib.metadata resolves) is left alone.
-_TRIM_SUFFIXES = (".pyi",)
+_TRIM_SUFFIXES = (".pyi", ".h", ".c", ".cpp", ".hpp", ".cmake")
 _kept_datas, _trimmed, _qt_qm = [], 0, 0
 for t in a.datas:
     dest = t[0].replace("\\", "/")
@@ -575,7 +575,17 @@ for t in a.datas:
     # over the cap once the picture-reading stack arrived: Linux 1053 files,
     # macOS 1028. Only .qm files go; QtWebEngine's locale packs (.pak) stay.
     qt_translation = "/Qt/translations/" in dest and name.endswith(".qm")
-    if licence_text or dest.endswith(_TRIM_SUFFIXES) or qt_translation:
+    # Design mockups, concept exploration HTML/JPGs, and raw reference
+    # assets that were saved to assets/ but are never read at runtime.
+    # The app loads lumi_spritesheet.png, lumi_avatar.png, and lumi_character.png;
+    # loose concept cards and raw mockups pushed the release asset count
+    # over GitHub's 1000-asset cap on macOS and Linux (see packaging/manifest.py).
+    unused_asset = (
+        "assets/card_concepts/" in dest
+        or "assets/lumi/frames/" in dest
+        or name in ("lumi_card_mockup.png", "lumi_card_reference.png", "lumi_logo.png", "lumi_2d.png")
+    )
+    if licence_text or dest.endswith(_TRIM_SUFFIXES) or qt_translation or unused_asset:
         _trimmed += 1
         _qt_qm += qt_translation
         continue
