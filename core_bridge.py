@@ -111,6 +111,16 @@ from core import lang as lang              # noqa: E402
 from core import router as router          # noqa: E402
 from core import contract as contract      # noqa: E402  (what a step must produce)
 
+
+def reset_run() -> None:
+    """Reset active run tracking back to empty."""
+    if hasattr(config, "_run") and isinstance(config._run, dict):
+        config._run.clear()
+
+
+if not hasattr(config, "reset_run"):
+    config.reset_run = reset_run  # type: ignore[attr-defined]
+
 # Count Groq tokens for licence metering. Installed here, from the GUI side,
 # rather than in core/router.py: prism_terminal is a submodule shared with the
 # CLI, which carries no licence and must keep running standalone. Wrapping the

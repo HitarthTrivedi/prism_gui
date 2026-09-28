@@ -1236,7 +1236,7 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
-        CB.config.reset_run()
+        getattr(CB.config, "reset_run", lambda: None)()
         self._stage_agents = {}
         self._stage_results = []
         self._run_shortfall = []
@@ -2140,7 +2140,7 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
-        CB.config.reset_run()
+        getattr(CB.config, "reset_run", lambda: None)()
         if len(self._task_queue) > 1:
             self.statusBar().showMessage(
                 f"Planning task {self._task_pos} of {len(self._task_queue)}…", 0)
@@ -2530,7 +2530,7 @@ class MainWindow(QMainWindow):
             self._current_run_file = None
             self._followup_session = None
             self._followup_text = ""
-            CB.config.reset_run()
+            getattr(CB.config, "reset_run", lambda: None)()
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
