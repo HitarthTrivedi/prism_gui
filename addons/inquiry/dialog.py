@@ -662,7 +662,7 @@ class _HistoryDialog(PrismDialog):
             i18n.t("The whole story"),
             i18n.t("Everything that happened on {no}, in the order it "
                    "happened.").replace("{no}", row.get("Inquiry no", "")),
-            icon="clock", parent=parent, closable=True, scrollable=True)
+            icon="clock", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(i18n.t("The whole story"))
         self.resize(720, 680)
         self.setMinimumSize(480, 360)

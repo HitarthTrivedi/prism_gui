@@ -545,3 +545,42 @@ def tint(hex_colour: str, alpha_hex: str = "1f") -> str:
     value = hex_colour.lstrip("#")
     r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
     return f"rgba({r},{g},{b},{int(alpha_hex, 16) / 255:.3f})"
+
+
+def html_bg(colour: str, bg: str = "#ffffff") -> str:
+    """Return a solid 6-digit hex safe for use in Qt HTML `bgcolor="..."` attrs.
+
+    Qt's QTextHtmlParser **cannot** parse `rgba(...)` strings inside a
+    `bgcolor` attribute — it silently falls back to `#000000` (pitch black).
+    CSS `style='background:rgba(...)'` works fine, but `bgcolor='rgba(...)'`
+    does not. Pass any theme color (hex or rgba) through this function when
+    you need it as a `bgcolor` value; transparent colors are composited onto
+    `bg` (default white).
+    """
+    c = qcolor(colour)
+    if not c.isValid() or c.alpha() == 0:
+        return bg
+    if c.alpha() < 255:
+        # Composite the semi-transparent colour onto the background
+        bv = bg.lstrip("#")
+        br, bg_r, bb = (int(bv[i:i + 2], 16) for i in (0, 2, 4))
+        a = c.alpha() / 255.0
+        nr = round(c.red() * a + br * (1 - a))
+        ng = round(c.green() * a + bg_r * (1 - a))
+        nb = round(c.blue() * a + bb * (1 - a))
+        return "#%02x%02x%02x" % (nr, ng, nb)
+    return "#%02x%02x%02x" % (c.red(), c.green(), c.blue())
+
+
+# ── solid-hex aliases for Qt HTML bgcolor="" attributes ─────────────────────
+# Qt's QTextHtmlParser cannot parse rgba() in bgcolor="…" — it silently falls
+# back to #000000. Use these pre-composited solids wherever setHtml()/
+# QTextBrowser is involved. The rgba() originals remain for QPainter / QSS.
+HTML_ERR_BG   = "#fef2f2"   # ERR_BG  composited on white  (rgba 220,38,38,0.14)
+HTML_WARN_BG  = "#fefce8"   # WARN_BG composited on white  (rgba 202,138,4,0.14)
+HTML_OK_BG    = "#f0fdf4"   # OK_BG   composited on white  (rgba 22,163,74,0.14)
+HTML_INFO_BG  = "#f0f9ff"   # INFO_BG composited on white  (rgba 2,132,199,0.14)
+HTML_ACCENT_100 = "#f5f5f7"  # ACCENT_RAMP[100] composited on white
+HTML_ACCENT_200 = "#ebebed"  # ACCENT_RAMP[200] composited on white
+HTML_WELL     = "#f7f7f7"   # WELL    composited on white  (rgba 0,0,0,0.03)
+

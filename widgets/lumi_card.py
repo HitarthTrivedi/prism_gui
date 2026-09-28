@@ -183,7 +183,7 @@ class LumiWelcomeHeader(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(225)
+        self.setFixedHeight(230)
         self.setAttribute(Qt.WA_Hover, True)
         self.setCursor(Qt.ArrowCursor)
 
@@ -208,27 +208,25 @@ class LumiWelcomeHeader(QWidget):
         top_bar = QHBoxLayout()
         top_bar.addStretch(1)
 
-        min_btn = QPushButton("—")
+        min_btn = QPushButton()
         min_btn.setFixedSize(26, 26)
         min_btn.setCursor(Qt.PointingHandCursor)
         min_btn.setToolTip(i18n.t("Minimize"))
+        icons.button_icon(min_btn, "minus", 14, "#1e293b")
         min_btn.setStyleSheet(
-            "QPushButton {"
-            "  border: none; background: transparent; font-size: 16px; font-weight: 700; color: #1e293b;"
-            "}"
+            "QPushButton { border: none; background: transparent; padding: 0; }"
             "QPushButton:hover { background: rgba(0,0,0,0.06); border-radius: 6px; }"
         )
         min_btn.clicked.connect(self.minimize_requested.emit)
         top_bar.addWidget(min_btn)
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton()
         close_btn.setFixedSize(26, 26)
         close_btn.setCursor(Qt.PointingHandCursor)
         close_btn.setToolTip(i18n.t("Close"))
+        icons.button_icon(close_btn, "x", 14, "#1e293b")
         close_btn.setStyleSheet(
-            "QPushButton {"
-            "  border: none; background: transparent; font-size: 15px; font-weight: 700; color: #1e293b;"
-            "}"
+            "QPushButton { border: none; background: transparent; padding: 0; }"
             "QPushButton:hover { background: rgba(0,0,0,0.06); border-radius: 6px; }"
         )
         close_btn.clicked.connect(self.close_requested.emit)
@@ -314,6 +312,11 @@ class LumiWelcomeHeader(QWidget):
         w = float(self.width())
         h = float(self.height())
 
+        # Clip strictly inside the parent card's rounded top border (radius 36px, stroke 3px)
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(QRectF(3.0, 3.0, w - 6.0, h + 100.0), 33.0, 33.0)
+        painter.setClipPath(clip_path)
+
         # 1. Base gradient
         grad = QLinearGradient(0, 0, 0, h)
         grad.setColorAt(0.0, QColor(220, 252, 231, 230))
@@ -341,28 +344,28 @@ class LumiWelcomeHeader(QWidget):
         # 3. Draw Sparkles
         sparkle_color = QColor(45, 212, 191, 230)
         # Left sparkles
-        self._draw_star(painter, w * 0.45, h * 0.58, 9.5, 3.2, sparkle_color)
-        self._draw_star(painter, w * 0.48, h * 0.70, 6.5, 2.2, sparkle_color)
+        self._draw_star(painter, w * 0.43, h * 0.44, 9.5, 3.2, sparkle_color)
+        self._draw_star(painter, w * 0.46, h * 0.56, 6.5, 2.2, sparkle_color)
         dash_pen = QPen(sparkle_color, 2.5, Qt.SolidLine, Qt.RoundCap)
         painter.setPen(dash_pen)
-        painter.drawLine(QPointF(w * 0.45, h * 0.45), QPointF(w * 0.465, h * 0.425))
-        painter.drawLine(QPointF(w * 0.43, h * 0.48), QPointF(w * 0.44, h * 0.50))
+        painter.drawLine(QPointF(w * 0.43, h * 0.32), QPointF(w * 0.445, h * 0.295))
+        painter.drawLine(QPointF(w * 0.41, h * 0.35), QPointF(w * 0.42, h * 0.37))
         # Right sparkles
-        self._draw_star(painter, w * 0.93, h * 0.65, 7.5, 2.5, sparkle_color)
-        painter.drawLine(QPointF(w * 0.89, h * 0.59), QPointF(w * 0.905, h * 0.57))
-        painter.drawLine(QPointF(w * 0.92, h * 0.54), QPointF(w * 0.93, h * 0.56))
+        self._draw_star(painter, w * 0.94, h * 0.52, 7.5, 2.5, sparkle_color)
+        painter.drawLine(QPointF(w * 0.91, h * 0.44), QPointF(w * 0.925, h * 0.42))
+        painter.drawLine(QPointF(w * 0.93, h * 0.39), QPointF(w * 0.94, h * 0.41))
 
-        # 4. Animated Lumi Mascot - perfectly scaled to fill right side
-        mw = int(w * 0.54)
-        mh = mw
-        mx = int(w * 0.45)
-        my = int(h * 0.05)
+        # 4. Animated Lumi Mascot - 45% scale, upright & matching reference
+        target_w = 150
+        target_h = int(target_w * (384.0 / 256.0))
+        mx = int(w - target_w - 20)
+        my = 12
 
         if self._frames:
             seq = self._waving_seq if self._mode == "waving" else self._idle_seq
             frame_idx = seq[self._current_seq_idx % len(seq)]
             frame = self._frames[frame_idx]
-            scaled = frame.scaled(mw, mh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled = frame.scaled(target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             if self._mode == "diving":
                 painter.save()
                 painter.translate(mx + scaled.width() / 2, my + scaled.height() / 2)
@@ -374,7 +377,7 @@ class LumiWelcomeHeader(QWidget):
         else:
             fallback = QPixmap(paths.resource("assets", "lumi", "lumi_character.png"))
             if not fallback.isNull():
-                scaled = fallback.scaled(mw, mh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = fallback.scaled(target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 if self._mode == "diving":
                     painter.save()
                     painter.translate(mx + scaled.width() / 2, my + scaled.height() / 2)
@@ -384,14 +387,14 @@ class LumiWelcomeHeader(QWidget):
                 else:
                     painter.drawPixmap(mx, my, scaled)
 
-        # 5. Fluffy White Cloud Shelf under Lumi
+        # 5. Fluffy White Cloud Shelf under Lumi - gentle shelf supporting arms/chest
         cloud = QPainterPath()
-        cloud.moveTo(w * 0.32, h)
-        cloud.cubicTo(w * 0.38, h * 0.90, w * 0.46, h * 0.74, w * 0.59, h * 0.74)
-        cloud.cubicTo(w * 0.70, h * 0.69, w * 0.82, h * 0.73, w * 0.90, h * 0.82)
-        cloud.cubicTo(w * 0.95, h * 0.87, w, h * 0.89, w, h)
+        cloud.moveTo(w * 0.26, h)
+        cloud.cubicTo(w * 0.34, h * 0.98, w * 0.46, h * 0.89, w * 0.58, h * 0.89)
+        cloud.cubicTo(w * 0.70, h * 0.85, w * 0.82, h * 0.87, w * 0.91, h * 0.93)
+        cloud.cubicTo(w * 0.96, h * 0.96, w, h * 0.96, w, h)
         cloud.lineTo(w, h + 30)
-        cloud.lineTo(w * 0.32, h + 30)
+        cloud.lineTo(w * 0.26, h + 30)
         cloud.closeSubpath()
         painter.fillPath(cloud, QColor(255, 255, 255, 255))
 
@@ -755,21 +758,28 @@ class LumiLauncherPill(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(124)
-        self.setMinimumWidth(340)
-        self.setMaximumWidth(400)
+        self._stage_h = 88
+        self.setFixedHeight(self._stage_h + 56)
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(285)
         self.setAttribute(Qt.WA_Hover, True)
 
         self._frames: list[QPixmap] = []
+        self._walk_frames: list[QPixmap] = []
+        self._idle_pix = QPixmap()
+        self._blink_pix = QPixmap()
         self._load_spritesheet()
 
         # Locomotion & State
         # States: "idle", "walking", "sitting", "waving", "shaking", "leaping", "working", "celebrating", "typing"
         self._state = "walking"
-        self._mascot_x = 70.0
-        self._target_x = 220.0
+        self._mascot_x = 50.0
+        self._target_x = 150.0
         self._facing_left = False
         self._walk_step = 0
+        self._stride_dist = 0.0
+        self._head_pitch = 0.0
+        self._target_pitch = 0.0
         self._state_timer = 0
         self._shake_phase = 0
         self._leap_progress = 0.0
@@ -789,58 +799,71 @@ class LumiLauncherPill(QWidget):
         self._idle_seq = [0, 1, 2, 3, 2, 1]
         self._waving_seq = [4, 5, 6, 7, 6, 5]
 
-        # Top 74px: transparent stage where Lumi perches & walks comfortably
-        # Bottom 50px: dark pill frame
+        # Top stage where Lumi perches & walks comfortably (compact 88px stage)
+        # Bottom 56px: dark pill frame (less horizontal, more vertical rounded pill)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 74, 0, 0)
+        layout.setContentsMargins(0, self._stage_h, 0, 0)
         layout.setSpacing(0)
 
         pill = QFrame(self)
         pill.setObjectName("lumiPillFrame")
-        pill.setFixedHeight(50)
+        pill.setFixedHeight(56)
         pill.setStyleSheet(
             "QFrame#lumiPillFrame {"
-            "  background: #18181b;"
-            "  border: 1px solid rgba(255, 255, 255, 0.16);"
-            "  border-radius: 25px;"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "    stop:0 rgba(28, 33, 46, 0.82),"
+            "    stop:0.45 rgba(18, 22, 32, 0.86),"
+            "    stop:1.0 rgba(10, 13, 20, 0.92));"
+            "  border: 1px solid rgba(255, 255, 255, 0.18);"
+            "  border-top: 1.5px solid rgba(255, 255, 255, 0.38);"
+            "  border-radius: 28px;"
             "}"
             "QFrame#lumiPillFrame:hover {"
-            "  background: #27272a;"
-            "  border-color: #2dd4bf;"
+            "  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            "    stop:0 rgba(36, 44, 60, 0.88),"
+            "    stop:0.45 rgba(22, 28, 40, 0.92),"
+            "    stop:1.0 rgba(14, 18, 28, 0.96));"
+            "  border: 1px solid rgba(45, 212, 191, 0.65);"
+            "  border-top: 1.5px solid rgba(94, 234, 212, 0.90);"
             "}"
         )
+        pill_shadow = QGraphicsDropShadowEffect(pill)
+        pill_shadow.setBlurRadius(24)
+        pill_shadow.setColor(QColor(0, 0, 0, 95))
+        pill_shadow.setOffset(0, 6)
+        pill.setGraphicsEffect(pill_shadow)
 
         p_box = QHBoxLayout(pill)
-        p_box.setContentsMargins(16, 5, 6, 5)
-        p_box.setSpacing(10)
+        p_box.setContentsMargins(14, 4, 8, 4)
+        p_box.setSpacing(8)
 
-        text_lbl = QLabel(i18n.t("Need help? Lumi can answer questions, find docs, and connect you to support."))
+        text_lbl = QLabel(i18n.t("Need help? Ask Lumi anything."))
         text_lbl.setStyleSheet(
-            "font-size: 11.5px; font-weight: 500; color: #f1f5f9; line-height: 130%; background: transparent;"
+            "font-family: 'Segoe UI', -apple-system, sans-serif; font-size: 11px; font-weight: 600; color: rgba(248, 250, 252, 0.95); letter-spacing: 0.2px; background: transparent;"
         )
-        text_lbl.setWordWrap(True)
+        text_lbl.setWordWrap(False)
         p_box.addWidget(text_lbl, stretch=1)
 
         # Avatar badge at right
         avatar_wrap = QWidget()
-        avatar_wrap.setFixedSize(40, 40)
+        avatar_wrap.setFixedSize(38, 38)
         a_layout = QVBoxLayout(avatar_wrap)
         a_layout.setContentsMargins(0, 0, 0, 0)
 
         self._avatar_btn = QLabel(avatar_wrap)
         av_pix = QPixmap(paths.resource("assets", "lumi", "lumi_avatar.png"))
         if not av_pix.isNull():
-            self._avatar_btn.setPixmap(av_pix.scaled(38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        self._avatar_btn.setFixedSize(38, 38)
+            self._avatar_btn.setPixmap(av_pix.scaled(34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self._avatar_btn.setFixedSize(36, 36)
         self._avatar_btn.setStyleSheet(
-            "border: 2px solid #2dd4bf; border-radius: 19px; background: #0f172a;"
+            "border: 2px solid rgba(45, 212, 191, 0.9); border-radius: 18px; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(45, 212, 191, 0.22), stop:1 rgba(15, 23, 42, 0.88));"
         )
 
         dot = QLabel(avatar_wrap)
         dot.setFixedSize(10, 10)
-        dot.move(28, 2)
+        dot.move(26, 1)
         dot.setStyleSheet(
-            "background: #22c55e; border: 1.5px solid #18181b; border-radius: 5px;"
+            "background: #22c55e; border: 1.5px solid rgba(10, 13, 20, 0.95); border-radius: 5px;"
         )
         p_box.addWidget(avatar_wrap)
 
@@ -858,16 +881,31 @@ class LumiLauncherPill(QWidget):
 
     def _load_spritesheet(self):
         sheet_path = paths.resource("assets", "lumi", "lumi_spritesheet.png")
-        if not os.path.exists(sheet_path):
-            return
-        sheet = QPixmap(sheet_path)
-        if sheet.isNull():
-            return
-        fw = sheet.width() // 4
-        fh = sheet.height() // 2
-        for r in range(2):
-            for c in range(4):
-                self._frames.append(sheet.copy(c * fw, r * fh, fw, fh))
+        if os.path.exists(sheet_path):
+            sheet = QPixmap(sheet_path)
+            if not sheet.isNull():
+                fw = sheet.width() // 4
+                fh = sheet.height() // 2
+                for r in range(2):
+                    for c in range(4):
+                        self._frames.append(sheet.copy(c * fw, r * fh, fw, fh))
+
+        # Dedicated walk cycle frames (both legs articulated, natural steps)
+        walk_dir = paths.resource("assets", "lumi", "walk")
+        for i in range(6):
+            wp = os.path.join(walk_dir, f"walk_{i}.png")
+            if os.path.exists(wp):
+                pix = QPixmap(wp)
+                if not pix.isNull():
+                    self._walk_frames.append(pix)
+
+        idle_p = os.path.join(walk_dir, "idle_0.png")
+        if os.path.exists(idle_p):
+            self._idle_pix = QPixmap(idle_p)
+
+        blink_p = os.path.join(walk_dir, "idle_blink.png")
+        if os.path.exists(blink_p):
+            self._blink_pix = QPixmap(blink_p)
 
     def _on_clicked(self, event):
         if event.button() == Qt.LeftButton:
@@ -878,7 +916,7 @@ class LumiLauncherPill(QWidget):
         self._state = "celebrating"
         self._celebrate_timer = int(duration_ms / 50)
         mx = self._mascot_x + 27
-        my = 74.0 - 20
+        my = float(self._stage_h) - 15.0
         for _ in range(36):
             self._confetti.append(_ConfettiParticle(mx, my))
         self.update()
@@ -897,14 +935,14 @@ class LumiLauncherPill(QWidget):
         self._card_is_open = False
         self._state = "shaking"
         self._shake_phase = 18
-        self._mascot_x = max(50.0, float(self.width() - 95))
+        self._mascot_x = max(40.0, float(self.width() - 95))
         self._facing_left = True
 
         # Spawn ripples at the avatar location
-        ax = float(self.width() - 36)
-        ay = 74.0 + 25.0
-        self._ripples.append(_Ripple(ax, ay, max_r=42.0))
-        self._ripples.append(_Ripple(ax, ay, max_r=26.0))
+        ax = float(self.width() - 32)
+        ay = float(self._stage_h) + 28.0
+        self._ripples.append(_Ripple(ax, ay, max_r=32.0))
+        self._ripples.append(_Ripple(ax, ay, max_r=20.0))
 
         # Spawn water droplets
         for _ in range(8):
@@ -920,8 +958,8 @@ class LumiLauncherPill(QWidget):
         self._leap_progress = 0.0
 
         mx = self._mascot_x + 27
-        my = 74.0
-        self._ripples.append(_Ripple(mx, my, max_r=36.0))
+        my = float(self._stage_h)
+        self._ripples.append(_Ripple(mx, my, max_r=30.0))
 
         anim = QVariantAnimation(self)
         anim.setDuration(280)
@@ -952,7 +990,30 @@ class LumiLauncherPill(QWidget):
         if self._typing_bob > 0:
             self._typing_bob = max(0.0, self._typing_bob - 0.7)
 
-        # 2. Check worker activity across Prism
+        # 2. Mouse tracking: follow mouse position and head pitch
+        try:
+            cur_global = QCursor.pos()
+            local_pt = self.mapFromGlobal(cur_global)
+            head_cx = self._mascot_x + 27.0
+            head_cy = float(self._stage_h) - 45.0
+            dx = float(local_pt.x()) - head_cx
+            dy = float(local_pt.y()) - head_cy
+
+            # Smooth head pitch tracking (looking up / down at mouse)
+            raw_pitch = math.degrees(math.atan2(dy, max(35.0, abs(dx))))
+            self._target_pitch = max(-20.0, min(10.0, raw_pitch * 0.45))
+            self._head_pitch += (self._target_pitch - self._head_pitch) * 0.22
+
+            # Turn body to face mouse when idle, sitting or waving
+            if self._state in ("idle", "sitting", "waving"):
+                if dx < -20.0:
+                    self._facing_left = True
+                elif dx > 20.0:
+                    self._facing_left = False
+        except Exception:
+            pass
+
+        # 3. Check worker activity across Prism
         # Only persistent background workers (> 2.0s) enter working runner mode.
         # Transient sub-second workers (licensing, Gerber/STEP check, plan route setup)
         # do NOT trigger working mode and NEVER trigger celebratory confetti!
@@ -980,7 +1041,7 @@ class LumiLauncherPill(QWidget):
 
         self._state_timer += 1
 
-        # 3. State machine handling
+        # 4. State machine handling
         if self._state == "celebrating":
             self._celebrate_timer -= 1
             self._walk_step += 1
@@ -1002,8 +1063,8 @@ class LumiLauncherPill(QWidget):
             # Running briskly back and forth with determination during long operations
             self._walk_step += 1
             speed = 2.0
-            min_x = 30.0
-            max_x = max(50.0, float(self.width() - 110))
+            min_x = 18.0
+            max_x = max(40.0, float(self.width() - 95))
 
             if self._facing_left:
                 self._mascot_x -= speed
@@ -1048,8 +1109,8 @@ class LumiLauncherPill(QWidget):
                     self._state_timer = 0
                 else:
                     self._state = "walking"
-                    min_x = 30.0
-                    max_x = max(60.0, float(self.width() - 110))
+                    min_x = 18.0
+                    max_x = max(40.0, float(self.width() - 95))
                     t = random.uniform(min_x, max_x)
                     if abs(t - self._mascot_x) < 45.0:
                         t = max_x if self._mascot_x < (min_x + max_x) / 2 else min_x
@@ -1063,8 +1124,8 @@ class LumiLauncherPill(QWidget):
             self._walk_step += 1
             if self._state_timer > 75:  # ~3.5 seconds
                 self._state = "walking"
-                min_x = 30.0
-                max_x = max(60.0, float(self.width() - 110))
+                min_x = 18.0
+                max_x = max(40.0, float(self.width() - 95))
                 t = random.uniform(min_x, max_x)
                 if abs(t - self._mascot_x) < 45.0:
                     t = max_x if self._mascot_x < (min_x + max_x) / 2 else min_x
@@ -1082,10 +1143,11 @@ class LumiLauncherPill(QWidget):
                 self._state = "idle"
                 self._state_timer = 0
             else:
-                speed = 1.05  # Smooth, gentle waddle speed
+                speed = 1.25  # Steady, grounded walking pace
                 step = speed if dist > 0 else -speed
                 self._mascot_x += step
                 self._facing_left = (step < 0)
+                self._stride_dist += abs(step)
             self.update()
 
     def enterEvent(self, event):
@@ -1153,110 +1215,119 @@ class LumiLauncherPill(QWidget):
         if self._card_is_open and self._state != "leaping":
             return
 
-        if not self._frames:
+        if not self._frames and not self._walk_frames:
             return
 
-        # Baseline ground alignment offsets for frames 0..7 based on measured asset alpha bboxes
-        # [0, 6, 0, -1, 32, 30, 31, 30] * (72 / 384)
-        FRAME_BASELINE_OFFSETS = [0.0, 1.1, 0.0, -0.2, 5.8, 5.6, 5.8, 5.6]
-
-        # Scaled up for prominent, expressive display (was 36x44 -> now 54x72)
-        mw, mh = 54, 72
+        # 45% scale: compact, neat and proportional (54x81)
+        mw, mh = 54, 81
         bob_y = 0.0
         tilt = 0.0
         scale_x = 1.0
         scale_y = 1.0
-        y_base = 74.0 - mh + 3.0  # Feet planted comfortably on the dark pill top rim
+        y_base = float(self._stage_h) - mh + 2.5  # Feet planted comfortably on the dark pill top rim
+
+        pix = None
 
         if self._state == "walking":
-            # Natural, grounded waddle (penguin / cute mascot locomotion)
-            # Distance-coupled phase ensures completely steady progress without jumping
-            waddle_phase = self._mascot_x * 0.13
-            tilt = math.sin(waddle_phase) * 3.2
-            bob_y = -abs(math.sin(waddle_phase)) * 1.3
-            squash = math.sin(waddle_phase * 2.0) * 0.035
-            scale_x = 1.0 + squash
-            scale_y = 1.0 - squash
-            # Natural blinking (Frame 2 shares the exact foot baseline with Frame 0)
-            is_blink = (self._walk_step % 65) in (0, 1, 2)
-            idx = 2 if is_blink else 0
+            # True articulated walking: alternating leg steps, no tilt bouncing
+            if self._walk_frames:
+                walk_idx = int(self._stride_dist / 5.5) % len(self._walk_frames)
+                pix = self._walk_frames[walk_idx]
+            elif self._frames:
+                pix = self._frames[0]
+            # Head follows mouse gently while walking
+            tilt = self._head_pitch * 0.35
 
         elif self._state == "idle":
-            # Gentle breathing
-            breath = math.sin(self._state_timer * 0.07)
-            bob_y = breath * 0.6
-            scale_y = 1.0 + breath * 0.015
             is_blink = (self._state_timer % 70) in (0, 1, 2)
-            idx = 2 if is_blink else 0
+            if is_blink and not self._blink_pix.isNull():
+                pix = self._blink_pix
+            elif not self._idle_pix.isNull():
+                pix = self._idle_pix
+            elif self._frames:
+                pix = self._frames[2 if is_blink else 0]
+
+            breath = math.sin(self._state_timer * 0.06)
+            bob_y = breath * 0.35
+            # Head tilts to follow mouse
+            tilt = self._head_pitch
 
         elif self._state == "sitting":
-            idx = 0
-            y_base += 6.0  # Relaxed sitting with legs resting over pill rim
+            if not self._idle_pix.isNull():
+                pix = self._idle_pix
+            elif self._frames:
+                pix = self._frames[0]
+            y_base += 6.0
             breath = math.sin(self._state_timer * 0.05)
-            bob_y = breath * 0.5
-            is_blink = (self._state_timer % 80) in (0, 1, 2)
-            if is_blink:
-                idx = 2
+            bob_y = breath * 0.35
+            tilt = self._head_pitch * 0.5
 
         elif self._state == "working":
-            # 3.3 Running worker progress
-            run_phase = self._mascot_x * 0.22
-            tilt = -9.0 if self._facing_left else 9.0
-            bob_y = -abs(math.sin(run_phase)) * 2.2
-            squash = math.sin(run_phase * 2.0) * 0.04
-            scale_x = 1.0 + squash
-            scale_y = 1.0 - squash
-            idx = 0
+            # Running worker progress
+            if self._walk_frames:
+                walk_idx = int((self._walk_step * 2.2) / 4.0) % len(self._walk_frames)
+                pix = self._walk_frames[walk_idx]
+            elif self._frames:
+                pix = self._frames[0]
+            tilt = 5.0
 
         elif self._state == "celebrating":
-            # 3.2 Celebration dance & sparkles
             seq = [4, 5, 6, 7]
             idx = seq[(self._walk_step // 2) % len(seq)]
-            bob_y = -abs(math.sin(self._walk_step * 0.45)) * 9.0
-            tilt = math.sin(self._walk_step * 0.45) * 11.0
-            # Sparkle stars
-            self._draw_star(painter, self._mascot_x + mw + 4, y_base - 10, 5.5, 2.0, QColor(245, 158, 11, 230))
-            self._draw_star(painter, self._mascot_x - 8, y_base - 4, 4.5, 1.8, QColor(45, 212, 191, 230))
+            pix = self._frames[idx] if self._frames else None
+            bob_y = -abs(math.sin(self._walk_step * 0.45)) * 8.0
+            tilt = math.sin(self._walk_step * 0.45) * 8.0
+            self._draw_star(painter, self._mascot_x + mw + 5, y_base - 6, 5.0, 1.8, QColor(245, 158, 11, 230))
+            self._draw_star(painter, self._mascot_x - 8, y_base - 2, 4.0, 1.5, QColor(45, 212, 191, 230))
 
         elif self._state == "waving":
             seq = self._waving_seq
             idx = seq[(self._walk_step // 3) % len(seq)]
-            tilt = math.sin(self._walk_step * 0.25) * 2.5
+            pix = self._frames[idx] if self._frames else None
+            tilt = self._head_pitch * 0.4
 
         elif self._state == "typing":
-            # 3.5 Typing sync nod
-            idx = 1
+            if not self._idle_pix.isNull():
+                pix = self._idle_pix
+            elif self._frames:
+                pix = self._frames[1]
             bob_y = -self._typing_bob
-            tilt = 0.0
+            tilt = self._head_pitch
 
         elif self._state == "shaking":
             idx = 2 if (self._shake_phase % 2 == 0) else 3
+            pix = self._frames[idx] if self._frames else None
             bob_y = (self._shake_phase % 2) * 1.5
-            tilt = 6.0 if (self._shake_phase % 2 == 0) else -6.0
+            tilt = 5.0 if (self._shake_phase % 2 == 0) else -5.0
 
         elif self._state == "leaping":
             p = self._leap_progress
             h_leap = 50.0
             bob_y = -4.0 * h_leap * p * (1.0 - p)
-            tilt = -14.0 if self._facing_left else 14.0
-            idx = 4
+            tilt = 12.0
+            pix = self._frames[4] if self._frames else None
         else:
-            seq = self._idle_seq
-            idx = seq[(self._walk_step // 4) % len(seq)]
+            if not self._idle_pix.isNull():
+                pix = self._idle_pix
+            elif self._frames:
+                pix = self._frames[0]
 
-        pix = self._frames[idx]
-        baseline_adj = FRAME_BASELINE_OFFSETS[idx] if idx < len(FRAME_BASELINE_OFFSETS) else 0.0
+        if not pix or pix.isNull():
+            return
+
         target_x = self._mascot_x
-        target_y = y_base + bob_y + baseline_adj
+        target_y = y_base + bob_y
 
         painter.save()
         painter.translate(target_x + mw / 2, target_y + mh / 2)
-        if tilt != 0.0:
-            painter.rotate(tilt)
         if self._facing_left:
-            painter.scale(-scale_x, scale_y)
-        else:
             painter.scale(scale_x, scale_y)
+            rot = -tilt
+        else:
+            painter.scale(-scale_x, scale_y)
+            rot = tilt
+        if rot != 0.0:
+            painter.rotate(rot)
 
         scaled = pix.scaled(mw, mh, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         painter.drawPixmap(-scaled.width() // 2, -scaled.height() // 2, scaled)
@@ -1426,8 +1497,8 @@ class LumiOverlay(QWidget):
         cw = self._card.width()
         ch = self._card.height()
         cx = max(edge, area.width() - edge - cw)
-        # Gap measured from top of the dark pill frame (y = ly + 74)
-        pill_top = ly + 74
+        # Gap measured from top of the dark pill frame (y = ly + stage_h)
+        pill_top = ly + getattr(self._launcher, "_stage_h", 88)
         cy = pill_top - gap - ch
         if cy < edge:
             cy = max(edge, area.height() - edge - ch)

@@ -145,7 +145,7 @@ class FollowupDialog(PrismDialog):
             i18n.t("The task is done. Tell Prism what to adjust and it will "
                    "send your note to the right step — or close this if it's "
                    "good."),
-            icon="sparkles", parent=parent, scrollable=True, closable=True)
+            icon="sparkles", parent=parent, scrollable=True, closable=False)
         self.setWindowTitle(i18n.t("Follow up"))
         self.resize(720, 680)
         self.setMinimumSize(580, 520)

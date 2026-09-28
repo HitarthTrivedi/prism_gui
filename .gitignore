@@ -50,3 +50,7 @@ run_prism.bat
 take_interaction_screenshot.js
 take_screenshot.js
 take_ss.ps1
+*.pdf
+*.html
+*.mp4
+ui_audit_verification/

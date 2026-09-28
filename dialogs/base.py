@@ -250,7 +250,7 @@ class PrismDialog(QDialog):
 
     def __init__(self, title: str, subtitle: str = "", icon: str = "",
                  parent=None, scrollable: bool = False,
-                 closable: bool = True, body_spacing: int = theme.CARD_GAP,
+                 closable: bool = False, body_spacing: int = theme.CARD_GAP,
                  eyebrow: str = "", leading: QWidget = None):
         super().__init__(parent)
         self.setWindowTitle(title)

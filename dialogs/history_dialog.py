@@ -565,7 +565,7 @@ class HistoryDialog(PrismDialog):
         if record.get("error"):
             parts.append(
                 f"<table width='100%' cellspacing='0' cellpadding='10'"
-                f"><tr><td bgcolor='{theme.ERR_BG}'>"
+                f"><tr><td bgcolor='#fef2f2'>"
                 f"<span style='color:{theme.ERR_INK}'>"
                 f"This run stopped early — {_esc(record['error'])}</span>"
                 f"</td></tr></table>")
@@ -584,7 +584,7 @@ class HistoryDialog(PrismDialog):
                     line += f" {len(failed)} failed."
             parts.append(
                 f"<table width='100%' cellspacing='0' cellpadding='10'>"
-                f"<tr><td bgcolor='{theme.ACCENT_RAMP[100]}'>"
+                f"<tr><td bgcolor='#f5f5f7'>"
                 f"<b>✉&nbsp; {_esc(email.get('subject', '(no subject)'))}</b><br>"
                 f"<span style='color:{theme.NEUTRAL[700]};font-size:12px'>"
                 f"{_esc(line)}</span></td></tr></table>")
@@ -707,7 +707,7 @@ class HistoryDialog(PrismDialog):
             if fu.get("error"):
                 parts.append(
                     f"<table width='100%' cellspacing='0' cellpadding='8' style='margin:0 0 10px 0;'>"
-                    f"<tr><td bgcolor='{theme.ERR_BG}'>"
+                    f"<tr><td bgcolor='#fef2f2'>"
                     f"<span style='color:{theme.ERR_INK}; font-size:12px;'>"
                     f"This follow-up stopped early — {_esc(fu['error'])}</span>"
                     f"</td></tr></table>")

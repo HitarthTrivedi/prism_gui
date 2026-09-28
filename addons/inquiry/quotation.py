@@ -883,7 +883,7 @@ class _CompareDialog(PrismDialog):
             i18n.t("Compare side by side"),
             i18n.t("What they asked for, against what you charge and what "
                    "it takes to make — and the quotation that comes out."),
-            icon="grid", parent=parent or quote_dialog, closable=True,
+            icon="grid", parent=parent or quote_dialog, closable=False,
             scrollable=True)
         self.setWindowTitle(i18n.t("Compare side by side"))
         self.resize(1080, 760)

@@ -140,7 +140,7 @@ def test_no_source_file_hands_an_rgba_token_straight_to_qcolor():
     theme.qcolor(...). This scans every shipped .py for the literal pattern."""
     tokens = _rgba_tokens()
     offenders = []
-    skip = {"venv", ".git", "__pycache__", "prism_terminal", "tests", "node_modules"}
+    skip = {"venv", ".venv", ".git", "__pycache__", "prism_terminal", "tests", "node_modules"}
     for root, dirs, files in os.walk(ROOT):
         dirs[:] = [d for d in dirs if d not in skip]
         for name in files:
@@ -164,3 +164,45 @@ def test_no_source_file_hands_an_rgba_token_straight_to_qcolor():
                     offenders.append(f"{os.path.relpath(path, ROOT)}:{node.lineno} "
                                      f"QColor(theme.{arg.attr})")
     assert not offenders, "use theme.qcolor(): " + "; ".join(offenders)
+
+
+def test_no_html_bgcolor_uses_rgba_token():
+    """Qt's QTextHtmlParser silently maps any unrecognised `bgcolor` value to
+    #000000 (pitch black). `rgba(...)` strings are not recognised. This test
+    scans every .py that contains `bgcolor=` f-string patterns and ensures none
+    of them embed a theme token that resolves to an rgba() string.
+
+    The only safe values for `bgcolor` are solid 6-digit hex strings.
+    Use `theme.HTML_ERR_BG`, `theme.HTML_OK_BG`, etc., or call `theme.html_bg()`.
+    """
+    # rgba token names from the live theme module
+    tokens = _rgba_tokens()
+    import re
+    # grep source files for   bgcolor='{theme.SOMETHING}'
+    # or                       bgcolor="{theme.SOMETHING}"
+    pattern = re.compile(r"""bgcolor=['"][^'"]*\{theme\.(\w+)\}[^'"]*['"]""")
+    offenders = []
+    skip = {"venv", ".venv", ".git", "__pycache__", "prism_terminal", "tests", "node_modules"}
+    for root, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for name in files:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(root, name)
+            try:
+                src = open(path, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for m in pattern.finditer(src):
+                attr = m.group(1)
+                # Only flag if the token resolves to an rgba() string
+                # e.g. ACCENT_RAMP is a dict — skip it, the key determines the value
+                val = getattr(theme, attr, None)
+                if isinstance(val, str) and val.strip().startswith("rgba"):
+                    lineno = src[:m.start()].count("\n") + 1
+                    offenders.append(
+                        f"{os.path.relpath(path, ROOT)}:{lineno} "
+                        f"bgcolor uses rgba token theme.{attr} — use theme.HTML_* or theme.html_bg()"
+                    )
+    assert not offenders, "bgcolor+rgba will render black: " + "; ".join(offenders)
+
