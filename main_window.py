@@ -210,11 +210,15 @@ class DashboardCentral(QWidget):
         try:
             cfg = CB.config.load()
             custom_bg = cfg.get("custom_bg") if cfg else None
+            # Empty string means the user explicitly chose the pure-white default.
+            # A non-empty value that exists on disk is a bundled or user wallpaper.
             if custom_bg and os.path.exists(custom_bg):
                 bg_path = custom_bg
+            elif custom_bg is None:
+                # Fresh install — use the built-in default background.
+                bg_path = paths.resource("assets", "dashboard-bg.jpg")
+            # custom_bg == "" → white; bg_path stays None
         except Exception:
-            pass
-        if not bg_path:
             bg_path = paths.resource("assets", "dashboard-bg.jpg")
         self._bg_orig = QPixmap(bg_path) if bg_path and os.path.exists(bg_path) else None
         self._cached_pixmap = None
@@ -272,12 +276,17 @@ class DashboardCentral(QWidget):
             grad.setColorAt(1.0, QColor(255, 255, 255, 30))
             painter.fillRect(self.rect(), grad)
         else:
-            painter.fillRect(self.rect(), QColor("#09090b"))
+            painter.fillRect(self.rect(), QColor("#f0f2f7"))  # soft light default
 
     def set_background(self, path: str):
         if path and os.path.exists(path):
+            # A real wallpaper (bundled preset)
             self._bg_orig = QPixmap(path)
+        elif path == "" or path is None:
+            # Empty string = user chose pure-white default
+            self._bg_orig = None
         else:
+            # Fallback for unknown path
             bg_path = paths.resource("assets", "dashboard-bg.jpg")
             self._bg_orig = QPixmap(bg_path) if os.path.exists(bg_path) else None
         self._cached_pixmap = None

@@ -44,8 +44,8 @@ import platform
 import sys
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QSize, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
@@ -1496,67 +1496,233 @@ class SettingsPanel(QDialog):
         return rows
 
     # ── appearance ────────────────────────────────────────────────────────
+    # Bundled wallpapers shipped with Prism. Resolved relative to this file so
+    # they work regardless of where the user launches the app from.
+    _BUNDLED_WALLS: list[tuple[str, str]] = [
+        ("prism_wall_1.jpg",  "Wallpaper 1"),
+        ("prism_wall_2.jpg",  "Wallpaper 2"),
+        ("prism_wall_3.jpg",  "Wallpaper 3"),
+        ("prism_wall_4.jpg",  "Wallpaper 4"),
+        ("prism_wall_5.png",  "Wallpaper 5"),
+        ("prism_wall_6.png",  "Wallpaper 6"),
+    ]
+
+    @staticmethod
+    def _bundled_wall_dir() -> str:
+        """Absolute path to assets/wallpapers/ next to this package."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(os.path.dirname(here), "assets", "wallpapers")
+
     def _appearance(self, col):
         card_wall = Card()
-        cw = card_wall.body((theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_3)
+        cw = card_wall.body(
+            (theme.CARD_PAD, theme.SPACE_4, theme.CARD_PAD, theme.SPACE_4),
+            spacing=theme.SPACE_3,
+        )
+
+        # ── header ──
         head_w = QHBoxLayout()
         head_w.setSpacing(theme.SPACE_3)
-        head_w.addWidget(C.IconPad("folder", theme.ACCENT, 34, theme.R_CONTROL, 17))
+        head_w.addWidget(
+            C.IconPad("image", theme.ACCENT, 34, theme.R_CONTROL, 17)
+        )
         w_col = QVBoxLayout()
-        w_col.addWidget(C.label(i18n.t("Dashboard wallpaper"), level="CARD_TITLE"))
-        w_col.addWidget(C.label(i18n.t("Canvas image blurred behind frosted cards"), level="META"))
+        w_col.addWidget(
+            C.label(i18n.t("Dashboard wallpaper"), level="CARD_TITLE")
+        )
+        w_col.addWidget(
+            C.label(
+                i18n.t("Choose one of the Prism wallpapers, upload your own image, or keep the clean default."),
+                level="META",
+            )
+        )
         head_w.addLayout(w_col, stretch=1)
         cw.addLayout(head_w)
-        cw.addWidget(C.label(
-            i18n.t("The background image is dynamically blurred and sampled by all cards and the left navigation rail. "
-                   "You can select any image or photo on your computer."),
-            level="SUPPORT", wrap=True))
+
+        # ── active wallpaper label ──
         current_bg = (self.cfg.get("custom_bg") or "").strip()
-        status_text = (os.path.basename(current_bg) if current_bg and os.path.exists(current_bg)
-                       else i18n.t("Default Prism wallpaper"))
-        cw.addWidget(C.label(f"{i18n.t('Active wallpaper')}: {status_text}", level="META"))
+        wall_dir = self._bundled_wall_dir()
+
+        def _same_path(p1: str, p2: str) -> bool:
+            if not p1 or not p2:
+                return False
+            return os.path.normcase(os.path.normpath(p1)) == os.path.normcase(os.path.normpath(p2))
+
+        is_bundled = any(
+            _same_path(current_bg, os.path.join(wall_dir, fname))
+            for fname, _ in self._BUNDLED_WALLS
+        ) if current_bg else False
+
+        if current_bg and os.path.exists(current_bg):
+            if is_bundled:
+                matched_label = next(
+                    (lbl for fname, lbl in self._BUNDLED_WALLS
+                     if _same_path(current_bg, os.path.join(wall_dir, fname))),
+                    os.path.basename(current_bg),
+                )
+                status_text = matched_label
+            else:
+                status_text = f"{os.path.basename(current_bg)} ({i18n.t('Custom')})"
+        else:
+            status_text = i18n.t("Default (Light)")
+
+        cw.addWidget(
+            C.label(f"{i18n.t('Active')}: {status_text}", level="META")
+        )
+
+        # ── thumbnail grid ──
+        # 3 columns: each tile is 190x116 px with a label underneath.
+        THUMB_W, THUMB_H = 190, 116
+        RADIUS = 10
+        COLS = 3
+
+        def _tile_border(active: bool) -> str:
+            if active:
+                return f"3px solid {theme.ACCENT}"
+            return "2px solid rgba(0,0,0,0.12)"
+
+        grid_widget = QWidget()
+        grid_widget.setStyleSheet("background: transparent;")
+        grid_rows = QVBoxLayout(grid_widget)
+        grid_rows.setContentsMargins(0, 0, 0, 0)
+        grid_rows.setSpacing(theme.SPACE_3)
+
+        all_options: list[tuple[str, str]] = [("default", i18n.t("Default (Light)"))] + [
+            (os.path.join(wall_dir, fname), label)
+            for fname, label in self._BUNDLED_WALLS
+        ]
+
+        if current_bg and os.path.exists(current_bg) and not is_bundled:
+            all_options.append((current_bg, f"{i18n.t('Custom')}: {os.path.basename(current_bg)}"))
+
+        rows_of = [all_options[i:i + COLS] for i in range(0, len(all_options), COLS)]
+
+        for row_items in rows_of:
+            row_layout = QHBoxLayout()
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(theme.SPACE_3)
+
+            for path, label in row_items:
+                is_active = (
+                    (path == "default" and not current_bg)
+                    or (path != "default" and _same_path(current_bg, path))
+                )
+
+                # Each tile: image button + text label below
+                tile_col = QVBoxLayout()
+                tile_col.setContentsMargins(0, 0, 0, 0)
+                tile_col.setSpacing(5)
+
+                btn = QPushButton()
+                btn.setFixedSize(THUMB_W, THUMB_H)
+                btn.setToolTip(label)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setFlat(True)
+
+                border = _tile_border(is_active)
+
+                if path == "default":
+                    btn.setStyleSheet(
+                        f"QPushButton {{ border: {border}; border-radius: {RADIUS}px;"
+                        " background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                        "stop:0 #e8eaf0, stop:0.5 #f0f2f7, stop:1 #dde1ea);"
+                        " color: #555; font-size: 13px; font-weight: 600; }}"
+                    )
+                    btn.setText("Default\n(Light)")
+                else:
+                    pix = QPixmap(path)
+                    if not pix.isNull():
+                        scaled = pix.scaled(
+                            THUMB_W, THUMB_H,
+                            Qt.KeepAspectRatioByExpanding,
+                            Qt.SmoothTransformation,
+                        )
+                        sx = max(0, (scaled.width() - THUMB_W) // 2)
+                        sy = max(0, (scaled.height() - THUMB_H) // 2)
+                        cropped = scaled.copy(sx, sy, THUMB_W, THUMB_H)
+                        btn.setIcon(QIcon(cropped))
+                        btn.setIconSize(QSize(THUMB_W, THUMB_H))
+                    btn.setStyleSheet(
+                        f"QPushButton {{ border: {border};"
+                        f" border-radius: {RADIUS}px;"
+                        "  padding: 0; margin: 0;"
+                        "  background: transparent; }}"
+                    )
+
+                # Active tick badge
+                if is_active:
+                    ck = QLabel("✓", btn)
+                    ck.setStyleSheet(
+                        f"background: {theme.ACCENT}; color: white;"
+                        " font-size: 13px; font-weight: bold;"
+                        " border-radius: 10px; padding: 2px 5px; border: none;"
+                    )
+                    ck.adjustSize()
+                    ck.move(THUMB_W - ck.width() - 6, 6)
+                    ck.raise_()
+
+                btn.clicked.connect(
+                    lambda checked=False, p=path: self._apply_preset_wallpaper(p)
+                )
+                tile_col.addWidget(btn)
+
+                # Name label under the tile
+                display_label = label
+                if len(display_label) > 24:
+                    display_label = display_label[:21] + "…"
+                lbl_name = C.label(display_label, level="META")
+                lbl_name.setAlignment(Qt.AlignCenter)
+                lbl_name.setFixedWidth(THUMB_W)
+                lbl_name.setToolTip(label)
+                tile_col.addWidget(lbl_name)
+
+                row_layout.addLayout(tile_col)
+
+            row_layout.addStretch()
+            grid_rows.addLayout(row_layout)
+
+        cw.addWidget(grid_widget)
+
+        # ── custom wallpaper button ──
         cw.addWidget(self._buttons([
-            C.button(i18n.t("Choose custom wallpaper…"), "primary",
-                     on_click=self._choose_wallpaper),
-            C.button(i18n.t("Reset to default"), "secondary",
-                     on_click=self._reset_wallpaper),
+            C.button(
+                i18n.t("Choose custom wallpaper…"),
+                "secondary",
+                icon_name="image",
+                on_click=self._choose_wallpaper,
+            ),
         ]))
+
         col.addWidget(card_wall)
 
     def _choose_wallpaper(self):
-        suggested = os.path.expanduser("~")
+        current_bg = (self.cfg.get("custom_bg") or "").strip()
+        if current_bg and os.path.exists(os.path.dirname(current_bg)):
+            suggested = os.path.dirname(current_bg)
+        else:
+            suggested = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Select dashboard wallpaper"), suggested,
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
+            self,
+            i18n.t("Select dashboard wallpaper"),
+            suggested,
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
         if path:
-            self.wallpaper_changed.emit(path)
-            target = self.parent() or self.window()
-            if hasattr(target, "set_wallpaper") and target is not self:
-                target.set_wallpaper(path)
-            self.cfg["custom_bg"] = path
-            try:
-                CB.config.save(self.cfg)
-            except Exception:
-                pass
-            self.refresh()
-            QMessageBox.information(
-                self, i18n.t("Wallpaper"),
-                i18n.t("Dashboard wallpaper updated successfully."))
+            self._apply_preset_wallpaper(path)
 
-    def _reset_wallpaper(self):
-        self.wallpaper_changed.emit("")
+    def _apply_preset_wallpaper(self, path: str):
+        """Apply one of the Prism bundled wallpapers (or '' for white default)."""
+        effective = "" if path == "default" else path
+        self.wallpaper_changed.emit(effective)
         target = self.parent() or self.window()
         if hasattr(target, "set_wallpaper") and target is not self:
-            target.set_wallpaper("")
-        self.cfg["custom_bg"] = ""
+            target.set_wallpaper(effective)
+        self.cfg["custom_bg"] = effective
         try:
             CB.config.save(self.cfg)
         except Exception:
             pass
         self.refresh()
-        QMessageBox.information(
-            self, i18n.t("Wallpaper"),
-            i18n.t("Dashboard wallpaper reset to default."))
 
     # ── privacy & data ────────────────────────────────────────────────────
     def _privacy(self, col):
