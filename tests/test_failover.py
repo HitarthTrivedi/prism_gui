@@ -155,6 +155,31 @@ class PickingAnAlternative(unittest.TestCase):
             for name in A.alternatives_for(stage, []):
                 self.assertIn(name, A.AGENT_REGISTRY, f"{stage} -> {name}")
 
+    def test_canva_is_not_offered_when_nobody_asked_for_something_editable(self):
+        """A real run: ChatGPT hit its free-tier image limit on a request
+        for a photorealistic product composite from reference photos.
+        Canva sits first in the visual catalogue ("most business visual
+        work is a post or a brochure"), and the failover offered it
+        anyway — a template builder handed a job it can never do,
+        because catalogue order was the only thing consulted. wants_canva
+        already exists to keep the PRIMARY tool from routing an ordinary
+        image request through Canva; this is that same signal, reused for
+        the fallback choice instead of ignored by it."""
+        for stage in ("visual", "presentation"):
+            picks = A.alternatives_for(stage, [], query="make me a product photo")
+            self.assertNotIn("Canva", picks, stage)
+            picks_no_query = A.alternatives_for(stage, [])
+            self.assertNotIn("Canva", picks_no_query, stage)
+
+    def test_canva_is_still_offered_when_the_customer_actually_asked_for_it(self):
+        """The legitimate case wants_canva protects stays intact: someone
+        who explicitly wants an editable design still gets Canva offered
+        as a fallback, not silently blocked by the same fix."""
+        for stage in ("visual", "presentation"):
+            picks = A.alternatives_for(
+                stage, [], query="make a poster I can edit later in canva")
+            self.assertIn("Canva", picks, stage)
+
 
 class GoogleGeminiIsChatGPTsRealFallback(unittest.TestCase):
     """The owner's ask (15 Sep 2026): add a Google image tool to the visual

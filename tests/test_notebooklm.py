@@ -176,6 +176,43 @@ class WiredIntoTheRun(unittest.TestCase):
         self.assertIn("_capture_download(driver, stage", src)
         self.assertIn("_capture_download(driver, stage, click", inspect.getsource(AU._nb_download))
 
+    def test_a_finished_video_is_not_thrown_away_right_after(self):
+        """17 Sep 2026: a NotebookLM Video Overview could render and download
+        clean, and the run would STILL end with no sign of it — the very next
+        line, `_make_editable(..., made_image=bool(got))`, crashed with
+        "cannot access local variable 'got'". `got` is only ever assigned
+        inside the generic else-branch (the image-wait/artwork loop); the
+        Apollo, Canva, ElevenLabs and NotebookLM branches all skip straight
+        past it, so a run that took NotebookLM's branch — and had already
+        spent up to `generate_wait` seconds rendering, and already
+        downloaded the file — lost that result to an UnboundLocalError
+        before `_save_artifacts(nb_files, ...)` ever ran.
+
+        The fix: `got` is initialised before the whole dispatch (Apollo /
+        Canva / ElevenLabs / NotebookLM / the generic maker path), so every
+        branch reaches `bool(got)` with a real value — 0 for the branches
+        that never counted a generated image, same as before for the one
+        that does."""
+        src = inspect.getsource(AU.run)
+        dispatch_start = src.index('if agent_cfg.get("search_tool") == "apollo":')
+        notebooklm_branch = src.index('elif agent_name == "NotebookLM":')
+        # rindex, not index: this fix's own explanatory comment (above)
+        # quotes the crash line as documentation, which would otherwise be
+        # matched instead of the real call below it.
+        made_image_call = src.rindex("made_image=bool(got)")
+        self.assertLess(dispatch_start, notebooklm_branch,
+                        "sanity: NotebookLM is one branch of this dispatch")
+        self.assertLess(notebooklm_branch, made_image_call,
+                        "sanity: the crash site comes after every branch")
+        # The fix: a `got = ` assignment between the two, so every branch
+        # -- Apollo, Canva, ElevenLabs, NotebookLM, and the generic maker
+        # path that later reassigns it -- has `got` defined before
+        # `bool(got)` is ever reached.
+        before_dispatch = src[:dispatch_start]
+        self.assertIn("got = ", before_dispatch,
+                     "`got` must be initialised before the tool dispatch, "
+                     "not only inside the generic else-branch")
+
 
 if __name__ == "__main__":
     unittest.main()

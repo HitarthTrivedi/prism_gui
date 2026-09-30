@@ -588,6 +588,143 @@ class AttachmentsReachTheTool(unittest.TestCase):
         self.assertEqual(inp.received, [])
 
 
+class ASlowBatchIsNotUndercounted(unittest.TestCase):
+    """A real run of six real photos came back 'only 2 of 6 attachment(s)
+    reached ChatGPT — the rest never appeared on the page' — not because
+    four actually failed, but because the browser was still one or two
+    polls away from rendering their chips when _verify_page_attachments
+    took the FIRST non-empty answer as final. The other four showed up a
+    moment later, on the very same upload, and were reported as lost."""
+
+    def setUp(self):
+        # A fake clock this test drives itself, advanced only when the code
+        # under test actually calls time.sleep — the stability window the
+        # fix waits out is exercised exactly, with no real wall-clock delay.
+        self.clock = 1000.0
+        patch_sleep = mock.patch.object(
+            automation.time, "sleep",
+            side_effect=lambda s: setattr(self, "clock", self.clock + s))
+        patch_time = mock.patch.object(
+            automation.time, "time", side_effect=lambda: self.clock)
+        patch_sleep.start()
+        patch_time.start()
+        self.addCleanup(patch_sleep.stop)
+        self.addCleanup(patch_time.stop)
+
+    def test_chips_that_finish_rendering_a_moment_late_still_count(self):
+        folder = tempfile.mkdtemp(prefix="prism-upload-progressive-")
+        paths = []
+        for i in range(6):
+            p = os.path.join(folder, f"photo{i}.jpg")
+            with open(p, "wb") as f:
+                f.write(b"\xff\xd8\xff")
+            paths.append(p)
+        attachments = [{"path": p, "name": os.path.basename(p), "size": 9}
+                       for p in paths]
+        basenames = [os.path.basename(p) for p in paths]
+        # Two chips visible on the first few polls (a real render still
+        # catching up), all six from partway through — the exact shape of
+        # the real bug report.
+        chip_counts = [2, 2, 2, 6, 6, 6, 6, 6]
+        seen = {"n": 0}
+
+        def fake_execute_script(script, *_args):
+            if "chips_count" in script:
+                n = chip_counts[min(seen["n"], len(chip_counts) - 1)]
+                seen["n"] += 1
+                return {"matched_names": basenames[:n], "chips_count": n,
+                       "has_busy": False, "error_msg": ""}
+            return False   # the dispatch-events / still-uploading scripts
+
+        inp = _FakeFileInput(accepts=True)
+        driver = _UploadDriver([inp])
+        driver.execute_script = fake_execute_script
+
+        sent = automation._upload_files(driver, {}, attachments, "ChatGPT")
+        self.assertEqual(sent, 6)
+
+
+class _LazyMountDriver:
+    """A page whose <input type='file'> does not exist at all until its
+    own attach-trigger button is clicked — Google Gemini's real
+    behaviour, confirmed by reading its DOM live: a freshly loaded page
+    has ZERO file inputs anywhere on it, not hidden, not late."""
+
+    class _Trigger:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def is_displayed(self):
+            return True
+
+        def click(self):
+            self._outer.revealed = True
+
+    def __init__(self, trigger_selector: str, inputs):
+        self.trigger_selector = trigger_selector
+        self.inputs = inputs
+        self.revealed = False
+
+    def find_elements(self, by, selector):
+        if selector == self.trigger_selector:
+            return [self._Trigger(self)]
+        return list(self.inputs) if self.revealed else []
+
+    def find_element(self, by, selector):
+        from selenium.common.exceptions import NoSuchElementException
+        found = self.find_elements(by, selector)
+        if not found:
+            raise NoSuchElementException(selector)
+        return found[0]
+
+    def execute_script(self, script, *args):
+        return False
+
+
+class AComposerThatMountsItsUploadInputOnlyAfterAClick(unittest.TestCase):
+    """A real run with 6 reference photos came back 'Google Gemini has no
+    file-upload field on this page' on every attempt — not a slow render
+    the existing WebDriverWait already covers, but a page with no file
+    input in its DOM at all until the '+' beside the composer is used."""
+
+    def setUp(self):
+        patch = mock.patch.object(automation.time, "sleep")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_the_trigger_is_clicked_before_looking_for_the_input(self):
+        folder = tempfile.mkdtemp(prefix="prism-upload-lazy-")
+        real = os.path.join(folder, "reference.jpg")
+        with open(real, "wb") as f:
+            f.write(b"\xff\xd8\xff")
+        trigger_sel = "button[aria-label*='Add files' i]"
+        inp = _FakeFileInput(accepts=True)
+        driver = _LazyMountDriver(trigger_sel, [inp])
+        agent_cfg = {"upload_trigger_selectors": (
+            "button[aria-label*='Upload file' i]",  # tried first, absent
+            trigger_sel,
+        )}
+        attachments = [{"path": real, "name": "reference.jpg", "size": 9}]
+        sent = automation._upload_files(driver, agent_cfg, attachments,
+                                        "Google Gemini")
+        self.assertEqual(sent, 1)
+        self.assertEqual(inp.received, [real])
+
+    def test_a_tool_with_no_trigger_configured_behaves_exactly_as_before(self):
+        """No `upload_trigger_selectors` at all — the common case, every
+        other tool in the registry — must not change behaviour: an input
+        that is simply never there is still reported honestly, not
+        silently retried against a selector nobody configured."""
+        folder = tempfile.mkdtemp(prefix="prism-upload-lazy-notrigger-")
+        real = os.path.join(folder, "reference.jpg")
+        with open(real, "wb") as f:
+            f.write(b"\xff\xd8\xff")
+        driver = _LazyMountDriver("button[aria-label*='Add files' i]", [])
+        attachments = [{"path": real, "name": "reference.jpg", "size": 9}]
+        sent = automation._upload_files(driver, {}, attachments, "SomeTool")
+        self.assertEqual(sent, 0)
+
+
 # ── 4. the profile only one browser can hold ─────────────────────────────────
 
 class OnlyPrismsOwnChromeIsClosed(unittest.TestCase):
