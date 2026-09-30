@@ -10,6 +10,839 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# Round 52 — a rotated copy of the same board was counted as a different board, and the array undercounted a real panel by 8 boards
+
+Reported by the manufacturing company field-testing Gerber automation:
+Prism's own answer sheet against the client's real fab quotation for the
+same job. Board size matched the client's figure exactly (25.50 x
+11.40mm, to the fourth decimal in inches) — the single-unit outline
+reading was never the problem. The array was: Prism said 28 boards in
+a clean "4 x 7" grid, 110.00 x 118.59mm; the client's own quotation
+form said 36 pieces, 121.6 x 133.6mm. Not noise — a real 8-board, real
+~12-15mm gap, and the reviewer's own words: "the filter... doesn't work
+correctly" on the newer, more complex panels they're seeing now.
+
+**Root cause, in `panel()` (`core/gerber.py`):** candidate board-sized
+faces on the outline layer are grouped into "the unit" by their own
+(width, height), rounded — the assumption being that every copy of the
+same board is drawn the same way round. A modern fab panel mixing
+orientations to pack the frame tighter (a real, ordinary practice, not
+an edge case) breaks that assumption directly: a board turned 90°
+has its width and height SWAPPED, so it lands in a completely
+different size bucket than its own un-rotated twin, and the code kept
+only the larger bucket — silently treating the rotated copies as if
+they were not there at all.
+
+Reproduced from first principles, not guessed at: a synthetic 75 x
+50mm panel — four 20 x 15mm boards in a block, two more of the exact
+same board turned 90° filling the rest of the frame, six real boards —
+came back "28 of 36"-shaped wrong two different ways depending on
+whether a frame face happens to fully enclose the missed units:
+sometimes an undercounted array (the client's own shape: some real
+count, smaller than true), sometimes the whole detection rejected
+outright and the entire panel reported as one giant "board" the size
+of the full frame (the fill-ratio sanity check — correctly there to
+catch decorative repeats — tripped by real boards it could not see).
+Both are the same root cause.
+
+**The fix:** the grouping key is now the SORTED (width, height) —
+`tuple(sorted((w, h)))` — so a board and its own 90°-rotated copy land
+in the same bucket, the way they are the same physical board on the
+panel. The reported single-board size can no longer come from
+whichever copy the group happens to start with either: it is now the
+DOMINANT orientation among the real units (a plain tally, not
+`units[0]`), so a mostly-one-way panel with a rotated minority still
+reports its board the way most of the panel actually reads it.
+
+Verified against the real customer sample jobs already in the suite
+(`PRISM_SLOW_TESTS=1`) — unaffected, as expected: none of them mix
+orientations, so sorting a key that was already symmetric changes
+nothing for them. The fix only changes behaviour for exactly the case
+it targets.
+
+**What this does not do:** it does not fix every possible "complex
+panel" failure mode — only the one this specific report's numbers
+pointed to and that a synthetic reproduction confirmed. If the same
+account hits another wrong array on a different kind of newer panel
+(non-rectangular tiling, mixed board sizes on one panel, rails that
+don't close as a single face), that needs its own real numbers to
+diagnose the same way this one was — a guess fixed against no
+reproduction is exactly the kind of change this project does not make.
+
+Files: `prism_terminal/core/gerber.py` (`panel`'s grouping key and
+board-size reporting), `tests/test_gerber.py`
+(`ARotatedCopyIsStillTheSameBoard`, `PANEL_MIXED_ORIENTATION`).
+
+---
+
+# Round 51 — when ChatGPT's image limit ran out, the fallback chain handed a photo-composite job to a template tool, then to a page with no upload field at all
+
+Reported from a real run: a request to composite a product hamper photo
+from 6 reference images. ChatGPT hit its own free-tier image limit,
+Prism failed over to Canva — which came back generic, because Canva
+builds an editable template and cannot use reference photos for a
+photorealistic composite at all — then failed over again to Google
+Gemini, which never received a single one of the 6 attachments.
+
+**Canva was never going to be able to do this job.** `alternatives_for()`
+picks a fallback by catalogue order alone: "visual" lists Canva first,
+deliberately, "because most business visual work is a post or a
+brochure" — a real, reasonable default for THAT case. But this project
+already has a signal for the other case: `wants_canva()` reads the
+customer's own words for "canva", "editable", "template" and so on, and
+already keeps the PRIMARY tool from routing an ordinary image request
+through Canva (`NO_CANVA_INSTRUCTION`). It was simply never reused for
+the fallback choice — so a photorealistic composite request, which
+`wants_canva()` would correctly say no to, still got offered Canva the
+moment the primary tool failed. Fixed by having `alternatives_for()`
+(now taking the user's own task text) exclude Canva from "visual" and
+"presentation" fallbacks unless that same signal says the customer
+actually asked for something editable — the legitimate case keeps
+working, verified with its own test.
+
+**Google Gemini attaching zero of 6 files was a second, separate bug.**
+Confirmed live, end-to-end, by driving the real gemini.google.com page:
+a freshly loaded page has ZERO `<input type='file'>` elements anywhere
+on it — not hidden, not slow to render, none — until the button beside
+the composer, aria-label "Upload & tools", is clicked; clicking it
+mounts a hidden file input, and assigning a file to that input directly
+produced a real attachment chip and enabled the send button, confirming
+the whole path works, not just that the button exists. The 15 Sep
+registry note that verified Gemini only ever tried a TEXT prompt, no
+reference photos, which is exactly why this went unnoticed: no amount
+of the upload path's existing wait (Round "composer renders late" fix)
+ever finds an input that the page has not created yet. `_upload_files`
+now tries a short list of candidate "reveal the upload control" buttons
+first when a tool declares them (`upload_trigger_selectors`, new,
+currently only set for Google Gemini) — silent and best-effort, so a
+tool that never needed this is untouched either way. One more real find
+along the way: the revealed input's own `accept` attribute lists
+document types only, no image extension in it at all — turned out to
+be a picker-dialog hint only, not an enforced filter, so an image still
+goes through it without issue.
+
+**What this does not do:** it does not change why ChatGPT hit its
+image limit in the first place — that is ChatGPT's own account quota,
+outside Prism's control; the fix here is that the fallback Prism reaches
+for next is now one that can actually do the job.
+
+Files: `prism_terminal/core/agents.py` (`alternatives_for`'s new `query`
+parameter and Canva exclusion, Google Gemini's `upload_trigger_selectors`),
+`prism_terminal/core/automation.py` (`_upload_files`'s trigger-click step,
+`_retry_failed_stages`' call site passing `query`),
+`tests/test_failover.py` (Canva exclusion/inclusion tests),
+`tests/test_cross_platform_browser.py`
+(`AComposerThatMountsItsUploadInputOnlyAfterAClick`).
+
+---
+
+# Round 50 — a real 6-photo attachment was reported "only 2 of 6 reached ChatGPT" while it was still uploading
+
+Reported straight from a real run's own terminal log, across several
+automation attempts on the same job: "📎 verified 6 file(s) attached to
+ChatGPT" the first time, then later runs on the same kind of job coming
+back "⚠️ only 2 of 6 attachment(s) reached ChatGPT — the rest never
+appeared on the page", and separately "⚠️ only 2 of 6 attachment(s)
+reached ChatGPT" on a fresh conversation with no prior failure nearby —
+not a browser crash, not a rejected file, an upload that was still
+legitimately in progress.
+
+**Root cause, in `_verify_page_attachments` (`core/automation.py`):** a
+real upload of several photos lands progressively — the browser reads
+and thumbnails each file in turn, so six camera photos can still be two
+chips deep half a second in. The polling loop broke on the very FIRST
+poll that saw ANY chip, any matched filename, or any busy indicator —
+so whatever partial count happened to be on screen at that one instant
+was reported as final, even though the rest of the very same upload
+would have shown up within another second or two. Not caught by the
+existing tests because the fake driver they use always returns `False`
+from `execute_script`, which sidesteps this function's real counting
+logic entirely (falls straight to the "assume everything worked"
+fallback) — a gap closed here with a driver that actually returns
+growing chip counts across polls, the shape of the real bug.
+
+**The fix:** keep the BEST count any poll has seen rather than the
+FIRST, and only stop once it has held steady — no growth, nothing still
+marked busy — for a short grace window (1.2s), or every file is
+accounted for, or the overall timeout runs out. The verification
+window itself also now scales with how many files there are to wait
+for (5s plus 1.5s per file beyond the first, capped at 24s) instead of
+a flat 5s that was never enough room for six real photos to finish
+rendering — the stability check still returns early once they are all
+in, so this only matters when the upload is genuinely still working.
+
+**What this does not fix:** the same log also showed several browser
+crashes ("no such window: target window already closed", "invalid
+session id") following repeated warnings that Chrome had auto-updated
+mid-session (pinned v152, running v153) — a separate, real instability
+this round did not touch. Worth running `/chrome` to update or clear
+the pin before the next long automation run; making the pipeline
+recover from a browser that closes mid-run is a bigger, different
+piece of work than an undercounted upload.
+
+Files: `prism_terminal/core/automation.py` (`_verify_page_attachments`,
+`_upload_files`'s verification timeouts), `tests/test_cross_platform_browser.py`
+(`ASlowBatchIsNotUndercounted`).
+
+---
+
+# Round 49 — overlapping red callouts on a real generated job now get a leader line instead
+
+Checked directly against the actual PNGs a real run of this job produced
+(`~/Desktop/Prism Step/Assem1 (7)/`) — not a synthetic case: on "top", a
+hole's Ø, one cutout's size and a second cutout's size all landed on
+the same few pixels, unreadable. On "bottom", a cutout's size label
+sat on top of a completely different, nearby hole's own drawn circle.
+
+**Root cause.** Every callout (`_draw_flat_pattern`'s cutout-size and
+hole-diameter labels) was placed "beside its own shape" — a fixed small
+offset from that one feature, with no idea any other feature's label,
+or even another feature's own drawn shape, might already be sitting
+there. Fine when features are spread out; on a real job with several
+small holes and cutouts within a few mm of each other, several labels'
+"beside" spots landed in the same place.
+
+**The fix, the way it was asked for:** a leader line. New
+`_place_label()` tries a label's normal spot first — nothing changes
+for the common case, a label reads exactly where it always has — and
+only when that spot collides with something already on the page (checked
+against a shared `label_boxes` list every cutout, hole and label
+registers itself into, in two passes: every shape is drawn and
+registered first, every label placed second, so a cutout's label
+already knows about a hole drawn later in the old single-pass order,
+which is what let it miss that hole before) does it try further
+positions — straight out along the same direction, then fanned out to
+other compass directions — and draw a thin line from the feature back
+to wherever the label ended up. Every real feature still gets its
+number; a crowded one just points at it from open space instead of
+printing on top of something else.
+
+Verified by rendering the actual job at every step, the discipline this
+whole feature has followed since Round 41 — not by trusting the
+collision math alone. Round 47's `flats` cutting images are exactly
+where this mattered most: a shop-floor image just filling the page
+means labels routinely sit close together now.
+
+Files: `prism_terminal/core/stepfile.py` (`_label_box`, `_boxes_overlap`,
+`_place_label`, `_draw_flat_pattern`'s cutout/hole labelling
+restructured into a draw-then-label two-pass), `tests/test_stepfile.py`
+(`test_no_two_red_callouts_overlap_on_a_real_generated_job`).
+
+---
+
+# Round 48 — the STEP sheet is drawn straight to PNG now, no HTML, no SVG, no browser
+
+Real feedback from a real job's output: too many files (an HTML page, a
+combined SVG, and one more SVG per part for the isometric alone), and a
+confusing cluster of short crossing lines at the "side" part's own
+stepped corner in what a person actually looks at. Both addressed.
+
+**File count and format.** `render_sheet()` used to write an HTML page,
+a combined SVG, and `<model> - view <part>.svg` for every part's
+isometric — main reason for the isometric SVGs' existence was letting
+someone open one part's 3D view alone, but nobody asked for that and it
+tripled the file count for no deliverable purpose. It also only ever
+produced a PNG when Playwright's Chromium happened to be installed —
+optional, and the exact class of fragility Round 38 already burned this
+project on once (a fresh Mac with no Chromium). Now: two kinds of file,
+both PNG, always produced, no browser involved —
+
+  - `<model> - drawing sheet.png` — everything, one page (same content
+    the old combined SVG had: every part's flat pattern or formed
+    3-view, isometric, hole table, notes, title block);
+  - `<model> - <part> - flat pattern.png` — one per part that has a
+    flat pattern, that part ALONE, full page width and height (no
+    isometric column sharing the page with it — a standalone cutting
+    image gets to be bigger and clearer, not squeezed into the corner
+    the combined sheet's layout would give it), no title block either
+    since the caption at its own top already carries the job/part/size.
+
+For this job (3 parts, all 3 flat): 4 images total, exactly what was
+asked for, replacing what used to be up to 5 files (1 html + 1 svg + up
+to 3 more svg) of which the png only sometimes existed at all.
+
+**How, without a new dependency:** a second drawing backend, `_Canvas`,
+implements the exact same method surface `_Sheet` (the SVG backend)
+already does — `text`, `line`, `rect`, `polygon`, `circle`, `arrow`,
+`view`, `dim_h`/`dim_v` (borrowed unbound from `_Sheet`, since they only
+ever call `self.line`/`self.arrow`/`self.text`, which both backends
+implement) — so `_draw_flat_pattern`, `_draw_part` and `_title_block`
+(now called through a shared `_lay_out_sheet(sh, report)`, factored out
+of `sheet_svg`) run against either backend completely unmodified.
+`_Canvas` rasterises straight to a PIL image, using the same
+`assets/fonts/Barlow-*.ttf` Reel's own PIL-drawn frames already use —
+no new dependency, just the one this project already has. The
+isometric's hidden-line-removal paths (from cadquery's own `getPaths`)
+come back as SVG path `d` strings; checked directly against this file's
+own real sample, every one uses only M (move) and L (line), cadquery
+has already flattened every curve to short line segments before handing
+them back — so a small `_svg_path_points()` reader (M/L only, no arc or
+Bezier flattening needed) turns them into point lists `_Canvas.view()`
+draws as plain polylines.
+
+**A real bug this caught before it shipped:** the first rendered sheet
+had every vertical dimension figure (the numbers running up the left
+edge of a flat pattern) drawn as garbled, mirrored-looking text.
+Traced, not guessed at — isolated the rotation, the paste, and the font
+loading into separate scripts and rendered each — to `textbbox()`'s own
+top-left corner not being `(0, 0)` (a font's internal ascent/leading
+offsets it); drawing the glyph flush at a fixed `(4, 4)` on the tightly
+sized temp layer clipped it against the layer's own edge before the
+rotation ever ran, which at a glance read as mirrored rather than
+clipped. Fixed by drawing at `(4 - bbox[0], 4 - bbox[1])` instead, so
+the actual ink lands where the layer has room for it. Caught by
+rendering the real sheet and reading it, the same discipline every
+other real bug in this feature has been caught by.
+
+**The corner the customer's reference marked as confusing:** checked
+directly — it is real geometry, not a rendering bug. The "side" part's
+two 276mm² flanges are narrower than the main panel (they stop at
+x=87.87mm; the main panel's own stepped corner runs out to x=96.37mm),
+so the flange's own edge and the panel's own step legitimately meet at
+that point, and the model has a couple of ~0.45mm relief jogs right
+there too — real, small, correctly-drawn cuts, not double-drawn
+geometry. Whether those sub-millimetre relief jogs are worth simplifying
+out of the outline for readability, at the cost of the drawing no longer
+showing the exact geometry a cutter would follow, is a real trade-off
+between precision and clarity — flagged to the customer rather than
+decided unilaterally, since simplifying a real cut line without being
+asked is exactly the kind of silent change that could send a wrong part
+to the floor. The much bigger, page-filling standalone flat image this
+round adds already makes that corner far easier to read than it was
+sharing a quarter of a page with an isometric column.
+
+**What this does not do:** it does not touch `sheet_svg()` or the SVG
+backend at all — every existing SVG-based test still reads the same
+string it always did; SVG is simply no longer written to disk. It does
+not change any geometry, dimensioning, or labelling logic — same
+`_draw_flat_pattern`, same `_draw_part`, same `_title_block`, called
+through the same `_lay_out_sheet`, only a different backend recording
+the same calls.
+
+Files: `prism_terminal/core/stepfile.py` (`HAVE_PIL`, `_svg_path_points`,
+`_Sheet.polygon`/`circle`, `_draw_flat_pattern`'s new `with_isometric`
+parameter, `_lay_out_sheet` (factored out of `sheet_svg`), `_step_font_path`,
+`_Canvas`, `names()` — dropped `html`/`svg` keys, `flat_image_name`
+(replacing `view_name`), `render_sheet` rewritten, `_svg_of` removed
+(dead code, nothing called it once its one caller was rewritten)),
+`prism_terminal/prism.py` (the one `drawn['html']` fallback),
+`addons/step/dialog.py` (`_on_measured` now saves the flat-pattern images
+as artifacts too), `tests/test_stepfile.py`, `tests/test_step_dialog.py`.
+
+---
+
+# Round 47 — the "side" part's missing corner turned out not to be missing; the K-factor back-solve tool
+
+Asked to build everything still on the table: a suspected branching-bend
+gap on the "side" part (only 4 of its 28 faces reach a detected bend —
+looked, on the numbers alone, like 24 faces of real geometry silently
+left out, including one 68.5 x 90.15mm face nobody expects to call a
+"small feature"), amboss/boss labelling, dimensioning the panel's own
+outline, and the K-factor back-solve tool flagged as needed back in
+Round 43 and never built.
+
+**The suspected branching-bend gap did not hold up.** Checked directly
+against `Assem1.STEP`'s real "side" part, face by face, before writing
+any code for it: all 3 real bends on that part ARE correctly detected
+and placed — each of the 6 raw cylindrical candidates touches exactly
+one planar neighbour, none of them were ever rejected by
+`_group_bends`'s single-neighbour rule. The 68.5 x 90.15mm face is not
+missing at all; it is the ROOT panel `_flatten_faces` picks (the
+largest reachable face), always placed. Its own outer wire already has
+12 points, not 4 — the stepped corner is already IN the outline
+`_draw_flat_pattern` draws. Rendered the actual page to check, the same
+discipline Round 44 and 46 both leaned on: the step is there, on
+screen, at the right size, before this round touched anything.
+
+What the 24 "unplaced" faces actually are, checked one at a time: the
+material's own edge-thickness walls of that same step (a sliver no
+wider than the sheet is thick — its two long edges lie ON the boundary
+the placed face already draws) and the untouched BACK faces of the
+panel and its two flanges (same shape, one thickness away, facing the
+opposite way — a solid sheet has two faces per panel, only one is ever
+what a bend's cylindrical face touches). Not one of the 24 is a
+distinct piece of geometry nothing else on the drawing already shows.
+Confirmed the same holds on "top" (3 of 68) and "bottom" (8 of 42) —
+same pattern, same conclusion: nothing real is missing on this job.
+
+**The fix is the warning, not the geometry.** `"N of M faces unfolded —
+small features off the main bend chain are not shown"` read as data
+loss on every one of these three real parts, when none had actually
+happened. New `_is_trivial_leftover()` in `stepfile.py` tells a genuine
+gap (a real face the bend graph could not reach, e.g. a true multi-way
+junction, should one show up on a future job) apart from these two
+harmless categories, geometrically: a sliver by bounding-box aspect
+(narrowest side no wider than 1.5x the sheet thickness), an
+area too small to matter, or a same-size, opposite-facing twin of an
+already-placed face one thickness away. `unfold()` now reports
+`faces_hidden_meaningful` alongside the existing raw counts (kept, for
+anything reading them already), and the drawing's own note only fires
+on that number — silent on all three of this job's real parts, exactly
+as it should be given nothing here is actually hidden.
+
+**Amboss/boss labelling was not built.** Looked for the geometry it
+would need to key off — a raised or recessed flat pad near a small
+pilot hole, offset from the main panel plane — around every Ø1.2mm hole
+on "side" and "bottom" (the sizes that read like amboss pilot holes on
+this job). Found none: each Ø1.2 hole's only nearby non-hole faces are
+its own cylindrical wall, split into two half-cylinders by the kernel,
+radius and length matching the hole exactly. `Assem1.STEP` simply does
+not model a real amboss feature, so there is nothing here to verify
+detection against — and this file's whole discipline, every round back
+to 41, has been to check a change against real geometry before trusting
+it, not to write a detector on a description alone and hope. Left
+undone, honestly, rather than shipped unverified; revisit if a job with
+a real boss ever comes through.
+
+**Outline/corner dimensioning: built.** Position dimensioning
+(`_draw_flat_pattern`'s chain) used to read only hole positions — a
+panel's own step or notch was drawn (it is part of the outline) but
+never numbered, which was the actual, if misdiagnosed, thing worth
+fixing here. Its own outline vertices now join the same `_cluster` +
+`_chain_points` chain a hole position already used, so a step in the
+edge gets a gap number on the same dimension line a hole would, not a
+shape a reader has to measure by eye. Verified on the real "bottom"
+panel: its 46mm window (Round 45) now splits what used to be one gap
+(33.36) into two real stops either side of the window's own edge
+(18.08 / 15.28) — a chain that used to only ever see holes now also
+sees the panel's own geometry.
+
+**The K-factor back-solve tool: built.** New `solve_k_factor(report,
+part_name, target_mm, axis)` in `stepfile.py`. Bend allowance is
+exactly linear in k (`_bend_allowance` is `angle*radius +
+angle*k*thickness`), and every placed point's flat position is a
+straight sum of bend-allowance terms along its own path back to the
+root panel — so the whole flat size is linear in k too. Two real
+`unfold()` calls (k=0.1 and k=0.9) pin that line down exactly; no
+search, no iteration, and no assumption baked in about what k "should"
+be. Verified by round-trip on the real job: unfolded "bottom" at a
+known k=0.7, fed the resulting width back in as the "true" figure,
+solved back to exactly 0.7. Wired into the dialog as a small box under
+the measured view — pick the part, say width or height and the true
+mm figure, Solve, then "Use this K-factor" copies it straight into the
+Bend K-factor field for the next Generate.
+
+**What this round does not do:** it does not add multi-way bend-
+junction handling — investigated first, found no real job that needs
+it, so nothing speculative was written against an untested case; it
+does not detect amboss/boss features, for the same "verify against real
+geometry first" reason. Both stay open, honestly, rather than shipped
+as a guess.
+
+Files: `prism_terminal/core/stepfile.py` (`_is_trivial_leftover`,
+`unfold`'s new `faces_hidden_meaningful` field, `solve_k_factor`,
+`_draw_flat_pattern`'s outline-fed chain and reworded disclosure),
+`addons/step/dialog.py` (the back-solve box, `_fill_kfit_parts`,
+`_kfit_solve`, `_kfit_apply`), `tests/test_stepfile.py`
+(`test_nothing_is_actually_missing_on_this_real_job`,
+`test_the_panels_own_outline_joins_the_dimension_chain`),
+`tests/test_step_dialog.py`
+(`KnowingARealFlatSizeSolvesTheKFactor`).
+
+---
+
+# Round 46 — Round 45's own cutout labels overlapped exactly the way Round 44's fix them for holes had already ruled out
+
+Round 45 fixed a real cutout (a 46 x 46 mm window) being drawn as nothing
+at all. The fix drew every cutout found — but a ventilation grille is
+not one cutout, it is eighteen of them, each a real, individually
+present slot in the actual geometry, and the new code labelled every
+single one. Same class of bug Round 44 had already found and fixed for
+hole positions, reintroduced by the very next round because the new
+code path didn't reuse that rule.
+
+**The fix, in `_draw_flat_pattern`:** one label per DISTINCT cutout
+size, the same rule hole diameters already follow — repeated instances
+of an identical size (the vent slats) get their outline drawn but no
+second label. For a cutout too small to hold its own label without the
+text spilling past the shape (a few-mm corner relief), the label moves
+beside it instead, the same convention a small hole's diameter label
+already uses — and where two differently-sized small cutouts still sit
+close enough to collide even placed beside their own shapes, each
+label's row is staggered, one per label placed that way.
+
+Caught the same way Round 44's bug was: by rendering the actual page and
+reading it, not by the code running without an error.
+
+Files: `prism_terminal/core/stepfile.py` (`_draw_flat_pattern`'s cutout
+loop), `tests/test_stepfile.py`
+(`test_a_ventilation_grilles_cutouts_are_not_each_individually_labelled`).
+
+---
+
+# Round 45 — a real cutout on a real customer part was drawn as nothing at all
+
+Checked against a fabricator's own reference drawing of this exact job
+(the same `Assem1.STEP` sample every other STEP round has used) and
+found a real, verified square window — 46 x 46 mm, cut into the bottom
+panel — completely missing from Prism's flat pattern. Not mislabelled,
+not mis-sized: absent. No outline, no gap, no note that anything had
+been left out.
+
+**The actual cause.** `unfold()` built each panel's shape from its
+face's OUTER wire only. A window or slot cut into the middle of a panel
+is one of that face's INNER wires, and nothing in `unfold()` ever looked
+at those — the code was never wrong about where the window is, it
+simply never asked whether one existed.
+
+**Why holes were fine and this wasn't.** A round hole's boundary is
+*also* an inner wire, but Prism already draws every hole correctly, from
+its own cylindrical side-wall face (`_holes_detail`) — a completely
+separate code path that has nothing to do with a face's inner wires.
+That is exactly why this one real customer part still fell through: its
+window has no cylindrical face at all (it's bounded by four straight
+edges), so the one detector that *would* have caught it never had
+anything to catch.
+
+**The fix.** Every placed panel's inner wires are now walked too. A
+degenerate one — collapsed to ~zero width in at least one direction,
+which is what a round hole's own inner-wire boundary looks like under
+this same crude vertex sampling — is skipped, because that hole is
+already drawn properly elsewhere; anything with real extent in both
+directions is a genuine cutout, drawn as its own outline (filled white,
+so it reads as an opening rather than a second panel) and labelled with
+its own width x height, the way the reference sheet marks its "46 x 46."
+
+**A second real bug hit immediately while wiring this in**, and fixed the
+same session: the new code passed 3D point arrays into a loop written
+for 2D tuples (`for x, y in pts` against `[x, y, z]` values) —
+`ValueError: too many values to unpack`, caught only because `unfold()`'s
+own blanket exception handler was temporarily removed to see it. Fixed
+by indexing (`p[0]`, `p[1]`) the same way the panel-outline code already
+does, instead of unpacking.
+
+Files: `prism_terminal/core/stepfile.py` (`unfold`'s cutout-detection
+block, `_draw_flat_pattern`), `tests/test_stepfile.py`
+(`test_the_bottom_panels_square_window_is_not_invisible`,
+`test_the_square_window_is_drawn_and_sized_on_the_page`,
+`test_a_round_holes_inner_wire_is_not_double_drawn_as_a_cutout`).
+
+**Still open, from the same reference-drawing comparison:** the "amboss"
+(boss/emboss) feature is still shown as a plain hole, with no distinction
+from an ordinary punched one; the panel outline's own corner/step
+geometry (as opposed to hole positions) still carries no dimensions even
+where it's drawn correctly; the ~0.14mm-per-bend K-factor shortfall
+(Round 43's finding) still has no back-solve tool. Next, in some order.
+
+---
+
+# Round 44 — the flat pattern dimensions BETWEEN holes, not just each hole's distance from an edge
+
+Round 42's position marks answered "where is this hole" (a distance from
+one edge). They did not answer "how far apart are these two holes" —
+which is what the reference sheet actually shows, and what the owner
+meant by "I don't see any measurements": reading the gap between two
+features off Prism's sheet meant subtracting two numbers by hand first.
+
+**What changed**, `_draw_flat_pattern` in `prism_terminal/core/stepfile.py`:
+position marks are now a dimension CHAIN — edge to first feature, feature
+to feature, last feature to the far edge, each its own little arrowed
+span (`26.5 -> 90.5 -> 50 -> 3.5`, summing to the whole) — the same
+convention the reference sheet uses, not Prism's own datum-distance
+convention from Round 42.
+
+**Two real bugs found by rendering the actual page and reading it, not
+by running the code and calling it done:**
+
+1. The first version could **drop the far edge itself** during
+  thinning, when the nearest real feature sat within tolerance of it —
+  the chain fell 2mm short of a real part's own measured height,
+  silently. Fixed: both ends of a chain always survive; when a feature
+  is too close to an edge to get its own segment, the FEATURE gives way,
+  folded into the edge segment, never the edge.
+2. The second version chained a dense row (eighteen vent-slot positions
+  on the real job) anyway, and the labels printed as an unreadable run
+  of overlapping digits. Fixed at the root rather than patched after the
+  fact: the clustering tolerance is now derived directly from
+  `_Sheet.NARROW` (dim_h/dim_v's own "too narrow to fit a label inside"
+  threshold), so every segment that survives clears it by construction —
+  no segment is ever built narrow enough to overlap its neighbour in the
+  first place. When there are still too many real, well-separated
+  positions to chain at all (`_chain_points` returns `None`), the sheet
+  says so honestly ("too closely packed to dimension individually — shown
+  to scale") instead of forcing a label onto it.
+
+**Verified against the same real job**, `Assem1.STEP` — every chain on
+every part now sums exactly to that part's own measured overall size,
+and the previously-broken vent row (Round 44's own reason for
+existing) turned out, on this particular job, not to need the fallback
+at all: the same small scale its tall neighbour forces already collapses
+it to two clean segments. Pinned as its own test rather than assumed;
+the fallback path itself is proven separately, on synthetic data built
+to actually trigger it.
+
+**Still open, from the owner's own comparison against a real fabricated
+reference (Round 43's conversation):** the ~0.14mm-per-bend shortfall in
+Prism's bend-allowance figure is diagnosed (the K-factor), not yet fixed
+with a tool — there is still no way to enter "this part's real flat size
+is X" and have Prism back-solve the K-factor that reproduces it. Next.
+
+Files: `prism_terminal/core/stepfile.py` (`_chain_points`,
+`_draw_flat_pattern`; `_Sheet.tick_h`/`tick_v` removed, superseded),
+`tests/test_stepfile.py` (new classes `TheDimensionChainAlwaysReachesBothEdges`,
+plus new assertions on `TheFlatPatternOfTheCustomersEnclosure`).
+
+---
+
+# Round 43 — STEP's "Draft" no longer asks ChatGPT for a picture unless told to
+
+Round 42 found, by actually opening the file ChatGPT drew and comparing
+it beside Prism's own, that STEP's Draft action was spending a minute
+asking ChatGPT to draw a "styled" copy of a sheet Prism had already drawn
+correctly — and what came back was that same picture traced, with the
+text garbled in the process ("t≈0.87 mm SHEET" → "t=.rr mm 5MEET"). It
+was never an independent check on the numbers; it was a slower, worse
+copy of a drawing that already existed. The owner's own words once that
+was shown: "if there is no need for chatgpt image generation, than make
+it optional."
+
+**What changed.** The ChatGPT drawing step is now a checkbox in STEP's
+"What to do" box, off by default, next to a note explaining why (the
+Round 42 finding, stated plainly rather than just silently switched
+off). Draft's own real deliverable — Prism's measured drawing sheet,
+flat pattern and all — is unaffected either way; it is made during
+measuring, before the action even runs. Checking the box is still there
+for the one real reason to want ChatGPT's version anyway: a
+differently-styled picture for sending to someone outside the shop, not
+a verification step.
+
+Files: `addons/step/dialog.py` (`ACTIONS`' own blurb, the new
+`ai_draft_cb`, `_draft`'s early return, `cfg["step_ai_draft"]`),
+`tests/test_step_dialog.py` (existing Draft tests now check the box
+explicitly, since what they test only runs when it is checked; new test
+`test_the_ai_draft_is_off_by_default_and_skips_chatgpt_entirely`).
+
+---
+
+# Round 42 — the flat pattern drawing is for the person cutting it, not the estimator
+
+Round 41 unfolded the flat pattern correctly, but drew it the way an
+estimator's software would: every part's OLD formed 3-view band still
+ran first, the flat pattern squeezed underneath it as an extra, and a
+hole's diameter lived only in a side table — meaning whoever cuts the
+part has to hold a table and a drawing in their head at once to know
+what any one hole is. The owner's own words: "this is something that
+would be read by a non technical person working on a machine," and the
+reference sheet they'd already shared showed why — diameters marked
+right next to each hole, no table to cross-reference.
+
+**What changed, in `_draw_flat_pattern` (`prism_terminal/core/stepfile.py`).**
+
+- Two plainly headed sections, side by side with a rule between them —
+  **FLAT PATTERN** and **ISOMETRIC** — instead of one dense band. The old
+  formed 3-view (front/top/side) is now only the fallback for a part
+  whose bends did not resolve to simple folds, where it is the only real
+  drawing there is; every part that has a flat pattern shows the flat
+  pattern first, not buried under a formed view of the same part.
+- Every hole's diameter is written on the drawing itself, next to the
+  hole — once per distinct size present, so a repeated size is not
+  re-labelled at every instance and crowded off the page — not only in
+  the side table (kept, smaller, as a quick order-quantity tally, not
+  the only place a size is stated).
+- Every hole's position is dimensioned from the panel's own edges,
+  grouped the way a real dimension chain reads (`_cluster`) rather than
+  one entry per hole.
+
+**A real layout bug, caught by looking at the actual rendered page, not
+just running the code:** the first version of the position dimensions
+used two staggered rows to keep adjacent labels apart. That's enough for
+a handful of mounting holes; it is nowhere near enough for a
+ventilation grille, where a dozen slot positions sit within 60 mm of
+each other — the labels printed on top of each other as an unreadable
+run of digits. Fixed two ways: four stagger rows instead of two, and the
+grouping tolerance itself is now computed in PIXEL space at the part's
+actual drawn scale (`22px` / `15px` minimum separation), not a fixed
+distance in millimetres — the same 1 mm of separation is three pixels on
+a small part and thirty on a large one, and only the pixel figure
+actually predicts whether two labels will collide.
+
+Files: `prism_terminal/core/stepfile.py` (`_draw_flat_pattern`, `_cluster`,
+`_Sheet.tick_h`/`tick_v`), `tests/test_stepfile.py` (new class
+`ClusteringHolePositionsForTheDrawing`, plus three new assertions on
+`TheFlatPatternOfTheCustomersEnclosure` for the section split, the
+inline diameter labels, and the position dimensions).
+
+---
+
+# Round 41 — the STEP add-on now unfolds a formed sheet-metal part
+
+The drawing sheet's own note used to say it out loud: "a bent sheet's
+flat pattern is not shown." A client's reference drawing (a real fab's
+"System Engineers" quotation sheet) made clear that flat, dimensioned,
+cutting-list drawings — not the formed 3-view — are what a fabricator
+actually needs. Building it needed real bend detection and real
+sheet-metal unfolding math, not a guess.
+
+**What was added, in `prism_terminal/core/stepfile.py`.** A bend is a
+cylindrical face OCCT models between two flat panels — but so is the
+small rounding fillet at almost every hole's edge, and the two look
+identical by angular span alone. The reliable difference, found by
+reading a real customer STEP file's faces directly: a bend's cylindrical
+face is as long as the panel it folds (tens or hundreds of mm); a hole's
+edge fillet is only ever as long as the sheet is thick. `_bend_candidates`
+uses exactly that, `_group_bends` pairs up each bend's inner/outer
+surfaces and finds the two flat panels it connects, and `unfold()` walks
+that graph from the largest flat face, rotating each connected panel
+about its own real bend axis by its own measured angle, then separating
+the two panels at that seam by the real bend-allowance distance —
+`angle x (radius + K x thickness)` — rather than the formed radius.
+Holes carry through to their true flat position. A part whose bends
+don't resolve to simple folds between flat panels is left unmeasured,
+not approximated — the same rule `_project()`/`_svg_of()` already follow
+for a view that cannot be drawn.
+
+**The K-factor** — the one input this can't derive from geometry — is
+now a field in the STEP dialog (blank = Prism's own default, 0.4133;
+entering one uses it instead), always stated on the drawing sheet
+("K-factor 0.4133 (Prism's default — confirm with the shop)" or
+"...(as entered)") so a default is never mistaken for a confirmed shop
+value.
+
+**Two real bugs found only by testing the actual numbers, not just
+whether the code ran.** Both looked completely fine as SVG renders —
+every panel positioned, every hole inside its outline, nothing visibly
+wrong — and both were still silently broken:
+
+1. A test asserting "a bigger K-factor makes a bigger flat pattern"
+  failed: raising K from 0.2 to 0.45 changed nothing. The correction
+  step measured "the gap" between a bend's two seam edges and nudged it
+  toward the target — except that gap is always exactly zero, by
+  construction (both edges belong to the same cylindrical face at the
+  same radius; rotating by the face's own angular span always lands one
+  exactly on the other), so the "correction" was reliably zero too, for
+  every bend, silently.
+2. Fixing that by pushing outward from the bend's cylinder axis instead
+  moved panels in the right amount but the wrong direction — into Z,
+  off the flat plane, because that axis sits one bend-radius OFF the
+  panel's own plane (a bend's cylindrical face is tangent to it, not
+  centred on it), which the correction's own "stay in-plane" projection
+  didn't account for. The fix measures from `other`'s own panel centre
+  instead, which is never degenerate with the fold line the way a point
+  chosen ON the bend geometry can be.
+
+Caught by writing the assertion "K goes up, size goes up" as an actual
+test before calling this done, not by eyeballing a rendered picture —
+the picture looked right both times.
+
+**Verified against a real customer job**, `step_file_demo/Assem1.STEP`
+(the same file `TheCustomersOwnEnclosure`'s tests already witness
+against) — all three real parts (top, bottom, side) unfold cleanly,
+every one of their 48 real holes lands inside its own flat outline, and
+a rendered SVG of the result was eyeballed panel by panel before trusting
+the numbers.
+
+Files: `prism_terminal/core/stepfile.py` (`unfold` and its helpers,
+`_measure`, `analyse`, `_draw_flat_pattern`, `write_xlsx`),
+`addons/step/dialog.py` (the K-factor field), `addons/step/workers.py`
+(threading it through), `tests/test_stepfile.py` (new classes
+`TheFlatPatternOfTheCustomersEnclosure` and
+`BendAllowanceIsTheNeutralAxisNotEitherRadius`), `tests/test_step_dialog.py`.
+
+**What this does not do.** Corner reliefs (the small notch cut where two
+bend lines meet) are not modelled — the flat outline is each panel's own
+real boundary at its correct unfolded position, which is exact for the
+numbers but does not yet draw the relief cut a real cutting file would
+have. A part whose bends are not simple folds between flat panels — most
+sheet metal in these two sample jobs, in fact only the box/bracket-style
+parts qualify — is reported as formed-only, same as before this round.
+
+---
+
+# Round 40 — a finished NotebookLM video was thrown away right after it downloaded
+
+"There is no sign of the video" — but the automation for actually driving
+NotebookLM's Studio → Video Overview → Customize → Generate now → download
+flow already existed (`_nb_generate`, `_nb_wait_generated`, `_nb_download`)
+and, live-checked against the real page on 18 Sep 2026, its selectors are
+still exactly right: `Customize Video Overview`'s Short/Explainer choices
+are `<mat-radio-button>`s each wrapped in a `<label>` starting with that
+word, and `Generate now` is a plain button by that name — both match what
+`_nb_generate` was already looking for.
+
+**The actual cause.** One line after `_run_notebooklm` returns —
+`_make_editable(..., made_image=bool(got))` — reads a variable, `got`,
+that is only ever assigned inside the generic maker branch (the
+image-wait/artwork loop, further down the same dispatch). Apollo, Canva,
+ElevenLabs and NotebookLM are the other four branches of that same
+dispatch, and every one of them reaches this line having never touched
+`got` — `UnboundLocalError: cannot access local variable 'got'`, every
+single time. It didn't matter that a Video Overview had genuinely
+rendered and downloaded: the crash lands *before*
+`_save_artifacts(nb_files, ...)` and before `pipeline_files[:] = ...`, so
+the file that NotebookLM had already produced was never saved to
+Artifacts and never reported back — indistinguishable, from the run's
+outside, from nothing having happened at all.
+
+**The fix.** `got = 0` is now set once, before the whole dispatch, so
+every branch — Apollo, Canva, ElevenLabs, NotebookLM, and the generic
+maker path that already reassigns it while actually counting images —
+reaches `bool(got)` with a real value.
+
+**Verified against the live page, not assumed.** Connected Playwright
+over CDP to Prism's own signed-in Chrome (same technique as the 13 Sep
+probe), opened the real `Video Overview → Customize` dialog on a live
+notebook, and read the DOM directly: `Customize Video Overview` heading,
+`Short`/`Explainer` as `<mat-radio-button><label>` pairs, `Generate now`
+and `Generate later` buttons — all present exactly as `_nb_generate`
+expects. Did not press Generate (that spends the account's daily
+allowance) — so `_nb_download`'s selector for a *finished* item's Download
+control is still unverified; the memory note from 13 Sep still calls that
+one "Unseen," and this round doesn't change that.
+
+Files: `prism_terminal/core/automation.py` (`AU.run`),
+`tests/test_notebooklm.py` (new test,
+`test_a_finished_video_is_not_thrown_away_right_after`).
+
+---
+
+# Round 39 — Gerber's "Measurements in" picker only ever reached the Excel form
+
+Picking "inch" in Gerber's unit box and still getting mm back, everywhere
+that mattered: the on-screen "THE FIVE NUMBERS" / "WORKINGS" panel, the
+CSV-adjacent report text, and the brief handed to the writing AI.
+
+**The actual cause.** `core/gerber.py`'s `answers_text()`, `summary_text()`
+and `agent_brief()` — the three places a measured job's figures ever
+become text a person or an AI reads — never took a unit argument at all;
+every dimension was hardcoded to mm, with mil shown as a fixed secondary
+reading. The dialog's `gerber_units` setting was real and correctly saved,
+but `_units_changed()` only ever called `_fill_forms()` (the client's
+Excel export, which already had proper mm/inch/mil support via
+`gerber_form.py`'s `_in_units()`) — it never touched the on-screen text,
+and `_write_up()` never passed a unit into `agent_brief()` either. Picking
+a unit changed nothing a customer or an AI actually read.
+
+**The fix.** `_fmt`, `_rule_note`, `answers_text`, `summary_text` and
+`agent_brief` in `core/gerber.py` now take a `unit` parameter and format
+every dimension (PCB/array size, track width, track spacing, drill size,
+pad pitch, SMT pad) in it — reusing `gerber_form.py`'s existing
+`_in_units()` conversion table and decimal convention (2 dp mm, 4 dp inch,
+2 dp mil) rather than a second copy, so a value shown in the dialog and a
+value written into a client's cell can never quietly disagree on what
+0.25 mm is in inch. The chosen unit is always shown with mm alongside it,
+so a figure never has to be taken on trust. `addons/gerber/dialog.py`
+threads `self.cfg["gerber_units"]` into all three call sites, and
+`_units_changed()` now rebuilds the on-screen report (`_render_meas_view`,
+extracted from `_on_measured`) as well as the client's form, so switching
+units after a job is already measured updates everything at once — no
+re-measuring, since the measurement itself was never the problem.
+
+**What this does not touch.** `write_report_csv()` — the audit-trail CSV
+saved next to every job — stays mm-only, deliberately: it is a fixed
+ground truth to cross-check an AI's reply against, not a display surface,
+and the customer's-form export already had its own working unit support.
+Two secondary readings (total trace length in metres, the X/Y position of
+the tightest copper gap) were deliberately left in mm — they are
+locations/aggregates, not the kind of dimension a fab quote is written
+against, and converting them added risk without matching what a customer
+actually complained about missing.
+
+Files: `prism_terminal/core/gerber.py`, `addons/gerber/dialog.py`,
+`tests/test_gerber.py` (new class `ChoosingAUnitActuallyChangesTheAnswer`,
+5 tests).
+
+---
+
 # Round 38 — a brand-new Mac couldn't start Chrome, and it wasn't the driver
 
 A client's MacBook Air M2: Prism opened, took her request, wrote a plan —

@@ -440,7 +440,33 @@ class GerberDialog(PrismDialog):
         self.cfg["gerber_units"] = units
         CB.config.save(self.cfg)
         if self.jobs:
+            # Both readouts of an already-measured job need to change with
+            # the picker, not only the client's Excel form: this dialog used
+            # to rebuild the form here and leave the on-screen "THE FIVE
+            # NUMBERS" / "WORKINGS" text (and later, the AI write-up) stuck
+            # in mm regardless of what was chosen — the actual "picked inch,
+            # got mm" bug.
+            self._render_meas_view()
             self._fill_forms()   # refill the measured job in the new unit
+
+    def _render_meas_view(self):
+        """(Re)build the on-screen report in the currently chosen unit.
+        No re-measuring, no new CSV — those are unit-independent ground
+        truth; only the display text changes."""
+        G = self.gerber
+        unit = self.cfg.get("gerber_units") or "mm"
+        blocks = []
+        for name, job in self.jobs:
+            heading = f"═══ {name} ═══\n" if len(self.jobs) > 1 else ""
+            blocks.append(
+                heading
+                + "FILES\n" + G.files_text(job) + "\n\n"
+                + "THE FIVE NUMBERS\n" + G.answers_text(job, unit=unit) + "\n\n"
+                + "WORKINGS\n" + G.summary_text(job, unit=unit) + "\n\n"
+                + "CHECKED AGAINST\n" + G.crosscheck_text(G.crosscheck(job))
+                + ("\n\nWARNINGS\n  ! " + "\n  ! ".join(job["warnings"])
+                   if job["warnings"] else ""))
+        self.meas_view.setPlainText("\n\n".join(blocks))
 
     def _fill_forms(self):
         """One filled copy of the client's form per measured job. A fill
@@ -535,34 +561,26 @@ class GerberDialog(PrismDialog):
     def _on_measured(self, results: list):
         self.jobs = results
         G = self.gerber
-        blocks = []
         csv_paths = []
         # (path, task) — each job's own CSV is grouped under that job's name;
         # the summary below covers every job at once, so it has none to
         # belong to and stays ungrouped rather than picking one arbitrarily.
+        # The report CSV is the audit trail, so it is always mm regardless of
+        # the "Measurements in" picker — write_report_csv() never took a
+        # unit and does not gain one here.
         to_save = []
         out_root = self._out_dir()
         os.makedirs(out_root, exist_ok=True)
         for name, job in results:
-            label = name if len(results) > 1 else ""
-            heading = f"═══ {name} ═══\n" if len(results) > 1 else ""
-            blocks.append(
-                heading
-                + "FILES\n" + G.files_text(job) + "\n\n"
-                + "THE FIVE NUMBERS\n" + G.answers_text(job) + "\n\n"
-                + "WORKINGS\n" + G.summary_text(job) + "\n\n"
-                + "CHECKED AGAINST\n" + G.crosscheck_text(G.crosscheck(job))
-                + ("\n\nWARNINGS\n  ! " + "\n  ! ".join(job["warnings"])
-                   if job["warnings"] else ""))
             stem = "".join(c if c.isalnum() or c in "-_" else "_"
-                          for c in label)[:40]
+                          for c in (name if len(results) > 1 else ""))[:40]
             csv_name = f"gerber_{stem}_{int(time.time())}.csv" if stem \
                 else f"gerber_{int(time.time())}.csv"
             csv_path = os.path.join(out_root, csv_name)
             G.write_report_csv(job, csv_path)
             csv_paths.append(csv_path)
             to_save.append((csv_path, name))
-        self.meas_view.setPlainText("\n\n".join(blocks))
+        self._render_meas_view()
 
         note = ""
         if len(results) > 1:
@@ -626,7 +644,8 @@ class GerberDialog(PrismDialog):
         # /gerber calls the same function, so the confidentiality sentence
         # cannot be worded two different ways in the two surfaces that hand
         # an agent a job's numbers.
-        brief = self.gerber.agent_brief(job, context)
+        brief = self.gerber.agent_brief(
+            job, context, unit=self.cfg.get("gerber_units") or "mm")
 
         self._set_busy(True, f"{agents[writer]} is writing this up — only "
                              "the numbers above were shown to it…")

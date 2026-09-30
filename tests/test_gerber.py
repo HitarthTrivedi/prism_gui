@@ -1058,6 +1058,58 @@ PANEL_VSCORE = """
     M02*
     """
 
+# A real customer's complaint, reproduced: a 75 x 50 mm panel with four
+# 20 x 15 mm boards in a 2x2 block AND two more of the SAME board turned
+# 90 degrees (15 x 20 mm bounding box) filling the rest of the frame —
+# six real boards, not four. The client's own fab sheet for this exact
+# job said 36 pieces; Prism's answer was 28, in a clean-looking "4 x 7"
+# grid that was actually four real columns of one orientation and
+# nothing at all of the rotated ones. Their reviewer called it a filter
+# that "doesn't work correctly" on newer, more complex panels — a fab
+# house mixing orientations to pack a frame tighter is exactly that.
+PANEL_MIXED_ORIENTATION = """
+    %FSLAX34Y34*%
+    %MOMM*%
+    %ADD10C,0.100*%
+    D10*
+    X0Y0D02*
+    X750000Y0D01*
+    X750000Y500000D01*
+    X0Y500000D01*
+    X0Y0D01*
+    X50000Y50000D02*
+    X250000Y50000D01*
+    X250000Y200000D01*
+    X50000Y200000D01*
+    X50000Y50000D01*
+    X350000Y50000D02*
+    X550000Y50000D01*
+    X550000Y200000D01*
+    X350000Y200000D01*
+    X350000Y50000D01*
+    X50000Y220000D02*
+    X250000Y220000D01*
+    X250000Y370000D01*
+    X50000Y370000D01*
+    X50000Y220000D01*
+    X350000Y220000D02*
+    X550000Y220000D01*
+    X550000Y370000D01*
+    X350000Y370000D01*
+    X350000Y220000D01*
+    X580000Y50000D02*
+    X730000Y50000D01*
+    X730000Y250000D01*
+    X580000Y250000D01*
+    X580000Y50000D01*
+    X580000Y270000D02*
+    X730000Y270000D01*
+    X730000Y470000D01*
+    X580000Y470000D01*
+    X580000Y270000D01*
+    M02*
+    """
+
 # Four 0.5 mm-pitch pads in a row, one pad drawn as two overlapping
 # circles (an oval built in pieces — NOT a 0.3 mm pitch), and a lone pad
 # far away.
@@ -1183,6 +1235,39 @@ class AnArrayIsSeveralBoardsNotOneBigOne(unittest.TestCase):
         self.assertIn("60.00 x 40.00", open(out).read())
 
 
+@_NEEDS_SHAPELY
+class ARotatedCopyIsStillTheSameBoard(unittest.TestCase):
+    """A board turned 90 degrees to pack the panel tighter is a real,
+    ordinary fab-house practice, not a different board — but grouping
+    candidate faces by RAW (width, height) put a rotated copy in a
+    different size bucket than its own un-rotated twin, and the group
+    picker kept only the bigger bucket. A real customer job (6 boards:
+    4 one way, 2 turned 90 degrees) came back as 28 of a true 36 on
+    the report that started this — this fixture is the same shape,
+    small enough to know the right answer by construction."""
+
+    def test_the_rotated_copies_are_counted(self):
+        d = tempfile.mkdtemp()
+        _write(d, "p.gko", PANEL_MIXED_ORIENTATION)
+        _write(d, "p.gtl", COPPER)
+        a = G.analyse(G.gather([d]))["answers"]
+        self.assertEqual(a["pcbs_per_array"], 6)
+        self.assertAlmostEqual(a["array_size_mm"][0], 75.0, places=3)
+        self.assertAlmostEqual(a["array_size_mm"][1], 50.0, places=3)
+
+    def test_the_reported_board_size_is_the_majority_orientation(self):
+        """Four boards read one way, two read the other — the size on
+        the report must be the four's, the real board as it is drawn
+        for the majority of the panel, not whichever copy the group
+        happened to start with."""
+        d = tempfile.mkdtemp()
+        _write(d, "p.gko", PANEL_MIXED_ORIENTATION)
+        _write(d, "p.gtl", COPPER)
+        a = G.analyse(G.gather([d]))["answers"]
+        self.assertAlmostEqual(a["pcb_size_mm"][0], 20.0, places=3)
+        self.assertAlmostEqual(a["pcb_size_mm"][1], 15.0, places=3)
+
+
 class EveryFigureIsShownToTwoDecimals(unittest.TestCase):
     """The customer's instruction: two decimal places, everywhere a figure
     is shown or written. Their check lists are kept that way, and a third
@@ -1214,6 +1299,58 @@ class EveryFigureIsShownToTwoDecimals(unittest.TestCase):
                         if re.fullmatch(r"-?\d+\.\d+", cell):
                             self.assertLessEqual(len(cell.split(".")[1]), 2,
                                                  (name, row))
+
+
+class ChoosingAUnitActuallyChangesTheAnswer(unittest.TestCase):
+    """A customer picked "inch" in the dialog's "Measurements in" box and
+    still got mm back — every reader of this text (answers_text,
+    summary_text, agent_brief) hardcoded mm and ignored the unit entirely.
+    The dialog's own unit picker only ever reached the client's-Excel-form
+    export, never the on-screen report or the AI write-up."""
+
+    def _job(self):
+        d = tempfile.mkdtemp()
+        _write(d, "a.gko", OUTLINE_50x30)
+        _write(d, "a.gtl", COPPER)
+        return G.analyse(G.gather([d]))
+
+    def test_inch_is_not_mm_in_disguise(self):
+        job = self._job()
+        mm_text = G.answers_text(job)
+        inch_text = G.answers_text(job, unit="inch")
+        # 50.00 mm is 1.9685 in — if the "inch" call still says "50.00" the
+        # picker is being ignored, which is exactly the reported bug.
+        self.assertIn("50.00 x 30.00 mm", mm_text)
+        self.assertNotIn("50.00 x 30.00 mm", inch_text.split("[")[0])
+        self.assertIn("1.9685 x 1.1811 in", inch_text)
+        # mm is still there for a cross-check, just no longer the headline.
+        self.assertIn("50.00 x 30.00 mm", inch_text)
+
+    def test_mil_is_its_own_unit_not_a_copy_of_inch(self):
+        job = self._job()
+        mil_text = G.answers_text(job, unit="mil")
+        self.assertIn("1968.5 x 1181.1 mil", mil_text)
+
+    def test_an_unknown_unit_falls_back_to_mm_rather_than_crashing(self):
+        job = self._job()
+        self.assertEqual(G.answers_text(job, unit="furlong"),
+                         G.answers_text(job, unit="mm"))
+
+    def test_the_write_up_brief_honours_the_picked_unit_too(self):
+        """The dialog's unit picker used to stop at the client's Excel
+        export — the text actually handed to the writing AI, agent_brief(),
+        never saw it and always spoke mm."""
+        job = self._job()
+        brief = G.agent_brief(job, unit="inch")
+        self.assertIn("1.9685 x 1.1811 in", brief)
+
+    def test_the_workings_match_the_headline_unit(self):
+        """summary_text() exists so a figure can be checked against how it
+        was built — that only works if both are in the same unit."""
+        job = self._job()
+        workings = G.summary_text(job, unit="inch")
+        self.assertIn("in", workings)
+        self.assertNotIn("0.25 mm", workings)
 
 
 @_NEEDS_SHAPELY

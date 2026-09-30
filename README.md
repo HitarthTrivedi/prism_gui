@@ -104,10 +104,10 @@ out, closed, or lost behind a tab, so there is no View menu either.
   something.
   - **WORK** — New task, Home, History, Artifacts: the destinations that
     bracket a run.
-  - **ADD-ONS** — Email automation, BOQ, Gerber, Email, BOM & Stock. This
-    shelf is **generated from `addons/registry.py`**, not hand-listed, so it
-    cannot drift from the Home screen the way it used to. Anything not in
-    your licence shows a padlock and opens the pitch rather than failing.
+  - **ADD-ONS** — Email automation, BOQ, Gerber, STEP, Email, BOM & Stock.
+    This shelf is **generated from `addons/registry.py`**, not hand-listed,
+    so it cannot drift from the Home screen the way it used to. Anything not
+    in your licence shows a padlock and opens the pitch rather than failing.
   - **Settings** — one row under a hairline. It owns everything that
     configures Prism; the old WORKSPACE and CONFIGURE shelves are sections of
     that screen now, so every field is editable where you land rather than
@@ -187,7 +187,7 @@ they said back → Waiting on a reply → The order came.**
 It stops twice on purpose — before a price goes to a customer, and before a
 purchase order is accepted.
 
-### BOQ, BOM, Gerber, Email, Reel, Motion
+### BOQ, BOM, Gerber, STEP, Email, Reel, Motion
 
 Each lives in `addons/<key>/` and is declared by one manifest. The
 authoritative list is `addons/registry.py`; this is the plain-English version.
@@ -207,6 +207,21 @@ authoritative list is `addons/registry.py`; this is the plain-English version.
   stage. Also rides the `boq` key, because there is no `gerber` key on the
   licence server yet and gating on one nobody can be granted would deny
   everyone, including the account testing it.
+- **STEP** — every part's size, wall/sheet thickness, holes and weight,
+  measured from the real 3D geometry (CadQuery/OpenCascade) — **the model
+  itself is never shown to an AI**, only the numbers. For sheet metal,
+  **Draft** unfolds each bent part into a dimensioned flat pattern — real
+  bend detection and bend-allowance math, not a guess — drawn straight to
+  PNG with no browser and no AI in the loop: one image with everything, plus
+  one flat-pattern-only image per part sized for actually cutting from. Every
+  hole and cutout is labelled on the drawing itself, pulled onto a leader
+  line when the page is too crowded to sit the label in place. The
+  customer's own bend K-factor is used when they give one, Prism's own
+  default otherwise — always stated, never assumed — and a **back-solve
+  tool** works out the K-factor from a flat size the shop already knows is
+  correct. **Ask** turns the measured figures into suggestions, reviewed
+  into an exact plan; **Edit** applies that plan to a COPY of the model and
+  re-measures it.
 - **Email** — recipients from an attached CSV and/or addresses in the goal
   text, a **Search for their public email** fallback, a draft generated through
   a normal pipeline stage (editable), then confirm-and-send from *your own*
@@ -372,7 +387,9 @@ addons/                 ONE FOLDER PER ADD-ON. This is where feature work goes.
                         for work without importing each other
   inquiry/              Email automation: dialog, quotation, setup, panel,
                         register_table
-  boq/  bom/  gerber/   measured off a drawing or a Gerber job
+  boq/  bom/  gerber/   measured off a drawing, a Gerber job or a 3D model
+  step/                 (CadQuery/OpenCascade for the 3D model — the one
+                        add-on with a hard dependency, not an optional one)
   email/                compose and send, plus sent_log
   reel/  motion/        video. Motion is status=SOON — it cannot run yet
 
