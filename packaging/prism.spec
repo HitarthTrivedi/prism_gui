@@ -567,7 +567,8 @@ for t in a.datas:
     dest = t[0].replace("\\", "/")
     name = dest.rsplit("/", 1)[-1]
     licence_text = (".dist-info/" in dest
-                    and ("/licenses/" in dest or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "AUTHORS"))))
+                    and ("/licenses/" in dest or name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "AUTHORS"))
+                         or name.lower().endswith((".md", ".rst"))))
     # Qt's own interface translations (qtbase_de.qm and a few hundred like
     # it). Prism never installs a QTranslator — i18n.py explains why it
     # translates its own strings instead — so not one of these is read, and
@@ -583,7 +584,8 @@ for t in a.datas:
     unused_asset = (
         "assets/card_concepts/" in dest
         or "assets/lumi/frames/" in dest
-        or name in ("lumi_card_mockup.png", "lumi_card_reference.png", "lumi_logo.png", "lumi_2d.png")
+        or "assets/lumi/walk/" in dest
+        or name in ("lumi_card_mockup.png", "lumi_card_reference.png", "lumi_logo.png", "lumi_2d.png", "dashboard-bg.png")
     )
     if licence_text or dest.endswith(_TRIM_SUFFIXES) or qt_translation or unused_asset:
         _trimmed += 1
