@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
 import core_bridge as CB  # noqa: E402
 import plans  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sample_jobs  # noqa: E402
 from test_gates import GateTest  # noqa: E402
 from addons.step import dialog as SD  # noqa: E402
 from addons.step.dialog import StepDialog  # noqa: E402
@@ -195,8 +196,8 @@ class TheFolderQuestionIsAskedOnceThenKept(unittest.TestCase):
         seen = {}
 
         class FakeMeasure:
-            def __init__(self, paths, mode, root):
-                seen.update(paths=paths, mode=mode, root=root)
+            def __init__(self, paths, mode, root, k_factor=0.0):
+                seen.update(paths=paths, mode=mode, root=root, k_factor=k_factor)
                 self.progress = self.done = self.failed = _Sig()
 
             def start(self):
@@ -216,6 +217,9 @@ class AnAgentOnlyEverSeesTheNumbersAndPrismsOwnRender(unittest.TestCase):
     def _draft_call(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
+        # The AI draft is opt-in (Round 42) — these tests are about what
+        # it is given WHEN it runs, so switch it on explicitly.
+        dlg.ai_draft_cb.setChecked(True)
         with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
             dlg._current = m
             dlg._draft(m)
@@ -247,6 +251,26 @@ class AnAgentOnlyEverSeesTheNumbersAndPrismsOwnRender(unittest.TestCase):
         dlg, m, seen = self._draft_call()
         self.assertEqual(seen["kwargs"]["image_stages"], {"visual"})
 
+    def test_the_ai_draft_is_off_by_default_and_skips_chatgpt_entirely(self):
+        """Round 42: checked against Prism's own drawing, ChatGPT's
+        'styled' copy just traced it, worse — not an independent check,
+        only a different look. Draft's job (Prism's own sheet) is already
+        done by the time this runs; ChatGPT is opt-in from here."""
+        dlg = _dialog()
+        m = _fake_measured(dlg)
+        self.assertFalse(dlg.ai_draft_cb.isChecked())
+        _CaptureWorker.seen = {}          # not reset between tests otherwise
+        # Skipping the AI stage means _draft falls straight through to
+        # _next() -> _finish(), which saves the run for real unless mocked
+        # (tests/conftest.py fails the suite on a write to the real
+        # ~/.prism, by design).
+        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker), \
+                mock.patch.object(CB.config, "save_run"):
+            dlg._current = m
+            dlg._draft(m)
+        self.assertEqual(_CaptureWorker.seen, {},
+                         "AutomationWorker (ChatGPT) must not be built at all")
+
     def test_draft_is_chatgpt_only_with_no_fallback(self):
         """Not the configured visual tool, and no hand-off to another
         image model if ChatGPT stumbles — a second, differently-wrong sheet
@@ -256,6 +280,7 @@ class AnAgentOnlyEverSeesTheNumbersAndPrismsOwnRender(unittest.TestCase):
                            "api_key": "k",
                            "step_out_dir": tempfile.mkdtemp()})
         m = _fake_measured(dlg)
+        dlg.ai_draft_cb.setChecked(True)
         with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
             dlg._current = m
             dlg._draft(m)
@@ -406,8 +431,11 @@ class ARealModelLandsWhereItWasSent(unittest.TestCase):
         cls.dlg = _dialog(root=cls.root)
         cls.dlg._on_files_added([cls.model])
         cls.dlg.mode_combo.setCurrentText("plastic")
-        # Draft is the default action and needs an image tool; stop the
-        # queue at the measurement by intercepting the AI stage.
+        # Draft is the default action; the AI stage is opt-in since Round
+        # 42, and this class's own test below wants it ON so it can check
+        # what that stage is handed. Checking it also stops the queue at
+        # the measurement by intercepting the AI stage.
+        cls.dlg.ai_draft_cb.setChecked(True)
         #
         # The measuring worker runs SYNCHRONOUSLY — start() replaced by
         # run() on the calling thread, so its signals deliver straight into
@@ -435,7 +463,7 @@ class ARealModelLandsWhereItWasSent(unittest.TestCase):
         for f in files:
             self.assertTrue(f.startswith("Bracket A - "), f)
         self.assertIn("Bracket A - dimensions.xlsx", files)
-        self.assertIn("Bracket A - drawing sheet.html", files)
+        self.assertIn("Bracket A - drawing sheet.png", files)
 
     def test_the_numbers_are_on_screen_and_the_folder_is_named(self):
         text = self.dlg.meas_view.toPlainText()
@@ -450,6 +478,55 @@ class ARealModelLandsWhereItWasSent(unittest.TestCase):
         for a in seen["args"][2]:
             self.assertFalse(a["path"].lower().endswith((".step", ".stp")))
             self.assertTrue(a["path"].startswith(self.root))
+
+
+@unittest.skipUnless(HAVE_CAD, "OCP/CadQuery not installed")
+class KnowingARealFlatSizeSolvesTheKFactor(unittest.TestCase):
+    """The shop-floor-facing side of solve_k_factor: pick a part, say
+    which side and the true figure, get the K-factor back — checked
+    against the same real, customer-verified job as
+    TheFlatPatternOfTheCustomersEnclosure in test_stepfile.py, not a
+    synthetic box. No worker, no event loop needed — the box only ever
+    reads report["_shapes"], already sitting in self.models once a
+    measurement has completed."""
+
+    @classmethod
+    def setUpClass(cls):
+        real = sample_jobs.path("step_file_demo", "Assem1.STEP")
+        cls.report = SF.analyse(real, mode="metal")
+        cls.dlg = _dialog()
+        cls.dlg.models = [{"report": cls.report}]
+        cls.dlg._fill_kfit_parts(cls.dlg.models)
+
+    def test_only_parts_with_a_flat_pattern_are_offered(self):
+        offered = {cls_data[1] for cls_data in
+                   (self.dlg.kfit_part_combo.itemData(i)
+                    for i in range(self.dlg.kfit_part_combo.count()))}
+        for name in ("top", "bottom", "side"):
+            self.assertIn(name, offered)
+
+    def test_the_true_width_this_part_was_measured_at_solves_back_to_it(self):
+        bottom = next(p for p in self.report["parts"] if p["name"] == "bottom")
+        true_w = bottom["flat"]["flat_size_mm"][0]
+        idx = next(i for i in range(self.dlg.kfit_part_combo.count())
+                  if self.dlg.kfit_part_combo.itemData(i)[1] == "bottom")
+        self.dlg.kfit_part_combo.setCurrentIndex(idx)
+        self.dlg.kfit_axis_combo.setCurrentIndex(0)     # width
+        self.dlg.kfit_target_edit.setText(f"{true_w:.2f}")
+        self.dlg._kfit_solve()
+        self.assertIn("reproduces that size exactly", self.dlg.kfit_result.text())
+        self.assertIsNotNone(self.dlg._kfit_solved)
+        solved = self.dlg._kfit_solved
+        self.dlg._kfit_apply()
+        self.assertEqual(self.dlg.k_edit.text(), f"{solved:g}")
+
+    def test_a_figure_that_cannot_be_this_part_says_so_plainly(self):
+        idx = 0
+        self.dlg.kfit_part_combo.setCurrentIndex(idx)
+        self.dlg.kfit_target_edit.setText("999999")
+        self.dlg._kfit_solve()
+        self.assertIn("doesn't fit", self.dlg.kfit_result.text())
+        self.assertIsNone(self.dlg._kfit_solved)
 
 
 class ItIsOnTheShelfAndInHistory(unittest.TestCase):

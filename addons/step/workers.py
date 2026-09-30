@@ -29,9 +29,11 @@ class StepMeasureWorker(_Worker):
     done = Signal(list)              # [{"path","report","out_dir","drawn","xlsx"}]
     failed = Signal(str)
 
-    def __init__(self, paths: list[str], mode: str, root: str):
+    def __init__(self, paths: list[str], mode: str, root: str,
+                k_factor: float = 0.0):
         super().__init__()
         self.paths, self.mode, self.root = paths, mode, root
+        self.k_factor = k_factor
 
     def run(self):
         try:
@@ -44,7 +46,7 @@ class StepMeasureWorker(_Worker):
             for path in self.paths:
                 name = os.path.basename(path)
                 self.progress.emit(f"measuring {name} ({self.mode})…")
-                report = SF.analyse(path, mode=self.mode)
+                report = SF.analyse(path, mode=self.mode, k_factor=self.k_factor)
                 out_dir = SF.output_dir(path, self.root)
                 names = SF.names(report)
                 xlsx = ""
@@ -94,10 +96,11 @@ class StepApplyWorker(_Worker):
     failed = Signal(str)
 
     def __init__(self, path: str, plan: dict, report: dict, mode: str,
-                 out_dir: str, question: str):
+                 out_dir: str, question: str, k_factor: float = 0.0):
         super().__init__()
         self.path, self.plan, self.report = path, plan, report
         self.mode, self.out_dir, self.question = mode, out_dir, question
+        self.k_factor = k_factor
 
     def run(self):
         try:
@@ -106,7 +109,7 @@ class StepApplyWorker(_Worker):
             names = SF.names(self.report)
             out_path = os.path.join(self.out_dir, names["modified"])
             built = SF.apply_plan(self.path, self.plan, out_path)
-            after = SF.analyse(out_path, mode=self.mode)
+            after = SF.analyse(out_path, mode=self.mode, k_factor=self.k_factor)
             try:
                 SF.write_xlsx(after,
                               os.path.join(self.out_dir, names["xlsx_after"]))

@@ -161,16 +161,445 @@ class TheCustomersOwnEnclosure(unittest.TestCase):
     def test_the_drawing_sheet_shows_every_part(self):
         out = tempfile.mkdtemp()
         drawn = SF.render_sheet(self.report, out)
-        html = open(drawn["html"], encoding="utf-8").read()
+        self.assertGreater(os.path.getsize(drawn["png"]), 5000)
+        from PIL import Image
+        img = Image.open(drawn["png"])
+        self.assertGreater(img.width, 100)
+        self.assertGreater(img.height, 100)
         for name in ("top", "bottom", "side"):
-            self.assertIn(name, html)
-            svg = os.path.join(out, SF.view_name("Assem1", name, 0))
-            self.assertTrue(os.path.exists(svg), svg)
-            self.assertGreater(os.path.getsize(svg), 5000, svg)
-        self.assertIn("101.00 x 93.00 x 71.00", html)
-        # The sheet itself carries the model's name, and so does its title.
-        self.assertEqual(os.path.basename(drawn["html"]),
-                         "Assem1 - drawing sheet.html")
+            self.assertIn(name, drawn["flats"])
+            self.assertTrue(os.path.exists(drawn["flats"][name]))
+        # The sheet itself carries the model's name.
+        self.assertEqual(os.path.basename(drawn["png"]),
+                         "Assem1 - drawing sheet.png")
+
+
+@unittest.skipUnless(HAVE and os.path.exists(REAL),
+                     "cadquery missing, or " + (sample_jobs.missing(
+                         "step_file_demo", "Assem1.STEP") or ""))
+class TheFlatPatternOfTheCustomersEnclosure(unittest.TestCase):
+    """The gap the drawing sheet's own warning used to name out loud:
+    'a bent sheet's flat pattern is not shown.' Witnessed against the same
+    real job as TheCustomersOwnEnclosure -- three real formed parts,
+    real bends, real holes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = SF.analyse(REAL, mode="metal")
+        cls.by_name = {p["name"]: p for p in cls.report["parts"]}
+
+    def test_all_three_parts_unfold(self):
+        for name in ("top", "bottom", "side"):
+            self.assertIsNotNone(self.by_name[name]["flat"], name)
+
+    def test_the_bottom_panels_square_window_is_not_invisible(self):
+        """Checked against a fabricator's own reference drawing of this
+        exact job: a real 46 x 46 mm square window cut into the bottom
+        panel. unfold() used to read only each face's OUTER wire — the
+        window is an INNER wire, cut into the middle of a face, and was
+        silently never looked at: drawn as nothing at all, not even a
+        gap in the outline. Any panel with a genuine non-round opening
+        should carry it now."""
+        cutouts = self.by_name["bottom"]["flat"]["cutouts"]
+        self.assertTrue(cutouts, "no cutouts found on 'bottom' at all")
+        sizes = [(round(max(x for x, _ in c) - min(x for x, _ in c), 1),
+                 round(max(y for _, y in c) - min(y for _, y in c), 1))
+                for c in cutouts]
+        self.assertIn((46.0, 46.0), sizes, sizes)
+
+    def test_the_flat_size_is_not_the_formed_size(self):
+        """The whole point: a bend adds real flat length that the formed
+        bounding box does not show."""
+        for name in ("top", "bottom", "side"):
+            flat_w, flat_h = self.by_name[name]["flat"]["flat_size_mm"]
+            formed = self.by_name[name]["size_mm"]
+            self.assertGreater(flat_w * flat_h, 0)
+            # At least one flat dimension exceeds every formed dimension --
+            # several formed legs straightened into one flat run.
+            self.assertTrue(flat_w > max(formed) or flat_h > max(formed),
+                            (name, flat_w, flat_h, formed))
+
+    def test_every_hole_lands_inside_the_flat_outline(self):
+        """Regression: a hole once landed 64 mm outside its own panel
+        because the nearest-plane test picked a different, merely nearby,
+        flat face instead of the one the hole is actually on."""
+        for name, part in self.by_name.items():
+            flat = part["flat"]
+            if not flat:
+                continue
+            w, h = flat["flat_size_mm"]
+            for hole in flat["holes"]:
+                self.assertGreaterEqual(hole["x"], -0.01, (name, hole))
+                self.assertGreaterEqual(hole["y"], -0.01, (name, hole))
+                self.assertLessEqual(hole["x"], w + 0.01, (name, hole))
+                self.assertLessEqual(hole["y"], h + 0.01, (name, hole))
+
+    def test_bend_lines_are_ninety_degrees_on_this_job(self):
+        for part in self.by_name.values():
+            for bend in (part["flat"] or {}).get("bend_lines", []):
+                self.assertAlmostEqual(bend["angle_deg"], 90.0, places=1)
+
+    def test_a_bigger_k_factor_makes_a_bigger_flat_pattern(self):
+        """The bend-allowance formula is angle x (radius + K x thickness) —
+        strictly increasing in K, so a bigger K-factor must never produce a
+        smaller (or equal) flat pattern for a part that actually has a
+        bend in it."""
+        low = SF.analyse(REAL, mode="metal", k_factor=0.2)
+        high = SF.analyse(REAL, mode="metal", k_factor=0.45)
+        low_by = {p["name"]: p for p in low["parts"]}
+        high_by = {p["name"]: p for p in high["parts"]}
+        grew = False
+        for name in ("top", "bottom", "side"):
+            lo, hi = low_by[name]["flat"], high_by[name]["flat"]
+            if not lo or not hi:
+                continue
+            self.assertGreaterEqual(hi["flat_size_mm"][0] * hi["flat_size_mm"][1],
+                                    lo["flat_size_mm"][0] * lo["flat_size_mm"][1],
+                                    name)
+            if hi["flat_size_mm"] != lo["flat_size_mm"]:
+                grew = True
+        self.assertTrue(grew, "no part's flat size changed with K-factor at all")
+
+    def test_the_default_k_factor_is_stated_not_silent(self):
+        self.assertEqual(self.report["k_factor"], SF._DEFAULT_K_FACTOR)
+        self.assertTrue(any("K-factor" in w for w in self.report["warnings"]))
+
+    def test_a_custom_k_factor_is_stated_as_entered(self):
+        report = SF.analyse(REAL, mode="metal", k_factor=0.38)
+        self.assertEqual(report["k_factor"], 0.38)
+        self.assertTrue(any("as entered" in w for w in report["warnings"]))
+
+    def test_plastic_mode_never_computes_a_flat_pattern(self):
+        report = SF.analyse(REAL, mode="plastic")
+        for part in report["parts"]:
+            self.assertIsNone(part["flat"])
+
+    def test_the_drawing_sheet_shows_the_flat_pattern(self):
+        out = tempfile.mkdtemp()
+        drawn = SF.render_sheet(self.report, out)
+        self.assertTrue(os.path.exists(drawn["png"]))
+        self.assertTrue(drawn["flats"])
+        for path in drawn["flats"].values():
+            self.assertTrue(os.path.exists(path))
+            self.assertGreater(os.path.getsize(path), 2000, path)
+
+    def test_the_square_window_is_drawn_and_sized_on_the_page(self):
+        html = SF.sheet_svg(self.report)
+        self.assertIn("46.00 x 46.00", html)
+
+    def test_a_round_holes_inner_wire_is_not_double_drawn_as_a_cutout(self):
+        """A plain punched hole's boundary is ALSO an inner wire on its
+        face — the same wire-walk that finds a real window would find
+        every ordinary hole too, if it did not filter out the
+        degenerate ones. It must not: a hole is already drawn once, as a
+        circle, from its cylindrical face."""
+        for part in self.by_name.values():
+            flat = part["flat"]
+            if not flat:
+                continue
+            hole_count = len(flat["holes"])
+            cutout_count = len(flat.get("cutouts", []))
+            # Real cutouts on this job are a handful at most; nowhere near
+            # one per hole, which is what "every hole's wire leaked
+            # through as a cutout too" would look like.
+            self.assertLess(cutout_count, max(hole_count, 1),
+                            (part["name"], hole_count, cutout_count))
+
+    def test_a_ventilation_grilles_cutouts_are_not_each_individually_labelled(self):
+        """Regression: the 'top' part's vent row is a real STEP feature —
+        eighteen individually-real rectangular cutouts, not one shape
+        Prism invented — and the first version of cutout labelling wrote
+        a size on every single one of them, which at that spacing prints
+        as an overlapping smear exactly like the hole-position chain did
+        before it got the same one-label-per-distinct-value rule. Cutout
+        labels follow it too now."""
+        html = SF.sheet_svg(self.report)
+        top = self.by_name["top"]["flat"]
+        cutouts = top.get("cutouts", [])
+        self.assertGreater(len(cutouts), 5,
+                           "the vent row itself should still be many real cutouts")
+        sizes = set()
+        for c in cutouts:
+            xs = [p[0] for p in c]
+            ys = [p[1] for p in c]
+            sizes.add((round(max(xs) - min(xs), 1), round(max(ys) - min(ys), 1)))
+        # However many individual vent slats there are, the PAGE should
+        # only ever carry one label text per distinct size among them.
+        for w, h in sizes:
+            self.assertEqual(html.count(f"{w:.2f} x {h:.2f}"), 1, (w, h))
+
+    def test_flat_pattern_and_isometric_are_separate_labelled_sections(self):
+        """The owner's own complaint: the formed 3-view band buried the
+        flat pattern instead of standing on its own, and a shop-floor
+        worker reading the sheet — not an estimator who already knows to
+        cross-reference a hole table — needs the two visually apart, each
+        headed plainly."""
+        html = SF.sheet_svg(self.report)
+        self.assertIn("FLAT PATTERN", html)
+        self.assertIn("ISOMETRIC", html)
+        # The formed 3-view band (FRONT VIEW / TOP VIEW / SIDE VIEW) is now
+        # only the fallback for a part that did NOT unfold — every real
+        # part on this job did, so none of those headings should appear.
+        for heading in ("FRONT VIEW", "TOP VIEW", "SIDE VIEW"):
+            self.assertNotIn(heading, html)
+
+    def test_every_hole_diameter_is_labelled_on_the_drawing_itself(self):
+        """Not only in a side table — the owner's own words: 'even the
+        radius and diameters are marked inside the diagram itself.'"""
+        html = SF.sheet_svg(self.report)
+        for name, part in self.by_name.items():
+            for dia in {h["dia_mm"] for h in (part["flat"] or {}).get("holes", ())}:
+                self.assertIn(f"Ø{dia:g}", html, (name, dia))
+
+    def test_hole_positions_are_dimensioned_not_only_shown_to_scale(self):
+        """A real, non-zero position figure for at least one hole on each
+        part — not just its outline drawn to scale."""
+        html = SF.sheet_svg(self.report)
+        for name, part in self.by_name.items():
+            flat = part["flat"]
+            if not flat or not flat["holes"]:
+                continue
+            some_x = f"{flat['holes'][0]['x']:.1f}"
+            self.assertTrue(some_x in html or
+                            any(f"{h['x']:.1f}" in html for h in flat["holes"]),
+                            name)
+
+    def test_positions_are_dimensioned_as_gaps_not_datum_distances(self):
+        """The owner's own words: 'I don't see any measurements' — meaning
+        Prism drew each hole's bare distance from an edge, so reading the
+        distance BETWEEN two holes meant subtracting two numbers by hand.
+        A chain draws that gap directly, the way the reference sheet
+        does. Checked the honest way: rebuild the same chain the drawing
+        function does, off the same measured positions, and confirm
+        those exact gap figures — not the raw positions — are what is on
+        the page."""
+        html = SF.sheet_svg(self.report)
+        found_a_chain = False
+        for name, part in self.by_name.items():
+            flat = part["flat"]
+            if not flat or not flat["holes"]:
+                continue
+            for axis, span in (("x", flat["flat_size_mm"][0]),
+                               ("y", flat["flat_size_mm"][1])):
+                pts = SF._cluster([h[axis] for h in flat["holes"]])
+                chain = SF._chain_points(pts, span, min_gap=1.0)
+                if not chain or len(chain) < 2:
+                    continue
+                gaps = [round(b - a, 2) for a, b in zip(chain, chain[1:])]
+                # At least one real (non-edge, non-total) gap actually
+                # printed on the page — proves it is drawing the chain,
+                # not just the overall span it already drew before this.
+                interior = [g for g in gaps if g not in
+                           (span, round(flat["flat_size_mm"][0], 2),
+                            round(flat["flat_size_mm"][1], 2))]
+                if any(f"{g:.2f}" in html for g in interior):
+                    found_a_chain = True
+        self.assertTrue(found_a_chain,
+                        "no chain-dimension gap value found anywhere on "
+                        "the sheet")
+
+    def test_a_chain_always_sums_to_the_full_span(self):
+        """Regression: an earlier version could drop the FAR edge itself
+        during thinning when the nearest real feature sat within
+        tolerance of it — the chain fell 2 mm short of a real part's own
+        measured height without saying so. Both ends must always survive."""
+        for part in self.by_name.values():
+            flat = part["flat"]
+            if not flat:
+                continue
+            for axis, span in (("x", flat["flat_size_mm"][0]),
+                               ("y", flat["flat_size_mm"][1])):
+                pts = SF._cluster([h[axis] for h in flat["holes"]])
+                chain = SF._chain_points(pts, span, min_gap=1.0)
+                if not chain:
+                    continue
+                self.assertAlmostEqual(chain[0], 0.0, places=2)
+                self.assertAlmostEqual(chain[-1], span, places=2)
+                self.assertAlmostEqual(sum(b - a for a, b in
+                                           zip(chain, chain[1:])), span, places=2)
+
+    def test_the_vent_row_did_not_need_the_fallback_on_this_real_job(self):
+        """The top part's vent-slot row (eighteen Ø3 holes a few mm apart)
+        is exactly the shape of data _chain_points' own fallback exists
+        for — but on THIS job the same small scale the tall Y span forces
+        also collapses the vent row down to two clean segments, so the
+        fallback is never actually reached here. That is a real
+        assertion worth pinning, not just an absence: the drawing shows
+        real numbers for this row, not a shrug. The fallback path itself
+        is covered directly, on synthetic data, in
+        TheDimensionChainAlwaysReachesBothEdges — that is the right place
+        to prove it works, since it does not fire on this particular
+        job's own numbers."""
+        html = SF.sheet_svg(self.report)
+        top = self.by_name["top"]["flat"]
+        fw = top["flat_size_mm"][0]
+        self.assertIn("45.00", html)          # 0 -> 45, the first stop
+        self.assertIn(f"{fw - 45.0:.2f}", html)  # 45 -> the far edge
+        self.assertNotIn("too closely packed", html)
+
+    def test_the_excel_sheet_carries_the_flat_size(self):
+        import openpyxl
+        out = os.path.join(tempfile.mkdtemp(), "dimensions.xlsx")
+        SF.write_xlsx(self.report, out)
+        wb = openpyxl.load_workbook(out)
+        # Row 1 is the title, row 2 blank, row 3 the header — see write_xlsx.
+        header = [c.value for c in wb["Parts"][3]]
+        self.assertIn("Flat L (mm)", header)
+        self.assertIn("Flat W (mm)", header)
+
+    def test_nothing_is_actually_missing_on_this_real_job(self):
+        """A hand-drawn fabricator reference for this exact job showed a
+        stepped/notched corner on the 'side' part that looked, at first
+        glance, absent from Prism's flat pattern — and the old disclosure
+        ("N of 28 faces unfolded — small features ... not shown") read
+        like confirmation something real was missing. Checked directly
+        against the geometry: it was not. The step is already in the
+        placed panel's own outline; every face the bend graph could not
+        reach is either that panel's untouched back face or a sliver of
+        the sheet's own edge thickness, neither of which is a feature
+        left off the drawing. Pinned on all three real parts so a future
+        change to the bend graph cannot quietly start hiding real
+        geometry again without this test noticing."""
+        for name in ("top", "bottom", "side"):
+            flat = self.by_name[name]["flat"]
+            self.assertEqual(flat["faces_hidden_meaningful"], 0, name)
+        self.assertNotIn("could not be unfolded", SF.sheet_svg(self.report))
+
+    def test_the_panels_own_outline_joins_the_dimension_chain(self):
+        """Position dimensioning used to read only hole positions — a
+        panel's own step or notch was drawn (it is part of the outline)
+        but never numbered. The real 'bottom' panel's 46mm square window
+        is cut into the outline as its own shape; its edges are genuine
+        chain stops a holes-only chain never saw."""
+        flat = self.by_name["bottom"]["flat"]
+        holes_only_x = SF._cluster([h["x"] for h in flat["holes"]])
+        outline_x = [x for poly in flat["panels"] for x, _y in poly]
+        combined_x = SF._cluster([h["x"] for h in flat["holes"]] + outline_x)
+        self.assertGreater(len(combined_x), len(holes_only_x))
+
+    def test_no_two_red_callouts_overlap_on_a_real_generated_job(self):
+        """A real Prism-generated run of this exact job had a hole's Ø, a
+        cutout's size and a SECOND cutout's size all land on the same
+        few pixels on 'top', and separately a cutout's size land on top
+        of a different nearby hole's own drawn circle on 'bottom' —
+        illegible, and the actual bug report that led to leader lines
+        (_place_label). Checked here the way it was actually found: by
+        collecting every red callout _draw_flat_pattern put on the page
+        and asking whether any two (or a label and a drawn shape) share
+        ground, not by eyeballing a render."""
+        for name in ("top", "bottom", "side"):
+            part = self.by_name[name]
+            sh = SF._Canvas()
+            SF._draw_flat_pattern(sh, 1, part, None, with_isometric=False)
+            labels, shapes = [], []
+            for op in sh._ops:
+                if op[0] == "text" and op[7] == "#a33":
+                    _, x, y, text, size, anchor, _bold, _fill, _rot = op
+                    labels.append(SF._label_box(x, y, text, size, anchor))
+                elif op[0] == "circle":
+                    _, cx, cy, r, *_ = op
+                    shapes.append((cx - r, cy - r, cx + r, cy + r))
+            # A label must not sit on another label, nor on a drawn
+            # shape (a hole's own circle). Two real holes' circles
+            # overlapping each other, if the model genuinely has them
+            # that close, is real geometry -- not this test's business.
+            for i, a in enumerate(labels):
+                for b in labels[i + 1:] + shapes:
+                    self.assertFalse(SF._boxes_overlap(a, b, pad=0),
+                                     (name, a, b))
+
+
+class BendAllowanceIsTheNeutralAxisNotEitherRadius(unittest.TestCase):
+    """A pure arithmetic check, no geometry -- the one formula every flat
+    size in this file depends on."""
+
+    def test_a_ninety_degree_bend(self):
+        import math
+        got = SF._bend_allowance(radius_mm=2.0, angle_rad=math.pi / 2,
+                                 thickness_mm=1.0, k_factor=0.4133)
+        expected = (math.pi / 2) * (2.0 + 0.4133 * 1.0)
+        self.assertAlmostEqual(got, expected, places=6)
+
+    def test_zero_radius_is_just_k_times_thickness_times_angle(self):
+        import math
+        got = SF._bend_allowance(radius_mm=0.0, angle_rad=math.pi / 2,
+                                 thickness_mm=2.0, k_factor=0.4133)
+        self.assertAlmostEqual(got, (math.pi / 2) * 0.4133 * 2.0, places=6)
+
+    def test_a_bigger_k_factor_is_strictly_more_allowance(self):
+        import math
+        small = SF._bend_allowance(2.0, math.pi / 2, 1.0, 0.2)
+        big = SF._bend_allowance(2.0, math.pi / 2, 1.0, 0.45)
+        self.assertGreater(big, small)
+
+
+class ClusteringHolePositionsForTheDrawing(unittest.TestCase):
+    """_cluster is what keeps a ventilation grille's dozen slot positions
+    from printing as one unreadable smear of digits on the flat pattern —
+    see _draw_flat_pattern's own note on why two stagger rows were not
+    enough on a real job."""
+
+    def test_identical_positions_collapse_to_one(self):
+        self.assertEqual(SF._cluster([10.0, 10.0, 10.0]), [10.0])
+
+    def test_positions_a_millimetre_apart_merge_by_default(self):
+        self.assertEqual(SF._cluster([10.0, 10.4, 10.9]), [10.0])
+
+    def test_positions_well_apart_all_survive(self):
+        self.assertEqual(SF._cluster([0.0, 20.0, 40.0]), [0.0, 20.0, 40.0])
+
+    def test_a_wider_tolerance_merges_more(self):
+        tight = SF._cluster([0.0, 5.0, 10.0], tol=1.0)
+        wide = SF._cluster([0.0, 5.0, 10.0], tol=6.0)
+        self.assertGreater(len(tight), len(wide))
+
+    def test_empty_in_is_empty_out(self):
+        self.assertEqual(SF._cluster([]), [])
+
+
+class TheDimensionChainAlwaysReachesBothEdges(unittest.TestCase):
+    """_chain_points builds the stops a position CHAIN runs between —
+    0, every real feature, and the far edge — the way the reference
+    sheet's own "26.5 / 90.5 / 50 / 3.5" reads: gaps between things, not
+    each thing's bare distance from a datum a reader has to subtract by
+    hand. The one rule that must never break: both ends of the chain are
+    always in it, however close a real feature sits to either one."""
+
+    def test_a_lone_feature_gives_two_segments(self):
+        self.assertEqual(SF._chain_points([50.0], 100.0), [0.0, 50.0, 100.0])
+
+    def test_no_features_is_still_one_span_edge_to_edge(self):
+        self.assertEqual(SF._chain_points([], 100.0), [0.0, 100.0])
+
+    def test_a_feature_against_the_start_edge_does_not_drop_the_edge(self):
+        chain = SF._chain_points([0.3], 100.0, min_gap=1.0)
+        self.assertAlmostEqual(chain[0], 0.0, places=2)
+
+    def test_a_feature_against_the_far_edge_does_not_drop_the_edge(self):
+        """The actual regression: the chain used to fall short of the
+        part's own measured span when the last real feature sat within
+        tolerance of the far edge — it silently dropped the edge instead
+        of the near-duplicate feature."""
+        chain = SF._chain_points([99.7], 100.0, min_gap=1.0)
+        self.assertAlmostEqual(chain[-1], 100.0, places=2)
+        self.assertEqual(sum(b - a for a, b in zip(chain, chain[1:])), 100.0)
+
+    def test_gaps_sum_to_the_full_span_regardless_of_how_many_features(self):
+        chain = SF._chain_points([10.0, 22.0, 22.4, 71.0], 100.0, min_gap=1.0)
+        self.assertAlmostEqual(sum(b - a for a, b in zip(chain, chain[1:])),
+                               100.0, places=2)
+
+    def test_too_many_stops_gives_up_cleanly_instead_of_overlapping(self):
+        """Round 44's actual bug: eighteen close-together vent-hole
+        positions chained anyway and printed as an unreadable smear.
+        Past the cap, this returns None so the caller can fall back to
+        showing the feature to scale instead of forcing a label onto it."""
+        dense = [float(i) for i in range(1, 30)]
+        self.assertIsNone(SF._chain_points(dense, 100.0, min_gap=1.0))
+
+    def test_a_reasonable_number_of_stops_is_not_dropped(self):
+        few = [10.0, 30.0, 50.0, 70.0]
+        self.assertIsNotNone(SF._chain_points(few, 100.0, min_gap=1.0))
 
 
 class ThePlanIsValidatedNotTrusted(unittest.TestCase):
@@ -457,8 +886,8 @@ class EveryFileCarriesTheModelsName(unittest.TestCase):
             self.assertTrue(name.startswith("Assem1 - "), (key, name))
         self.assertEqual(out["xlsx"], "Assem1 - dimensions.xlsx")
         self.assertEqual(out["modified"], "Assem1 - modified.step")
-        self.assertEqual(SF.view_name("Assem1", "top", 1),
-                         "Assem1 - view top.svg")
+        self.assertEqual(SF.flat_image_name("Assem1", "top", 1),
+                         "Assem1 - top - flat pattern.png")
         self.assertEqual(SF.ai_sheet_name("Assem1", 1, ".png"),
                          "Assem1 - AI drawing sheet 1.png")
 
@@ -581,13 +1010,12 @@ class TheSheetIsDrawnByPrismNotAnAI(unittest.TestCase):
     def test_the_sheet_lands_under_the_models_name(self):
         out = tempfile.mkdtemp()
         drawn = SF.render_sheet(self.report, out)
-        self.assertEqual(os.path.basename(drawn["svg"]),
-                         "Bracket A - drawing sheet.svg")
-        self.assertEqual(os.path.basename(drawn["html"]),
-                         "Bracket A - drawing sheet.html")
-        html = open(drawn["html"], encoding="utf-8").read()
-        self.assertIn("<svg", html)
-        self.assertIn("60.00 x 40.00 x 8.00", html)
+        self.assertEqual(os.path.basename(drawn["png"]),
+                         "Bracket A - drawing sheet.png")
+        self.assertTrue(os.path.exists(drawn["png"]))
+        # A plain box has no bend, so no part of it has a flat pattern —
+        # no flat-only image for a part that has none.
+        self.assertEqual(drawn["flats"], {})
 
     def test_a_part_with_no_geometry_still_gets_a_line(self):
         report = dict(self.report, _shapes=[])

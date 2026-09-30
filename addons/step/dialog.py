@@ -28,9 +28,9 @@ import shutil
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QMessageBox, QPlainTextEdit, QProgressBar, QRadioButton,
-    QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+    QProgressBar, QRadioButton, QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -48,9 +48,12 @@ MODEL_EXTS = (".step", ".stp")
 # (key, label, what it does) — the order they are offered in.
 ACTIONS = (
     ("draft", "Draft",
-     "Measure and draw the dimensioned sheet here (front, top and side "
-     "views, sizes in mm, hole table — no AI), then ChatGPT also draws a "
-     "styled version from the numbers, never from the model."),
+     "Measure and draw the dimensioned sheet here — flat pattern, "
+     "isometric, every hole sized and placed on the drawing itself — no "
+     "AI. ChatGPT drawing a second, styled copy is optional (below); "
+     "compared against Prism's own sheet it turned out to just trace the "
+     "picture it was shown, text and all, worse — it is not an "
+     "independent check on the numbers, only a different look."),
     ("ask", "Ask",
      "Measure, then get suggestions for the part from the numbers and your "
      "question, reviewed into an exact change plan you can read. Nothing "
@@ -157,6 +160,26 @@ class StepDialog(PrismDialog):
         mat_row.addStretch(1)
         opt_v.addLayout(mat_row)
 
+        # The bend-allowance K-factor a flat pattern is unfolded with —
+        # theirs if they know it, Prism's own default if they don't. Never
+        # asked before every model; kept in cfg like everything else here,
+        # and the drawing sheet always states which one was actually used
+        # (core.stepfile.analyse's own warning), so a blank box quietly
+        # becoming the default is never mistaken for a confirmed shop value.
+        k_row = QHBoxLayout()
+        k_row.addWidget(QLabel(i18n.t("Bend K-factor")))
+        self.k_edit = QLineEdit()
+        self.k_edit.setPlaceholderText(f"default {self.sf._DEFAULT_K_FACTOR:g}")
+        self.k_edit.setMaximumWidth(90)
+        self.k_edit.setText(str(self.cfg.get("step_k_factor") or ""))
+        k_row.addWidget(self.k_edit)
+        k_note = QLabel(i18n.t("— only for a metal flat pattern; leave "
+                               "blank unless your shop gives you one"))
+        k_note.setStyleSheet(f"color: {theme.NEUTRAL[700]}; font-size: 12.5px;")
+        k_row.addWidget(k_note)
+        k_row.addStretch(1)
+        opt_v.addLayout(k_row)
+
         # Where everything for a model goes. Asked ONCE, the first time
         # Generate is pressed (see _ensure_root), and shown here so the
         # answer is never a mystery and can be changed at any time.
@@ -212,6 +235,22 @@ class StepDialog(PrismDialog):
             row_l.addWidget(note, stretch=1)
             act_v.addWidget(row)
         self._action_buttons["draft"].setChecked(True)
+
+        # Off by default: checked against Prism's own drawing, ChatGPT's
+        # "styled" copy just traced it, worse — same numbers, garbled
+        # text (see ACTIONS' own note above). Not deleted, because a
+        # differently-styled picture for sending to someone outside the
+        # shop is still a real, if occasional, reason to want one; it is
+        # just no longer something Draft spends a minute on unasked.
+        self.ai_draft_cb = QCheckBox(i18n.t(
+            "Also ask ChatGPT to draw a styled copy (optional — not an "
+            "independent check; see above)"))
+        self.ai_draft_cb.setChecked(bool(self.cfg.get("step_ai_draft")))
+        indent = QWidget()
+        indent_l = QHBoxLayout(indent)
+        indent_l.setContentsMargins(28, 0, 0, 0)
+        indent_l.addWidget(self.ai_draft_cb)
+        act_v.addWidget(indent)
         step2_v.addWidget(act_box)
         self.step2.setVisible(False)
         root.addWidget(self.step2)
@@ -233,6 +272,51 @@ class StepDialog(PrismDialog):
         meas_l.addWidget(self.files_label)
         self.meas_box.setVisible(False)
         root.addWidget(self.meas_box, stretch=1)
+
+        # Back-solve the K-factor: the shop already knows the true flat
+        # size of a part they've cut before (from a past job, or a
+        # fabricator's own reference sheet) — this turns that one known
+        # number into the K-factor that reproduces it, instead of asking
+        # them to guess-and-check against Prism's default. Only appears
+        # once something has actually been measured and unfolded.
+        self.kfit_box = QGroupBox(i18n.t(
+            "Know a part's real flat size? Back-solve the K-factor"))
+        kfit_v = QVBoxLayout(self.kfit_box)
+        kfit_v.setSpacing(theme.SPACE_2)
+        kfit_note = QLabel(i18n.t(
+            "Pick the part, say which side you know (from a past job or "
+            "the fabricator's own sheet) and its true length — Prism works "
+            "out the K-factor that would have produced exactly that."))
+        kfit_note.setWordWrap(True)
+        kfit_note.setStyleSheet(f"color: {theme.NEUTRAL[700]}; font-size: 12.5px;")
+        kfit_v.addWidget(kfit_note)
+        kfit_row = QHBoxLayout()
+        self.kfit_part_combo = QComboBox()
+        kfit_row.addWidget(self.kfit_part_combo, stretch=1)
+        self.kfit_axis_combo = QComboBox()
+        self.kfit_axis_combo.addItem(i18n.t("Width"), "w")
+        self.kfit_axis_combo.addItem(i18n.t("Height"), "h")
+        kfit_row.addWidget(self.kfit_axis_combo)
+        self.kfit_target_edit = QLineEdit()
+        self.kfit_target_edit.setPlaceholderText(i18n.t("true size, mm"))
+        self.kfit_target_edit.setMaximumWidth(110)
+        kfit_row.addWidget(self.kfit_target_edit)
+        kfit_row.addWidget(self.button(i18n.t("Solve"), "secondary",
+                                       small=True, on_click=self._kfit_solve))
+        kfit_v.addLayout(kfit_row)
+        result_row = QHBoxLayout()
+        self.kfit_result = QLabel("")
+        self.kfit_result.setWordWrap(True)
+        result_row.addWidget(self.kfit_result, stretch=1)
+        self.kfit_use_btn = self.button(i18n.t("Use this K-factor"),
+                                        "secondary", small=True,
+                                        on_click=self._kfit_apply)
+        self.kfit_use_btn.setVisible(False)
+        result_row.addWidget(self.kfit_use_btn)
+        kfit_v.addLayout(result_row)
+        self._kfit_solved: float | None = None
+        self.kfit_box.setVisible(False)
+        root.addWidget(self.kfit_box)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -371,6 +455,21 @@ class StepDialog(PrismDialog):
     def _mode(self) -> str:
         return self.mode_combo.currentText().strip() or "metal"
 
+    def _k_factor(self) -> float:
+        """0.0 means "use Prism's default" — a blank box, or anything
+        that doesn't parse as a plausible K-factor (0 to 1; it is a
+        fraction of the sheet's thickness, never more than one whole
+        thickness), falls back to that rather than silently unfolding
+        with whatever a typo left in the box."""
+        text = self.k_edit.text().strip()
+        if not text:
+            return 0.0
+        try:
+            k = float(text)
+        except ValueError:
+            return 0.0
+        return k if 0.0 < k < 1.0 else 0.0
+
     # ── generate: measure, then the chosen action per model ────────────
 
     def _agents(self) -> dict:
@@ -416,6 +515,8 @@ class StepDialog(PrismDialog):
             return
 
         self.cfg["step_mode"] = self._mode()
+        self.cfg["step_k_factor"] = self.k_edit.text().strip()
+        self.cfg["step_ai_draft"] = self.ai_draft_cb.isChecked()
         try:
             CB.config.save(self.cfg)
         except Exception:                               # noqa: BLE001
@@ -427,7 +528,7 @@ class StepDialog(PrismDialog):
         self._set_busy(True, i18n.t(
             "Measuring — the model never leaves this machine…"))
         self._worker = StepMeasureWorker(list(self.paths), self._mode(),
-                                         self._root())
+                                         self._root(), self._k_factor())
         self._worker.progress.connect(self._on_progress)
         self._worker.done.connect(self._on_measured)
         self._worker.failed.connect(self._on_failed)
@@ -445,7 +546,10 @@ class StepDialog(PrismDialog):
                        else "")
             blocks.append(heading + self.sf.report_text(report))
             files.append(m["out_dir"])
-            for path in (m.get("xlsx"), (m.get("drawn") or {}).get("png")):
+            drawn = m.get("drawn") or {}
+            deliverables = [m.get("xlsx"), drawn.get("png"),
+                            *drawn.get("flats", {}).values()]
+            for path in deliverables:
                 if path and os.path.exists(path):
                     try:
                         CB.config.save_artifact(path, os.path.basename(path),
@@ -459,8 +563,63 @@ class StepDialog(PrismDialog):
             + "; ".join(files))
         self.meas_box.setVisible(True)
         self.folder_btn.setEnabled(True)
+        self._fill_kfit_parts(results)
         self._queue = list(results)
         self._next()
+
+    def _fill_kfit_parts(self, results: list):
+        """Only the parts that actually unfolded to a flat pattern can
+        have their K-factor back-solved — nothing to invert for a part
+        with no flat size in the first place."""
+        self.kfit_part_combo.clear()
+        self.kfit_result.setText("")
+        multi = len(results) > 1
+        for i, m in enumerate(results):
+            report = m["report"]
+            for p in report["parts"]:
+                if not p.get("flat"):
+                    continue
+                label = (f"{report['file']} — {p['name']}" if multi
+                         else p["name"])
+                self.kfit_part_combo.addItem(label, (i, p["name"]))
+        self.kfit_box.setVisible(self.kfit_part_combo.count() > 0)
+
+    def _kfit_solve(self):
+        self.kfit_use_btn.setVisible(False)
+        self._kfit_solved = None
+        if self.kfit_part_combo.count() == 0:
+            return
+        idx = self.kfit_part_combo.currentIndex()
+        model_i, part_name = self.kfit_part_combo.itemData(idx)
+        axis = self.kfit_axis_combo.currentData()
+        text = self.kfit_target_edit.text().strip()
+        try:
+            target = float(text)
+        except ValueError:
+            self.kfit_result.setText(i18n.t(
+                "Enter the true size in millimetres first."))
+            return
+        report = self.models[model_i]["report"]
+        k = self.sf.solve_k_factor(report, part_name, target, axis=axis)
+        if k is None:
+            self.kfit_result.setText(i18n.t(
+                "That figure doesn't fit this part's own geometry — check "
+                "the part, the side (width/height) and the number."))
+            return
+        self._kfit_solved = k
+        self.kfit_result.setText(i18n.t(
+            "K-factor {k} reproduces that size exactly.").replace(
+            "{k}", f"{k:g}"))
+        self.kfit_use_btn.setVisible(True)
+
+    def _kfit_apply(self):
+        if self._kfit_solved is None:
+            return
+        self.k_edit.setText(f"{self._kfit_solved:g}")
+        self.kfit_result.setText(self.kfit_result.text() + "  " + i18n.t(
+            "— now set as the Bend K-factor above; press Generate again to "
+            "re-draw with it."))
+        self.kfit_use_btn.setVisible(False)
 
     def _next(self):
         """The chosen action, one model at a time — an AI stage per model,
@@ -476,6 +635,16 @@ class StepDialog(PrismDialog):
 
     def _draft(self, m: dict):
         report = m["report"]
+        if not self.ai_draft_cb.isChecked():
+            # Prism's own drawing sheet was already made in _on_measured —
+            # that IS the deliverable now (Round 42: flat pattern + hole
+            # positions marked on the drawing itself). Nothing left for an
+            # AI to add unless the person actually asked for its copy.
+            self._notes.append(f"{report['file']}: Prism's own drawing "
+                               "sheet stands — ChatGPT's copy wasn't asked "
+                               "for")
+            self._next()
+            return
         artist = self._artist()
         # Only Prism's OWN render travels — never the model. With no PNG
         # (no browser engine) the numbers in the brief carry it alone.
@@ -638,7 +807,8 @@ class StepDialog(PrismDialog):
             "Building {name} and re-measuring it — here, on a copy…")
             .replace("{name}", out["modified"]))
         self._apply_worker = StepApplyWorker(
-            m["path"], plan, report, self._mode(), out_dir, question)
+            m["path"], plan, report, self._mode(), out_dir, question,
+            self._k_factor())
         self._apply_worker.done.connect(self._on_applied)
         self._apply_worker.failed.connect(self._on_failed)
         self._apply_worker.start()
