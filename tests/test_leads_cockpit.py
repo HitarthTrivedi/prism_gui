@@ -2828,6 +2828,30 @@ class RemoveTakesThemOffTheList(_Workbench):
         wb._filters.set_spec({"contact_stages": {"include": ["Interested"]}})
         self.assertEqual(self._names(wb), ["Person 0"])       # the stage came back too
 
+    def test_the_real_removed_window_path_runs(self):
+        """_restore_dialog used QDialog without importing it, so the moment the
+        Removed window closed it raised NameError and nothing was restored.
+        Every other test replaces _restore_dialog, which is why none saw it."""
+        from PySide6.QtWidgets import QDialog
+        from unittest import mock
+        wb = self._WB.LeadsWorkbench({})
+        self._held(wb)
+
+        class _Window:
+            def __init__(self, records, parent=None):
+                self.records = records
+            def exec(self):
+                return self.result
+            def chosen_ids(self):
+                return [r.id for r in self.records]
+
+        records = [mock.Mock(id="a"), mock.Mock(id="b")]
+        with mock.patch("addons.leads.removed_dialog.RemovedDialog", _Window):
+            _Window.result = QDialog.Accepted
+            self.assertEqual(wb._restore_dialog(records), ["a", "b"])
+            _Window.result = QDialog.Rejected
+            self.assertEqual(wb._restore_dialog(records), [])
+
     def test_closing_the_removed_window_restores_nobody(self):
         wb = self._WB.LeadsWorkbench({})
         self._held(wb)

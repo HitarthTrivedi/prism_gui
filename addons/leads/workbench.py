@@ -1555,6 +1555,7 @@ class LeadsWorkbench(QWidget):
     def _restore_dialog(self, records) -> list:
         """The Removed window: the ids ticked to come back, [] on Close.
         Tests patch this."""
+        from PySide6.QtWidgets import QDialog
         from addons.leads.removed_dialog import RemovedDialog
         dlg = RemovedDialog(records, parent=self)
         return dlg.chosen_ids() if dlg.exec() == QDialog.Accepted else []
