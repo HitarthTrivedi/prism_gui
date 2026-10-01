@@ -327,33 +327,73 @@ def write_outreach(drafts: list[Draft], path: str) -> str:
 # ── suppression: never contact the same person twice; honour opt-outs ─────────
 
 def _suppression_path() -> str:
+    """The machine-wide list: opt-outs, hard bounces, and everything written
+    before contacts were scoped per sending address. Dead for one sender is
+    dead for all, so this one stays shared."""
     return os.path.join(os.path.expanduser("~"), ".prism", "outreach_suppressed.txt")
 
 
-def load_suppression() -> set:
-    """Addresses we must not (re-)contact: previously emailed, hard-bounced, or
-    opted out. A plain text file the owner can also edit by hand — the send
-    checks it before every message."""
+def _contacted_path(sender: str) -> str:
+    """Who THIS sending address has already written to. Scoped per address:
+    one member emailing a prospect must not silently stop a colleague with
+    their own account and their own leads from ever reaching them (review
+    finding 8, 2026-10-01)."""
+    slug = re.sub(r"[^a-z0-9@._-]+", "_", (sender or "").strip().lower()) or "default"
+    return os.path.join(os.path.expanduser("~"), ".prism", "outreach_contacted",
+                        slug + ".txt")
+
+
+def _read_list(path: str) -> set:
     try:
-        with open(_suppression_path(), encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return {ln.strip().lower() for ln in f
                     if ln.strip() and not ln.startswith("#")}
     except Exception:                                       # noqa: BLE001
         return set()
 
 
-def _suppress(emails) -> None:
-    new = {e.strip().lower() for e in emails if e and e.strip()} - load_suppression()
+def load_suppression(sender: str | None = None) -> set:
+    """Addresses we must not (re-)contact from `sender`: the machine-wide list
+    (opted out, hard-bounced, or listed before the lists were scoped) plus the
+    ones this sender has already written to. With no sender: everyone anyone
+    on this machine has reached — what a "reached to date" count wants. Plain
+    text files the owner can also edit by hand — the send checks them before
+    every message."""
+    out = _read_list(_suppression_path())
+    if sender is not None:
+        return out | _read_list(_contacted_path(sender))
+    folder = os.path.dirname(_contacted_path("x"))
+    try:
+        for name in os.listdir(folder):
+            if name.endswith(".txt"):
+                out |= _read_list(os.path.join(folder, name))
+    except OSError:
+        pass
+    return out
+
+
+def _append(path: str, emails, already: set) -> None:
+    new = {e.strip().lower() for e in emails if e and e.strip()} - already
     if not new:
         return
     try:
-        path = _suppression_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             for e in sorted(new):
                 f.write(e + "\n")
     except Exception:                                       # noqa: BLE001
         pass
+
+
+def _suppress(emails, sender: str | None = None) -> None:
+    """Record addresses. With a `sender`: "this address has now written to
+    them" (scoped). Without: a machine-wide, every-sender suppression."""
+    if sender is None:
+        path = _suppression_path()
+        _append(path, emails, _read_list(path))
+    else:
+        path = _contacted_path(sender)
+        _append(path, emails, _read_list(path) | _read_list(_suppression_path()))
 
 
 def _with_optout(body: str) -> str:
@@ -389,9 +429,29 @@ def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
     if not CB.mailer.is_configured(cfg):
         raise RuntimeError("No sending account is set up yet "
                            "(Email → Set up the sending account).")
-    suppressed = load_suppression()
+    sender = ((cfg.get("email") or {}).get("address") or "").strip().lower()
+    suppressed = load_suppression(sender)
     sent, failed = [], []
     total = len(drafts)
+
+    # The same pace and daily ceiling the Email screen keeps. Each message
+    # here is its own one-recipient send_bulk call, so the mailer's own gap
+    # and per-run cap never applied to this path: "Send all" went out
+    # back-to-back and never showed in the daily count (review finding 7,
+    # 2026-10-01).
+    import email_config
+    import send_ledger
+    policy = email_config.send_policy(cfg)
+    try:
+        today = send_ledger.sent_today(cfg, sender)
+    except Exception:                                       # noqa: BLE001
+        today = 0
+    waiting = [d for d in drafts
+               if (d.recipient["email"] or "").strip().lower() not in suppressed
+               and (d.recipient["email"] or "").strip()]
+    allowed, reasons = email_config.plan_send(policy, len(waiting), today)
+    tried = 0
+
     for i, d in enumerate(drafts, 1):
         if should_stop and should_stop():
             break
@@ -401,22 +461,47 @@ def send(drafts: list[Draft], cfg: dict, on_progress=None, should_stop=None):
             continue
         if email in suppressed:
             d.status = "skipped"
-            d.note = "on the suppression list (already contacted or opted out)"
+            d.note = "on the suppression list (already contacted from this address, or opted out / bounced)"
             if on_progress:
                 on_progress(i, total, d)
             continue
-        s, f = CB.mailer.send_bulk(cfg, [d.recipient], d.subject,
-                                   _with_optout(d.body), files=[])
+        if tried >= allowed:
+            d.status = "skipped"
+            d.note = "held back by your send limits (%s)" % "; ".join(reasons)
+            if on_progress:
+                on_progress(i, total, d)
+            continue
+        if tried:                                   # the gap between two sends
+            pause = CB.mailer.pause_after_send(policy["gap_seconds"],
+                                               policy["jitter_seconds"])
+            waited = 0.0
+            while waited < pause:
+                if should_stop and should_stop():
+                    break
+                time.sleep(min(0.25, pause - waited))
+                waited += 0.25
+            if should_stop and should_stop():
+                break
+        tried += 1
+        body = _with_optout(d.body)
+        s, f = CB.mailer.send_bulk(cfg, [d.recipient], d.subject, body, files=[])
         if s:
             d.status = "sent"
             sent.append(d.recipient["email"])
-            _suppress([email])                     # don't re-contact on a re-run
+            _suppress([email], sender)             # this sender won't re-contact on a re-run
             suppressed.add(email)                  # …nor later in this same batch
+            try:                                   # counts toward today's limit
+                send_ledger.record(cfg, to=[d.recipient], subject=d.subject,
+                                   body=body, sent=[d.recipient["email"]],
+                                   failed=[], attachments=[],
+                                   list_name="Leads", sender=sender)
+            except Exception:                                   # noqa: BLE001
+                pass            # a log that cannot be written must not stop a send
         else:
             d.status, d.error = "failed", (f[0][1] if f else "unknown error")
             failed.append((d.recipient["email"], d.error))
             if _is_bounce(d.error):
-                _suppress([email])                 # a hard bounce → never retry
+                _suppress([email])                 # a hard bounce → never retry, for any sender
                 suppressed.add(email)              # …not even a repeat in this batch
         if on_progress:
             on_progress(i, total, d)

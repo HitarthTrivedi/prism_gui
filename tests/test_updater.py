@@ -301,6 +301,18 @@ class Advice(Harness):
         self.assertFalse(updater.dismissed("1.4.0"))
         self.assertTrue(updater.dismissed("1.5.0"))
 
+    def test_not_now_postpones_it_does_not_hide_the_update_for_good(self):
+        """The banner's Download button used to vanish after "Not now" and
+        never return (review finding 6, 2026-10-01)."""
+        import time
+        updater.dismiss("1.4.0")
+        now = time.time()
+        self.assertTrue(updater.dismissed("1.4.0", now=now + 60))
+        self.assertTrue(updater.dismissed(
+            "1.4.0", now=now + updater.DISMISS_FOR_SECONDS - 60))
+        self.assertFalse(updater.dismissed(
+            "1.4.0", now=now + updater.DISMISS_FOR_SECONDS + 60))
+
     def test_blank_versions_are_never_dismissed(self):
         updater.dismiss("")
         self.assertFalse(updater.dismissed(""))

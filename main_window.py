@@ -2304,9 +2304,6 @@ class MainWindow(QMainWindow):
             return
         if not licensing.require("core", self):
             return
-        # Pressing Start the work commits the whole queue, not just the plan on
-        # screen. From here every later task plans and runs without stopping.
-        self._auto_run = True
         self.agents_panel.ensure_prompts()
         run_agents = self.agents_panel.selected_agents()
         # The ordered form of the same plan. A dict keyed by stage cannot
@@ -2463,6 +2460,14 @@ class MainWindow(QMainWindow):
                              for label, agent, questions in run_steps]
 
         skip_stages = sorted(dropped)
+
+        # Pressing Start the work commits the whole queue, not just the plan on
+        # screen. From here every later task plans and runs without stopping.
+        # Armed only now, after every confirmation above has been answered:
+        # a Cancel on one of those returns early, and arming first left the
+        # flag set, so the NEXT task planned on this surface started by itself
+        # instead of waiting for review.
+        self._auto_run = True
 
         # The prompts were written when the plan was made -- before anyone
         # looked at it. If a step was dropped, added, moved or given another
@@ -3969,7 +3974,20 @@ class MainWindow(QMainWindow):
         waits then overlap, so three stuck workers cost ten seconds between
         them instead of thirty.
         """
-        live = [w for w in self._workers if w is not None and _is_running(w)]
+        # The window's own list is not every worker there is: a panel such as
+        # Leads starts its own enrichment, search and send workers, which
+        # register only in the shared `workers._running` set. Retiring just
+        # this list left those threads alive into teardown — the process
+        # abort this method exists to prevent (review finding 3, 2026-10-01).
+        import workers as _workers
+        seen: set = set()
+        live = []
+        for w in [*self._workers, *list(_workers._running)]:
+            if w is None or id(w) in seen:
+                continue
+            seen.add(id(w))
+            if _is_running(w):
+                live.append(w)
         if not live:
             return
         diagnostics.write("INFO", f"stopping {len(live)} worker(s) before exit")

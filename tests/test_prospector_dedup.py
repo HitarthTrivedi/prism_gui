@@ -517,6 +517,9 @@ class ReachMailsEachAddressOncePerBatch(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.suppression = os.path.join(tmp.name, "outreach_suppressed.txt")
+        self.ledger = os.path.join(tmp.name, "email")     # never ~/Prism Email
+        self.contacted_dir = os.path.join(tmp.name, "contacted")
+        self.naps = []
 
     @staticmethod
     def _draft(email: str) -> reach.Draft:
@@ -524,12 +527,61 @@ class ReachMailsEachAddressOncePerBatch(unittest.TestCase):
         return reach.Draft(dossier=Dossier(lead=lead, verdict=HOT),
                            subject="A quick idea", body="Hi Jane")
 
-    def _send(self, drafts, answer):
+    def _cfg(self, **send):
+        return {"email": {"address": "me@x.in", "folder": self.ledger,
+                          "send": send}}
+
+    def _send(self, drafts, answer, **send):
         with mock.patch.object(reach, "_suppression_path", return_value=self.suppression), \
+                mock.patch.object(reach, "_contacted_path", side_effect=self._contacted), \
+                mock.patch.object(reach.time, "sleep", self.naps.append), \
                 mock.patch.object(self.CB.mailer, "is_configured", return_value=True), \
                 mock.patch.object(self.CB.mailer, "send_bulk", side_effect=answer) as bulk:
-            sent, failed = reach.send(drafts, {"email": {}})
+            sent, failed = reach.send(drafts, self._cfg(**send))
         return sent, failed, bulk
+
+    def _contacted(self, sender):
+        return os.path.join(self.contacted_dir,
+                            (sender or "default").replace("@", "_at_") + ".txt")
+
+    def _contacted_list(self, sender="me@x.in"):
+        try:
+            with open(self._contacted(sender), encoding="utf-8") as f:
+                return f.read().split()
+        except OSError:
+            return []
+
+    @staticmethod
+    def _ok(cfg, rcpts, subject, body, files=()):
+        return rcpts, []
+
+    def test_the_configured_gap_is_kept_between_sends(self):
+        drafts = [self._draft(f"p{i}@acme.com") for i in range(3)]
+        sent, _, bulk = self._send(drafts, self._ok, gap_seconds=2, jitter_seconds=0)
+        self.assertEqual(bulk.call_count, 3)
+        self.assertAlmostEqual(sum(self.naps), 4.0, places=3)   # two gaps, not three
+
+    def test_the_daily_limit_holds_back_the_rest(self):
+        drafts = [self._draft(f"p{i}@acme.com") for i in range(4)]
+        sent, _, bulk = self._send(drafts, self._ok, max_per_day=2)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(bulk.call_count, 2)
+        self.assertEqual([d.status for d in drafts], ["sent", "sent", "skipped", "skipped"])
+        self.assertIn("send limits", drafts[2].note)
+
+    def test_a_leads_send_counts_toward_todays_limit_across_runs(self):
+        first = [self._draft(f"a{i}@acme.com") for i in range(2)]
+        self._send(first, self._ok, max_per_day=3)
+        second = [self._draft(f"b{i}@acme.com") for i in range(3)]
+        sent, _, _ = self._send(second, self._ok, max_per_day=3)
+        self.assertEqual(len(sent), 1)          # 3 a day, 2 already used
+        import send_ledger
+        self.assertEqual(send_ledger.sent_today(self._cfg(), "me@x.in"), 3)
+
+    def test_the_per_run_cap_applies(self):
+        drafts = [self._draft(f"p{i}@acme.com") for i in range(4)]
+        sent, _, _ = self._send(drafts, self._ok, max_per_run=1)
+        self.assertEqual(len(sent), 1)
 
     def test_the_same_address_twice_is_mailed_once(self):
         first, second = self._draft("jane@acme.com"), self._draft(" Jane@Acme.com ")
@@ -539,8 +591,29 @@ class ReachMailsEachAddressOncePerBatch(unittest.TestCase):
         self.assertEqual((first.status, second.status), ("sent", "skipped"))
         self.assertIn("suppression list", second.note)
         self.assertEqual((sent, failed), (["jane@acme.com"], []))
-        with open(self.suppression, encoding="utf-8") as f:
-            self.assertEqual(f.read().split(), ["jane@acme.com"])
+        # "already contacted" is kept for THIS sending address, not machine-wide
+        self.assertEqual(self._contacted_list(), ["jane@acme.com"])
+        self.assertFalse(os.path.exists(self.suppression))
+
+    def test_another_sender_is_not_blocked_by_someone_elses_contact(self):
+        """Review finding 8 (2026-10-01): the list used to be one flat
+        machine-wide file, so a prospect one member emailed was silently
+        skipped for every other member and account."""
+        first = self._draft("jane@acme.com")
+        self._send([first], self._ok)                      # me@x.in writes to her
+        with mock.patch.object(reach, "_suppression_path", return_value=self.suppression), \
+                mock.patch.object(reach, "_contacted_path", side_effect=self._contacted), \
+                mock.patch.object(reach.time, "sleep", self.naps.append), \
+                mock.patch.object(self.CB.mailer, "is_configured", return_value=True), \
+                mock.patch.object(self.CB.mailer, "send_bulk", side_effect=self._ok) as bulk:
+            other = self._draft("jane@acme.com")
+            cfg = {"email": {"address": "colleague@x.in", "folder": self.ledger}}
+            sent, _ = reach.send([other], cfg)
+            same = self._draft("jane@acme.com")
+            reach.send([same], {"email": {"address": "me@x.in", "folder": self.ledger}})
+        self.assertEqual(sent, ["jane@acme.com"])          # the colleague can reach her
+        self.assertEqual(same.status, "skipped")           # the first sender still cannot
+        self.assertEqual(bulk.call_count, 1)
 
     def test_a_hard_bounce_is_not_retried_later_in_the_batch(self):
         first, second = self._draft("gone@acme.com"), self._draft("gone@acme.com")

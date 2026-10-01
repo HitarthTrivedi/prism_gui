@@ -387,6 +387,26 @@ class ClosingDuringARunMustNotAbort(unittest.TestCase):
         self.assertTrue(worker.waited, "never joined — this is the abort")
         self.assertFalse(worker.running)
 
+    def test_a_panels_own_worker_is_retired_too(self):
+        """Leads starts its own workers; they register only in the shared
+        workers._running set, not in the window's list. Closing the app while
+        one ran left a live QThread through teardown (review finding 3,
+        2026-10-01)."""
+        import workers
+        panel_worker = self._Worker()
+        listed = self._Worker()
+        workers._running.add(panel_worker)
+        try:
+            # `listed` is in both places: it must be retired exactly once.
+            workers._running.add(listed)
+            self._window([listed])._retire_workers()
+        finally:
+            workers._running.discard(panel_worker)
+            workers._running.discard(listed)
+        self.assertTrue(panel_worker.stopped, "a panel's worker was never stopped")
+        self.assertTrue(panel_worker.waited, "a panel's worker was never joined")
+        self.assertTrue(listed.waited)
+
     def test_every_worker_is_stopped_before_any_is_waited_on(self):
         """Stop-all-then-wait-all, so the waits overlap. Stopping and waiting
         each in turn makes three stuck workers cost thirty seconds."""

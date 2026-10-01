@@ -92,6 +92,32 @@ class TheEngineKeepsThePace(unittest.TestCase):
         # two pauses of 3.0s, slept in quarter-second slices
         self.assertAlmostEqual(sum(naps), 6.0, places=3)
 
+    def test_a_failed_reconnect_still_reports_what_was_already_sent(self):
+        """The reconnect used to raise out of send_bulk, discarding `sent`: the
+        caller thought nothing had gone out and offered the same people again
+        (review finding 1, 2026-10-01)."""
+        server = _Server()
+        seen, calls = [], []
+
+        def connect(*_a, **_k):
+            calls.append(1)
+            if len(calls) > 1:                  # the first login works...
+                raise OSError("reconnect failed")
+            return server                       # ...every later one fails
+
+        with mock.patch.object(mailer, "_connect", side_effect=connect), \
+                mock.patch.object(mailer.time, "sleep", lambda _s: None):
+            sent, failed = mailer.send_bulk(
+                CFG, _people(3), "s", "b", [], session_max=1,
+                on_progress=lambda *a: seen.append(a))
+
+        self.assertEqual(sent, ["p0@x.in"])            # one really went out
+        self.assertEqual([e for e, _ in failed], ["p1@x.in", "p2@x.in"])
+        self.assertIn("reconnect", failed[0][1])
+        self.assertEqual(server.sent, ["p0@x.in"])
+        # every recipient got a progress report, so the dialog can account for them
+        self.assertEqual([a[2] for a in seen], ["p0@x.in", "p1@x.in", "p2@x.in"])
+
     def test_a_per_run_limit_sends_to_the_first_n_only(self):
         server, sent, failed, naps, _ = self._run(_people(5), limit=2)
         self.assertEqual(sent, ["p0@x.in", "p1@x.in"])

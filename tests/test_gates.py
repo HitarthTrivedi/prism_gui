@@ -460,6 +460,47 @@ class RoutedAgentGate(GateTest):
         worker.assert_not_called()
         self.assertEqual(self.paywalled, ["reel"])
 
+    def test_declining_does_not_arm_the_queue_to_run_by_itself(self):
+        """Cancel on a gate used to leave _auto_run set, so the NEXT task
+        planned on the same surface started on its own instead of waiting
+        for review (review finding 5, 2026-10-01)."""
+        import main_window
+        from PySide6.QtWidgets import QMessageBox
+        self.grant(["core"])
+        win = self._window()
+        win.routing = {"stages": {}}
+        win._last_query = "make me a reel"
+        self.assertFalse(win._auto_run)
+
+        with mock.patch.object(win.agents_panel, "selected_agents",
+                               return_value={"media": "Prism Studio"}), \
+             mock.patch.object(main_window.QMessageBox, "question",
+                               return_value=QMessageBox.Cancel), \
+             mock.patch.object(main_window, "AutomationWorker"):
+            win._run_pipeline()
+
+        self.assertFalse(win._auto_run)
+
+    def test_accepting_the_drop_arms_the_queue(self):
+        import main_window
+        from PySide6.QtWidgets import QMessageBox
+        self.grant(["core"])
+        win = self._window()
+        win.routing = {"stages": {}}
+        win._last_query = "make me a reel"
+
+        with mock.patch.object(win.agents_panel, "selected_agents",
+                               return_value={"brains": "Claude",
+                                             "media": "Prism Reel"}), \
+             mock.patch.object(main_window.QMessageBox, "question",
+                               return_value=QMessageBox.Yes), \
+             mock.patch.object(main_window, "AuthorizeWorker",
+                               self._instant_authorize()), \
+             mock.patch.object(main_window, "AutomationWorker"):
+            win._run_pipeline()
+
+        self.assertTrue(win._auto_run)
+
 
 class TaskQueue(GateTest):
     """The queue plans and runs tasks one at a time, and keeps each one's

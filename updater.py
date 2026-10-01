@@ -174,10 +174,27 @@ def target(state: LicenseState | None = None,
 
 
 # ── "Not now" (Phase 0, unchanged) ──────────────────────────────────────────
-def dismissed(version: str) -> bool:
-    """Has the customer already waved THIS version away?"""
+# "Not now" is a postponement, not a refusal: it hid the banner for good and
+# the Download button never came back (review finding 6, 2026-10-01). The
+# banner returns once this long has passed; Settings always carries the
+# "Update available" card with its own Download button in the meantime.
+DISMISS_FOR_SECONDS = 24 * 60 * 60
+
+
+def dismissed(version: str, now: float | None = None) -> bool:
+    """Has the customer waved THIS version away, recently enough that the
+    banner should stay quiet?"""
     version = (version or "").strip()
-    return bool(version) and _load().get("dismissed") == version
+    if not version:
+        return False
+    state = _load()
+    if state.get("dismissed") != version:
+        return False
+    when = state.get("dismissed_at")
+    if not isinstance(when, (int, float)):
+        return True             # an older state file: keep its old meaning
+    now = time.time() if now is None else now
+    return 0 <= now - when < DISMISS_FOR_SECONDS
 
 
 def dismiss(version: str) -> None:
