@@ -1150,6 +1150,12 @@ class PageHeader(QFrame):
         self.subtitle = QLabel(subtitle, self)
         self.subtitle.setObjectName("pageSubtitle")
         self.subtitle.setTextFormat(Qt.RichText)
+        # Wrapping, as in SectionHeader (see the note there). Without it the
+        # label insists on its whole sentence as its minimum width, so at the
+        # app's default width the subtitle was cut mid-word ("...not gue") and
+        # the buttons beside it were squeezed ("Export shee"), on Inquiry,
+        # Email, Gerber, STEP, BOM and Leads (seen in the real window).
+        self.subtitle.setWordWrap(True)
         self.subtitle.setVisible(bool(subtitle))
         col.addWidget(self.subtitle)
         row.addLayout(col, stretch=1)
