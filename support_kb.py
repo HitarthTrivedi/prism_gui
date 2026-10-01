@@ -517,7 +517,11 @@ _SIGNIN = Topic(
                 action="chrome", action_label="Open Chrome settings"),
             keywords=("chromedriver", "session not created", "version",
                       "browser", "won't start", "can't find chrome",
-                      "update"),
+                      "update",
+                      # error wording customers paste in (Lumi QA, 29 Sep 2026)
+                      "9222", "127.0.0.1", "cannot connect to chrome",
+                      "can't connect to chrome", "remote debugging",
+                      "debugger address", "browser executable"),
             related=("chrome-in-use", "other-browser")),
 
         Question(
@@ -546,7 +550,10 @@ _SIGNIN = Topic(
                  "Sign in to your AI websites inside Chrome once.",
                  "Carry on using your usual browser for everything else.")),
             keywords=("edge", "safari", "firefox", "brave", "browser",
-                      "default browser", "opera"),
+                      "default browser", "opera",
+                      # the plural and the "other than Chrome" phrasing
+                      "browsers", "other browsers", "other than chrome",
+                      "which browsers", "what browsers", "supported browsers"),
             related=("chrome-wont-open", "what-do-i-need")),
 
         Question(
