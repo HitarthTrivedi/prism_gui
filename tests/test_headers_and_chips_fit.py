@@ -76,5 +76,20 @@ class RoomForTheLumiLauncher(unittest.TestCase):
                                 theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
 
 
+class EmailSetupFieldsAreTallEnough(unittest.TestCase):
+    """The Email account dialog clipped the bottom of every field's text
+    (22 px fields for 18 px text with 6 px padding): it has no explicit size,
+    so it was sized before the stylesheet padding applied. Seen in the real
+    window, 1 Oct 2026."""
+
+    def test_each_field_has_a_real_minimum_height(self):
+        import theme
+        from addons.email.dialog import EmailSetupDialog
+        dlg = EmailSetupDialog({"email": {}}, None)
+        for edit in (dlg.addr_edit, dlg.pass_edit, dlg.host_edit, dlg.port_edit):
+            self.assertGreaterEqual(edit.minimumHeight(), theme.BTN_HEIGHT_MD)
+        dlg.reject()
+
+
 if __name__ == "__main__":
     unittest.main()

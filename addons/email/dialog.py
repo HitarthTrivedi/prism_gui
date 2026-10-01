@@ -133,6 +133,13 @@ class EmailSetupDialog(PrismDialog):
         self.port_edit = QLineEdit()
         self.port_edit.setPlaceholderText("465 = SSL, 587 = STARTTLS")
         form.addRow("SMTP port:", self.port_edit)
+        # The dialog sizes itself from size hints taken BEFORE the stylesheet's
+        # 6px/11px padding applies, so with no explicit size the four fields
+        # were squeezed to 22 px and their text clipped at the bottom (seen in
+        # the real window, 1 Oct 2026; Compose avoids it by calling resize()).
+        # A real minimum makes the dialog grow to fit instead.
+        for edit in (self.addr_edit, self.pass_edit, self.host_edit, self.port_edit):
+            edit.setMinimumHeight(theme.BTN_HEIGHT_MD)
         root.addLayout(form)
 
         # The placeholder alone reads as "empty" to anyone who has not
