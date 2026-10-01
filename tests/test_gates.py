@@ -871,15 +871,18 @@ class UpdateBanner(GateTest):
 
 
 class UnpromptedStepGate(GateTest):
-    """A step ticked on by hand with no prompt behind it is caught before
-    the run starts, by the name the plan shows — not discovered five minutes
-    in by an engine waiting on a tab nobody typed into (the 2026-09-07 reel
-    run: two such steps, 322 seconds on the first).
+    """A step ticked on by hand starts with no prompt behind it. Run as it
+    stood, that was the 2026-09-07 reel run: a step that uploads the files,
+    asks nothing, and waits the whole 300 s cap.
 
-    Caught, not refused: the owner is offered the run without that step, the
-    same way a locked add-on is offered as a drop. The first version refused
-    outright and the very next plan showed why that was wrong — "Make the
-    images" ticked on for a Studio reel, which makes its own artwork."""
+    The first fix asked the owner to DROP such a step. Since 788c29a Start the
+    work instead writes a stage-tailored default prompt for it from the task
+    (`ensure_prompts`), so it shows on the card, is editable, and the run
+    carries it — nothing is asked and nothing is dropped. These tests pin that
+    behaviour; the old "drop it?" dialog is unreachable because the same
+    condition that would raise it is the one `ensure_prompts` has just fixed.
+    Seen in the real plan panel, 1 Oct 2026 (before: no prompt on the card;
+    after Start: "Find relevant contacts… for: <the task>")."""
 
     def _window_with_a_hand_ticked_step(self, agents=None, routing=None,
                                         tick="leads"):
@@ -891,7 +894,8 @@ class UnpromptedStepGate(GateTest):
             routing or {"leads": {"needed": False, "questions": []},
                         "content": {"needed": True,
                                     "questions": ["Write the script."]}},
-            agents or {"leads": "ChatGPT", "content": "ChatGPT"})
+            agents or {"leads": "ChatGPT", "content": "ChatGPT"},
+            win._last_query)            # as main_window._on_routed passes it
         row = next(r for r in win.agents_panel.rows() if r.stage == tick)
         row.set_included(True)
         return win, row
@@ -909,30 +913,30 @@ class UnpromptedStepGate(GateTest):
             win._run_pipeline()
         return asked, worker
 
-    def test_the_step_is_named_and_the_run_can_be_declined(self):
+    def test_start_writes_a_prompt_naming_the_task_for_a_hand_ticked_step(self):
+        win, row = self._window_with_a_hand_ticked_step()
+        self.assertEqual(win.agents_panel.unprompted_steps(), ["Find the people"])
+        win.agents_panel.ensure_prompts()
+        self.assertEqual(win.agents_panel.unprompted_steps(), [])
+        [prompt] = row.questions()
+        self.assertIn("make a reel for instagram for this brand", prompt)
+
+    def test_a_hand_ticked_step_runs_with_its_default_prompt_and_asks_nothing(self):
         from PySide6.QtWidgets import QMessageBox
         win, _ = self._window_with_a_hand_ticked_step()
         asked, worker = self._run(win, QMessageBox.Cancel)
-        worker.assert_not_called()
-        self.assertTrue(asked.called)
-        said = asked.call_args[0][2]
-        self.assertIn("Find the people", said)
-        self.assertIn("Prompt", said)
-
-    def test_accepting_runs_the_rest_without_it(self):
-        from PySide6.QtWidgets import QMessageBox
-        win, _ = self._window_with_a_hand_ticked_step()
-        asked, worker = self._run(win, QMessageBox.Yes)
+        asked.assert_not_called()
         self.assertTrue(worker.called)
-        labels = [s[0] for s in worker.call_args.kwargs["custom_stages"]]
-        self.assertIn("content", labels)
-        self.assertNotIn("leads", labels)
-        self.assertNotIn("leads", worker.call_args[0][1]["agents"])
+        stages = {s[0]: s[2] for s in worker.call_args.kwargs["custom_stages"]}
+        self.assertIn("leads", stages)
+        self.assertIn("make a reel for instagram", stages["leads"][0])
+        self.assertIn("leads", worker.call_args[0][1]["agents"])
 
-    def test_a_studio_reel_is_told_it_still_gets_its_pictures(self):
-        """The plan that showed a refusal was wrong: "Make the images"
-        ticked on by hand, for a reel Prism Studio illustrates itself."""
+    def test_a_hand_ticked_picture_step_in_a_studio_reel_is_kept(self):
+        """It used to be offered as a drop ("Prism Studio makes its own
+        artwork"). Ticking it by hand is now taken as meant."""
         from PySide6.QtWidgets import QMessageBox
+        import main_window
         win, _ = self._window_with_a_hand_ticked_step(
             agents={"visual": "ChatGPT", "content": "ChatGPT",
                     "media": "Prism Studio"},
@@ -940,10 +944,17 @@ class UnpromptedStepGate(GateTest):
                      "content": {"needed": True, "questions": ["Write it."]},
                      "media": {"needed": True, "questions": ["Film it."]}},
             tick="visual")
-        asked, worker = self._run(win, QMessageBox.Cancel)
-        worker.assert_not_called()
-        self.assertIn("Make the images", asked.call_args[0][2])
-        self.assertIn("makes its own artwork", asked.call_args[0][2])
+        with mock.patch.object(main_window.CB, "studio_available",
+                               return_value=(True, "")):
+            asked, worker = self._run(win, QMessageBox.Yes)
+        # The only thing it may ask is the separate licence question for
+        # Prism Studio — never "this step has no prompt".
+        for call in asked.call_args_list:
+            self.assertNotIn("no prompt", call[0][2])
+        self.assertTrue(worker.called)
+        self.assertNotIn("visual", worker.call_args.kwargs["skip_stages"])
+        self.assertIn("visual",
+                      [s[0] for s in worker.call_args.kwargs["custom_stages"]])
 
     def test_a_plan_with_a_prompt_on_every_step_asks_nothing(self):
         from PySide6.QtWidgets import QMessageBox
@@ -975,29 +986,9 @@ class UnpromptedStepGate(GateTest):
         self.assertNotIn("visual",
                          [s[0] for s in worker.call_args.kwargs["custom_stages"]])
 
-    def test_a_step_dropped_for_having_no_prompt_is_left_out_too(self):
+    def test_a_hand_ticked_step_is_not_left_out_of_the_run(self):
         from PySide6.QtWidgets import QMessageBox
         win, _ = self._window_with_a_hand_ticked_step()      # leads, no prompt
         asked, worker = self._run(win, QMessageBox.Yes)
-        self.assertIn("leads", worker.call_args.kwargs["skip_stages"])
+        self.assertNotIn("leads", worker.call_args.kwargs["skip_stages"])
 
-    def test_dropping_the_image_step_of_a_reel_keeps_its_pictures(self):
-        """1.5.7. The dialog tells the owner the reel still gets its
-        pictures; dropping the unprompted "Make the images" step must not
-        then switch off the artwork step the engine inserts for the reel."""
-        from PySide6.QtWidgets import QMessageBox
-        win, _ = self._window_with_a_hand_ticked_step(
-            agents={"visual": "ChatGPT", "content": "ChatGPT",
-                    "media": "Prism Studio"},
-            routing={"visual": {"needed": False, "questions": []},
-                     "content": {"needed": True, "questions": ["Write it."]},
-                     "media": {"needed": True, "questions": ["Film it."]}},
-            tick="visual")
-        import main_window
-        with mock.patch.object(main_window.CB, "studio_available",
-                               return_value=(True, "")):
-            asked, worker = self._run(win, QMessageBox.Yes)
-        self.assertTrue(worker.called)
-        self.assertNotIn("visual", worker.call_args.kwargs["skip_stages"])
-        self.assertNotIn("visual",
-                         [s[0] for s in worker.call_args.kwargs["custom_stages"]])
