@@ -10,6 +10,19 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.6.0 — release roll-up (1 Oct 2026)
+
+What this version carries on top of 1.5.8: Rounds 37-40 and 47-52 from the
+engine (Gemini in Visual & Image, a Mac with no Chrome could not start one,
+STEP flat-pattern K-factor, PNG-only rendering, Gerber rotated-board and
+unit-picker fixes, NotebookLM in the audio category); automation and Reel
+Studio work in `prism_terminal` (busy send buttons with attachments, run-state
+reset between tasks, reel editor and Studio editor); bundled wallpaper presets
+and custom wallpapers in Settings; the new Lumi welcome card and help centre;
+and release-bundle trimming to stay under GitHub's 1000-assets-per-release cap.
+
+---
+
 # Round 52 — a rotated copy of the same board was counted as a different board, and the array undercounted a real panel by 8 boards
 
 Reported by the manufacturing company field-testing Gerber automation:
