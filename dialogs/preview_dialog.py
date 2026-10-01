@@ -68,6 +68,9 @@ def _classify(path: str) -> str:
         return "presentation"
     if ext in _TEXT_EXTS:
         return "text"
+    return "other"
+
+
 def _trigger_edit_reel(path: str, origin_widget=None) -> bool:
     """Find MainWindow and launch the reel layout editor."""
     from PySide6.QtWidgets import QApplication

@@ -427,37 +427,36 @@ def test_mix_audio_when_video_is_longer(monkeypatch):
     assert cmd[c_idx + 1] == "copy"
 
 
-def test_mix_audio_real_ffmpeg_execution():
+def test_mix_audio_real_ffmpeg_execution(tmp_path):
+    """Runs the real encoder. Uses the ffmpeg Prism ships (reel.ffmpeg_path),
+    not a system `ffmpeg`/`ffprobe` that a CI runner or a customer's machine
+    need not have — the old version failed there with FileNotFoundError."""
+    import re
     import subprocess
-    vid_path = "/tmp/test_unit_vid.mp4"
-    aud_path = "/tmp/test_unit_aud.mp3"
-    for p in (vid_path, aud_path):
-        if os.path.exists(p):
-            os.remove(p)
+    from core import reel
+
+    exe = reel.ffmpeg_path()
+    vid_path = str(tmp_path / "unit_vid.mp4")
+    aud_path = str(tmp_path / "unit_aud.mp3")
 
     # 2-second video, 5-second audio
     subprocess.run([
-        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=2",
+        exe, "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=2",
         "-c:v", "libx264", vid_path
     ], check=True, capture_output=True)
     subprocess.run([
-        "ffmpeg", "-y", "-f", "lavfi", "-i", "sine=f=440:d=5",
+        exe, "-y", "-f", "lavfi", "-i", "sine=f=440:d=5",
         "-c:a", "mp3", aud_path
     ], check=True, capture_output=True)
 
-    try:
-        mixed = footage.mix_audio(vid_path, aud_path)
-        assert mixed == vid_path
-        probe_res = subprocess.run([
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", mixed
-        ], capture_output=True, text=True)
-        dur = float(probe_res.stdout.strip())
-        assert dur >= 4.9, f"Expected output >= 4.9s, got {dur}"
-    finally:
-        for p in (vid_path, aud_path):
-            if os.path.exists(p):
-                os.remove(p)
+    mixed = footage.mix_audio(vid_path, aud_path)
+    assert mixed == vid_path
+    # ffmpeg prints the duration when asked to read a file and write nothing
+    report = subprocess.run([exe, "-i", mixed], capture_output=True, text=True)
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", report.stderr)
+    assert m, report.stderr[-300:]
+    dur = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    assert dur >= 4.9, f"Expected output >= 4.9s, got {dur}"
 
 
 def test_studio_scenes_scale_to_match_long_voiceover(monkeypatch):

@@ -249,7 +249,9 @@ class _FakeDriver:
 
     def execute_async_script(self, script, href):
         self.fetched.append(href)
-        if href.endswith(".docx"):
+        # A blob: URL has no extension; fetching a real one gives the file's
+        # bytes, not the page's HTML, so the double answers it with the file.
+        if href.endswith(".docx") or href.startswith("blob:"):
             return ("data:application/vnd.openxmlformats-officedocument."
                     "wordprocessingml.document;base64,"
                     + base64.b64encode(b"PK\x03\x04 not really a docx").decode())

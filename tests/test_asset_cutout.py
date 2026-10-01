@@ -216,7 +216,11 @@ class APhotograph(Files):
         self.assertIn("OPAQUE", said)
         self.assertIn("object-fit: cover", said)
         self.assertIn("FULL-BLEED", said)
-        self.assertIn("Never a bare <img>", said)
+        # The old wording ("Never a bare <img>") was replaced in 2906c89 by the
+        # same rule in longer form plus a ban on polygon clip-paths; the test
+        # pins the rule, not the sentence.
+        self.assertIn("Never place a tiny <img> floating loosely", said)
+        self.assertIn("NEVER use arbitrary polygon clip-paths", said)
 
     def test_a_transparent_one_is_told_it_needs_no_box(self):
         im = Image.new("RGBA", (300, 300), (0, 0, 0, 0))

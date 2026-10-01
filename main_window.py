@@ -1233,10 +1233,12 @@ class MainWindow(QMainWindow):
             self._reset_for_new_task()
         self.work_stack.setCurrentIndex(COMPOSE)
 
-    def _reset_for_new_task(self):
-        """Back to a blank workbench. Attachments survive on purpose — they're
-        explicit choices sitting visibly in the rail with their own Detach
-        button, and the next task usually concerns the same files."""
+    def _reset_for_new_task(self, keep_attachments: bool = False):
+        """Back to a blank workbench. After a finished run the attachments go
+        too (they belonged to that journey); Discard passes keep_attachments
+        because its own dialog promises "Files you've attached stay attached" —
+        they are explicit choices sitting visibly in the rail with their own
+        Detach button, and the next task usually concerns the same files."""
         self._run_finished = False
         self._set_stage("describe")
         self.routing = None
@@ -1256,8 +1258,9 @@ class MainWindow(QMainWindow):
         self._task_runs = []
         self._queue_stopped = False
         self._auto_run = False
-        self.attachments = []
-        self.files_panel.set_attached([])
+        if not keep_attachments:
+            self.attachments = []
+            self.files_panel.set_attached([])
         self.input_panel.reset()
         self.input_panel.set_context([])
         self.agents_panel.clear()
@@ -2593,7 +2596,7 @@ class MainWindow(QMainWindow):
                 "Files you've attached stay attached.",
                 QMessageBox.Yes | QMessageBox.Cancel) != QMessageBox.Yes:
             return
-        self._reset_for_new_task()
+        self._reset_for_new_task(keep_attachments=True)
 
     # ── the reel layout editor, from a finished workbench step ──────────
     def _edit_reel_layout(self, mp4_path: str):
