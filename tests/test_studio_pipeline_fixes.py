@@ -5,10 +5,20 @@
 - ElevenLabs narration extraction and prompt hygiene
 - 6-asset artwork instructions
 """
+import os
 import unittest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import core_bridge  # noqa: F401
 from core import reel_web as RW
 from core import automation as auto
+from PySide6.QtWidgets import QApplication
+
+# test_output_panel_* builds a real widget; without an application, running
+# this file on its own aborts the interpreter (it only worked in the full run
+# because an earlier file happened to create one).
+_app = QApplication.instance() or QApplication([])
 
 
 class TestAccentPreflightAndAutoHeal(unittest.TestCase):
@@ -35,15 +45,24 @@ class TestAccentPreflightAndAutoHeal(unittest.TestCase):
         healed = RW.ensure_accent_applied(spec)
         self.assertEqual(healed["design"]["css"], before)
 
-    def test_brand_faults_auto_heals_missing_accent(self):
+    def test_brand_faults_reports_and_ensure_accent_applied_heals(self):
+        """brand_faults() only REPORTS; the render path heals first
+        (ensure_accent_applied) and then re-checks, as reel_web.render does.
+        The old test asked brand_faults itself to mutate the spec, which the
+        engine deliberately does not do."""
         spec = {
             "brand": {"accent": "#3a713a"},
             "design": {"css": "body { background: #fff; }"},
             "scenes": [{"type": "intro", "html": "<h1>Welcome</h1>"}],
         }
         faults = RW.brand_faults(spec)
-        self.assertEqual(faults, [])
-        self.assertIn("var(--accent)", spec["design"]["css"])
+        self.assertEqual(len(faults), 1)
+        self.assertIn("#3a713a", faults[0])
+        self.assertNotIn("var(--accent)", spec["design"]["css"])     # reporting changes nothing
+
+        healed = RW.ensure_accent_applied(spec)
+        self.assertIn("var(--accent)", healed["design"]["css"])
+        self.assertEqual(RW.brand_faults(healed), [])                # and the re-check is clean
 
     def test_apply_followup_auto_heals_accent(self):
         spec = {

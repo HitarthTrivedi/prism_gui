@@ -203,6 +203,17 @@ class Folders(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="prism-ws-")
         self.cfg = {"workspace_root": self.tmp}
+        # runs_dir() falls back to ~/.prism/runs when a member's own folder has
+        # no run records yet (the upgrade path). On a machine that has used
+        # Prism that is the developer's REAL history, so "a member gets their
+        # own folder" failed everywhere except CI. Point the fallback at an
+        # empty home.
+        empty_home = tempfile.mkdtemp(prefix="prism-home-")
+        patch = mock.patch.object(
+            W.paths, "user_dir",
+            side_effect=lambda *p: os.path.join(empty_home, ".prism", *p))
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_a_personal_copy_keeps_using_the_old_runs_folder(self):
         """The upgrade path. An existing customer opening History after this
