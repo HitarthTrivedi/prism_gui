@@ -99,9 +99,11 @@ BATCH_SIZE = 40
 # `update-assets-<os>` workflow artifact is actually named). Mirrors that
 # workflow's `strategy.matrix.include` — update this table if that matrix
 # ever changes runner images.
+# Order is the release order: Windows first (the platform whose installs have
+# the least slack when an update is skipped), then Linux, then macOS.
 PLATFORMS = [
-    ("linux-x64", "ubuntu-22.04"),
     ("windows-x64", "windows-latest"),
+    ("linux-x64", "ubuntu-22.04"),
     # `-app`: the bundle-layout channel (updater.platform_tag()). The plain
     # `macos-arm64` name is retired — see the comment there for why a 1.4.0
     # Mac must never find a manifest under it.
@@ -294,6 +296,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true",
                    help="Re-sign and re-upload a platform even if the "
                         "release already has its .signed manifest")
+    p.add_argument("--only", action="append", metavar="PLATFORM",
+                   choices=[t for t, _ in PLATFORMS],
+                   help="Release just this platform (repeatable), in the "
+                        "order given — e.g. --only windows-x64 to do Windows "
+                        "first. Default: every platform, in table order")
     args = p.parse_args(argv)
 
     # No upfront "key must be set" check: a platform whose signed manifest
@@ -309,7 +316,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Working directory: {work}\n")
 
     done, failed = [], []
-    for platform_tag, matrix_os in PLATFORMS:
+    table = dict(PLATFORMS)
+    wanted = ([(t, table[t]) for t in args.only] if args.only else PLATFORMS)
+    for platform_tag, matrix_os in wanted:
         print(f"── {platform_tag} " + "─" * max(1, 40 - len(platform_tag)))
         try:
             do_platform(args.repo, args.tag, args.run_id, work,

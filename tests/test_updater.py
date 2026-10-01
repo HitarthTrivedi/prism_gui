@@ -363,5 +363,7 @@ class PlatformChannel(unittest.TestCase):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))), "devtools"))
         import release_all
+        # Same three channel names as the updater; the ORDER is the release
+        # order (Windows, Linux, macOS), set on purpose in release_all.py.
         self.assertEqual([p for p, _ in release_all.PLATFORMS],
-                         ["linux-x64", "windows-x64", "macos-arm64-app"])
+                         ["windows-x64", "linux-x64", "macos-arm64-app"])
