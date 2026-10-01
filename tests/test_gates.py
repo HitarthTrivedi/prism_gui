@@ -371,6 +371,10 @@ class GettingOut(GateTest):
             win._discard_plan()
         self.assertIsNone(win.routing)
         self.assertEqual(len(win.attachments), 1)   # explicit choices survive
+        # ...and they are still SHOWN: the tray and the chips are drawn from
+        # the list, and a first version kept the list but wiped both.
+        self.assertEqual(win.files_panel.attached_count_value(), 1)
+        self.assertEqual(win.input_panel._attachments_flow.count(), 1)
 
     def test_discard_can_be_backed_out_of(self):
         import main_window

@@ -1260,9 +1260,12 @@ class MainWindow(QMainWindow):
         self._auto_run = False
         if not keep_attachments:
             self.attachments = []
-            self.files_panel.set_attached([])
+        self.files_panel.set_attached(self.attachments)
         self.input_panel.reset()
-        self.input_panel.set_context([])
+        # The chips and the "Working from" list are drawn FROM the attachments;
+        # clearing them while keeping the list left files attached but hidden,
+        # which the first version of this did (seen in the real window, 1 Oct).
+        self.input_panel.set_context(self.attachments)
         self.agents_panel.clear()
         self.files_panel.clear_mentions()
         self.output_panel.set_finished(False)
