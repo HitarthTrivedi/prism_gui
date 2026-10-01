@@ -48,6 +48,10 @@ from widgets import icons
 
 _WIDE = 640            # at least this wide: the widgets beside the tabs
 _LEFT_W = 264          # the widgets' column when it sits beside the tabs
+_STICKY_H = 440        # at least this tall: the header stays pinned above the scroll.
+                       # Shorter, it scrolls away with the rest — pinned, it took ~150px
+                       # of a 340px drawer and left the person a 190px strip (a laptop's
+                       # was 57px), which is why "I can't see the contact's details".
 _COLLEAGUES = 6        # "People at …" shown before "and N more"
 _LIST_MAX = 8          # notes / tasks shown before "Show all"
 # The tabs, Apollo's order, left to right.
@@ -66,12 +70,13 @@ _VIA_WORDS = {"import": "Imported from a CSV", "save": "Saved as a contact",
               "export": "Exported — saved as a contact",
               "sequence": "Added to a sequence — saved as a contact",
               "list": "Added to a list — saved as a contact",
-              "email": "E-mail looked up — saved as a contact"}
+              "email": "E-mail looked up — saved as a contact",
+              "phone": "Phone number looked up — saved as a contact"}
 _EDIT_FIELDS = (("name", "Name"), ("title", "Title"), ("company", "Company"),
                 ("email", "E-mail"), ("phone", "Phone"), ("industry", "Industry"),
                 ("location", "Location"), ("linkedin", "LinkedIn"),
                 ("website", "Company website"))
-_PHONE_NOTE = "No phone yet — phone numbers come from EasyLeadz, which isn't connected."
+_PHONE_NOTE = "No phone yet"
 
 
 @dataclass
@@ -423,12 +428,23 @@ class PersonPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._header())
+        self._root = root
+        # The header and the rule under it travel as one: pinned above the scroll
+        # while the panel is tall enough to spare the room, and the first thing IN
+        # the scroll — so it scrolls away and the whole panel is left for the
+        # person — when it is not (_dock_header).
+        self._head_group = QWidget()
+        group = QVBoxLayout(self._head_group)
+        group.setContentsMargins(0, 0, 0, 0)
+        group.setSpacing(0)
+        group.addWidget(self._header())
         rule = QFrame()
         rule.setObjectName("pRule")
         rule.setFixedHeight(1)
         rule.setStyleSheet(f"QFrame#pRule{{background:{theme.HAIRLINE};border:none;}}")
-        root.addWidget(rule)
+        group.addWidget(rule)
+        self._head_sticky = True
+        root.addWidget(self._head_group)
         scroll = QScrollArea()
         scroll.setObjectName("pScroll")
         scroll.setWidgetResizable(True)
@@ -440,7 +456,15 @@ class PersonPanel(QWidget):
         body.setObjectName("pBody")
         body.setAttribute(Qt.WA_StyledBackground, True)
         body.setStyleSheet(f"QWidget#pBody{{background:{theme.CARD};}}")
-        self._body_lay = QBoxLayout(QBoxLayout.LeftToRight, body)
+        outer = QVBoxLayout(body)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._head_slot = QVBoxLayout()             # where a scrolling header sits
+        self._head_slot.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(self._head_slot)
+        cols = QWidget()
+        outer.addWidget(cols, 1)
+        self._body_lay = QBoxLayout(QBoxLayout.LeftToRight, cols)
         self._body_lay.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4,
                                           theme.SPACE_4)
         self._body_lay.setSpacing(theme.SPACE_4)
@@ -587,9 +611,25 @@ class PersonPanel(QWidget):
             self._left.setMinimumWidth(0)
             self._left.setMaximumWidth(16777215)
 
+    def _dock_header(self, sticky: bool) -> None:
+        """Pin the header above the scroll (sticky), or make it the first thing
+        in it. Depends only on the panel's own height, which moving the header
+        does not change, so it cannot flip back and forth."""
+        if sticky == self._head_sticky:
+            return
+        self._head_sticky = sticky
+        if sticky:
+            self._head_slot.removeWidget(self._head_group)
+            self._root.insertWidget(0, self._head_group)
+        else:
+            self._root.removeWidget(self._head_group)
+            self._head_slot.addWidget(self._head_group)
+        self._head_group.show()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._lay_out(self.width() >= _WIDE)
+        self._dock_header(self.height() >= _STICKY_H)
 
     def _toggle_expand(self) -> None:
         self._expanded = not self._expanded
@@ -677,12 +717,35 @@ class PersonPanel(QWidget):
             self.find_email = _link(i18n.t("Find their e-mail…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["email"]))
             col.addWidget(self.find_email)
+        from prospector import phones
+        found = phones.entry_for(lead)      # a number Find phones found, with where it came from
         phone_row = QHBoxLayout()
         phone_row.setSpacing(theme.SPACE_2)
         phone_row.addWidget(self._icon("phone"))
-        phone_row.addWidget(_label(_text(lead.phone) or i18n.t(_PHONE_NOTE),
+        kind = (found or {}).get("kind") or "unknown"
+        shown = phones.display(lead.phone, kind) if found else _text(lead.phone)
+        phone_row.addWidget(_label(shown or i18n.t(_PHONE_NOTE),
                                    "pVal" if lead.phone else "pMuted", select=True), 1)
+        if found:
+            kind_words = phones.KIND_LABEL.get(kind, phones.KIND_LABEL["unknown"])
+            phone_row.addWidget(_pill(i18n.t(kind_words), theme.NEUTRAL[700], theme.NEUTRAL[200]),
+                                0, Qt.AlignVCenter)
         col.addLayout(phone_row)
+        if found:
+            # What the number IS, said every time it is shown: the company's own
+            # published number, never rung, never checked against a do-not-call list.
+            line = phones.SOURCE_LINE.get(found.get("source"), phones.SOURCE_LINE["other"])
+            self.phone_source = _label(
+                i18n.t(line).format(when=evidence.when(found.get("found_at") or "")
+                                    or i18n.t("recently")), "pMuted")
+            col.addWidget(self.phone_source)
+            if evidence.safe_url(found.get("source_url") or ""):
+                col.addWidget(_link(i18n.t("Open the page it came from"),
+                                    lambda: self.open_url(found.get("source_url") or "")))
+        elif phones.needs_phone(lead):
+            self.find_phone = _link(i18n.t("Find their phone…"),
+                                    lambda: self.enrichRequested.emit(self.view.row, ["phone"]))
+            col.addWidget(self.find_phone)
         # LinkedIn only when it is LinkedIn; the page a search found them on
         # (an Exa people page) is its own link (identity.move_profile_link).
         for key, icon_name, text in (("linkedin", "linkedin", "LinkedIn profile"),
@@ -1047,15 +1110,19 @@ class PersonPanel(QWidget):
                                     "that costs a credit asks first."), "pMuted"))
         from addons.leads.cockpit import needs_email
         self.enrich_boxes = {}
+        from prospector import phones
         choices = (
             ("email", i18n.t("E-mail — look it up and check it (free verifiers first, "
                              "then a finder credit)"), needs_email(view.row)),
+            ("phone", i18n.t("Phone — the number their company publishes (one Exa "
+                             "lookup; a credit only for a number found)"),
+             phones.needs_phone(lead)),
             ("company", i18n.t("Company — website, size, revenue and HQ (one Exa search)"),
              bool(_text(lead.company) or _extra(lead, "website"))),
             ("qualify", i18n.t("Qualify — research, score and draft an opener (Groq and "
                                "one news search)"), view.status in RETRYABLE),
         )
-        for key, text, can in choices + (("phone", i18n.t(_PHONE_NOTE), False),):
+        for key, text, can in choices:
             row, cb, words = _check_row(text)
             cb.setEnabled(bool(can))
             words.setObjectName("pVal" if can else "pMuted")

@@ -357,6 +357,32 @@ def website_rows(company: str) -> list | None:
     return _rows("domain", company=company)
 
 
+def company_phones(companies: list, why: list | None = None) -> list | None:
+    """The phone number each company publishes — [{"name", "domain", "phone",
+    "kind", "source_kind", "source_url", "found_at", "evidence"}] for the ones that
+    do, a list (maybe empty) when the lookup ran, None when it failed. `companies`
+    is [{"name", "domain", "location"}], up to 15 (prospector/phones.py batches).
+    Charged per number found; published and format-checked, not called.
+
+    A failure is None like every lookup's, but this one is asked for one reason more
+    than the others: when `why` is a list, the server's own sentence (written for the
+    customer: server too old, pool empty, provider down) is appended to it."""
+    try:
+        out = _call("phones", companies=[
+            {"name": str(c.get("name") or "")[:160], "domain": str(c.get("domain") or "")[:120],
+             "location": str(c.get("location") or "")[:120]} for c in companies[:15]])
+    except GatewayError as e:
+        if why is not None:
+            why.append(e.message)
+        return None
+    rows = (out.get("result") or {}).get("results")
+    if not isinstance(rows, list):
+        if why is not None:
+            why.append("The server's answer was not one this version of Prism can read.")
+        return None
+    return rows
+
+
 def news_rows(company: str, focus: str = "", exclude_domains=(), num_results: int = 5,
               days: int = 180) -> list | None:
     """Dated news rows about one company, or None when the lookup failed."""

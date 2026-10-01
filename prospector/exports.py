@@ -79,6 +79,29 @@ def email_source_of(lead) -> str:
     return _SOURCE_WORDS.get(src, src.title() if src else "Your sheet")
 
 
+def phone_source_of(lead) -> str:
+    """What the Phone No. column's number IS: "" for no phone, "Your sheet" for a
+    number the person came with, and for one Find phones found the honest
+    description — the company's own published number, from where and when, and
+    that nobody has called it ("The company's number — their website, 26 Sep
+    2026, not verified")."""
+    if not (getattr(lead, "phone", "") or "").strip():
+        return ""
+    import datetime
+    from .phones import SOURCE_LABEL, entry_for
+    found = entry_for(lead)
+    if found is None:
+        return "Your sheet"
+    day = ""
+    try:
+        d = datetime.date.fromisoformat(str(found.get("found_at") or "")[:10])
+        day = f", {d.day} {d:%b %Y}"
+    except ValueError:
+        pass
+    return "The company's number — %s%s, not verified" % (
+        SOURCE_LABEL.get(found.get("source"), "the web"), day)
+
+
 def _linkedin_of(extra: dict) -> str:
     """The LinkedIn column holds LinkedIn only — never the Exa page a search
     result came from (that is Profile link)."""
@@ -142,9 +165,9 @@ def _save(wb, path: str) -> str:
 # ── the LEADS sheet — industry-tabbed, e-mail-verified ────────────────────────
 
 _LEAD_COLS = ["No.", "Industry", "Company", "Name", "Designation", "E-mail",
-              "Email check", "Email source", "Phone No.", "Location", "In role since",
-              "LinkedIn", "Profile link"]
-_LEAD_WIDTH = [5, 20, 30, 22, 44, 34, 12, 14, 13, 22, 12, 34, 34]
+              "Email check", "Email source", "Phone No.", "Phone source", "Location",
+              "In role since", "LinkedIn", "Profile link"]
+_LEAD_WIDTH = [5, 20, 30, 22, 44, 34, 12, 14, 16, 34, 22, 12, 34, 34]
 
 
 def leads_xlsx(leads, path: str) -> str:
@@ -179,7 +202,7 @@ def leads_xlsx(leads, path: str) -> str:
                 x = l.extra or {}
                 vals = [cno if first else "", ind if first else "",
                         company if first else "", l.name, l.title, l.email,
-                        check_of(l, mx), email_source_of(l), l.phone,
+                        check_of(l, mx), email_source_of(l), l.phone, phone_source_of(l),
                         x.get("location", ""), x.get("since", ""),
                         _linkedin_of(x), _profile_of(x)]
                 for ci, v in enumerate(vals, 1):

@@ -17,6 +17,8 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PySide6.QtCore import QSize                                    # noqa: E402
+from PySide6.QtGui import QResizeEvent                              # noqa: E402
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel      # noqa: E402
 
 from prospector.models import Dimension, Dossier, Lead              # noqa: E402
@@ -97,6 +99,48 @@ class ASavedContact(unittest.TestCase):
         self.assertFalse(self.p._linkedin.isHidden())
         self.assertTrue(self.p._save_btn.isHidden())           # already a contact
         self.assertTrue(self.p._act_delete.isEnabled())
+
+    def _resized(self, width, height):
+        """The panel at a real size, with no event loop: resize, send the
+        resize a hidden widget would only get on show, run the layout."""
+        p = self.p
+        p.resize(width, height)
+        QApplication.sendEvent(p, QResizeEvent(p.size(), QSize()))
+        p.layout().activate()
+        return p
+
+    def test_a_tall_panel_pins_its_header_a_short_one_scrolls_it_away(self):
+        """Owner, 26-Sep-2026: "i cant see the contact's details properly". The
+        header (name, role, the action buttons) is ~150px, pinned above the
+        scroll; in a 340px drawer that left ~190px for the person, and on a
+        laptop 57px. A panel shorter than _STICKY_H makes the header the first
+        thing in the scroll instead, so the whole panel is the reading area."""
+        p = self._resized(760, 900)
+        self.assertTrue(p._head_sticky)
+        self.assertIs(p._head_group.parentWidget(), p)
+        self.assertEqual(p.layout().indexOf(p._head_group), 0)
+        pinned = p._scroll.viewport().height()
+        self.assertLess(pinned, 900 - p._head_group.height() + 2)   # the header takes its share
+
+        p = self._resized(760, PP._STICKY_H - 60)
+        self.assertFalse(p._head_sticky)
+        self.assertIs(p._head_group.parentWidget(), p._scroll.widget())
+        self.assertEqual(p.layout().indexOf(p._head_group), -1)
+        self.assertGreaterEqual(p._scroll.viewport().height(), p.height() - 2)  # all of it
+
+        p = self._resized(760, 900)                       # and back, with nothing lost
+        self.assertTrue(p._head_sticky)
+        self.assertIs(p._head_group.parentWidget(), p)
+        self.assertEqual(p._scroll.viewport().height(), pinned)
+
+    def test_the_header_and_its_buttons_survive_the_move(self):
+        p = self._resized(760, PP._STICKY_H - 60)          # scrolling
+        for button in (p._mail_btn, p._call_btn, p._task_btn, p._list_btn,
+                       p._seq_btn, p._expand_btn):
+            self.assertIs(button.window(), p.window())
+            self.assertTrue(button.isVisibleTo(p), button.toolTip() or button.text())
+        self.assertEqual(p.name.text(), "Asha Rao")       # still filled in
+        self.assertFalse(p._head_group.isHidden())
 
     def test_the_left_widgets_apollos_order(self):
         heads = [w.text() for w in self.p._left.findChildren(QLabel)
@@ -240,7 +284,7 @@ class SomeoneNotSavedYet(unittest.TestCase):
         self.assertTrue(boxes["email"].isEnabled())             # no address yet
         self.assertTrue(boxes["qualify"].isEnabled())           # never qualified
         self.assertTrue(boxes["company"].isEnabled())
-        self.assertFalse(boxes["phone"].isEnabled())            # EasyLeadz: not connected
+        self.assertTrue(boxes["phone"].isEnabled())             # a company to look a number up for
         boxes["email"].setChecked(True)
         boxes["qualify"].setChecked(True)
         self.p.enrich_btn.click()

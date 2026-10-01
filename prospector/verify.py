@@ -291,13 +291,17 @@ def _hunter_find(lead, key: str):
 
 # The FINDERS — the only way Prism gets an address it was not handed (the
 # owner, 24-Sep-2026: "hunter + apollo only to find mails"; addresses are never
-# guessed). Apollo first (broader database, often has the id already for leads
-# sourced from Apollo); Hunter next as a fallback, spending its monthly credits
-# only for people Apollo missed. Both charge only when they know the person.
-# Hunter is a FINDER ONLY — confirmation is left to the free verifiers.
+# guessed). Hunter is our MAIN finder (the owner, 27-Sep-2026: "our main will
+# always be hunter") — free plans keep working, and it is a FINDER ONLY, so
+# every one of its monthly credits goes to finding, never spent confirming
+# what it already found. Apollo is the fallback, for whoever Hunter missed —
+# useful only with a paid Apollo plan (the free one refuses people/match
+# outright, so it is asked once a batch and then left alone: see
+# AFinderThatRefusesTheAccountIsAskedOnce). Both charge only when they know
+# the person.
 _FINDERS = [
-    ("apollo_api_key",  "Apollo", _apollo_find),        # 1 credit per person FOUND
-    ("hunter_api_key",  "Hunter", _hunter_find),        # monthly credits, FIND only
+    ("hunter_api_key",  "Hunter", _hunter_find),        # our main finder — monthly credits, FIND only
+    ("apollo_api_key",  "Apollo", _apollo_find),        # fallback — 1 credit per person FOUND
 ]
 # Every finder/verifier config key — collected from config/env by collect_keys.
 VERIFIER_KEYS = [k for k, _, _ in _FINDERS] + [k for k, _, _ in _VERIFIERS]
@@ -318,6 +322,31 @@ def collect_keys(cfg: dict | None = None) -> dict:
         if v:
             out[k] = v
     return out
+
+
+def find_domains(leads, cfg: dict | None = None) -> None:
+    """The real website of every company among `leads` with nobody found and no
+    domain yet — one Exa lookup per company (enrich.enrich), so the finders
+    that follow ask Hunter/Apollo BY DOMAIN, not just a company's bare name.
+
+    27-Sep-2026: this step never ran (enrich.enrich was built, tested, and
+    never wired into a run), so every finder call went out with just a
+    company's name — Hunter answered nothing for "company=Asian Paints" but
+    found its CEO instantly for "domain=asianpaints.com", a company that size.
+    Fixed here, called once per batch before the finder loop, instead of once
+    per lead inside find_and_verify — enrich already dedupes by company, and a
+    lead-by-lead call would ask Exa for the same company's site again for
+    every person who works there.
+
+    `cfg` is the run's OWN config — pooled (gateway.effective_cfg) or direct —
+    so this reads exactly the key find_and_verify itself would use: the pool
+    sentinel, the caller's own Exa key, or nothing, in which case this is a
+    silent no-op and the finders fall back to a company's bare name, same as
+    before this existed."""
+    from . import enrich, signals
+    key = signals.exa_key(cfg)
+    if key:
+        enrich.enrich(leads, key)
 
 
 _STATUS_RANK = {"valid": 3, "invalid": 2, "catch-all": 1, "unknown": 0}
@@ -436,17 +465,23 @@ def find_and_verify(lead, keys: dict | None = None, refused: dict | None = None)
 
 
 def verify_reachable(dossiers, keys: dict | None = None, limit: int = 25,
-                     on_progress=None) -> int:
-    """FIND + VERIFY the hot/warm slice: the finders (Apollo, then Hunter)
-    find the real address, then the FREE verifier waterfall (Verifalia → Reoon
-    → ZeroBounce → AbstractAPI → Kickbox) confirms it. Runs only on the people
-    about to be emailed, staying inside the free tiers. Sequential on purpose —
-    free tiers are rate-limited and this list is short. With no keys it is
-    skipped and the sheet keeps its free MX check."""
+                     on_progress=None, cfg: dict | None = None) -> int:
+    """FIND + VERIFY the hot/warm slice: the finders (Hunter, our main one,
+    then Apollo) find the real address, then the FREE verifier waterfall
+    (Verifalia → Reoon → ZeroBounce → AbstractAPI → Kickbox) confirms it. Runs
+    only on the people about to be emailed, staying inside the free tiers.
+    Sequential on purpose — free tiers are rate-limited and this list is
+    short. With no keys it is skipped and the sheet keeps its free MX check.
+
+    `cfg` (optional, the run's own config) looks up this slice's companies'
+    real domains first (find_domains) — with no `cfg`, or no Exa key in it,
+    this is skipped exactly as before, and the finders fall back to a
+    company's bare name."""
     keys = keys or {}
     if not any(keys.values()):
         return 0
     targets = [d for d in dossiers if d.verdict in (HOT, WARM) and d.lead.name][:limit]
+    find_domains([d.lead for d in targets], cfg)
     refused: dict = {}              # a finder that refused the key is asked once a run
     for i, d in enumerate(targets, 1):
         if gateway.exhausted():

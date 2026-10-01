@@ -202,6 +202,9 @@ COPY_TABLES = {
     # labels, and what each says with nothing to pick yet. (Stage and list
     # NAMES are records' values, shown as kept — never looked up.)
     "_RECORD_SIDES", "_CUSTOM_SIDES", "_RECORD_EMPTY", "_CUSTOM_EMPTY",
+    # …and Find phones: the kind of number a found phone looks like, and what the
+    # person panel says under it about where it was published (prospector/phones.py).
+    "KIND_LABEL", "SOURCE_LINE",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's

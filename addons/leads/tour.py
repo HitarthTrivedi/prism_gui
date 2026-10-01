@@ -303,6 +303,12 @@ STEPS = (
      "address is only charged when a finder knows the person. Nothing is "
      "guessed."),
 
+    ("bulk_phones", "Find phones",
+     "Looks up the number each ticked person's company publishes on its own "
+     "website or a business directory: one lookup per company, and a credit "
+     "only for a number found. It is the company's number, not a direct dial, "
+     "and Prism has not called it."),
+
     ("bulk_list", "Add to list",
      "Writes the ticked people to a sheet on your own machine, which then "
      "appears under the Lists tab."),

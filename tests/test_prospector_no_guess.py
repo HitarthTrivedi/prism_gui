@@ -99,10 +99,13 @@ class NothingIsGuessed(unittest.TestCase):
             self.assertFalse(E.is_guess(found), source)
 
 
-class TheFindersAreApolloThenHunter(unittest.TestCase):
+class TheFindersAreHunterThenApollo(unittest.TestCase):
 
-    def test_apollo_then_hunter_and_nothing_else(self):
-        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Apollo", "Hunter"])
+    def test_hunter_then_apollo_and_nothing_else(self):
+        # 27-Sep-2026: the code used to disagree with this file's own module
+        # docstring ("the finders are Hunter, then Apollo") — Apollo ran
+        # first. Fixed to match (the owner: "our main will always be hunter").
+        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Hunter", "Apollo"])
 
     def test_a_website_subdomain_is_not_asked_for_mail(self):
         self.assertEqual(V._registrable("new.abb.com"), "abb.com")
@@ -156,6 +159,64 @@ class TheFindersAreApolloThenHunter(unittest.TestCase):
         finder.assert_not_called()
         self.assertEqual((lead.email, lead.extra["email_check"]),
                          ("asha@raoworks.in", "valid"))
+
+
+class TheCompanysDomainIsFoundBeforeTheFindersAsk(unittest.TestCase):
+    """27-Sep-2026, the owner's real 50-lead run: Hunter answered nothing for
+    "company=Asian Paints" but found its CEO instantly for "domain=
+    asianpaints.com" — enrich.enrich (one Exa lookup per company) was built
+    and tested, but nothing ever called it, so every finder was always asked
+    by a company's bare name. verify.find_domains is that missing call."""
+
+    def test_an_exa_key_looks_the_domain_up_once_per_company(self):
+        leads = [_lead("Asha Rao", "Rao Works Pvt Ltd"), _lead("Bala Iyer", "Rao Works Pvt Ltd")]
+        with mock.patch.object(E, "_real_domain", return_value="raoworks.in") as real_domain:
+            V.find_domains(leads, {"exa_api_key": "exa-k"})
+        real_domain.assert_called_once_with("Rao Works Pvt Ltd", "exa-k")
+        self.assertEqual([l.extra["company_domain"] for l in leads], ["raoworks.in"] * 2)
+
+    def test_no_exa_key_is_a_silent_no_op(self):
+        lead = _lead()
+        with mock.patch.object(E, "enrich") as enriched:
+            V.find_domains([lead], {})
+            V.find_domains([lead], None)
+        enriched.assert_not_called()
+        self.assertNotIn("company_domain", lead.extra)
+
+    def test_a_pooled_cfg_asks_with_the_pool_sentinel(self):
+        from prospector import gateway as G
+        lead = _lead()
+        with mock.patch.object(E, "enrich") as enriched:
+            V.find_domains([lead], {"exa_api_key": G.POOL_KEY})
+        enriched.assert_called_once_with([lead], G.POOL_KEY)
+
+    def test_verify_reachable_looks_up_only_the_hot_and_warm_slice(self):
+        """The company lookup runs on the SAME slice the finders then work
+        through (hot/warm, capped by limit) — not the whole dossier list."""
+        from prospector.models import HOT, WARM, COLD
+        rows = []
+        for i, verdict in enumerate((HOT, WARM, COLD)):
+            lead = _lead(f"P{i}", f"Company {i}")
+            dossier = mock.Mock(lead=lead, verdict=verdict)
+            rows.append(dossier)
+        seen = []
+        with mock.patch.object(V, "find_domains", side_effect=lambda ls, cfg: seen.append(list(ls))), \
+                mock.patch.object(V, "find_and_verify"):
+            V.verify_reachable(rows, {"hunter_api_key": "h"}, cfg={"exa_api_key": "exa-k"})
+        self.assertEqual(seen, [[rows[0].lead, rows[1].lead]])      # hot, warm — not cold
+
+    def test_with_no_cfg_verify_reachable_behaves_exactly_as_before(self):
+        """Old callers that never learnt about `cfg` keep working — the
+        domain step is just skipped, same as when find_domains has no key."""
+        from prospector.models import HOT
+        lead = _lead()
+        dossier = mock.Mock(lead=lead, verdict=HOT)
+        with mock.patch.object(E, "enrich") as enriched, \
+                mock.patch.object(V, "find_and_verify") as checked:
+            done = V.verify_reachable([dossier], {"hunter_api_key": "h"})
+        enriched.assert_not_called()
+        checked.assert_called_once_with(lead, {"hunter_api_key": "h"}, {})
+        self.assertEqual(done, 1)
 
 
 class AFinderThatRefusesTheAccountIsAskedOnce(unittest.TestCase):
@@ -256,16 +317,29 @@ class AFinderThatRefusesTheAccountIsAskedOnce(unittest.TestCase):
         self.assertEqual(refused, {})
 
     def test_the_other_finder_is_still_asked(self):
-        _calls, patched = self._apollo_says(403, self._FREE_PLAN)
+        """27-Sep-2026: Hunter is asked first now (our main finder) — a
+        refusal from it does not stop Apollo being asked for the SAME lead."""
+        asked = []
+
+        def get(url, params=None, timeout=None):
+            asked.append(url)
+            if url == V.ACCOUNT:
+                return _Http(200, {"data": {"reset_date": "2026-09-27"}})
+            return _Http(429, self._QUOTA)
+
         refused = {}
-        with patched, mock.patch("requests.get", return_value=_Http(
-                200, {"data": {"email": "asha.rao@raoworks.in"}})):
+        apollo = mock.Mock(return_value=("asha.rao@raoworks.in", "valid"))
+        # _FINDERS holds the function itself: patch the list's entry too.
+        finders = [(k, n, (apollo if n == "Apollo" else f)) for k, n, f in V._FINDERS]
+        with mock.patch("requests.get", side_effect=get), \
+                mock.patch.object(V, "_FINDERS", finders):
             lead = _lead()
-            V.find_and_verify(lead, {"apollo_api_key": "a", "hunter_api_key": "h"},
+            V.find_and_verify(lead, {"hunter_api_key": "h", "apollo_api_key": "a"},
                               refused)
+        self.assertEqual(asked.count(V.FINDER), 1)
         self.assertEqual((lead.email, lead.extra["email_source"]),
-                         ("asha.rao@raoworks.in", "hunter"))
-        self.assertIn("Apollo", refused)
+                         ("asha.rao@raoworks.in", "apollo"))
+        self.assertIn("Hunter", refused)
 
     def test_without_a_shared_dict_a_refusal_still_never_ends_a_run(self):
         _calls, patched = self._apollo_says(403, self._FREE_PLAN)

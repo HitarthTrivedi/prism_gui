@@ -12,7 +12,7 @@ spreadsheet import ever fills; nothing finds one).
 | Credit ledger on the licence server | **Built** in `prism-license-server` (`app/credits.py`), tested; admin console has a Credits tab (24-Sep) |
 | Provider gateway (`/v1/leads/*`) | **Built 24-Sep-2026, tested against fake providers and over real HTTP** — Exa (people, company, website, why-now), Groq (qualify/draft), the e-mail verifiers, Hunter (find). **Not yet run against a live provider**: it needs the owner's provider keys set on the server and a licence with the `leads` feature and some credits (§3a) |
 | Leads screen on the pool | **Built 24-Sep-2026**: credits pill, every paid action says what it costs in credits before it runs and asks, no API-key boxes, no verifier-key card in Settings, an empty pool stops a run and says so. `PRISM_LEADS_DIRECT=1` keeps the developer's own-keys mode (a dev switch, not a setting) |
-| Phone finding | Not built. **Owner decision 20-Sep: pooled credits, EasyLeadz (human Unlimited seat + API) as the source, Apollo as the comparator. Corrected comparison in §4.2. Everything now hinges on EasyLeadz's written answer (§8) — nothing is bought or built against them until it arrives.** |
+| Phone finding | **Company phones built 26-Sep-2026 (§4.2d):** the number a company PUBLISHES on its own site or a directory, found by Exa's agent — a "Find phones" bulk action and a "Find their phone…" link, `POST /v1/leads/phones`, charged per number found, shown "published, not verified" with its source, exported with a Phone source column. **Person-level mobiles: not built** — Exa person-level after the owner's own 30-lead test. **EasyLeadz dropped 26-Sep** (its API is not on the plans the owner can buy, §4.2c). Live run against Exa: not done. |
 
 ## 1. What changes for a customer
 
@@ -253,6 +253,81 @@ Exa's own price list (read live) has an **Agent API** with a fixed price per req
 
 **Other leads Exa surfaced (terms not yet read; test before relying):** vendors that explicitly allow white-label / agency resale — Datagma (phone about $0.28 on its Expert plan, EU-strong, India unclear, no attribution needed), AgentEnrich (Agency plan $399 a month, "resell to clients (white-label)", free API key, US-leaning); India-first pay-per-lookup APIs — EazyReach (phone 8 credits, CXO phone 10, free trial about 18 phones, no charge on a miss, MCA director phones), Bulkpe (director phone ₹30 + GST, refund if not found, LinkedIn URL -> phone), Instafinancials DirectorConnect and IDSPay (MCA director numbers by DIN); 1Lookup Mobile Finder (about $0.14–0.20 a found number, global). The only independent test found (Outbound Kitchen, 10 mobile-data vendors, about $2,500 spent, mid-2026): no provider is both wide and accurate, about 1 in 4 returned mobiles is the wrong person, and only about 60% of valid mobiles are the right person — so validate line type and name before dialling (about $0.10 a number).
 
+### 4.2d Company phones — built 26-Sep-2026 (owner: "build the company phone part with Exa")
+
+**What it is.** Exa's agent reads a company's own website and its directory listings and returns the number the company
+*publishes*, with the page it came from. It is the COMPANY's number (a switchboard, a sales desk, sometimes an owner's mobile the firm
+itself prints), not a named person's direct dial.
+
+**It does not validate a number the way Apollo does.** Read first-hand from Apollo's docs (26-Sep): each Apollo number carries
+`status_cd` (a validation status), `type_cd` (mobile / work_direct), `confidence_cd` and a do-not-call status. Exa returns a number, its
+own claimed type and a source URL, and nothing else — no live-line check, no DNC. So Prism reads the number strictly itself
+(`normal_phone`, kept in step in `prospector/phones.py` and the server's `leads_gateway.py`): a plausible Indian or international number
+in E.164, dropped when it is junk (all one digit, `1234567890`, too short, an extension, no STD code); kind = mobile / landline /
+toll_free / unknown **by what the digits and the writing prove** (a leading 1–5 is always a landline; a leading 9 is always a mobile, since no
+Indian STD code starts with 9; a leading 6–8 is a landline when the number is WRITTEN with its STD code apart — "+91 (80) 33422000",
+"080-3342 2000" — a mobile only when the page says so, and otherwise "unknown"). A number that comes back for two different companies in one batch
+is dropped (a directory's helpline). The app calls it "published, not verified" every time it shows one, and says where and when it was found.
+
+**Correction, 27-Sep-2026 (the owner's screenshot).** The first real number, Siemens' Bengaluru switchboard, was shown as "Looks like a mobile"
+beside Apollo's real mobile for the same person. Siemens' page prints it "+91 (80) 33422000" on a Tel. line — a landline. The reader threw the
+brackets away and, with no label, called every 6–8 number a mobile (the docstring said "unknown", the code said "mobile", and a test encoded the
+code). Fixed in both copies of `normal_phone` (app and server): 9… → mobile, 6–8 → landline if the STD code is set apart, mobile only on the page's
+word, else unknown; "+91 (0)80…" (the trunk 0 inside the +91) is now read instead of dropped. Numbers saved before the fix carry no `read`
+marker (`phones.READING`), and `entry_for` shows a saved 6–8 "mobile" as "unknown" without rewriting what was saved. Company number ≠ the
+person's mobile: Apollo's number for him is his own mobile; Exa's is the office line.
+
+**How it works.** `POST /v1/leads/phones {companies: [{name, domain, location}] ≤ 15}` on the licence server; the question put to Exa is
+fixed on the server and only company names, websites and cities are sent (never a person). One Exa agent run per call, polled (max 75 s,
+then refunded); `LEADS_PHONE_EFFORT` (minimal / low / medium, default low) — Exa prices the run by effort, not by rows (measured 21-Sep:
+minimal $0.012 found 14 of 20, low $0.025 found 16 of 20). Hold → work → settle like every lookup: `company_phone` is charged **per number
+found** (placeholder **2 credits** — set the real price in the console; ≈ ₹0.1–0.4 real cost measured), the rest refunded. The client
+(`prospector/phones.py`) makes ONE lookup per company however many people work there, only for leads with no phone yet, 15 to a call, and
+stops the loop when the pool runs dry, keeping what it found. Developer mode (`PRISM_LEADS_DIRECT=1`) asks Exa directly with the
+developer's own key, so it works before the server is deployed.
+
+**Where it shows.** Cockpit bulk bar "Find phones" (folds into More first on a narrow bar; tour step `bulk_phones`); person panel Contact
+information: number, a "Looks like a mobile / Office / landline line / Toll-free line" pill, "The company's number, published on … ·
+found <date> · not verified", "Open the page it came from", and "Find their phone…" when there is none (also an Enrichment pick). Stored on
+the lead as `lead.phone` (only when they had none — a number they came with is never overwritten) plus `extra["phones"]` (number, kind,
+scope "company", source, source_url, found_at, provider, checked "format"); saved contacts keep it (`via` "phone"); the leads sheet has a
+**Phone source** column beside Phone No.
+
+**When a lookup does not run, the app says why (26-Sep-2026).** The first real press ("Find their phone…", developer mode, the owner's own Exa
+key) read "Found 0 phone number(s) for 0 companies · 1 couldn't be looked up" — and the cause was invisible: Exa had answered **HTTP 402
+`NO_MORE_CREDITS`** ("You have exceeded your credits limit… dashboard.exa.ai"), i.e. the Exa account behind that key was out of credit;
+the request itself never got as far as being checked. `phones._agent_run` and `gateway.company_phones` now hand the reason back
+(`find()["why"]`), and the workbench prints it: a spent Exa account, a rejected key (401/403), a rate limit (429), an Exa outage, Exa's own
+words for a 4xx, a failed / stalled run, no connection, or — on the pool — the licence server's own sentence (server too old, pool
+empty, provider down). When nothing ran at all it says "No phone numbers were looked up." and the reason, not "Found 0 … for 0 companies".
+Only status codes, Exa's own error text (160 characters) and exception class names are ever shown — never the key or a URL.
+
+**Not done / owner's.** Exa's written OK to resell lookups (one e-mail — no draft yet); a live run that gets past Exa's credit check
+(`tools/leads_live_smoke.py` now includes one phones call) — the Agent-API request for this company schema is modelled on the 21-Sep tests
+and has still not been accepted by Exa in this form; real credit price; person-level mobiles (needs the owner's 30-lead test); a
+do-not-call scrub (numbers show "not checked").
+
+### 4.2e Validating a found number — what exists (researched 26-Sep-2026, after the first real number was found)
+
+Apollo's per-number status / type / confidence / do-not-call have four separate equivalents, and only some can be bought:
+
+* **Line status + type → an HLR lookup** (a silent query to the operator's register: active or not, operator, ported, mobile or not). Mobiles
+  only — a landline has no HLR, so an office line can only be format-checked. CheckMobi's India page lists **HLR $0.004 a request (≈ ₹0.4 at
+  ₹96/$), MNP $0.002**, "number verification" (structure only) free; its terms (§6 "API Access and Your Applications", read through a
+  summary) let you build applications on the API and serve them to others. HLR-Lookups.com: €0.01 falling to €0.005 a lookup, an explicit reseller
+  programme, India shown only in a sample. Twilio Lookup's Line Type / Line Status pages do not list India ("test the coverage"). **No independent
+  accuracy figure for India was found** — every claim is the vendor's — so run ~30 of the numbers actually found (≈ $0.12) before building.
+  Of the 29 numbers Exa found on 21-Sep, 19 looked like mobiles, so HLR would apply to about two thirds for small firms and little for large ones.
+  **Unproven until tested in the owner's hands** (his own words, 26-Sep: it must not turn out like EasyLeadz, where a page's claim was not what his
+  account allowed). Cheapest test, free and with no sign-up: 1Lookup's HLR tool (returns active / absent / invalid / unknown, rate-limited) or
+  IPQualityScore's free HLR tool, on four numbers whose truth he knows — his Airtel, his Jio, a dead number, one Exa found. Every answer "unknown"
+  for India means drop HLR; SS7 HLR is known to be blocked or scrambled by some operators' SMS firewalls, and Jio is unconfirmed either way.
+* **Do-not-call → a scrub against TRAI's NCPR.** A legal step: promotional calls need telemarketer registration and a scrubbed list; "DND search
+  API" providers exist (e.g. EasyGoSMS) but publish no price and do not say what registration they need. Prism keeps "not checked" and has no dialer.
+* **Right company → nothing to buy.** The source page is stored and linked; a second independent source, or an STD code whose city matches the
+  company's city, raises confidence for free (not built). Only a call proves a number reaches the right person.
+* **A found number is never WhatsApp opt-in**, whatever a check says.
+
 ### 4.2c How Prism would fetch numbers from EasyLeadz automatically (read first-hand, 21-Sep-2026)
 
 **Confirmed.** The endpoint is live: a call with a dummy key returns HTTP 200 and `{"data":[],"status":"0","message":"Invalid API
@@ -305,6 +380,17 @@ monthly cards: listed), and all of them end in "ask support".
 3. **≈ ₹2,850 with GST — one month of Startup** (₹2,419 + 18 %, 40 numbers; every monthly card lists API): the cheapest real
    end-to-end test, and it doubles as the hit-rate test on 40 real leads. It only works if they switch the API on for the account.
 4. **₹50,004 + GST (≈ ₹59,000), non-refundable — Fully Unlimited 20/day, annual:** only after 1–3 have worked.
+
+**Settled 26-Sep-2026 — the cheap plans have no API.** The owner opened the upgrade plans inside his EasyLeadz account and the
+API is **denied** there. Re-reading the public page the same day (live) it still contradicts itself: the FAQ says "API
+enrichment is available in Annual Growth and higher plans and it is subject to use case approval. By default it is not
+available to every user"; the yearly plan cards list "API Enrichment\*" only on **Hyper Growth** (₹19,249.91 a month, ₹2.31 lakh a
+year, 7,500 numbers ≈ ₹30.8 each) and **Super Nova** (₹36,299.90 a month, 15,000 numbers ≈ ₹29 each) — not on Startup, Scaleup or
+Growth; yet both Fully Unlimited cards (₹4,167 and ₹6,667) still tick "API", Bulk Upload and EasySearch. What the owner's
+account offers is what counts. So an EasyLeadz **API lane** would cost ≈ ₹29–31 a number on an annual ₹2.3–4.4 lakh plan, after an
+approval, and would still need resale consent — worse than Exa (≈ ₹6.7 a number found) and Apollo (≈ ₹15). EasyLeadz is left, at
+most, as the optional **desk lane** (a person on an Unlimited or Fully Unlimited seat working requests by hand), and that needs its
+written consent. Whether Bulk Upload and EasySearch are also missing from the owner's upgrade screen is not yet known.
 
 **Three other routes found on the way**
 * **Bulk Upload** is also on the Fully Unlimited cards: a CSV of LinkedIn URLs (up to 3 × the available credits, at most 5,000),

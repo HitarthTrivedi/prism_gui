@@ -53,9 +53,9 @@ from addons.leads.filter_panel import (
 )
 from addons.leads.credits_page import CreditPopover, CreditUsageDialog, UpgradeDialog
 from addons.leads.workers import (CreditsCallWorker, CreditsWorker, LeadsEmailWorker,
-                                  LeadsExportWorker, LeadsQualifyWorker, LeadsSendWorker,
-                                  LeadsSessionLoadWorker, LeadsVerifyWorker,
-                                  SourceWorker, outside_filters)
+                                  LeadsExportWorker, LeadsPhoneWorker, LeadsQualifyWorker,
+                                  LeadsSendWorker, LeadsSessionLoadWorker,
+                                  LeadsVerifyWorker, SourceWorker, outside_filters)
 from addons.leads.cockpit import LeadsWorkspace
 
 try:
@@ -1126,6 +1126,7 @@ class LeadsWorkbench(QWidget):
         self._cockpit.deleteSavedSearchRequested.connect(self._delete_saved_search)
         self._cockpit.verifyRequested.connect(self._verify_selected)
         self._cockpit.emailsRequested.connect(self._find_emails)
+        self._cockpit.phonesRequested.connect(self._find_phones)
         self._cockpit.saveListRequested.connect(self._save_list)
         self._cockpit.exportRequested.connect(self._export_selected)
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
@@ -1783,12 +1784,12 @@ class LeadsWorkbench(QWidget):
 
     def _panel_enrich(self, dos, fields) -> None:
         """Enrichment ▸ Enrich fields: each picked field in turn — an e-mail,
-        the company, a qualify pass — every one asking before it spends."""
+        a phone, the company, a qualify pass — every one asking before it spends."""
         if self._jobs:
             self._status.setText(i18n.t(
                 "Wait for the job that is running to finish, then try again."))
             return
-        self._enrich_queue = [(dos, f) for f in ("email", "company", "qualify")
+        self._enrich_queue = [(dos, f) for f in ("email", "phone", "company", "qualify")
                               if f in (fields or ())]
         self._next_enrichment()
 
@@ -1799,6 +1800,8 @@ class LeadsWorkbench(QWidget):
             dos, what = self._enrich_queue.pop(0)
             if what == "email":
                 self._find_emails([dos])
+            elif what == "phone":
+                self._find_phones([dos])
             elif what == "company":
                 self._enrich_company(dos.lead)
             elif what == "qualify":
@@ -2578,22 +2581,22 @@ class LeadsWorkbench(QWidget):
         self._email_worker.start()
 
     def _confirm_emails(self, n: int) -> bool:
-        """Each lead can cost a finder credit — Apollo's, then Hunter's, only
-        when one of them knows the person — and every ticked row is looked up,
-        nothing is sampled, so a batch past ten asks first, and names whose
-        credits. Nothing is guessed (24-Sep-2026). This question is the only
-        cap on the spend. Tests patch this. On the credit pool it asks in
-        credits (_confirm_pool_emails); the finders' own names are the
-        developer switch's."""
+        """Each lead can cost a finder credit — Hunter's (our main finder),
+        then Apollo's, only when one of them knows the person — and every
+        ticked row is looked up, nothing is sampled, so a batch past ten asks
+        first, and names whose credits. Nothing is guessed (24-Sep-2026). This
+        question is the only cap on the spend. Tests patch this. On the credit
+        pool it asks in credits (_confirm_pool_emails); the finders' own names
+        are the developer switch's."""
         if n <= 10:
             return True
         if self._pooled():
             return self._confirm_pool_emails(n)
         # Named in the order verify._FINDERS asks them.
-        apollo = self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked")
         hunter = self._key("hunter_api_key")
-        who = (i18n.t("Apollo, then Hunter") if apollo and hunter
-               else i18n.t("Apollo") if apollo else i18n.t("Hunter"))
+        apollo = self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked")
+        who = (i18n.t("Hunter, then Apollo") if hunter and apollo
+               else i18n.t("Hunter") if hunter else i18n.t("Apollo"))
         answer = QMessageBox.question(
             self, i18n.t("Find e-mails"),
             i18n.t("Find and check e-mails for {n} leads? Prism asks {who} for "
@@ -2651,6 +2654,106 @@ class LeadsWorkbench(QWidget):
             QMessageBox.warning(self, i18n.t("Find e-mails"), "\n\n".join(
                 [i18n.t("No e-mails were found. The finders turned Prism away:")]
                 + refusals))
+
+    def _find_phones(self, dossiers):
+        """"Find phones" — the number each selected person's COMPANY publishes on
+        its website or a directory, one lookup per company (prospector/phones.py).
+
+        It is the company's number, published and not called: nothing checks that
+        the line is live, whose it is, or whether it is on a do-not-call register,
+        and Prism says so wherever it shows one. Nobody who already has a phone is
+        looked up again, and (on the pool) a credit is used only for a number found."""
+        if not dossiers or self._jobs:
+            return
+        from addons.leads.cockpit import needs_phone
+        from prospector import phones
+        leads = [d.lead for d in dossiers if needs_phone(d)]
+        if not leads:
+            self._status.setText(i18n.t(
+                "Those leads already have a phone number, or name no company to look one up for."))
+            return
+        if self._pooled():
+            blocked = self._pool_blocker("phones")
+            if blocked:
+                self._status.setText(blocked)
+                return
+        elif not self._key("exa_api_key"):
+            self._status.setText(i18n.t(
+                "Finding phone numbers needs an Exa API key — add it under "
+                "Search settings › Keys & claims."))
+            return
+        companies = phones.companies_of(leads)
+        if not self._confirm_phones(companies):
+            return
+        self._set_running(True)
+        self._acted = list(leads)
+        self._status.setText(i18n.t("Finding phone numbers for {n} companies…").format(
+            n=companies))
+        self._phone_worker = LeadsPhoneWorker(leads, self.cfg)
+        self._phone_worker.progress.connect(lambda i, n: self._status.setText(
+            i18n.t("Looked up {i} of {n} companies…").format(i=i, n=n)))
+        self._phone_worker.done.connect(self._on_phones_found)
+        self._phone_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._phone_worker.start()
+
+    def _confirm_phones(self, companies: int) -> bool:
+        """Every lookup asks first, in credits on the pool. It is priced per number
+        FOUND, so the figure is a ceiling: what the company does not publish is
+        given back. Tests patch this."""
+        if self._pooled():
+            price = gateway.rate("company_phone", 2)
+            return self._confirm_pool(i18n.t("Find phones"), [
+                i18n.t("Look up the phone number for {n} companies — up to {c}.").format(
+                    n=companies, c=self._cr(companies * price)),
+                i18n.t("Prism asks for the number each company publishes on its own "
+                       "website or a business directory. A credit is used only for a "
+                       "number found. It is the company's number, published — not a "
+                       "direct dial, and not called or checked.")])
+        answer = QMessageBox.question(
+            self, i18n.t("Find phones"),
+            i18n.t("Look up the published phone number of {n} companies with your Exa "
+                   "key? It is the company's number, not a direct dial, and Prism has "
+                   "not called it.").format(n=companies))
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _on_phones_found(self, counts) -> None:
+        """Fold the numbers in: each person at a company that published one now
+        has it (the export, the drafts and the person panel read it), the session
+        and the saved contacts keep it, and the line says what was — and was not —
+        found, and that it is published, not verified."""
+        idle = self._job_done()
+        counts = counts if isinstance(counts, dict) else {}
+        found, asked, given = (int(counts.get(k, 0)) for k in ("found", "asked", "given"))
+        failed = int(counts.get("failed", 0))
+        self._save_session()
+        if not self._keep_as_contacts(getattr(self, "_acted", []), "phone"):
+            self._rebuild_pool_keep_page()
+        if idle:
+            self._set_running(False)
+        # Why a lookup did not run, in the provider's or the server's own sentence. The
+        # pool's "out of credits" is already said by _used_note — not twice.
+        stopped = gateway.exhausted()
+        said = dict.fromkeys(str(w).strip() for w in (counts.get("why") or ()))
+        reason = " ".join(i18n.t(w) for w in said if w and w != stopped)
+        if failed and not asked:
+            # Nothing was looked up at all. "Found 0 for 0 companies" reads as an answer
+            # (26-Sep-2026: an Exa account with no credit left said exactly that).
+            parts = [i18n.t("No phone numbers were looked up.")]
+            if reason:
+                parts.append(reason)
+        else:
+            parts = [i18n.t("Found {f} phone number(s) for {a} companies — published, "
+                            "not verified.").format(f=found, a=asked)]
+            if asked > found:
+                parts.append(i18n.t("{n} publish none.").format(n=asked - found))
+            if failed:
+                parts.append(" ".join([i18n.t("{n} couldn't be looked up.").format(n=failed)]
+                                      + ([reason] if reason else [])))
+        self._status.setText("   ·   ".join(parts) + self._used_note())
+        if given and self._res is not None and (self._res.dossiers
+                                                or getattr(self._res, "all_leads", None)):
+            self._start_export(self._autosave_dir(), announce=False)
 
     def _qualify_selected(self, dossiers):
         """Qualify & draft the checked people the run sourced but never

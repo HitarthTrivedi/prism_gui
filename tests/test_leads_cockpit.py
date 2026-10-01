@@ -25,7 +25,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt         # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent, QShowEvent              # noqa: E402
 from PySide6.QtTest import QTest                               # noqa: E402
 from PySide6.QtWidgets import (                                # noqa: E402
@@ -541,8 +541,38 @@ class TableFeel(unittest.TestCase):
         self._lay_out(1000, 700)
         c._place_drawer()                                 # what the body's resize does
         self.assertFalse(c._drawer_docked)
-        self.assertIs(c._drawer_w.parentWidget(), c._body)
+        self.assertIs(c._drawer_w.parentWidget(), c)      # the page's, not the body's
         self.assertFalse(c._drawer_w.isHidden())
+
+    def test_a_floating_drawer_runs_the_pages_full_height(self):
+        """Owner, 26-Sep-2026: "i cant see the contact's details properly". The
+        drawer floated in the strip UNDER the toolbar — ~340px of a 1080p window
+        was already spent above the results, so the person got a ~190px viewport
+        (57px on a 768p laptop). Now it is Apollo's side panel: from the top of
+        the page to the foot of the results."""
+        c = self.c
+        self._lay_out(1000, 700)
+        c._table.setCurrentCell(0, 1)
+        c._place_drawer()
+        w = c._drawer_w
+        self.assertFalse(c._drawer_docked)
+        self.assertEqual(w.y(), 0)                        # over the title row and toolbar…
+        foot = c.mapFromGlobal(c._view_stack.mapToGlobal(QPoint(0, c._view_stack.height()))).y()
+        self.assertEqual(w.y() + w.height(), foot)        # …down to the pager, which stays clear
+        self.assertGreater(c._body.y(), 0)                # there IS a title row and toolbar…
+        self.assertGreater(w.height(), foot - c._body.y())    # …and the drawer is taller than
+        self.assertGreater(w.x(), 0)                      # the strip it used to get; the left stays clear
+
+    def test_expanded_covers_the_whole_cockpit_and_goes_back(self):
+        c = self.c
+        self._lay_out(1000, 700)
+        c._table.setCurrentCell(0, 1)
+        c._place_drawer()
+        before = c._drawer_w.geometry()
+        c._set_expanded(True)
+        self.assertEqual(c._drawer_w.geometry(), QRect(0, 0, c.width(), c.height()))
+        c._set_expanded(False)
+        self.assertEqual(c._drawer_w.geometry(), before)
 
 
 class CardGallery(unittest.TestCase):
@@ -3455,6 +3485,42 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
         c.set_dossiers([_dos("Kunyi", 96, "k@x.com", "valid")])
         self.assertTrue(c._b_emails.isHidden())
 
+    def test_find_phones_arms_for_people_with_no_phone_at_a_company(self):
+        """Find phones looks up the number each COMPANY publishes, so it is for
+        people with no phone of any kind who work somewhere it can look up."""
+        c = CK.LeadsCockpit()
+        has = _dos("Kunyi", 96, "k@x.com", "valid")
+        has.lead.phone = "+91 98250 12345"                       # came with a number
+        found = _dos("Vaibhav", 80, "v@x.com", "")
+        found.lead.extra["phones"] = [{"number": "+912652345678", "kind": "landline"}]
+        bare = _dos("Asha", 70, "")
+        nowhere = _dos("Ravi", 60, "", company="")               # no company to look up
+        c.set_dossiers([has, found, bare, nowhere])
+        self.assertFalse(c._b_phones.isHidden())                 # someone still needs one
+        self._tick(c, [has.lead, found.lead, nowhere.lead])
+        self.assertFalse(c._b_phones.isEnabled())                # each has one, or can't be looked up
+        self._tick(c, [bare.lead])
+        self.assertTrue(c._b_phones.isEnabled())
+        got = []
+        c.phonesRequested.connect(got.append)
+        c._b_phones.click()
+        self.assertEqual({d.lead.name for d in got[0]}, {"Kunyi", "Vaibhav", "Asha", "Ravi"})
+
+    def test_find_phones_leaves_the_bar_once_everyone_has_one(self):
+        c = CK.LeadsCockpit()
+        d = _dos("Kunyi", 96, "k@x.com", "valid")
+        d.lead.phone = "+91 98250 12345"
+        c.set_dossiers([d])
+        self.assertTrue(c._b_phones.isHidden())
+
+    def test_find_phones_folds_into_more_before_anything_else_on_a_narrow_bar(self):
+        c = CK.LeadsCockpit()
+        c.set_dossiers([_dos("Asha", 70, "")])
+        actions = c._bulk_actions()
+        self.assertIn(c._b_phones, CK.LeadsCockpit._fold_set(2, actions))
+        self.assertNotIn(c._b_emails, CK.LeadsCockpit._fold_set(3, actions))   # e-mails stay longest
+        self.assertIn(c._b_emails, CK.LeadsCockpit._fold_set(4, actions))
+
     def test_the_workspace_re_exposes_the_signal(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -3466,6 +3532,10 @@ class FindEmailsOnTheRowsYouPick(_Workbench):
         w.leads._table.item(0, 0).setCheckState(Qt.Checked)
         w.leads._b_emails.click()
         self.assertEqual(got, [[d]])
+        phones = []
+        w.phonesRequested.connect(phones.append)                # and Find phones, the same way
+        w.leads._b_phones.click()
+        self.assertEqual(phones, [[d]])
 
     def test_exactly_the_ticked_leads_go_to_the_worker(self):
         wb = self._WB.LeadsWorkbench({})
@@ -3857,11 +3927,12 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
 
         w, got = self._worker([blank, held], cfg={"hunter_api_key": "h",
                                                   "reoon_api_key": "r"})
-        with mock.patch("prospector.enrich.enrich") as enriched, \
+        with mock.patch("prospector.signals.exa_key", return_value=""), \
+                mock.patch("prospector.enrich.enrich") as enriched, \
                 mock.patch("prospector.verify.find_and_verify", side_effect=fake_find):
             w.run()
         self.assertEqual(got["failed"], [])
-        enriched.assert_not_called()                     # nothing made up first
+        enriched.assert_not_called()          # no Exa key: the domain step is skipped
         self.assertEqual((blank.email, blank.extra["email_source"]),
                          ("ana.ruiz@acme.com", "hunter"))
         self.assertEqual([l for l, _k in seen], [blank, held])
@@ -3883,6 +3954,50 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
             w.run()
         self.assertNotIn("apollo_api_key", keys[0])
         self.assertIn("reoon_api_key", keys[0])
+
+    def test_the_companys_domain_is_found_once_before_any_finder_is_asked(self):
+        """27-Sep-2026, the owner's real run: Hunter answered nothing for
+        "company=Asian Paints" but found its CEO instantly for "domain=
+        asianpaints.com" — the domain step existed (enrich.enrich) but nothing
+        ever called it. Find e-mails now looks each COMPANY's site up once
+        (not once per lead) before any finder is asked."""
+        from unittest import mock
+        a = Lead(name="Ana Ruiz", company="Acme", title="Owner")
+        b = Lead(name="Bo Diaz", company="Acme", title="Manager")   # same firm: one lookup, not two
+        order = []
+
+        def fake_enrich(leads, api_key, on_progress=None):
+            order.append(("enrich", list(leads), api_key))
+            for l in leads:
+                l.extra["company_domain"] = "acme.example"
+
+        def fake_find(lead, keys=None, refused=None):
+            order.append(("find", lead))
+
+        w, got = self._worker([a, b], cfg={"hunter_api_key": "h", "exa_api_key": "exa-k"})
+        with mock.patch("prospector.enrich.enrich", side_effect=fake_enrich) as enriched, \
+                mock.patch("prospector.verify.find_and_verify", side_effect=fake_find):
+            w.run()
+        self.assertEqual(got["failed"], [])
+        enriched.assert_called_once_with([a, b], "exa-k")
+        self.assertEqual([tag for tag, *_ in order], ["enrich", "find", "find"])
+        # The pre-existing "Finding e-mail domains…" progress line (i == 0).
+        self.assertEqual(got["progress"][0], (0, 2, None))
+
+    def test_a_pool_key_looks_the_domain_up_too(self):
+        """The run's OWN cfg is what find_domains reads — pooled, that already
+        carries the sentinel (gateway.effective_cfg), so this is the SAME
+        website lookup Find e-mails already prices in (_confirm_pool_emails:
+        "Prism looks up each company's website"), now actually made."""
+        from unittest import mock
+        from prospector import gateway as G
+        a = Lead(name="Ana Ruiz", company="Acme", title="Owner")
+        w, got = self._worker([a], cfg={"exa_api_key": G.POOL_KEY, "leads_pool": True})
+        with mock.patch("prospector.enrich.enrich") as enriched, \
+                mock.patch("prospector.verify.find_and_verify"):
+            w.run()
+        self.assertEqual(got["failed"], [])
+        enriched.assert_called_once_with([a], G.POOL_KEY)
 
     def test_a_refused_account_is_said_once_before_the_result(self):
         """The batch shares one `refused`: whatever find_and_verify writes
@@ -3916,12 +4031,13 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
                  for i in range(30)]
         checked = []
         w, got = self._worker(leads)
-        with mock.patch("prospector.enrich.enrich") as enriched, \
+        with mock.patch("prospector.signals.exa_key", return_value=""), \
+                mock.patch("prospector.enrich.enrich") as enriched, \
                 mock.patch("prospector.verify.find_and_verify",
                            side_effect=lambda l, k=None, refused=None: checked.append(l)):
             w.run()
         self.assertEqual(got["failed"], [])
-        enriched.assert_not_called()
+        enriched.assert_not_called()          # no Exa key: the domain step is skipped
         self.assertEqual(len(checked), len(leads))
         self.assertTrue(all(not l.email for l in leads))
         self.assertEqual(got["done"], [(0, 0)])
@@ -3962,7 +4078,8 @@ _TOOLBAR_KEYS = ("import_menu", "views_menu", "hide_filters", "people_search",
 _COCKPIT_KEYS = _TOOLBAR_KEYS + ("table", "select_all", "col_lead", "col_focus",
                                  "col_fit", "col_status", "col_signal")
 _BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails",
-              "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
+              "bulk_phones", "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify",
+              "bulk_sequence")
 _TAB_KEYS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
              "tab_sequences", "tab_analytics")
 # The workbench's own: Find new people. (Search settings' rows are one
@@ -4039,6 +4156,7 @@ class PointAtMeCockpit(unittest.TestCase):
         self.assertIs(t["bulk_save"], self.c._b_contact)      # Apollo's Save
         self.assertIs(t["bulk_verify"], self.c._b_verify)
         self.assertIs(t["bulk_emails"], self.c._b_emails)
+        self.assertIs(t["bulk_phones"], self.c._b_phones)
         self.assertIs(t["bulk_list"], self.c._b_save)         # Add to list
         self.assertIs(t["bulk_export"], self.c._b_export)
         self.assertIs(t["bulk_sequence"], self.c._b_seq)
@@ -4073,6 +4191,32 @@ class PointAtMeCockpit(unittest.TestCase):
         self.assertIs(self.c.help_targets()["drawer"], self.c._drawer_panel)
         self.assertEqual(self.c._table.currentRow(), 0)
         self.assertEqual(self.c.selected(), [])
+
+    def test_a_step_on_a_control_the_full_height_drawer_covers_shuts_it(self):
+        """The floating drawer runs the page's full height, so a step BACK from
+        the drawer step can land on Import, which is then under it."""
+        c = self.c
+        c.resize(1500, 700)                     # wide enough to float, not dock
+        c.layout().activate()
+        c._body.layout().activate()
+        c._split.refresh()
+        row, chain = c._import_btn.parentWidget(), []      # the title row lays itself
+        while row is not None and row is not c:            # out only when shown, so do
+            chain.append(row)                              # what showing it would: top-down
+            row = row.parentWidget()
+        for row in reversed(chain):
+            if row.layout() is not None:
+                row.layout().activate()
+        c.help_reveal("drawer")
+        c._place_drawer()
+        self.assertFalse(c._drawer_w.isHidden())
+        self.assertFalse(c._drawer_docked)
+        self.assertTrue(c._drawer_covers("import_menu"))
+        self.assertFalse(c._drawer_covers("people_tabs"))
+        c.help_reveal("people_tabs")            # the rail is beside it: it stays open
+        self.assertFalse(c._drawer_w.isHidden())
+        c.help_reveal("import_menu")            # Import is under it: it shuts
+        self.assertTrue(c._drawer_w.isHidden())
 
     def test_no_reveal_ticks_filters_or_starts_anything(self):
         fired = []

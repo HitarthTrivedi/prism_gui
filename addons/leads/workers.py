@@ -209,7 +209,7 @@ class ProspectorWorker(_Worker):
             if vkeys and self.verify_limit:
                 self.progress.emit("Verifying the hot/warm emails…")
                 verify.verify_reachable(
-                    res.dossiers, vkeys, limit=self.verify_limit,
+                    res.dossiers, vkeys, limit=self.verify_limit, cfg=self.cfg,
                     on_progress=lambda i, n, l: self.progress.emit(
                         f"Verifying {i} of {n}: {l.display()}"))
             drafts = reach.draft_batch(
@@ -364,15 +364,18 @@ class LeadsEmailWorker(_Worker):
     where that money is spent, on the people the owner ticked — or on the rows
     of a sheet they exported and brought back.
 
-    One pass, `verify.find_and_verify` per lead: an address they came with (a
-    sheet's, Apollo's) is checked with the free verifiers; anyone without one,
-    or whose address the check could not confirm, is looked up by the FINDERS
-    — Apollo, then Hunter, each only where its key is set, each charging only
-    when it knows the person — and what they find is checked too. Nothing is
-    ever guessed (the owner, 24-Sep-2026: "hunter + apollo only to find
-    mails"): someone neither finder knows keeps no address. A finder that
-    turns the ACCOUNT away (a Free plan, a spent quota, a wrong key) is asked
-    once, and `refused` says why before `done`.
+    First, ONE Exa lookup per company (verify.find_domains, not per lead) —
+    the finders that follow ask by domain, not just a company's bare name,
+    which finds far less (27-Sep-2026: this step existed but was never
+    called). Then, `verify.find_and_verify` per lead: an address they came
+    with (a sheet's, Apollo's) is checked with the free verifiers; anyone
+    without one, or whose address the check could not confirm, is looked up
+    by the FINDERS — Hunter (our main finder), then Apollo, each only where
+    its key is set, each charging only when it knows the person — and what
+    they find is checked too. Nothing is ever guessed (the owner, 24-Sep-2026:
+    "hunter + apollo only to find mails"): someone neither finder knows keeps
+    no address. A finder that turns the ACCOUNT away (a Free plan, a spent
+    quota, a wrong key) is asked once, and `refused` says why before `done`.
     Not capped by the rail's Verify setting. That number is a budget for a
     RUN, which verifies whatever its top slice happens to be — this action is
     the owner naming people, row by row, and the workbench asks before a batch
@@ -396,6 +399,12 @@ class LeadsEmailWorker(_Worker):
             if self.cfg.get("apollo_api_blocked"):
                 keys.pop("apollo_api_key", None)
             blank = [l for l in self.leads if not (l.email or "").strip()]
+            # One Exa lookup per company (not per lead) before any finder is
+            # asked, so Hunter/Apollo get a real domain instead of just a
+            # company's bare name — silently skipped with no Exa key, same as
+            # before this existed (27-Sep-2026: this was the missing step).
+            self.progress.emit(0, len(self.leads), None)
+            verify.find_domains(self.leads, self.cfg)
             refused: dict = {}
             for i, lead in enumerate(self.leads, 1):
                 self.progress.emit(i, len(self.leads), lead)
@@ -410,6 +419,32 @@ class LeadsEmailWorker(_Worker):
             if refused:
                 self.refused.emit(dict(refused))
             self.done.emit(found, ok)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class LeadsPhoneWorker(_Worker):
+    """Find the phone number each SELECTED lead's company publishes, off the UI
+    thread — the cockpit's "Find phones" and the person panel's "Find their
+    phone". One lookup per company, 15 to a call, only for leads with no phone
+    yet (prospector/phones.py); the credits are charged per number found.
+
+    Nothing here checks the number is live or whose it is: it is the number the
+    company itself prints, with the page it came from. `done` carries the counts
+    the workbench says out loud — {"asked", "found", "given", "failed"}."""
+    progress = Signal(int, int)             # companies looked up so far, of how many
+    done = Signal(object)                   # phones.find's counts
+    failed = Signal(str)
+
+    def __init__(self, leads: list, cfg: dict):
+        super().__init__()
+        self.leads, self.cfg = list(leads or []), _run_cfg(cfg)
+
+    def run(self):
+        try:
+            from prospector import phones
+            self.done.emit(phones.find(self.leads, self.cfg,
+                                       on_progress=lambda i, n: self.progress.emit(i, n)))
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))
 
@@ -449,7 +484,7 @@ class LeadsQualifyWorker(_Worker):
             if vkeys and self.verify_limit:
                 self.progress.emit("Verifying the hot/warm emails…")
                 verify.verify_reachable(
-                    res.dossiers, vkeys, limit=self.verify_limit,
+                    res.dossiers, vkeys, limit=self.verify_limit, cfg=self.cfg,
                     on_progress=lambda i, n, l: self.progress.emit(
                         f"Verifying {i} of {n}: {l.display()}"))
             drafts = reach.draft_batch(
@@ -601,7 +636,8 @@ class SourceWorker(_Worker):
     """The full from-scratch pipeline off the UI thread: find people who match
     the lead FILTERS (every person checked against the filters before they take
     a slot), then qualify and draft — the hot and warm have their real
-    addresses FOUND on the way (verify.verify_reachable: Apollo, then Hunter).
+    addresses FOUND on the way (verify.verify_reachable: Hunter, our main
+    finder, then Apollo).
     No address is ever guessed (24-Sep-2026).
     Emits the SAME (RunResult, drafts) as ProspectorWorker, so the dialog
     treats the sheet path and the search path identically.
@@ -832,7 +868,7 @@ class SourceWorker(_Worker):
             if vkeys and self.verify_limit:
                 self.progress.emit("Verifying the hot/warm emails…")
                 verify.verify_reachable(
-                    res.dossiers, vkeys, limit=self.verify_limit,
+                    res.dossiers, vkeys, limit=self.verify_limit, cfg=self.cfg,
                     on_progress=lambda i, n, l: self.progress.emit(
                         f"Verifying {i} of {n}: {l.display()}"))
             drafts = reach.draft_batch(

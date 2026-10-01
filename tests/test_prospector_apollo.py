@@ -668,12 +668,12 @@ class FinderTest(unittest.TestCase):
                                                "key"), ("", ""))
         self.assertEqual(apollo.find_email(self._lead(), ""), ("", ""))
 
-    def test_the_finders_are_apollo_then_hunter(self):
-        # The owner, 24-Sep-2026 (updated): Apollo first (broader database,
-        # often already has the id for leads sourced from Apollo); Hunter next
-        # as a monthly-credit fallback for people Apollo missed.
+    def test_the_finders_are_hunter_then_apollo(self):
+        # The owner, 27-Sep-2026: "our main will always be hunter" — Hunter
+        # first (free plans keep working, finder-only so no credit is spent
+        # confirming); Apollo the fallback, useful only with a paid plan.
         keys = [k for k, _, _ in verify._FINDERS]
-        self.assertEqual(keys, ["apollo_api_key", "hunter_api_key"])
+        self.assertEqual(keys, ["hunter_api_key", "apollo_api_key"])
         self.assertIn("apollo_api_key", verify.VERIFIER_KEYS)
 
     def test_collect_keys_picks_the_apollo_key_up(self):

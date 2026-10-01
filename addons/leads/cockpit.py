@@ -94,6 +94,14 @@ def needs_email(dos) -> bool:
     return ((dos.lead.extra or {}).get("email_check") or "") != "valid"
 
 
+def needs_phone(dos) -> bool:
+    """True while "Find phones" still has something to do for this lead: they have
+    no phone of any kind and work somewhere a company's number can be looked up.
+    A lead that came with a number, or has one already, is left as it is."""
+    from prospector import phones
+    return phones.needs_phone(getattr(dos, "lead", None))
+
+
 def unqualified_rows(dossiers, all_leads) -> list:
     """Everyone a run sourced whom the qualify pass didn't reach, as display-only
     rows. The table used to list qualified dossiers alone, so a leads-sheet-only
@@ -209,8 +217,8 @@ _SORTS = (("relevance", "Relevance"), ("name", "Name A–Z"),
 # keys answer with a region of the header instead (_section_rect).
 _HELP_COLS = {"col_lead": _C_LEAD, "col_focus": _C_FOCUS, "col_fit": _C_FIT,
               "col_status": _C_STATUS, "col_signal": _C_SIGNAL}
-_HELP_BULK = ("bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_list",
-              "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
+_HELP_BULK = ("bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_phones",
+              "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
 _HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_search",
                         "research_menu", "save_as_search", "sort", "search_settings",
                         "view_toggle", "people_tabs", "pager",
@@ -981,6 +989,7 @@ class LeadsCockpit(QWidget):
 
     verifyRequested = Signal(list)
     emailsRequested = Signal(list)
+    phonesRequested = Signal(list)          # Find phones: each company's published number
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -1850,10 +1859,18 @@ class LeadsCockpit(QWidget):
         else:
             self._b_verify = QPushButton("Verify free")
             self._b_emails.setToolTip("Find each selected person's real e-mail "
-                                      "with Apollo, then Hunter, and check it with "
+                                      "with Hunter, then Apollo, and check it with "
                                       "the free verifiers. A credit is used only "
                                       "when a finder knows the person. Nothing is "
                                       "guessed.")
+        # The phone each selected person's COMPANY publishes (its website, or a
+        # directory), one lookup per company. Published, not called or verified.
+        self._b_phones = QPushButton("Find phones")
+        self._b_phones.setToolTip(
+            "Look up the phone number each selected person's company publishes on "
+            "its own website or a business directory. It is the company's number, "
+            "not a direct dial, and Prism has not called it."
+            + (" A credit is used only for a number found." if gateway.pooled() else ""))
         self._b_save = QPushButton("Add to list")
         self._b_export = QPushButton("Export")
         # Apollo's Edit > Set stage: where the selected contacts stand with
@@ -1882,6 +1899,7 @@ class LeadsCockpit(QWidget):
         self._b_remove.clicked.connect(lambda: self.removeRequested.emit(self.selected()))
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
         self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
+        self._b_phones.clicked.connect(lambda: self.phonesRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
         self._b_export.clicked.connect(lambda: self.exportRequested.emit(self.selected()))
         self._b_qualify.clicked.connect(lambda: self.qualifyRequested.emit(self.selected()))
@@ -1893,11 +1911,12 @@ class LeadsCockpit(QWidget):
         self._b_more.hide()
         self._qualify_wanted = False        # the run holds someone Qualify can reach
         self._emails_wanted = False         # …and someone without a verified address
+        self._phones_wanted = False         # …and someone with no phone at all
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
         for b in (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
-                  self._b_save, self._b_export, self._b_stage, self._b_qualify,
-                  self._b_more, self._b_seq):
+                  self._b_phones, self._b_save, self._b_export, self._b_stage,
+                  self._b_qualify, self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
         self._bulk_bar_w = bar
@@ -1982,33 +2001,37 @@ class LeadsCockpit(QWidget):
         self._toolbar_level = level
 
     def _bulk_actions(self) -> tuple:
-        """In _HELP_BULK's order: Save, Remove, Verify, Find e-mails, Add to
-        list, Export, Set stage, Qualify & draft, Add to sequence."""
+        """In _HELP_BULK's order: Save, Remove, Verify, Find e-mails, Find phones,
+        Add to list, Export, Set stage, Qualify & draft, Add to sequence."""
         return (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
-                self._b_save, self._b_export, self._b_stage, self._b_qualify,
-                self._b_seq)
+                self._b_phones, self._b_save, self._b_export, self._b_stage,
+                self._b_qualify, self._b_seq)
 
     def _wanted(self, button: QPushButton) -> bool:
-        """An action the run can still use. Qualify and Find e-mails are about
-        work not yet done, so they leave the bar once it is."""
+        """An action the run can still use. Qualify, Find e-mails and Find phones
+        are about work not yet done, so they leave the bar once it is."""
         if button is self._b_qualify:
             return self._qualify_wanted
         if button is self._b_emails:
             return self._emails_wanted
+        if button is self._b_phones:
+            return self._phones_wanted
         return True
 
     @staticmethod
     def _fold_set(level: int, actions: tuple) -> tuple:
-        """Which actions sit in More at a compaction level: from 2 the three
-        least used, from 3 all but Save, the primary and Find e-mails (a list
+        """Which actions sit in More at a compaction level: from 2 the four
+        least used (Find phones among them — an occasional action, folded before
+        the rest), from 3 all but Save, the primary and Find e-mails (a list
         with no addresses is unusable, so that stays on the bar as long as it
         fits). Save never folds: it is Apollo's first action, and the one that
         moves people from Net New to Saved. Nor does Remove: the owner asked
         for it by name, and a folded one is a button he cannot find."""
-        _contact, _remove, verify, emails, add_list, export, stage, qualify, _seq = actions
-        return {2: (verify, add_list, stage),
-                3: (verify, add_list, stage, export, qualify),
-                4: (verify, add_list, stage, export, qualify, emails)}.get(level, ())
+        (_contact, _remove, verify, emails, phones, add_list, export, stage, qualify,
+         _seq) = actions
+        return {2: (verify, phones, add_list, stage),
+                3: (verify, phones, add_list, stage, export, qualify),
+                4: (verify, phones, add_list, stage, export, qualify, emails)}.get(level, ())
 
     def _bulk_need(self, level: int) -> int:
         """The width the bulk bar needs at a compaction level: 0 is all of it;
@@ -2066,9 +2089,12 @@ class LeadsCockpit(QWidget):
     def _drawer(self) -> QWidget:
         """The person panel's drawer — Apollo's contact profile (addons/leads/
         person.py). Hidden until a person is picked; docks beside the results
-        on a wide window and floats over them on a narrow one, so opening it
-        never squeezes the table into a sliver; Expand spreads it over the
-        whole page."""
+        on a wide window and floats over them on a narrow one — full height,
+        from the top of the page (_float_rect) — so opening it never squeezes
+        the table into a sliver; Expand spreads it over the whole page.
+        Floating, it is the COCKPIT's child, not the body's: the body starts
+        under the title row and the toolbar, and a drawer confined to it was
+        left too short to read a person in."""
         from addons.leads.person import PersonPanel
         panel = QFrame()
         panel.setObjectName("leadDrawer")
@@ -2089,7 +2115,7 @@ class LeadsCockpit(QWidget):
         self._drawer_dos = None             # the row the panel shows
         self._drawer_person = None
         self._drawer_panel = panel
-        self._drawer_w = _Reveal(panel, Qt.Horizontal, self._body)
+        self._drawer_w = _Reveal(panel, Qt.Horizontal, self)
         self._drawer_w.setObjectName("leadDrawerSlot")
         self._style_drawer(floating=True)
         close = QShortcut(QKeySequence(Qt.Key_Escape), self._drawer_w)
@@ -2147,19 +2173,21 @@ class LeadsCockpit(QWidget):
         return self._body.width() >= need
 
     def _float_rect(self) -> QRect:
-        """Floating, the drawer covers the results' right edge between the
-        toolbar and the bulk bar, so view/sort and the bulk actions stay
-        reachable while it's open."""
-        body = self._body
-        top = 0
-        if not self._toolbar.isHidden():
-            top = body.mapFromGlobal(self._toolbar.mapToGlobal(QPoint(0, self._toolbar.height()))).y()
-        bottom = body.mapFromGlobal(self._view_stack.mapToGlobal(QPoint(0, self._view_stack.height()))).y()
+        """Floating, the drawer is Apollo's side panel: it runs the cockpit's
+        whole height on the right — over the title row and the toolbar's right
+        half, whose left half (Default view, Hide filters, Search) stays clear —
+        and stops at the foot of the results, so the pager and the bulk actions
+        stay reachable while it is open. It used to start UNDER the toolbar:
+        the rows above the results had already taken ~340px of a 1080p window,
+        which left the person's details a 190px strip (57px on a 768p laptop).
+        In the cockpit's own coordinates — the drawer is its child, not the
+        body's. Expanded, it is the whole cockpit."""
         if getattr(self, "_drawer_expanded", False):
-            # Apollo's expanded profile: the whole page under the toolbar.
-            return QRect(0, top, body.width(), max(0, body.height() - top))
-        width = min(_DRAWER_W + _SHADOW, body.width())
-        return QRect(body.width() - width, top, width, max(0, bottom - top))
+            return QRect(0, 0, self.width(), self.height())
+        bottom = self.mapFromGlobal(
+            self._view_stack.mapToGlobal(QPoint(0, self._view_stack.height()))).y()
+        width = min(_DRAWER_W + _SHADOW, self.width())
+        return QRect(self.width() - width, 0, width, max(0, bottom))
 
     def _set_expanded(self, on: bool) -> None:
         """Expand (or back to the list): the panel spreads over the whole page
@@ -2173,7 +2201,7 @@ class LeadsCockpit(QWidget):
             self._settle_drawer()
 
     def _move_drawer(self, dock: bool, sized: bool = True) -> None:
-        """Put the drawer in the splitter (dock) or back over the body (float)."""
+        """Put the drawer in the splitter (dock) or back over the page (float)."""
         w = self._drawer_w
         shown = not w.isHidden()
         self._placing = True
@@ -2185,7 +2213,7 @@ class LeadsCockpit(QWidget):
                 w.setMinimumWidth(_DRAWER_MIN)
                 w.setMaximumWidth(_DRAWER_MAX)
             else:
-                w.setParent(self._body)
+                w.setParent(self)
                 w.setMinimumWidth(0)
                 w.setMaximumWidth(_QMAX)
             w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -2239,10 +2267,15 @@ class LeadsCockpit(QWidget):
         if _motion_ok(self):
             self._slide_drawer(False)
         else:
-            self._drawer_anim.stop()
-            self._drawer_opening, self._drawer_t = False, 0.0
-            w.hide()
-            self._settle_drawer()
+            self._shut_drawer_now()
+
+    def _shut_drawer_now(self) -> None:
+        """Shut without the slide — for when something else needs the space
+        this very moment (a tour step aimed at a control the drawer covers)."""
+        self._drawer_anim.stop()
+        self._drawer_opening, self._drawer_t = False, 0.0
+        self._drawer_w.hide()
+        self._settle_drawer()
 
     def _slide_drawer(self, opening: bool) -> None:
         """Slide the drawer in from the right edge, or back out. Docked, it
@@ -2274,7 +2307,7 @@ class LeadsCockpit(QWidget):
             self._split_sizes(drawer=round(self._drawer_pref * self._drawer_t))
         else:
             r = self._float_rect()
-            w.setGeometry(self._body.width() - round(r.width() * self._drawer_t),
+            w.setGeometry(self.width() - round(r.width() * self._drawer_t),
                           r.top(), r.width(), r.height())
             w.raise_()
 
@@ -2715,6 +2748,10 @@ class LeadsCockpit(QWidget):
         # so the button is for the rows that are blank, guessed or unconfirmed.
         self._emails_wanted = any(needs_email(d) for d in self._dossiers + picked)
         self._b_emails.setEnabled(any(needs_email(d) for d in picked))
+        # And for phones: someone with a number already (their sheet's, or one
+        # Find phones found) has nothing left to look up.
+        self._phones_wanted = any(needs_phone(d) for d in self._dossiers + picked)
+        self._b_phones.setEnabled(any(needs_phone(d) for d in picked))
         # The header's box speaks for THIS page, as Apollo's does.
         ticked = len([i for i in self._checked if i not in self._hidden])
         self._head.set_check_state(Qt.Unchecked if ticked == 0 else
@@ -2779,6 +2816,10 @@ class LeadsCockpit(QWidget):
         while it is down rather than ticked into being."""
         if key not in _HELP_KEYS:
             return
+        if key != "drawer" and self._drawer_covers(key):
+            # A step back from the drawer step can land on Import or the view
+            # toggle, which the full-height drawer sits over: shut it first.
+            self._shut_drawer_now()
         if key == "people_tabs":
             self.set_filters_shown(True)        # the rail may be folded away
             self._rail.ensureWidgetVisible(self._tabs_frame, 0, _REVEAL_PAD)
@@ -2786,6 +2827,19 @@ class LeadsCockpit(QWidget):
             self._scroll_to_column(_HELP_COLS.get(key, _C_TICK))
         elif key == "drawer":
             self._help_open_drawer()
+
+    def _drawer_covers(self, key: str) -> bool:
+        """Whether the open, floating drawer is over a help target. It runs the
+        page's full height, so Import, the view toggle and the like sit under it."""
+        w = self._drawer_w
+        if w.isHidden() or self._drawer_docked:
+            return False
+        target = self.help_targets().get(key)
+        widget = target[0] if isinstance(target, tuple) else target
+        if widget is None:
+            return False
+        at = self.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
+        return w.geometry().intersects(QRect(at, widget.size()))
 
     def _section_rect(self, col: int) -> QRect:
         """One column's heading as a box in the header's own coordinates,
@@ -3823,6 +3877,7 @@ class LeadsWorkspace(QWidget):
 
     verifyRequested = Signal(list)
     emailsRequested = Signal(list)
+    phonesRequested = Signal(list)
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -3851,8 +3906,9 @@ class LeadsWorkspace(QWidget):
         self._folder = leads_folder or os.path.join(
             os.path.expanduser("~"), "Documents", "Prism Leads")
         self.leads = LeadsCockpit()
-        for name in ("verifyRequested", "emailsRequested", "exportRequested",
-                     "saveListRequested", "sequenceRequested", "qualifyRequested",
+        for name in ("verifyRequested", "emailsRequested", "phonesRequested",
+                     "exportRequested", "saveListRequested", "sequenceRequested",
+                     "qualifyRequested",
                      "saveContactsRequested", "stageRequested", "removeRequested",
                      "removedRequested", "importRequested", "tabChanged",
                      "pageRequested", "sortChanged", "queryChanged",

@@ -678,12 +678,10 @@ class ImportWizard(PrismDialog):
         self._email_meta = C.label("", level="META", wrap=True)
         self._email_meta.setContentsMargins(26, 0, 0, 0)
         col.addWidget(self._email_meta)
-        phones = QCheckBox(i18n.t("Find phone numbers"))
-        phones.setEnabled(False)
-        col.addWidget(phones)
-        meta = C.label(i18n.t("Phone numbers come from EasyLeadz, which is not "
-                              "connected to Prism yet."), level="META", wrap=True)
-        meta.setContentsMargins(26, 0, 0, 0)
+        # Not a checkbox: a phone lookup is made on people you have chosen, after
+        # the import, where it shows what it will cost and asks first.
+        meta = C.label(i18n.t("Phone numbers: once they are imported, select people and "
+                              "press Find phones."), level="META", wrap=True)
         col.addWidget(meta)
         col.addStretch(1)
         return page
