@@ -39,6 +39,12 @@ class _El:
     def __init__(self, text=""):
         self.text = text
 
+    def is_displayed(self):
+        # A real element has it, and _smart_wait's busy check calls it. Without
+        # it the check raised and read as "not busy", so a still-generating turn
+        # looked finished.
+        return True
+
 
 class _Driver:
     """Answers each selector from a script of readings, one per poll."""
@@ -54,6 +60,11 @@ class _Driver:
 
     def execute_script(self, js, *args):
         self.executed.append(args)
+        # "Is there a finished generated image on the page?" — never, in these
+        # scenes. Answering True to every script made _smart_wait think an
+        # image had arrived and settle the wait early.
+        if "naturalWidth" in js:
+            return False
         return True
 
 
