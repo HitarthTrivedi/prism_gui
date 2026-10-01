@@ -60,7 +60,7 @@ class RoomForTheLumiLauncher(unittest.TestCase):
 
     def test_the_clearance_covers_the_pill_and_the_mascot(self):
         import theme
-        self.assertGreaterEqual(theme.LAUNCHER_CLEARANCE, 56 + 36)
+        self.assertGreaterEqual(theme.LAUNCHER_CLEARANCE, 56 + 64)
 
     def test_pages_leave_that_room_under_their_last_row(self):
         import theme
@@ -89,6 +89,30 @@ class EmailSetupFieldsAreTallEnough(unittest.TestCase):
         for edit in (dlg.addr_edit, dlg.pass_edit, dlg.host_edit, dlg.port_edit):
             self.assertGreaterEqual(edit.minimumHeight(), theme.BTN_HEIGHT_MD)
         dlg.reject()
+
+
+class InquiryTablesShareTheSlack(unittest.TestCase):
+    """The to-quote table sized "Qty" to its longest value
+    ("5000 nos (monthly, ongoing)") and left Customer cut to "Shreeji A…".
+    Seen in the real window, 1 Oct 2026."""
+
+    def test_several_columns_stretch_and_a_long_one_is_capped(self):
+        from PySide6.QtWidgets import QHeaderView
+        from addons.inquiry.dialog import InquiryDialog
+        t = InquiryDialog._make_table(["No", "Customer", "What", "Qty"],
+                                      stretch=(1, 2), fit=(0,), fixed={3: 120})
+        head = t.horizontalHeader()
+        self.assertEqual(head.sectionResizeMode(1), QHeaderView.Stretch)
+        self.assertEqual(head.sectionResizeMode(2), QHeaderView.Stretch)
+        self.assertEqual(head.sectionResizeMode(0), QHeaderView.ResizeToContents)
+        self.assertEqual(head.sectionResizeMode(3), QHeaderView.Interactive)
+        self.assertEqual(head.sectionSize(3), 120)
+
+    def test_a_single_stretch_column_still_works(self):
+        from PySide6.QtWidgets import QHeaderView
+        from addons.inquiry.dialog import InquiryDialog
+        t = InquiryDialog._make_table(["a", "b"], stretch=1)
+        self.assertEqual(t.horizontalHeader().sectionResizeMode(1), QHeaderView.Stretch)
 
 
 if __name__ == "__main__":

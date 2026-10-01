@@ -243,12 +243,13 @@ RADIUS_XL = R_CARD              # 12px - dialogs, modal panels
 # The four page-layout constants every screen uses, named so a panel does not
 # have to remember which SPACE step the scaffold called for.
 PAGE_PAD = SPACE_6              # 28 — page edge to content, every screen
-# The floating "Ask Lumi" widget is a 56 px pill with the mascot standing on top
-# of it (~36 px more), ~24 px off the bottom-right corner of every screen.
+# The floating "Ask Lumi" widget is a 56 px pill with the mascot walking on an
+# 88 px stage above it (she is usually in its lower ~64 px), ~24 px off the
+# bottom-right corner of every screen.
 # Anything pinned to the foot of a screen, or the last row of a scrolling one,
 # needs this much extra room under it or Lumi sits on top of it (the pill
 # covered Discard and half of "Start the work", and the mascot stood on Discard).
-LAUNCHER_CLEARANCE = 92
+LAUNCHER_CLEARANCE = 120
 CARD_PAD = SPACE_5              # 20 — card edge to content
 CARD_GAP = SPACE_4              # 16 — gutter between cards in a grid
 ROW_GAP = SPACE_3               # 12 — between rows inside one card

@@ -987,8 +987,11 @@ class InquiryDialog(QWidget):
 
         root.addWidget(C.hairline())
         footer_row = QHBoxLayout()
-        footer_row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3,
-                                      theme.PAGE_PAD, theme.SPACE_3)
+        # Room under the buttons for the floating Ask-Lumi widget: this screen
+        # is embedded in the main window, so the pill sat on top of "Back to
+        # Email inquiry automation" (seen in the real window, 1 Oct 2026).
+        footer_row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_3, theme.PAGE_PAD,
+                                      theme.SPACE_3 + theme.LAUNCHER_CLEARANCE)
         footer_row.setSpacing(theme.SPACE_2)
         footer_row.addWidget(self.button(
             i18n.t("Open the folder"), "secondary", icon_name="folder",
@@ -1240,11 +1243,15 @@ class InquiryDialog(QWidget):
     # ── tab 1: what arrived ───────────────────────────────────────────────
     # ── building the six tabs ─────────────────────────────────────────────
     @staticmethod
-    def _make_table(headers: list[str], stretch: int,
-                    fit=()) -> QTableWidget:
-        """A plain grid, the same on every tab: one column takes the slack,
-        the ones named in `fit` size to their text — so a date is never
-        "02-08-20…" and an inquiry number is never "INQ/…"."""
+    def _make_table(headers: list[str], stretch, fit=(),
+                    fixed: dict | None = None) -> QTableWidget:
+        """A plain grid, the same on every tab: the column(s) in `stretch`
+        (one index, or several) share the slack, the ones named in `fit` size
+        to their text — so a date is never "02-08-20…" and an inquiry number
+        is never "INQ/…" — and `fixed` ({column: pixels}) holds a column whose
+        text can be long and matters less ("5000 nos (monthly, ongoing)" used
+        to size itself to its longest value and squeeze Customer to "Shreeji
+        A…"; seen in the real window, 1 Oct 2026). Long text elides."""
         table = QTableWidget(0, len(headers))
         table.setObjectName("inquiryTable")
         table.setHorizontalHeaderLabels([i18n.t(h) for h in headers])
@@ -1255,9 +1262,13 @@ class InquiryDialog(QWidget):
         table.setAlternatingRowColors(True)
         table.setWordWrap(False)
         head = table.horizontalHeader()
-        head.setSectionResizeMode(stretch, QHeaderView.Stretch)
+        for column in (stretch if isinstance(stretch, (tuple, list)) else (stretch,)):
+            head.setSectionResizeMode(column, QHeaderView.Stretch)
         for column in fit:
             head.setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        for column, width in (fixed or {}).items():
+            head.setSectionResizeMode(column, QHeaderView.Interactive)
+            head.resizeSection(column, width)
         return table
 
     def _add_row_actions(self, panel: _SelectedPanel) -> _SelectedPanel:
@@ -1310,7 +1321,7 @@ class InquiryDialog(QWidget):
     def _to_quote_tab(self) -> QWidget:
         self.to_quote_table = self._make_table(
             ["Inquiry no", "Date", "Customer", "What they want", "Qty",
-             "Status"], stretch=3, fit=(0, 1, 4, 5))
+             "Status"], stretch=(2, 3), fit=(0, 1, 5), fixed={4: 120})
         page = _TabPage(
             "These inquiries have no quotation yet. Pick one, then press "
             "Prepare a quotation.",
@@ -1366,7 +1377,8 @@ class InquiryDialog(QWidget):
         """
         self.replies_table = self._make_table(
             ["Inquiry no", "Customer", "Subject", "Prism thinks",
-             "Register will say"], stretch=2, fit=(0, 3, 4))
+             "Register will say"], stretch=(1, 2), fit=(0,),
+            fixed={3: 170, 4: 170})
         page = _TabPage(
             "The customer wrote back about a quotation. Read what they said, "
             "then tell Prism what it means.",
