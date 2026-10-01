@@ -1626,8 +1626,8 @@ class SettingsPanel(QDialog):
                         f"QPushButton {{ border: {border}; border-radius: {RADIUS}px;"
                         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
                         "stop:0 #e8eaf0, stop:0.5 #f0f2f7, stop:1 #dde1ea);"
-                        " color: #555; font-size: 13px; font-weight: 600; }}"
-                    )
+                        " color: #555; font-size: 13px; font-weight: 600; }"
+                    )                                   # plain string: ONE brace
                     btn.setText("Default\n(Light)")
                 else:
                     pix = QPixmap(path)
@@ -1646,7 +1646,7 @@ class SettingsPanel(QDialog):
                         f"QPushButton {{ border: {border};"
                         f" border-radius: {RADIUS}px;"
                         "  padding: 0; margin: 0;"
-                        "  background: transparent; }}"
+                        "  background: transparent; }"      # not an f-string: ONE brace
                     )
 
                 # Active tick badge

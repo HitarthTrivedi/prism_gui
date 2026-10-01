@@ -1495,9 +1495,14 @@ class FilterChips(QWidget):
 
     def __init__(self, options: list, current: str = "", parent=None):
         super().__init__(parent)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.SPACE_2 - 2)
+        # A FlowLayout, not a QHBoxLayout: AI tools feeds this eleven
+        # categories, and a one-line row reports their whole width (742 px) as
+        # its minimum, which forced the page's scroll content wider than the
+        # viewport and clipped the right-hand column of cards at the app's
+        # default width (seen in the real window, 1 Oct 2026). Chips now step
+        # down a line instead.
+        row = FlowLayout(self, margin=0, h_space=theme.SPACE_2 - 2,
+                         v_space=theme.SPACE_2 - 2)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}
@@ -1519,7 +1524,6 @@ class FilterChips(QWidget):
             self._group.addButton(btn)
             row.addWidget(btn)
             self._buttons[value] = btn
-        row.addStretch(1)
 
         self._current = ""
         first = current or (next(iter(self._buttons), ""))
