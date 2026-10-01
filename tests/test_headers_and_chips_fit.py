@@ -52,5 +52,29 @@ class FilterChipsFit(unittest.TestCase):
         self.assertEqual(seen, ["b"])
 
 
+class RoomForTheLumiLauncher(unittest.TestCase):
+    """The floating Ask-Lumi widget (a 56 px pill with the mascot on top) sat on
+    top of "Discard" and half of "Start the work", which are pinned to the foot
+    of the workbench, and on the last row of scrolling pages. Measured in the
+    real window at max scroll, 1 Oct 2026."""
+
+    def test_the_clearance_covers_the_pill_and_the_mascot(self):
+        import theme
+        self.assertGreaterEqual(theme.LAUNCHER_CLEARANCE, 56 + 36)
+
+    def test_pages_leave_that_room_under_their_last_row(self):
+        import theme
+        from widgets.panel_base import Page
+
+        class _P(Page):
+            TITLE = "t"
+            def build(self):
+                pass
+        page = _P({})
+        margins = page._scroll.widget().layout().contentsMargins()
+        self.assertGreaterEqual(margins.bottom(),
+                                theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
+
+
 if __name__ == "__main__":
     unittest.main()

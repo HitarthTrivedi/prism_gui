@@ -431,8 +431,8 @@ class Page(QWidget):
         host = QWidget()
         self._scroll.setWidget(host)
         frame = QHBoxLayout(host)
-        frame.setContentsMargins(theme.PAGE_PAD, theme.PAGE_PAD,
-                                 theme.PAGE_PAD, theme.PAGE_PAD)
+        frame.setContentsMargins(theme.PAGE_PAD, theme.PAGE_PAD, theme.PAGE_PAD,
+                                 theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
         frame.setSpacing(0)
         holder = QWidget()
         if self.MAX_W:

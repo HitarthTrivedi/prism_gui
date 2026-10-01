@@ -954,7 +954,9 @@ class MainWindow(QMainWindow):
 
         wrap = QWidget()
         layout = QVBoxLayout(wrap)
-        layout.setContentsMargins(40, 32, 40, 32)
+        # Extra room at the foot: "Start the work" / "Discard" are pinned there,
+        # outside the scroll, and the Ask-Lumi pill used to sit on top of them.
+        layout.setContentsMargins(40, 32, 40, 32 + theme.LAUNCHER_CLEARANCE)
         layout.setSpacing(20)
         layout.addWidget(self._workbench_header())
         layout.addWidget(self.work_stack, stretch=1)
