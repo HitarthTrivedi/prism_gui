@@ -428,7 +428,7 @@ class ShowcaseTourCard(QFrame):
         video_path = next((p for p in candidates if os.path.exists(p)), "")
         if video_path:
             from dialogs.preview_dialog import open_preview
-            open_preview(video_path, self)
+            open_preview(video_path, self, demo_mode=True)
         else:
             self.tour_clicked.emit()
 

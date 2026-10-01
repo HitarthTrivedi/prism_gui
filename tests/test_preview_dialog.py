@@ -85,40 +85,54 @@ class EveryViewerActuallyConstructs(unittest.TestCase):
         dlg.reject()
 
     @unittest.skipUnless(_HAVE_MULTIMEDIA, _WHY_NOT)
-    def test_demo_video_constructs_without_header_actions(self):
+    def test_demo_video_is_a_plain_player_with_only_close(self):
+        """The Home "Watch demo video" is a prospect watching a promo: a plain
+        title, no raw file name, none of the file-handling buttons. (These
+        tests used to pin a header layout with five action buttons that the
+        dialog no longer has; seen in the real window, 1 Oct 2026.)"""
         from dialogs.preview_dialog import PreviewDialog
-        path = self._file("demo.mp4", b"constructor regression")
+        path = self._file("prism-creator-promo_2026-08-16_05-15-18.mp4",
+                          b"constructor regression")
         # Exercise the actual demo layout without opening an audio device.
         with mock.patch.object(PreviewDialog, "_wire_player") as wire:
             dlg = PreviewDialog(path, "video", demo_mode=True)
             try:
                 wire.assert_called_once()
-                self.assertEqual(dlg.header.actions_row.count(), 1)
-                self.assertIs(dlg.header.actions_row.itemAt(0).widget(),
-                              dlg.header.close_btn)
+                self.assertEqual(dlg.header.title.text(), "Prism demo")
+                self.assertEqual(self._footer_labels(dlg), ["Close"])
             finally:
                 dlg.reject()
 
-    def test_header_actions_and_close_work_in_both_modes(self):
+    def test_a_normal_preview_keeps_the_file_name_and_its_buttons(self):
         from dialogs.preview_dialog import PreviewDialog
         path = self._file("header.txt", b"Preview regression")
         for demo_mode in (False, True):
             with self.subTest(demo_mode=demo_mode):
                 dlg = PreviewDialog(path, "text", demo_mode=demo_mode)
                 try:
-                    row = dlg.header.actions_row
-                    self.assertEqual(row.count(), 1 if demo_mode else 5)
-                    self.assertIs(row.itemAt(row.count() - 1).widget(),
-                                  dlg.header.close_btn)
-                    if not demo_mode:
-                        with mock.patch("dialogs.preview_dialog.QApplication.clipboard") as clipboard:
-                            row.itemAt(2).widget().click()
-                            clipboard.return_value.setText.assert_called_once_with(path)
-                    with mock.patch.object(dlg, "_stop_playback") as stop:
-                        dlg.header.close_btn.click()
-                        stop.assert_called_once()
+                    labels = self._footer_labels(dlg)
+                    self.assertEqual(dlg.header.title.text(),
+                                     "Prism demo" if demo_mode else "header.txt")
+                    self.assertEqual(
+                        labels, ["Close"] if demo_mode
+                        else ["Open in default app", "Close"])
+                    # the real close button closes
+                    self._press(dlg, "Close")
+                    self.assertEqual(dlg.result(), dlg.DialogCode.Accepted)
                 finally:
                     dlg.reject()
+
+    @staticmethod
+    def _footer_buttons(dlg):
+        from PySide6.QtWidgets import QPushButton
+        return [b for b in dlg.footer.findChildren(QPushButton)]
+
+    def _footer_labels(self, dlg):
+        return [b.text() for b in self._footer_buttons(dlg)
+                if b.isVisibleTo(dlg) or not b.isHidden()]
+
+    def _press(self, dlg, label):
+        next(b for b in self._footer_buttons(dlg) if b.text() == label).click()
 
     def test_text(self):
         from dialogs.preview_dialog import PreviewDialog

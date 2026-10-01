@@ -93,7 +93,7 @@ def _trigger_edit_reel(path: str, origin_widget=None) -> bool:
     return False
 
 
-def open_preview(path: str, parent=None):
+def open_preview(path: str, parent=None, demo_mode: bool = False):
     """Show `path` inside Prism. A folder gets a navigable list of its own
     contents; a file gets the viewer matching its kind, or — for a kind
     nothing here can render — a small dialog offering to open it externally
@@ -112,7 +112,7 @@ def open_preview(path: str, parent=None):
         UnsupportedPreviewDialog(path, parent).exec()
         return
     try:
-        dlg = PreviewDialog(path, kind, parent)
+        dlg = PreviewDialog(path, kind, parent, demo_mode=demo_mode)
     except ImportError:
         UnsupportedPreviewDialog(path, parent).exec()
         return
@@ -130,10 +130,16 @@ class PreviewDialog(PrismDialog):
     """One file, rendered in-app. `kind` picks the body; the chrome (title,
     close, an explicit escape hatch to the OS app) is the same for all four."""
 
-    def __init__(self, path: str, kind: str, parent=None):
-        super().__init__(os.path.basename(path),
+    def __init__(self, path: str, kind: str, parent=None, demo_mode: bool = False):
+        # demo_mode is the "Watch demo video" on Home: a prospect watching a
+        # promo, not someone inspecting a file. It carries a plain title
+        # instead of "prism-creator-promo_2026-08-16_05-15-18.mp4" and none
+        # of the file-handling buttons (open in the default app, edit layout,
+        # open chat) — just the player and Close.
+        super().__init__(i18n.t("Prism demo") if demo_mode else os.path.basename(path),
                          icon=_HEADER_ICON.get(kind, "file"), parent=parent,
                          scrollable=(kind == "text"))
+        self.demo_mode = demo_mode
         self.path = path
         self._player = None   # keeps QMediaPlayer/QAudioOutput alive
         self.resize(860, 640)
@@ -151,11 +157,12 @@ class PreviewDialog(PrismDialog):
         }[kind]
         body()
 
-        self.footer.add_utility(self.button(
-            i18n.t("Open in default app"), on_click=self._open_externally))
+        if not demo_mode:
+            self.footer.add_utility(self.button(
+                i18n.t("Open in default app"), on_click=self._open_externally))
 
         # Check if editable reel
-        if kind == "video":
+        if kind == "video" and not demo_mode:
             try:
                 from widgets.artifacts_panel import _editable_reel
                 if _editable_reel(self.path):
@@ -168,7 +175,7 @@ class PreviewDialog(PrismDialog):
         # Check if chat link exists
         try:
             from widgets.artifacts_panel import _chat_link
-            chat_url = _chat_link(self.path)
+            chat_url = None if demo_mode else _chat_link(self.path)
             if chat_url:
                 self.footer.add_secondary(self.button(
                     i18n.t("Open chat"), "secondary",

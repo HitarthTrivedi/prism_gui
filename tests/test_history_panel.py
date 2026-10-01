@@ -34,6 +34,7 @@ from PySide6.QtWidgets import QApplication                 # noqa: E402
 
 import core_bridge as _CB                                  # noqa: E402
 import dashboard_data as DATA                              # noqa: E402
+import paths as _PATHS                                      # noqa: E402
 import workspace as _WS                                    # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
@@ -70,6 +71,21 @@ class RunFolderTest(unittest.TestCase):
         patch = mock.patch.object(_CB.config, "RUNS_DIR", _SCRATCH_RUNS)
         patch.start()
         self.addCleanup(patch.stop)
+        # dashboard_data._run_files FALLS BACK to paths.user_dir("runs") when
+        # the member's folder holds no run records (the upgrade case). With an
+        # empty scratch folder that fallback silently loaded the developer's
+        # REAL history, so "an empty History" was not empty on any machine
+        # that had used Prism, and a test that clears it reached the real
+        # confirmation dialog and hung the whole suite at ~24%. The product's
+        # own delete guard refused the real paths, which is the only reason
+        # nothing was removed. Redirect the fallback to the scratch folder too.
+        real_user_dir = _PATHS.user_dir
+        patch = mock.patch.object(
+            _PATHS, "user_dir",
+            lambda *parts: (_SCRATCH_RUNS if parts == ("runs",)
+                            else real_user_dir(*parts)))
+        patch.start()
+        self.addCleanup(patch.stop)
 
         # The safety net. If anything ever hands the real resolver back
         # again, every test in this file fails here -- loudly, before a
@@ -86,6 +102,9 @@ class RunFolderTest(unittest.TestCase):
 
         for name in os.listdir(_SCRATCH_RUNS):
             os.remove(os.path.join(_SCRATCH_RUNS, name))
+        self.assertEqual(DATA._run_files({}), [],
+                         "an empty scratch folder still lists runs -- the "
+                         "fallback is reading the real ~/.prism/runs")
 
     def write_run(self, stamp: int, **extra) -> str:
         path = os.path.join(_SCRATCH_RUNS, "run_%d.json" % stamp)
