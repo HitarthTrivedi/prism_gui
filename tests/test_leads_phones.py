@@ -505,6 +505,18 @@ class _FakePhoneWorker:
 class FindPhonesOnTheScreen(_Workbench):
     """The bulk bar's Find phones and the person panel's Find their phone…, through the workbench."""
 
+    def setUp(self):
+        super().setUp()
+        # A finished run refreshes the credit balance, and on the pool that is a
+        # CreditsWorker making a REAL call to the licence server. It was still
+        # running when the file finished, and Qt aborts the process at exit
+        # ("QThread: Destroyed while thread is still running", exit 134). These
+        # tests are about phones, not about the balance pill.
+        patcher = mock.patch.object(self._WB.LeadsWorkbench, "_refresh_credits",
+                                    lambda _self: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _people(self, wb, n=3):
         from prospector.engine import RunResult
         leads = [Lead(name=f"P{i} Singh", title="Plant Head", company=f"Co {i}", fit_score=60 + i)
