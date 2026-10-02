@@ -238,6 +238,29 @@ class ASavedContact(unittest.TestCase):
         self.p._act_delete.trigger()
         self.assertEqual(self.rec.got[-1], ("deleteRequested", self.lead))
 
+    def test_the_real_delete_box_shows_a_name_as_text_never_as_markup(self):
+        """`name` arrives from an imported sheet or a provider. The static
+        QMessageBox helpers default to AutoText, so "<b>Admin</b>" in it
+        rendered as markup in the box that confirms who is being deleted. The
+        real box is built here (the seam is normally replaced) and only its
+        format and text are read: exec() is intercepted, no modal opens."""
+        from unittest import mock
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMessageBox
+        seen = []
+
+        def fake_exec(box):
+            seen.append((box.textFormat(), box.text(), box.defaultButton().text()))
+            return QMessageBox.StandardButton.No
+
+        name = "<b>Admin</b> <font color=red>Ravi</font>"
+        with mock.patch.object(QMessageBox, "exec", fake_exec):
+            self.assertFalse(PP.PersonPanel.confirm_delete(self.p, name))
+        [(fmt, text, default)] = seen
+        self.assertEqual(fmt, Qt.TextFormat.PlainText)
+        self.assertIn(name, text)
+        self.assertIn("No", default.replace("&", ""))
+
     def test_two_columns_when_wide_one_when_narrow(self):
         self.p._lay_out(True)
         self.assertEqual(self.p._left.maximumWidth(), PP._LEFT_W)

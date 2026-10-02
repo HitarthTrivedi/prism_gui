@@ -1264,14 +1264,19 @@ class PersonPanel(QWidget):
 
     def confirm_delete(self, name: str) -> bool:
         """Apollo's warning, in Prism's words. A test seam."""
-        answer = QMessageBox.question(
-            self, i18n.t("Delete contact"),
+        # Built rather than QMessageBox.question(...): the static helpers give no
+        # way to set a text format and default to AutoText, and `name` comes from
+        # an imported sheet or a provider, so markup in it would render as
+        # markup in the box that confirms who is about to be deleted.
+        box = QMessageBox(
+            QMessageBox.Icon.Question, i18n.t("Delete contact"),
             i18n.t("Delete {name} from your contacts? Their stage, lists, notes, tasks "
                    "and activity go with them. Someone a search found stays on the "
                    "page as net new.").format(name=name or i18n.t("this person")),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        return answer == QMessageBox.StandardButton.Yes
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        return box.exec() == QMessageBox.StandardButton.Yes
 
     def _delete(self) -> None:
         if self.view is not None and self.view.contact is not None \
