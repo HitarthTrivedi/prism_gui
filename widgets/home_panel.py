@@ -714,7 +714,8 @@ class HomePanel(QWidget):
         self._scroll.setWidget(self._host)
         self._col = QVBoxLayout(self._host)
         self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
-                                     theme.PAGE_PAD, theme.PAGE_PAD + 40)
+                                     theme.PAGE_PAD,
+                                     theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
         self._col.setSpacing(theme.CARD_GAP)
         root.addWidget(self._scroll, stretch=1)
 

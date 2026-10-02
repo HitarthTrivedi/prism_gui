@@ -76,6 +76,25 @@ class RoomForTheLumiLauncher(unittest.TestCase):
                                 theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
 
 
+    def test_home_leaves_that_room_too(self):
+        """Home built its own scroll column with `PAGE_PAD + 40`, so at maximum
+        scroll "Browse Add-ons" and "Explore all" sat under the mascot (seen in
+        the real window, 2 Oct 2026). Built against a temporary home so the
+        panel cannot read the developer's own runs."""
+        import tempfile
+        from unittest import mock
+        import paths
+        import theme
+        from widgets.home_panel import HomePanel
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(paths, "user_dir", lambda *a, **k: tmp):
+            panel = HomePanel({})
+            margins = panel._col.contentsMargins()
+            self.assertGreaterEqual(margins.bottom(),
+                                    theme.PAGE_PAD + theme.LAUNCHER_CLEARANCE)
+            panel.deleteLater()
+
+
 class EmailSetupFieldsAreTallEnough(unittest.TestCase):
     """The Email account dialog clipped the bottom of every field's text
     (22 px fields for 18 px text with 6 px padding): it has no explicit size,
