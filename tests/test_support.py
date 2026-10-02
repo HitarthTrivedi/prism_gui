@@ -123,6 +123,49 @@ class TheAnswersPointSomewhereReal(unittest.TestCase):
                               f"{q.qid} points at {q.answer.action!r}, which "
                               f"_handle_command does not dispatch")
 
+    def _help_text(self):
+        for q in KB.all_questions():
+            yield q.qid, " ".join((q.answer.what, *q.answer.steps))
+
+    def test_every_settings_path_in_an_answer_is_a_real_section(self):
+        """The Settings redesign removed the old Status page and its "Change…"
+        buttons, and six answers kept sending customers to them. The 29 Sep QA
+        report scored which article matched, never whether the steps inside it
+        were still true. "Settings → X" must start with a section label the
+        Settings screen actually has."""
+        from widgets.settings_panel import SECTIONS
+        labels = [label for _key, label, _group, _blurb in SECTIONS]
+        for qid, text in self._help_text():
+            for tail in text.split("Settings → ")[1:]:
+                self.assertTrue(
+                    any(tail.startswith(label) for label in labels),
+                    f"{qid}: 'Settings → {tail[:30]}…' is not one of {labels}")
+
+    def test_the_controls_an_answer_names_exist_on_screen(self):
+        """Retired names must stay gone, and every control an answer tells a
+        customer to find or press must be a string the UI really carries."""
+        retired = ("Change API key", "Pin Chrome version", "Change language",
+                   "Your role and team", "Deactivate this computer",
+                   "Start follow-up", "Export diagnostics", "Settings → Status")
+        named = ("Groq key", "Company designation key", "Chrome version",
+                 "Release this computer's seat", "Change licence key",
+                 "AI writes back in", "Send follow-up", "Contact support",
+                 "Save as a file")
+        ui = ""
+        for rel in ("widgets/settings_panel.py", "dialogs/license_dialog.py",
+                    "dialogs/followup_dialog.py", "dialogs/contact_dialog.py",
+                    "widgets/support_panel.py"):
+            with open(os.path.join(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__))), rel), encoding="utf-8") as f:
+                ui += f.read()
+        spoken = " ".join(text for _qid, text in self._help_text())
+        for old in retired:
+            where = [qid for qid, text in self._help_text() if old in text]
+            self.assertFalse(where, f"{old!r} no longer exists in the UI, "
+                                    f"but {where} still tell people to use it")
+        for control in named:
+            self.assertIn(f'"{control}"', ui, f"{control!r} is not in the UI")
+
     def test_the_pointers_from_elsewhere_are_dispatchable_too(self):
         """friendly's catch-all and the guide's last topic both send people
         here — checked against the same dispatcher, for the same reason."""

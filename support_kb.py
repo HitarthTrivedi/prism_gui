@@ -201,9 +201,10 @@ _START = Topic(
                 ("Go to console.groq.com and sign up.",
                  "Open API Keys, then Create API Key.",
                  "Copy the whole key — it begins with gsk_ — and paste it "
-                 "into Settings → Status → Change API key.",
-                 "Press Save. Prism checks it there and then, so you find out "
-                 "immediately if only half of it was pasted."),
+                 "into Settings → Agents, in the Groq key box.",
+                 "Press Save. Prism checks that it looks like a Groq key (it "
+                 "must start with gsk_), so a wrong paste is caught "
+                 "straight away."),
                 action="key", action_label="Open the key setting"),
             keywords=("groq", "api key", "gsk", "free", "cost", "sign up",
                       "console.groq.com", "where do i get"),
@@ -265,8 +266,9 @@ _RUNNING = Topic(
                 "that message is easy to miss, so check there first.",
                 ("Check the status line at the bottom of the window for what "
                  "it said.",
-                 "Check your key is saved — Settings → Status says Set or "
-                 "Not set beside Groq key.",
+                 "Check your key is saved — open Settings → Agents; the "
+                 "Groq key box shows dots when a key is saved and is empty "
+                 "when it is not.",
                  "Check this computer is online by loading any website.",
                  "Wait a minute and press it again — our licence server "
                  "sometimes takes a moment to wake up first thing in the "
@@ -416,7 +418,7 @@ _RUNNING = Topic(
                 ("Open the completed task card in Workbench or History.",
                  "Press Follow-up at the bottom of the screen.",
                  "Describe what to refine, adjust, or produce next.",
-                 "Press Start follow-up to run only the needed adjustments."),
+                 "Press Send follow-up to run only the needed adjustments."),
                 action="runs", action_label="Open History"),
             keywords=("followup", "follow-up", "changes", "modify result",
                       "revise", "adjust task", "iterate", "ask again", "tweak"),
@@ -509,8 +511,8 @@ _SIGNIN = Topic(
                 ("Open Chrome, click its menu, then About Google Chrome, and "
                  "let it finish updating.",
                  "Close every Chrome window completely, then try again.",
-                 "Clear the version box under Settings → Status → Pin Chrome "
-                 "version if you ever typed one in by hand, so Prism finds it "
+                 "Clear the Chrome version box under Settings → Connections "
+                 "if you ever typed one in by hand, so Prism finds it "
                  "automatically.",
                  "Check Google Chrome is actually installed — Prism cannot "
                  "use another browser."),
@@ -692,7 +694,7 @@ _LICENCE = Topic(
                 "and how many seats it holds, so nobody has to guess.",
                 ("Open Settings and look at the Licence section.",
                  "Release a seat on a computer you no longer use: press "
-                 "Change licence key there, then Deactivate this computer.",
+                 "Release this computer's seat there, on that computer.",
                  "Get in touch if you need more seats added."),
                 action="licence", action_label="Open Licence settings"),
             keywords=("seats", "how many", "computers", "machines", "devices",
@@ -706,8 +708,8 @@ _LICENCE = Topic(
                 "Release the seat on the old computer first, then activate on "
                 "the new one with the same key. Doing it in that order means "
                 "you never need us involved at all.",
-                ("Open Settings → Licence on the old computer, press Change "
-                 "licence key, then Deactivate this computer.",
+                ("Open Settings → Licence on the old computer and press "
+                 "Release this computer's seat.",
                  "Install Prism on the new computer.",
                  "Paste the same licence key in when it asks."),
                 action="licence", action_label="Open Licence settings"),
@@ -1565,9 +1567,8 @@ _TEAM = Topic(
                 "purpose — plenty of people want to read the buttons in "
                 "Gujarati and have the proposal come back in English.",
                 ("Open Settings and go to Language.",
-                 "Press Change language.",
                  "Pick Prism's own language and, separately, what the AI "
-                 "should write back in."),
+                 "should write back in, then press Save."),
                 action="language", action_label="Open Language settings"),
             keywords=("hindi", "gujarati", "language", "translate", "english",
                       "regional", "marathi", "change language"),
@@ -1580,9 +1581,9 @@ _TEAM = Topic(
                 "Yes, and that is exactly why they are two separate settings. "
                 "Reading the interface in your own language and sending a "
                 "customer a proposal in English are different needs.",
-                ("Open Settings → Language and press Change language.",
-                 "Set the second option — what the AI writes back in — to "
-                 "whichever you want."),
+                ("Open Settings → Language.",
+                 "Set the second option, AI writes back in, to whichever "
+                 "you want, then press Save."),
                 action="language", action_label="Open Language settings"),
             keywords=("output language", "reply", "writes back", "different "
                       "language", "translate output"),
@@ -1598,9 +1599,9 @@ _TEAM = Topic(
                 "without reading anything.",
                 ("Open Settings and go to Profile to see which role this "
                  "copy is set to.",
-                 "Press Your role and team to change it if the wrong one was "
-                 "picked."),
-                action="team", action_label="Open Your role and team"),
+                 "Paste a new key into Company designation key and press Apply "
+                 "to change it if the wrong one was picked."),
+                action="team", action_label="Open Profile settings"),
             keywords=("colour", "color", "different", "accent", "blue",
                       "green", "theme", "colleague"),
             related=("designation-key",)),
@@ -1613,11 +1614,11 @@ _TEAM = Topic(
                 "job this copy is set up for. It sets the colour, and it "
                 "gives you your own folders in a shared team workspace. If "
                 "nobody has given you one, you do not need one.",
-                ("Open Settings → Profile and press Your role and team.",
-                 "Paste the code your company gave you.",
+                ("Open Settings → Profile and find Company designation key.",
+                 "Paste the key your company gave you and press Apply.",
                  "Ignore this entirely if you are the only person using "
                  "Prism."),
-                action="team", action_label="Open Your role and team"),
+                action="team", action_label="Open Profile settings"),
             keywords=("designation", "role", "member", "team", "job title",
                       "code", "who am i"),
             related=("different-colour", "team-folder")),
@@ -1730,8 +1731,8 @@ _PRIVACY = Topic(
                 "and that stripping is tested — because you cannot reasonably "
                 "be expected to read the file before sending it. What is left "
                 "describes this installation and the recent log.",
-                ("Open Settings and press Change licence key — the sheet "
-                 "that opens has Export diagnostics along the bottom.",
+                ("Open Help (Ask Lumi) and press Contact support — the sheet "
+                 "that opens has Save as a file, which includes the details.",
                  "Send us the file it saves.",
                  "Open it in any text editor first if you would like to see "
                  "for yourself."),
@@ -1821,8 +1822,8 @@ _BROKEN = Topic(
                 "was pasted in.",
                 ("Go to console.groq.com and sign in.",
                  "Open API Keys and create a new one — it begins with gsk_.",
-                 "Copy the whole of it and paste it into Settings → Status → "
-                 "Change API key."),
+                 "Copy the whole of it and paste it into Settings → Agents, "
+                 "in the Groq key box, then press Save."),
                 action="key", action_label="Open the key setting"),
             keywords=("rejected", "invalid key", "401", "unauthorized", "bad "
                       "key", "wrong key", "not working"),
@@ -1865,8 +1866,8 @@ _BROKEN = Topic(
                 "folder, because a packaged app has no window to print an "
                 "error into. The tidier route is the diagnostics file, which "
                 "wraps the log up with everything else we would ask you for.",
-                ("Open Settings and press Change licence key — the sheet "
-                 "that opens has Export diagnostics along the bottom.",
+                ("Open Help (Ask Lumi) and press Contact support — the sheet "
+                 "that opens has Save as a file, which includes the details.",
                  "Email us the file it saves.",
                  "Tell us roughly what you were doing at the time — it makes "
                  "the log far quicker to read."),
@@ -1905,8 +1906,8 @@ _BROKEN = Topic(
                 "licence, and the recent log — with your key, passwords and "
                 "email addresses stripped out. That one file usually tells us "
                 "everything we need.",
-                ("Open Settings and press Change licence key — the sheet "
-                 "that opens has Export diagnostics along the bottom.",
+                ("Open Help (Ask Lumi) and press Contact support — the sheet "
+                 "that opens has Save as a file, which includes the details.",
                  "Email the file it saves to us.",
                  "Say what you were doing when it happened, and roughly "
                  "when."),
