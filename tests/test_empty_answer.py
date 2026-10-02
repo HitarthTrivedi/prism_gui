@@ -135,6 +135,50 @@ class AnEmptyFinishedTurnEndsTheWait(unittest.TestCase):
         self.assertGreaterEqual(took, 100)
 
 
+class AnAnswerAlreadyOnThePageIsNotTheNewReply(unittest.TestCase):
+    """A reply that never "grows" is only trustworthy when it is provably this
+    one. With earlier turns on screen the previous answer looks exactly like a
+    finished new one, and settling hands it back as the result (found in the
+    2 Oct 2026 review: a follow-up, or the next Studio scene in the same tab,
+    "finished" after 20 s while the tool had not started)."""
+
+    OLD = "SUBJECT: last turn's finished answer " + "x" * 80
+
+    def test_a_follow_up_does_not_settle_on_the_previous_turns_text(self):
+        # two turns already there, the reply to the new prompt has not started
+        frames = [{TURN: ["old q", "old a"], RESP: [self.OLD]}] * 60
+        d = _Driver(frames)
+        took, settled = _wait(d, frames, cap=120)
+        self.assertFalse(settled)
+        self.assertGreaterEqual(took, 120)
+
+    def test_a_reply_already_complete_in_a_fresh_chat_still_settles(self):
+        # one assistant turn, text present from the first reading, never grows
+        frames = [{TURN: ["only"], RESP: [self.OLD]}] * 60
+        d = _Driver(frames)
+        took, settled = _wait(d, frames, cap=300)
+        self.assertTrue(settled)
+        self.assertLess(took, 120)
+
+    def test_a_tool_with_no_turn_selector_never_takes_the_shortcut(self):
+        plain = {k: v for k, v in CHATGPT.items() if k != "turn_selector"}
+        frames = [{RESP: [self.OLD]}] * 60
+        d = _Driver(frames)
+        clock = [0.0]
+
+        def sleep(sec, *_):
+            clock[0] += sec
+            d.i += 1
+            return False
+
+        with mock.patch.object(AU.time, "time", lambda: clock[0]), \
+                mock.patch.object(AU, "_sleep_interruptibly", sleep):
+            took, settled = AU._smart_wait(d, plain, 100, poll=5,
+                                           stable_for=25, min_wait=35)
+        self.assertFalse(settled)
+        self.assertGreaterEqual(took, 100)
+
+
 class RegenerateOnce(unittest.TestCase):
 
     def test_it_clicks_the_tools_control_inside_the_last_turn(self):
