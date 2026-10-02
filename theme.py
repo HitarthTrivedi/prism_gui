@@ -65,6 +65,50 @@ NEUTRAL_350 = "#9ca3af"
 import re
 
 
+def apply_palette(app) -> None:
+    """Make the whole application light, whatever the desktop is set to.
+
+    Prism is light-only. main.py used to pin seven roles on a fresh QPalette and
+    leave every other role to the platform, and Qt 6 follows the OS colour
+    scheme. Measured on a GNOME desktop in dark mode (2 Oct 2026 review): the
+    selection colour was the OS accent, placeholder text and the bevel roles
+    (Mid/Dark/Light, which paint progress tracks and pill tints) came out dark,
+    and the Disabled group was identical to the enabled one. Under a light OS
+    theme the placeholder was pure black, indistinguishable from typed text.
+
+    So: ask Qt for its light scheme first (Qt >= 6.8; a build without the call
+    keeps the explicit roles below), then set every role the widgets read.
+    Disabled text is the same grey the stylesheet gives disabled buttons.
+    """
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPalette
+
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme"):
+        hints.setColorScheme(Qt.ColorScheme.Light)
+
+    pal = QPalette()
+    ink, paper, subtle = QColor(TEXT), QColor("#ffffff"), QColor(NEUTRAL[500])
+    muted = QColor("#b7b7ba")
+    roles = {
+        QPalette.Window: paper, QPalette.WindowText: ink,
+        QPalette.Base: paper, QPalette.AlternateBase: QColor("#f4f5f6"),
+        QPalette.Text: ink, QPalette.Button: paper, QPalette.ButtonText: ink,
+        QPalette.BrightText: paper, QPalette.PlaceholderText: subtle,
+        QPalette.Highlight: QColor(ACCENT), QPalette.HighlightedText: paper,
+        QPalette.Link: QColor(NEUTRAL[700]), QPalette.LinkVisited: QColor(NEUTRAL[600]),
+        # the bevel roles: light ramp, darkest last
+        QPalette.Light: paper, QPalette.Midlight: QColor("#ececee"),
+        QPalette.Mid: QColor("#d4d4d8"), QPalette.Dark: QColor(NEUTRAL[400]),
+        QPalette.Shadow: QColor(NEUTRAL[500]),
+    }
+    for role, colour in roles.items():
+        pal.setColor(role, colour)
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, muted)
+    app.setPalette(pal)
+
+
 def qcolor(val: str | QColor | tuple | list) -> QColor:
     """Safe conversion from CSS rgba/rgb/hex strings, tuples, or QColor to a valid QColor."""
     if isinstance(val, QColor):

@@ -28,6 +28,12 @@ _app = QApplication.instance() or QApplication([])
 
 import theme  # noqa: E402
 
+# What main.py does before any widget exists. Without it these tests paint over
+# whatever palette the DESKTOP has -- dark mode made the bevel roles dark and
+# two of them failed on any machine set to dark, while the shipped app was
+# never at fault in that way.
+theme.apply_palette(_app)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -206,3 +212,21 @@ def test_no_html_bgcolor_uses_rgba_token():
                     )
     assert not offenders, "bgcolor+rgba will render black: " + "; ".join(offenders)
 
+
+
+# ── the application palette ──────────────────────────────────────────────────
+
+def test_the_palette_is_light_whatever_the_desktop_is_set_to():
+    """Seven pinned roles left placeholder text, selection, the bevels and the
+    Disabled group to the OS. All of them are fixed values now."""
+    from PySide6.QtGui import QPalette
+    p = _app.palette()
+    assert not _is_black(p.color(QPalette.Window))
+    for role in (QPalette.Light, QPalette.Midlight, QPalette.Mid):
+        assert not _is_black(p.color(role)), role
+    assert p.color(QPalette.Highlight).name() == theme.qcolor(theme.ACCENT).name()
+    assert p.color(QPalette.PlaceholderText) != p.color(QPalette.Text), \
+        "placeholder text must not look like typed text"
+    assert p.color(QPalette.Disabled, QPalette.Text) != p.color(QPalette.Active, QPalette.Text), \
+        "disabled text must look disabled"
+    assert p.color(QPalette.Disabled, QPalette.ButtonText).name() == "#b7b7ba"
